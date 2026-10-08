@@ -160,6 +160,68 @@
   (__syscall3 sysFcntlNum fd cmd arg))
 
 ; ------------------------------------------------------------------
+; Kinds of failure
+; ------------------------------------------------------------------
+; What went wrong, in words that mean the same on every target. An
+; `Error`'s code is the kernel's errno, and those numbers differ: EAGAIN
+; is 11 on Linux and 35 on Darwin. Match on `(errorKind e)` instead of a
+; number. The names are `std::io::ErrorKind`'s.
+(pub data ErrorKind
+  (NotFound)
+  (PermissionDenied)
+  (ConnectionRefused)
+  (ConnectionReset)
+  (HostUnreachable)
+  (NetworkUnreachable)
+  (ConnectionAborted)
+  (NotConnected)
+  (AddrInUse)
+  (AddrNotAvailable)
+  (NetworkDown)
+  (BrokenPipe)
+  (AlreadyExists)
+  (WouldBlock)
+  (InvalidInput)
+  (InvalidData)
+  (TimedOut)
+  (Interrupted)
+  (Unsupported)
+  (UnexpectedEof)
+  (OutOfMemory)
+  (Other))
+
+; The kind of failure `e` reports. Errno numbers that are the same on
+; every target are written here; the rest come from `Sys.Platform`. The
+; library's own `errUnexpectedEof` and `errInvalidData` have kinds too,
+; and any other code, including a program's own, is `Other`.
+(pub :: errorKind (-> Error ErrorKind))
+(pub fn (errorKind e)
+  (let ((c (errCode e)))
+    (if
+      (== c 2) NotFound
+      (|| (== c 1) (== c 13)) PermissionDenied
+      (== c eConnRefused) ConnectionRefused
+      (== c eConnReset) ConnectionReset
+      (== c eHostUnreach) HostUnreachable
+      (== c eNetUnreach) NetworkUnreachable
+      (== c eConnAborted) ConnectionAborted
+      (== c eNotConn) NotConnected
+      (== c eAddrInUse) AddrInUse
+      (== c eAddrNotAvail) AddrNotAvailable
+      (== c eNetDown) NetworkDown
+      (== c 32) BrokenPipe
+      (== c eExist) AlreadyExists
+      (== c eAgain) WouldBlock
+      (== c 22) InvalidInput
+      (== c errInvalidData) InvalidData
+      (== c eTimedOut) TimedOut
+      (== c 4) Interrupted
+      (|| (== c eNoSys) (== c eOpNotSupp)) Unsupported
+      (== c errUnexpectedEof) UnexpectedEof
+      (== c 12) OutOfMemory
+      Other)))
+
+; ------------------------------------------------------------------
 ; Writing
 ; ------------------------------------------------------------------
 ; Write all of `s` to `f`, returning the number of bytes written or a

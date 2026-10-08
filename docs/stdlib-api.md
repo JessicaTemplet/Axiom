@@ -995,7 +995,7 @@ two differ.
 
 ## `Err`
 
-`stdlib/Err.ax` — 36 public names
+`stdlib/Err.ax` — 38 public names
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
@@ -1005,6 +1005,8 @@ two differ.
 | `errOverflow` | value | `Int` |  | A result the 64-bit integer cannot hold. |
 | `errShiftTooWide` | value | `Int` |  | A shift amount below 0, or of 64 or more. |
 | `errShortWrite` | value | `Int` |  | A descriptor accepted some bytes and then accepted none, without an errno to say why. It is NOT a syscall error - `write` returned 0, which is a legal answer - so it cannot borrow an errno, and it is not success either, which is exactly why `IO`'s write loop could not express it while it answered an Int. `ERR-REC-3` calls a short write a failure and not an absence: the bytes were meant to go and did not. |
+| `errUnexpectedEof` | value | `Int` |  | The input ended before the bytes a reader was asked for, as when a peer closes in the middle of `Net.tcpReadExact`. |
+| `errInvalidData` | value | `Int` |  | Bytes arrived that break the shape the reader expects, as when a line runs past the limit `Net.tcpReadLine` was given. |
 | `mkError` | value | `(-> Int String Error)` | `Alloc` |  |
 | `errCode` | value | `(-> Error Int)` |  |  |
 | `errMessage` | value | `(-> Error String)` |  |  |
@@ -1111,7 +1113,7 @@ two differ.
 
 ## `IO`
 
-`stdlib/IO.ax` — 67 public names
+`stdlib/IO.ax` — 69 public names
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
@@ -1120,6 +1122,8 @@ two differ.
 | `stdout` | value | `File` | `Alloc,IO,Unsafe` |  |
 | `stderr` | value | `File` | `Alloc,IO,Unsafe` |  |
 | `fileClose` | value | `(-> File (Result Int Error))` | `Alloc,IO,Unsafe` | Close early, once: `(Ok 0)`, or `(Err e)` carrying the errno of the close - on a written file, where a deferred write error surfaces. Aliases observe the close, and any later use of one traps 85. The descriptor is retired before the close and the close is never retried. Closing a standard stream retires that value only. |
+| `ErrorKind` | data |  |  | What went wrong, in words that mean the same on every target. An `Error`'s code is the kernel's errno, and those numbers differ: EAGAIN is 11 on Linux and 35 on Darwin. Match on `(errorKind e)` instead of a number. The names are `std::io::ErrorKind`'s. |
+| `errorKind` | value | `(-> Error ErrorKind)` |  | The kind of failure `e` reports. Errno numbers that are the same on every target are written here; the rest come from `Sys.Platform`. The library's own `errUnexpectedEof` and `errInvalidData` have kinds too, and any other code, including a program's own, is `Other`. |
 | `writeStr` | value | `(-> File String Int)` | `Alloc,IO` | Write all of `s` to `f`, returning the number of bytes written or a negative errno. This is the printing path's answer: `println` is `(writeStr stdout ...)`, and a statement that prints does not have to bind a `Result`. `fileWrite` answers the same write as a `Result`. |
 | `writeSlice` | value | `(-> File String Int Int Int)` | `Alloc,IO` | Write the `len` bytes of `s` that start at byte `start`, all of them, returning the number written or a negative errno - `writeStr` over a part of a string, with no copy. |
 | `writeOut` | value | `(-> String Int)` | `Alloc,IO` | Write all of `s` to standard output, or to standard error: the bytes written, or a negative errno. `println` and `eprintln` are these with the line built at expansion time. They make no `File`, so printing allocates nothing on the way out; `(writeStr stdout s)` is the same write through a `File`. |
@@ -1519,7 +1523,7 @@ two differ.
 
 ## `Sys.Platform`
 
-`stdlib/Sys/Platform.darwin.ax` — 146 public names
+`stdlib/Sys/Platform.darwin.ax` — 163 public names
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
@@ -1580,6 +1584,18 @@ two differ.
 | `fDupFdCloexec` | value | `Int` |  | fcntl's F_DUPFD_CLOEXEC: a duplicate of a descriptor, closed on exec. `IO.termRaw` keeps one, so its guard can restore the terminal however the caller's file is closed. |
 | `oNonblock` | value | `Int` |  |  |
 | `eAgain` | value | `Int` |  | EAGAIN, which a non-blocking `accept` or `read` answers negated when there is nothing to take yet. 35 here, 11 on Linux - so a caller that compares against a literal is correct on one target and silently wrong on the other, which is the reason this is a name. |
+| `eNoSys` | value | `Int` |  | ENOSYS - the kernel has no such call: 38 on Linux, 78 on Darwin and FreeBSD. |
+| `eOpNotSupp` | value | `Int` |  | EOPNOTSUPP - the operation does not apply to this socket or file: 95 on Linux, 102 on Darwin, 45 on FreeBSD. |
+| `eNotConn` | value | `Int` |  | ENOTCONN - the socket is not connected: 107 on Linux, 57 on the BSDs. |
+| `eConnRefused` | value | `Int` |  | ECONNREFUSED - nothing listens on the port: 111 on Linux, 61 on the BSDs. |
+| `eConnReset` | value | `Int` |  | ECONNRESET - the peer reset the connection: 104 on Linux, 54 on the BSDs. |
+| `eConnAborted` | value | `Int` |  | ECONNABORTED - the connection was aborted before it was accepted: 103 on Linux, 53 on the BSDs. |
+| `eHostUnreach` | value | `Int` |  | EHOSTUNREACH - no route to the host: 113 on Linux, 65 on the BSDs. |
+| `eNetUnreach` | value | `Int` |  | ENETUNREACH - no route to the network: 101 on Linux, 51 on the BSDs. |
+| `eNetDown` | value | `Int` |  | ENETDOWN - the network is down: 100 on Linux, 50 on the BSDs. |
+| `eAddrInUse` | value | `Int` |  | EADDRINUSE - another socket holds the address: 98 on Linux, 48 on the BSDs. |
+| `eAddrNotAvail` | value | `Int` |  | EADDRNOTAVAIL - the address is not one of this host's: 99 on Linux, 49 on the BSDs. |
+| `eInProgress` | value | `Int` |  | EINPROGRESS - a non-blocking connect has started and not finished: 115 on Linux, 36 on the BSDs. |
 | `sockaddrHasLenByte` | value | `Int` |  | WHETHER `sockaddr_in` OPENS WITH A LENGTH BYTE. It does here and does not on Linux, and the two layouts cannot share a builder: |
 | `pollUsesKqueue` | value | `Int` |  |  |
 | `sysPollCreateNum` | value | `Int` |  | kqueue() - BSD 362. Takes no arguments. |
@@ -1588,6 +1604,7 @@ two differ.
 | `pollEventSize` | value | `Int` |  | `struct kevent` is 32 bytes on both 64-bit Darwin arches: |
 | `pollEventFdOffset` | value | `Int` |  |  |
 | `pollReadFilter` | value | `Int` |  | EVFILT_READ. THE ONE VALUE THAT GENUINELY DIVERGES: kqueue's filters are NEGATIVE small integers naming a kind of event, where epoll's are a positive bitmask. -1 here, EPOLLIN = 1 there. It is written into a SIGNED 16-BIT field, so `Sys.ax` masks it to two bytes rather than storing a word. |
+| `pollWriteFilter` | value | `Int` |  | The writability filter: EVFILT_WRITE (-2) for kqueue, EPOLLOUT (4) for epoll. It goes where `pollReadFilter` goes. |
 | `pollAddOp` | value | `Int` |  | EV_ADD and EV_DELETE, which coincide with EPOLL_CTL_ADD and EPOLL_CTL_DEL at 1 and 2. The agreement is luck rather than design, so both are named on both platforms instead of being assumed. |
 | `pollDelOp` | value | `Int` |  |  |
 | `pollSigsetSize` | value | `Int` |  | The size of the mask argument epoll_pwait takes and kevent does not. Zero here because nothing reads it; see the Linux files for why it must be exactly 8 there. |
@@ -1659,6 +1676,10 @@ two differ.
 | `msgNoSignal` | value | `Int` |  | MSG_NOSIGNAL - the same, per write, for `sendto`; 0 where the flag does not exist |
 | `ipprotoTcp` | value | `Int` |  | IPPROTO_TCP - the level TCP options are set at |
 | `tcpNoDelayOpt` | value | `Int` |  | TCP_NODELAY - send small writes at once rather than join them |
+| `ipprotoIp` | value | `Int` |  | IPPROTO_IP - the level of the IPv4 socket options, 0 everywhere. |
+| `ipTtl` | value | `Int` |  | IP_TTL - the time-to-live of outgoing IPv4 packets: 2 on Linux, 4 on the BSDs. |
+| `ipprotoIpv6` | value | `Int` |  | IPPROTO_IPV6 - the level of the IPv6 socket options, 41 everywhere. |
+| `ipv6UnicastHops` | value | `Int` |  | IPV6_UNICAST_HOPS - the hop limit of outgoing IPv6 packets, IPv6's time-to-live: 16 on Linux, 4 on the BSDs. |
 | `sysPreadNum` | value | `Int` |  | pread(fd, buf, count, offset) - BSD 153 |
 | `sysPwriteNum` | value | `Int` |  | pwrite(fd, buf, count, offset) - BSD 154 |
 | `sysFsyncNum` | value | `Int` |  | fsync(fd) - BSD 95. Darwin's fsync leaves the data in the drive's own cache, so Axqlite's pager asks `fcntl(F_FULLFSYNC)` instead and uses this only if the file system refuses that. |
