@@ -69,7 +69,7 @@ export function Tour() {
       <div className="container">
         <SectionHead id="tour-h" eyebrow="The tour" title="Get a feel for the language.">
           <p>
-            Ten working programs, from your first data type to calling Rust. Explore the code,
+            Working programs, from your first data type to calling Rust. Explore the code,
             follow the annotations, and see exactly what each program prints.
           </p>
         </SectionHead>
@@ -158,7 +158,20 @@ export function Tour() {
               {showBroken ? (
                 <Report text={p.refusal!.human} command={`axiom check ${p.file}`} />
               ) : (
-                <RunOutput command={commandFor(p)} output={p.output} replay={p.id} />
+                <>
+                  <RunOutput
+                    command={commandFor(p)}
+                    output={p.mode === 'serve' ? `${p.output}\n^C` : p.output}
+                    replay={p.id}
+                  />
+                  {p.client && (
+                    <RunOutput
+                      command={p.client.command}
+                      output={[...p.client.exchange.flat(), '^D'].join('\n')}
+                      replay={p.id}
+                    />
+                  )}
+                </>
               )}
             </CodeWindow>
 

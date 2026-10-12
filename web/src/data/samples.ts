@@ -59,8 +59,13 @@ export interface Program {
   code: string
   /** Its real stdout. */
   output: string
-  /** `run` unless stated. */
-  mode?: 'run' | 'test'
+  /** `run` unless stated. A `serve` program is a server: it is shown as
+   * `axiom run` and never exits on its own, so the checker drives
+   * `client`'s session against it and then stops it with Ctrl-C. */
+  mode?: 'run' | 'test' | 'serve'
+  /** A `serve` program's client: the command shown, and each line sent
+   * beside the line the server answers. Hanging up is Ctrl-D. */
+  client?: { command: string; exchange: [string, string][] }
   /** Compiler options, placed before the input file. */
   flags?: string[]
   /** A crate directory, relative to the repository, passed as `--crate`. */
@@ -76,7 +81,7 @@ const REF = `${LIB}docs/reference.md`
 
 /** The shell command that produced a program's output. */
 export function commandFor(p: Program): string {
-  const verb = p.mode ?? 'run'
+  const verb = p.mode === 'serve' ? 'run' : (p.mode ?? 'run')
   return `axiom ${verb}${p.flags?.length ? ` ${p.flags.join(' ')}` : ''} ${p.file}${p.crate ? ` --crate ${p.crate}` : ''}`
 }
 
@@ -936,65 +941,63 @@ ok   testOlder
   },
   {
     id: 'tcp',
-    file: 'greet.ax',
+    file: 'echo.ax',
     tab: 'TCP',
-    title: 'A TCP server, and a client to try it',
-    lede: '`Net` is TCP the way Rust\'s `std::net` has it: listen, accept, read and write, with each failure answered as a Result. The client runs in the same program, so the example finishes; a real server loops on `tcpAccept`.',
+    title: 'An echo server that runs until you stop it',
+    lede: '`Net` is TCP the way Rust\'s `std::net` has it. This server answers each line a client sends with the same line, serves one client after another, and runs until you press Ctrl-C. Try it with `nc` in a second terminal.',
     points: [
-      { at: '(match (tcpReadLine conn 1024)', text: 'One line without its newline, capped at 1 KiB, so a client cannot grow your memory without bound.' },
-      { at: '(match (tcpAccept server)', text: 'Each connection is a TcpStream, and its socket closes when the last share goes.' },
-      { at: '(match (tcpListen "127.0.0.1:0")', text: 'An address as text. Port 0 asks the kernel for a free port, and tcpListenerLocalAddr says which.' },
+      { at: '(match (tcpReadLine conn 4096)', text: 'One line without its newline, capped at 4 KiB so a client cannot grow your memory without bound.' },
+      { at: '((Ok (None)) 0)', text: 'None means the client hung up. When serve returns, the connection closes itself and the loop takes the next client.' },
+      { at: '(while true', text: 'The accept loop never returns: the server runs until you stop it.' },
     ],
     docs: { label: 'TCP with Net', href: `${LIB}docs/stdlib.md#net` },
-    output: 'hello, Ada',
+    mode: 'serve',
+    client: {
+      command: 'nc 127.0.0.1 7878',
+      exchange: [
+        ['hello', 'hello'],
+        ['still here?', 'still here?'],
+      ],
+    },
+    output: 'listening on 127.0.0.1:7878',
     code: `(import Err)
 (import IO)
 (import Net)
 (import Str)
 
-; The server's side of one connection: read a name, answer a greeting.
+(:: report (-> String Error Int))
+;@axiom:effect(io)
+(fn (report what e)
+  (let ((why (errorText e)))
+    (eprintln "{what}: {why}")))
+
+; Echo each line back until the client hangs up.
 (:: serve (-> TcpStream Int))
 ;@axiom:effect(io)
 (fn (serve conn)
-  (match (tcpReadLine conn 1024)
-    ((Ok (Some name))
-      (match (tcpWrite conn (concat "hello, " (concat name "\\n")))
-        ((Ok _) 0)
-        ((Err e) (die (errorText e) 1)))
+  (match (tcpReadLine conn 4096)
+    ((Ok (Some line))
+      (match (tcpWrite conn (concat line "\\n"))
+        ((Ok _) (serve conn))
+        ((Err e) (report "write" e)))
     )
     ((Ok (None)) 0)
-    ((Err e) (die (errorText e) 1))))
-
-; Take the next connection off the queue and serve it.
-(:: acceptOne (-> TcpListener Int))
-;@axiom:effect(io)
-(fn (acceptOne server)
-  (match (tcpAccept server)
-    ((Ok conn) (serve conn))
-    ((Err e) (die (errorText e) 1))))
+    ((Err e) (report "read" e))))
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (match (tcpListen "127.0.0.1:0")
-    ((Err e) (die (errorText e) 1))
-    ((Ok server)
-      (match (andThen (tcpListenerLocalAddr server) tcpConnectAddr)
-        ((Err e) (die (errorText e) 1))
-        ((Ok client)
-          (let (
-            (_ (tcpWrite client "Ada\\n"))
-            (_ (acceptOne server))
-          )
-            (match (tcpReadLine client 1024)
-              ((Ok (Some reply))
-                {
-                  (println reply)
-                  0
-                }
-              )
-              (_ (die "no reply" 1))))
-        ))
+  (match (tcpListen "127.0.0.1:7878")
+    ((Err e) (report "listen" e))
+    ((Ok lsn)
+      {
+        (println "listening on 127.0.0.1:7878")
+        (while true
+          (match (tcpAccept lsn)
+            ((Ok conn) (serve conn))
+            ((Err e) (report "accept" e))))
+        0
+      }
     )))`,
   },
   {

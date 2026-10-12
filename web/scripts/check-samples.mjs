@@ -33,7 +33,8 @@
  * success without having looked is worse than none.
  */
 import { build } from 'esbuild'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { createConnection } from 'node:net'
 import {
   existsSync,
   mkdtempSync,
@@ -130,6 +131,86 @@ function differs(what, label, want, got) {
   return false
 }
 
+/**
+ * A `serve` program is a server: built and started, it prints the line
+ * the page shows and waits for clients. Its client's exchange runs
+ * twice, over two connections, so the second shows the server outlived
+ * the first client hanging up; then Ctrl-C stops it, and what it printed
+ * must be the page's output. The page shows `axiom run`, which is this
+ * build and this run.
+ */
+async function serveCheck(p, what) {
+  const base = p.file.replace(/\.ax$/, '')
+  const b = ax(p.file, p.code, ['build', '--input', p.file, '--output', base])
+  if (b.status !== 0) {
+    fail(what, `axiom build exited ${b.status}\n${trimEnd(plain(b.stderr))}`)
+    return false
+  }
+  const m = /^nc (\S+) (\d+)$/.exec(p.client?.command ?? '')
+  if (!m) {
+    fail(what, 'a serve program needs a client whose command is `nc HOST PORT`')
+    return false
+  }
+  const [, host, port] = m
+  const server = spawn(join(work, base), [], { cwd: work, env })
+  let out = ''
+  server.stdout.setEncoding('utf8')
+  server.stdout.on('data', (d) => (out += d))
+  const exited = new Promise((res) => server.on('exit', res))
+  const within = (ms, promise, label) =>
+    Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(label)), ms))])
+  try {
+    const first = trimEnd(p.output).split('\n')[0]
+    await within(20_000, (async () => {
+      while (!out.includes(first)) await new Promise((r) => setTimeout(r, 25))
+    })(), `the server never printed ${JSON.stringify(first)}`)
+    for (let round = 1; round <= 2; round++) {
+      const got = await within(10_000, new Promise((res, rej) => {
+        const sock = createConnection({ host, port: Number(port) })
+        sock.setEncoding('utf8')
+        let buf = ''
+        const replies = []
+        let i = 0
+        const sendNext = () => {
+          if (i < p.client.exchange.length) sock.write(`${p.client.exchange[i][0]}\n`)
+          else sock.end()
+        }
+        sock.on('connect', sendNext)
+        sock.on('data', (d) => {
+          buf += d
+          let nl
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            replies.push(buf.slice(0, nl))
+            buf = buf.slice(nl + 1)
+            i++
+            sendNext()
+          }
+        })
+        sock.on('close', () => res(replies))
+        sock.on('error', rej)
+      }), `client session ${round} did not finish`)
+      const want = p.client.exchange.map(([, r]) => r)
+      if (differs(what, `client session ${round}`, want.join('\n'), got.join('\n'))) {
+        server.kill('SIGKILL')
+        return false
+      }
+    }
+  } catch (e) {
+    fail(what, e.message)
+    server.kill('SIGKILL')
+    return false
+  }
+  server.kill('SIGINT')
+  try {
+    await within(5_000, exited, 'the server did not stop on Ctrl-C')
+  } catch (e) {
+    fail(what, e.message)
+    server.kill('SIGKILL')
+    return false
+  }
+  return !differs(what, 'stdout', p.output, out)
+}
+
 // --- 1. programs -----------------------------------------------------
 const programs = [data.HERO, ...data.TOUR]
 for (const p of programs) {
@@ -143,6 +224,12 @@ for (const p of programs) {
   }
 
   const mode = p.mode ?? 'run'
+  if (mode === 'serve') {
+    if (await serveCheck(p, what)) {
+      console.log(`ok   ${what}: formatted, serves its client twice, stops on Ctrl-C, prints what the page says`)
+    }
+    continue
+  }
   // A crate is passed exactly as `--crate` spells it on the page, made
   // absolute: the driver builds and links the archive (cargo must be on
   // PATH; with no cargo the build is refused as AX4004, and so is this).
