@@ -418,15 +418,20 @@ echo "== layer 6: structural, and mostly free from the compiler =="
 # AX3049 at SEV_ERROR, so a `writeStr` added to any decoder or editor
 # function fails the build. These greps catch what the compiler cannot:
 # a function added without the claim, which is never asked.
-tty_sites="$(LC_ALL=C grep -rl '(isTerminal ' "$repo_root"/self_host/*.ax | wc -l | tr -d ' ')"
-tty_lines="$(LC_ALL=C grep -rh '(isTerminal ' "$repo_root"/self_host/*.ax | wc -l | tr -d ' ')"
+# An import list that names the predicate first, as in
+# `(import IO (isTerminal ...))`, spells `(isTerminal ` without calling
+# it, so `(import` lines are not call sites. Every import in self_host/
+# is one line.
+tty_calls="$(LC_ALL=C grep -rn '(isTerminal ' "$repo_root"/self_host/*.ax | LC_ALL=C grep -v '^[^:]*:[0-9]*:(import ' || true)"
+tty_lines="$(printf '%s' "$tty_calls" | LC_ALL=C grep -c . || true)"
+tty_sites="$(printf '%s' "$tty_calls" | LC_ALL=C cut -d: -f1 | LC_ALL=C sort -u | LC_ALL=C grep -c . || true)"
 if [[ "$tty_lines" == 1 && "$tty_sites" == 1 ]]; then
-  ok "the tty predicate is written EXACTLY once across self_host/ (1 line, 1 file)"
+  ok "the tty predicate is called on EXACTLY one line across self_host/ (1 line, 1 file)"
 else
   bad "isTerminal is called on $tty_lines line(s) in $tty_sites file(s), want exactly 1 and 1."
   echo "     A second test downstream is how the two surfaces start diverging in places"
   echo "     no gate looks. The one place is replInteractive."
-  LC_ALL=C grep -rn '(isTerminal ' "$repo_root"/self_host/*.ax | sed 's/^/     /'
+  printf '%s\n' "$tty_calls" | sed 's/^/     /'
 fi
 for m in Keys Edit; do
   if LC_ALL=C grep -q '^(import Sys)' "$repo_root/stdlib/Tui/$m.ax"; then

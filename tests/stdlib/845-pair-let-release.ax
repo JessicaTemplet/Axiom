@@ -1,0 +1,97 @@
+; A function answering an `Option` or a `Result` returns it in two
+; registers, and the `ret` that does so leaves before the scope ends of
+; the `let`s around it. Each of those bindings still gives its share
+; back on the way out, so a resource owner bound there runs its cleanup
+; when the last share goes, as it does in any other function. The
+; counter below holds one entry per cleanup that ran.
+(import IO)
+(import Vec)
+(import Err)
+
+(struct Owner sealed (handle : Handle))
+
+(:: makeOwner (-> (Vec Int) Int Owner))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (makeOwner hits n)
+  (Owner (__resource_new (lambda (v) { (vecPush hits v) 0 }) n)))
+
+(:: useOwner (-> Owner Int))
+;@axiom:effect(unsafe)
+(fn (useOwner o)
+  (__resource_get o.handle))
+
+; The owner is the payload: the binding's share goes back, the pair's
+; stays with the caller.
+(:: answerOwner (-> (Vec Int) Int (Result Owner Error)))
+;@axiom:effect(io)
+(fn (answerOwner hits n)
+  (let ((o (makeOwner hits n)))
+    (Ok o)))
+
+; The owner is only read: its binding is the last share.
+(:: answerWord (-> (Vec Int) Int (Option Int)))
+;@axiom:effect(io)
+(fn (answerWord hits n)
+  (let ((o (makeOwner hits n)))
+    (let ((v (useOwner o)))
+      (Some v))))
+
+; The nullary leaf.
+(:: answerNone (-> (Vec Int) Int (Option Int)))
+;@axiom:effect(io)
+(fn (answerNone hits n)
+  (let ((o (makeOwner hits n)))
+    (if (> (useOwner o) 0)
+      None
+      (Some 0))))
+
+; A leaf that forwards another function's pair: the callee borrows the
+; owner, and the binding's share goes back after it returns.
+(:: answerFwd (-> (Vec Int) Int (Option Int)))
+;@axiom:effect(io)
+(fn (answerFwd hits n)
+  (let ((o (makeOwner hits n)))
+    (readOwner o)))
+
+(:: readOwner (-> Owner (Option Int)))
+(fn (readOwner o)
+  (Some (useOwner o)))
+
+; An owning `mut` slot's last value.
+(:: answerSlot (-> (Vec Int) Int (Option Int)))
+;@axiom:effect(io)
+(fn (answerSlot hits n)
+  (let ((mut o (makeOwner hits n)))
+    (let ((v (useOwner o)))
+      (Some v))))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let ((hits vecNew))
+    {
+      (match (answerOwner hits 1)
+        ((Ok o) (println (useOwner o)))  ; 1
+        ((Err e) (println 0)))
+      (println (vecLen hits))  ; 1
+      (match (answerWord hits 2)
+        ((Some v) (println v))  ; 2
+        ((None) (println 0)))
+      (println (vecLen hits))  ; 2
+      (match (answerNone hits 3)
+        ((Some v) (println v))
+        ((None) (println 3)))  ; 3
+      (println (vecLen hits))  ; 3
+      (match (answerFwd hits 4)
+        ((Some v) (println v))  ; 4
+        ((None) (println 0)))
+      (println (vecLen hits))  ; 4
+      (match (answerSlot hits 5)
+        ((Some v) (println v))  ; 5
+        ((None) (println 0)))
+      (println (vecLen hits))  ; 5
+      (println (vecGet hits 0))  ; 1
+      (println (vecGet hits 4))  ; 5
+      0
+    }))

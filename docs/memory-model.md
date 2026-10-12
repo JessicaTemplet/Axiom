@@ -3664,9 +3664,6 @@ These still leak, which is the safe direction:
   neither;
 - the last value of an owning `mut` slot when the `let`'s value may
   carry it outside tail position;
-- the last value of a `let` or `mut` slot in a function that answers a
-  register pair, such as one returning `(Option Int)`: its `ret` leaves
-  before the scope end;
 - a binding that a lambda captures when a binder in its scope reuses
   its name;
 - a `let` whose value is a field of the block it binds;
@@ -3702,6 +3699,11 @@ These cases don't leak:
 - A lambda handed to a self tail call is an owned temporary at the
   boundary.
 - A `handle` as a reference-returning tail retains once.
+- A function that answers a register pair, such as one returning
+  `(Option Int)`, gives back its `let` bindings and owning `mut` slots
+  before its `ret`, as a self tail call does before its jump. A
+  resource owner bound there runs its cleanup with its last share.
+  Tested by `tests/stdlib/845-pair-let-release.ax`.
 
 The next rule removes what blocked counting in containers and in the
 compiler's own data. Whether a store emits a retain is decided by

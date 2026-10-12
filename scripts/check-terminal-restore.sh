@@ -385,6 +385,24 @@ v() { sed -n "s/^$2=//p" "$1" | tail -1 | tr -d '\r'; }
 # so the gate does not depend on them matching across platforms.
 e_notty="$(python3 -c 'import errno; print(errno.ENOTTY)')"
 
+# A device that takes no terminal requests answers whatever its driver
+# says, and that is not ENOTTY everywhere: Linux's /dev/null answers
+# ENOTTY, Darwin's answers ENODEV. `termRaw` hands back the kernel's
+# errno, so the kernel is asked here, through Python's own
+# `termios.tcgetattr`, from outside the program under test. An answer of
+# 0 would mean /dev/null is a terminal on this host, and NULL_RAW below
+# would check nothing, so that fails too.
+e_null="$(python3 - <<'PYX'
+import os, termios
+fd = os.open("/dev/null", os.O_RDONLY)
+try:
+    termios.tcgetattr(fd)
+    print(0)
+except termios.error as e:
+    print(e.args[0])
+PYX
+)"
+
 # ------------------------------------------------------------------
 # run_pty <keepSignals> <label>
 # ------------------------------------------------------------------
@@ -559,7 +577,7 @@ if [[ "$(v "$work/neg.log" NEG_DONE)" == 1 ]]; then
     got="$(v "$work/neg.log" "$1")"
     if [[ "$got" == "$2" ]]; then ok "$1 = $2"; else bad "$1 = $got, want $2"; fi
   done
-  for k in PIPE_RAW PIPE_SIZE NULL_RAW; do
+  for k in PIPE_RAW PIPE_SIZE; do
     got="$(v "$work/neg.log" $k)"
     if [[ "$got" == "-$e_notty" ]]; then
       ok "$k answers -$e_notty (ENOTTY on this host), not a fabricated success"
@@ -567,6 +585,14 @@ if [[ "$(v "$work/neg.log" NEG_DONE)" == 1 ]]; then
       bad "$k = $got, want -$e_notty (ENOTTY)"
     fi
   done
+  got="$(v "$work/neg.log" NULL_RAW)"
+  if [[ ! "$e_null" =~ ^[1-9][0-9]*$ ]]; then
+    bad "the kernel's tcgetattr on /dev/null answered '$e_null', not an errno - NULL_RAW has nothing to be compared with"
+  elif [[ "$got" == "-$e_null" ]]; then
+    ok "NULL_RAW answers -$e_null, the errno this host's kernel gives tcgetattr on /dev/null, not a fabricated success"
+  else
+    bad "NULL_RAW = $got, want -$e_null (this host's kernel answers tcgetattr on /dev/null with errno $e_null)"
+  fi
 else
   bad "the non-terminal probe did not finish"; sed 's/^/     /' "$work/neg.log" | head -20
 fi

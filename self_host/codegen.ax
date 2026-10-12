@@ -23601,6 +23601,11 @@
             args
             argRegs
             0)
+          ; the scope ends this `ret` leaves before, paid here as
+          ; `emitPairRet` pays them: the callee has returned, and its
+          ; pair holds its own share of anything it answers
+          (releasePending cgA (memGetWordVec cgA 42) 0)
+          (releasePendingSlots cgA (vecGetVec (memGetWordVec cgA 46) 17) 0)
           (emitLine cgA (concat "  ret { i64, i64 } " r))
           (memSetWord cgA 31 1)
           cgA
@@ -23743,6 +23748,16 @@
 ; tail plumbing above - `emitIfTail`, `emitSeqTail`, `emitLetAt` -
 ; already knows how to handle an arm that did that, and
 ; `emitFnDef` already knows not to write a `ret` after one.
+;
+; So the leaf pays the scope ends it leaves before, as a self tail
+; jump does (`emitTailJump`): every releasable `let` on the tail path
+; (word 42) and every owning `mut` slot (pair slot 17). `emitLetAt`
+; and `emitLetMAt` skip their release after a terminated body, so
+; without this a `let` around a pair leaf kept its share for good -
+; and a resource owner bound there, such as the `TermGuard` `termRaw`
+; answers, never ran its cleanup (MM-EXEC-17). The payload's own share
+; is taken first, so a payload that is one of those values survives
+; its binding's release, exactly as a boxed field store's does.
 ; The constructor a pair leaf names: `None` from a bare reference,
 ; `Some` from the head of an application.
 (pub :: pairCtorNameOf (-> Int String))
@@ -23758,6 +23773,8 @@
 (pub fn (emitPairRet e entry cg)
   (if (== (eArity entry) 0)
     {
+      (releasePending cg (memGetWordVec cg 42) 0)
+      (releasePendingSlots cg (vecGetVec (memGetWordVec cg 46) 17) 0)
       (emitLine cg (concat (concat "  ret { i64, i64 } { i64 " (constStr (eTag entry))) ", i64 0 }"))
       (memSetWord cg 31 1)
       cg
@@ -23793,6 +23810,8 @@
         {
           (emitLine cgA (concat (concat "  " (concat r0 (concat " = insertvalue { i64, i64 } undef, i64 " (constStr (eTag entry))))) ", 0"))
           (emitLine cgA (concat (concat "  " (concat r1 (concat " = insertvalue { i64, i64 } " r0))) (concat ", i64 " (concat v ", 1"))))
+          (releasePending cgA (memGetWordVec cgA 42) 0)
+          (releasePendingSlots cgA (vecGetVec (memGetWordVec cgA 46) 17) 0)
           (emitLine cgA (concat "  ret { i64, i64 } " r1))
           (memSetWord cgA 31 1)
           cgA
