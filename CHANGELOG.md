@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- End a failed subtype check's message with a newline. The backtrace
+  header ran onto the same line, `axiom: subtype check
+  failedaxiom: backtrace`, so no `.err` golden could pin the message.
+  Tested by `tests/stdlib/844-subtype-trap-message.ax`.
+
 - Bring `Net` up to Rust's `std::net`. `tcpListen` and `tcpConnect`
   take an address as text, as in `(tcpListen "0.0.0.0:8080")`;
   `tcpListenAddr` and `tcpConnectAddr` take a `SocketAddr`, and
