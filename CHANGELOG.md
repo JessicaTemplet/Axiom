@@ -16,6 +16,13 @@ its changelog too.
 
 ## Unreleased
 
+- Release the `let` bindings and owning `mut` slots of a function that
+  returns an `Option` or a `Result` in two registers. Its `ret` skipped
+  their scope ends, so a resource owner bound there never ran its
+  cleanup: a `TermGuard` from `termRaw` left the terminal raw when it
+  went out of scope. Tested by `tests/stdlib/845-pair-let-release.ax`
+  and `scripts/check-terminal-restore.sh`.
+
 - End a failed subtype check's message with a newline. The backtrace
   header ran onto the same line, `axiom: subtype check
   failedaxiom: backtrace`, so no `.err` golden could pin the message.
