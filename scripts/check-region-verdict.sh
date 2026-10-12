@@ -24,10 +24,11 @@
 # slice gate ablates only its own spend and pins the delta on its
 # fixture; here every spend is off at once, so each fixture's delta
 # is its OWN traffic plus the other slices' cross-traffic in the same
-# file - new pins (18/23/21/24/21/26), each above its slice's, each
-# decomposed by hand in the design note's verdict row. A seventh probe
-# carries slice 5's four literal positions with deterministic stdout
-# (its gate's probe answers a pointer cast, which ASLR moves).
+# module, the stdlib it prints through included - new pins
+# (17/22/20/23/20/25), each above its slice's, each decomposed at the
+# pin list below. A seventh probe carries slice 5's four literal
+# positions with deterministic stdout (its gate's probe answers a
+# pointer cast, which ASLR moves).
 #
 # THREE WORKLOADS, §1.1's three columns (peak RSS, binary, output):
 #
@@ -339,18 +340,25 @@ cat > "$work/litprobe.ax" <<'AX'
   })
 AX
 # name:pin - full-ablation pins, each its slice's pin plus the other
-# slices' cross-traffic in the same file, classified by operand
+# slices' cross-traffic in the same module, classified by operand
 # definer (construction call, other call, phi, load, `@strhdr_*`
 # literal) against both IRs:
-#   479: 18 = 6 constructions (the slice pin) + 12 literals
-#   480: 23 = 7 calls (the slice pin; no join spends - zero phis) + 13 literals, 2 constructions, 1 call
-#   481: 21 = 8 fresh calls (the slice pin) + 12 literals, 1 construction
-#   482: 24 = 6 joins + 1 scratch load (the slice pin) + 15 literals, 1 construction, 1 load
-#   483: 21 = 6 joins + 2 scratch loads (the slice pin) + 12 literals, 1 construction
-#   484: 26 = 4 fresh calls + 4 joins (the slice pin) + 16 literals, 1 construction, 1 load
+#   479: 17 = 6 constructions (the slice pin) + 11 literals
+#   480: 22 = 7 calls (the slice pin; no join spends - zero phis) + 12 literals, 2 constructions, 1 call
+#   481: 20 = 8 fresh calls (the slice pin) + 11 literals, 1 construction
+#   482: 23 = 6 joins + 1 scratch load (the slice pin) + 14 literals, 1 construction, 1 load
+#   483: 20 = 6 joins + 2 scratch loads (the slice pin) + 11 literals, 1 construction
+#   484: 25 = 4 fresh calls + 4 joins (the slice pin) + 15 literals, 1 construction, 1 load
 # The dominant cross-traffic is literals - the println and term
 # strings every fixture prints through. Slice floors: 6/7/8/7/8/8.
-pins="479-region-reclaim:18 480-region-fresh-call:23 481-region-fresh-let:21 482-region-phi-call:24 483-region-phi-let:21 484-region-scrutinee:26"
+# Three of each program's literals, the literal probe's too, are the
+# stdlib's print path rather than the program's own code: one each in
+# Err's `mkError`, Fmt's `fmtInt` and Sys.Platform's
+# `platformWriteFd`. That share is the same in all seven programs, so
+# a change to the print path moves every pin here by one amount and
+# leaves the slice classes alone. Re-pin from a classification of both
+# IRs, as above, so a moved slice class can't hide in the new number.
+pins="479-region-reclaim:17 480-region-fresh-call:22 481-region-fresh-let:20 482-region-phi-call:23 483-region-phi-let:20 484-region-scrutinee:25"
 if [[ -f "$work/axc-ablated" ]]; then
   sum_new=0; sum_abl=0
   for pair in $pins; do
@@ -405,7 +413,9 @@ if [[ -f "$work/axc-ablated" ]]; then
     sum_new=$(( sum_new + b_new )); sum_abl=$(( sum_abl + b_abl ))
     ok "$name: delta $pin, identical answers, code $b_new <= $b_abl bytes (files $f_new / $f_abl, not asserted)"
   done
-  # The literal probe: four guarded positions, pin 4, stdout "50" and "41".
+  # The literal probe: pin 9 = its four guarded positions + 2 literals
+  # in `main` + the 3 on the stdlib's print path; it prints "51".
+  lit_pin=9
   "$axc" emit-llvm "$work/litprobe.ax" -o "$work/litprobe.ll" >"$work/lit.log" 2>&1 \
     || { bad "the literal probe does not emit under test"; }
   "$work/axc-ablated" emit-llvm "$work/litprobe.ax" -o "$work/litprobe-abl.ll" >>"$work/lit.log" 2>&1 \
@@ -413,8 +423,8 @@ if [[ -f "$work/axc-ablated" ]]; then
   if [[ -f "$work/litprobe.ll" && -f "$work/litprobe-abl.ll" ]]; then
     n_new="$(releases_in "$work/litprobe.ll")"
     n_abl="$(releases_in "$work/litprobe-abl.ll")"
-    if (( n_abl - n_new != 10 )); then
-      bad "literal probe delta is $((n_abl - n_new)) ($n_abl ablated, $n_new under test), wanted exactly 10"
+    if (( n_abl - n_new != lit_pin )); then
+      bad "literal probe delta is $((n_abl - n_new)) ($n_abl ablated, $n_new under test), wanted exactly $lit_pin"
     elif ! "$axc" build --input "$work/litprobe.ax" --output "$work/litprobe" >>"$work/lit.log" 2>&1 \
          || ! "$work/axc-ablated" build --input "$work/litprobe.ax" --output "$work/litprobe-abl" >>"$work/lit.log" 2>&1; then
       bad "the literal probe does not build under one or both compilers"
@@ -435,7 +445,7 @@ if [[ -f "$work/axc-ablated" ]]; then
           bad "literal probe code is $b_new bytes under test against $b_abl ablated"
         else
           sum_new=$(( sum_new + b_new )); sum_abl=$(( sum_abl + b_abl ))
-          ok "literal probe: delta 10, answers 51 both ways, code $b_new <= $b_abl bytes"
+          ok "literal probe: delta $lit_pin, answers 51 both ways, code $b_new <= $b_abl bytes"
         fi
       fi
     fi
