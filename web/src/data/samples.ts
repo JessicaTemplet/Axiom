@@ -935,6 +935,69 @@ ok   testOlder
     )))`,
   },
   {
+    id: 'tcp',
+    file: 'greet.ax',
+    tab: 'TCP',
+    title: 'A TCP server, and a client to try it',
+    lede: '`Net` is TCP the way Rust\'s `std::net` has it: listen, accept, read and write, with each failure answered as a Result. The client runs in the same program, so the example finishes; a real server loops on `tcpAccept`.',
+    points: [
+      { at: '(match (tcpReadLine conn 1024)', text: 'One line without its newline, capped at 1 KiB, so a client cannot grow your memory without bound.' },
+      { at: '(match (tcpAccept server)', text: 'Each connection is a TcpStream, and its socket closes when the last share goes.' },
+      { at: '(match (tcpListen "127.0.0.1:0")', text: 'An address as text. Port 0 asks the kernel for a free port, and tcpListenerLocalAddr says which.' },
+    ],
+    docs: { label: 'TCP with Net', href: `${LIB}docs/stdlib.md#net` },
+    output: 'hello, Ada',
+    code: `(import Err)
+(import IO)
+(import Net)
+(import Str)
+
+; The server's side of one connection: read a name, answer a greeting.
+(:: serve (-> TcpStream Int))
+;@axiom:effect(io)
+(fn (serve conn)
+  (match (tcpReadLine conn 1024)
+    ((Ok (Some name))
+      (match (tcpWrite conn (concat "hello, " (concat name "\\n")))
+        ((Ok _) 0)
+        ((Err e) (die (errorText e) 1)))
+    )
+    ((Ok (None)) 0)
+    ((Err e) (die (errorText e) 1))))
+
+; Take the next connection off the queue and serve it.
+(:: acceptOne (-> TcpListener Int))
+;@axiom:effect(io)
+(fn (acceptOne server)
+  (match (tcpAccept server)
+    ((Ok conn) (serve conn))
+    ((Err e) (die (errorText e) 1))))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (match (tcpListen "127.0.0.1:0")
+    ((Err e) (die (errorText e) 1))
+    ((Ok server)
+      (match (andThen (tcpListenerLocalAddr server) tcpConnectAddr)
+        ((Err e) (die (errorText e) 1))
+        ((Ok client)
+          (let (
+            (_ (tcpWrite client "Ada\\n"))
+            (_ (acceptOne server))
+          )
+            (match (tcpReadLine client 1024)
+              ((Ok (Some reply))
+                {
+                  (println reply)
+                  0
+                }
+              )
+              (_ (die "no reply" 1))))
+        ))
+    )))`,
+  },
+  {
     id: 'chrono',
     file: 'schedule.ax',
     tab: 'Dates & times',
