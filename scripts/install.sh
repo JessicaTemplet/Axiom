@@ -396,19 +396,21 @@ done
 # The probe imports a standard-library module, so an archive with no
 # `stdlib/`, or one the compiler cannot locate, fails here. It runs from
 # a directory of its own, so the compiler's working-directory fallback
-# cannot resolve the module for it.
+# cannot resolve the module for it. `--version` installs any release and
+# the probe compiles against that release's stdlib, so it prints with
+# `println` and imports `IO` whole: every release spells both the same.
 echo "==> checking the new compiler before installing it"
 probe="$work/probe"
 mkdir -p "$probe"
 cat >"$probe/probe.ax" <<'AX'
-(import IO (writeStr))
+(import IO)
 
 (:: main Int)
 
 ;@axiom:effect(io)
 (fn (main)
   {
-    (writeStr stdout "the standard library travelled with the compiler\n")
+    (println "the standard library travelled with the compiler")
     42
   }
 )

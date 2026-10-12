@@ -16,6 +16,12 @@ its changelog too.
 
 ## Unreleased
 
+- Install 0.7.8 with `install.sh` again. The installer's check program
+  wrote to `stdout` without importing it from `IO`, so it stopped with
+  `AX3023` and installed nothing. The check now prints with `println`,
+  which compiles against every release `--version` can fetch, 0.2.0
+  included. Tested by `scripts/check-install.sh`.
+
 - End a failed subtype check's message with a newline. The backtrace
   header ran onto the same line, `axiom: subtype check
   failedaxiom: backtrace`, so no `.err` golden could pin the message.
