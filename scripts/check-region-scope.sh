@@ -32,6 +32,17 @@
 #      emits exactly two cells, so the count is not zero because the
 #      grep stopped matching.
 #
+#      The cell has two widths (`emitRegionCell`): three words, or
+#      four in a module with the owner registry, whose fourth word is
+#      the registry's counter (MM-EXEC-20). The registry is on in a
+#      module that makes resource owners and resets the arena
+#      (`resRegistryWanted`). `self_host` is one, and so is any
+#      program with a region that imports IO, whose `File` is an
+#      owner. So the negative counts both widths, and the positive
+#      half is two probes, one per width, each also asserting the
+#      registry state that picks its width: a grep for one width
+#      alone reads zero in a module that emits the other.
+#
 #   2. RECLAIM, AS A RATIO. One program, two spellings one word apart:
 #      a region that allocates and fills 64 KiB, four thousand times,
 #      and the same body with `region r` deleted. Without the reset
@@ -91,10 +102,18 @@ gate_build_axc axc
 # than skip when neither `time` answers.
 # (`max_rss_kb` itself is defined once, in scripts/lib/gate.sh.)
 
-CELL='alloca i64, i64 3, align 16'
+# A region's mark cell in its two widths (`emitRegionCell`), and the
+# registry global whose presence picks the four-word one (MM-EXEC-20).
+# No other alloca has either shape: a recovery record is sixteen words
+# or more.
+CELL3='alloca i64, i64 3, align 16'
+CELL4='alloca i64, i64 4, align 16'
+REGISTRY='^@__axiom_res_seq = '
+
+onoff() { if [[ "$1" -eq 1 ]]; then echo on; else echo off; fi; }
 
 # ---------------------------------------------------------------
-# 1. no region, no cell - and two regions, two cells
+# 1. no region, no cell - and two regions, two cells, in each width
 # ---------------------------------------------------------------
 echo "== 1. a program that writes no region emits no region cell =="
 checks=$((checks + 1))
@@ -102,37 +121,53 @@ if ! "$axc" emit-llvm "$repo_root/self_host/main.ax" -o "$work/self.ll" >"$work/
   bad "could not emit self_host/main.ax"
   sed 's/^/     /' "$work/self.log" | head -20
 else
-  cells=$(grep -c "$CELL" "$work/self.ll" || true)
+  c3=$(grep -c "$CELL3" "$work/self.ll" || true)
+  c4=$(grep -c "$CELL4" "$work/self.ll" || true)
+  reg=$(grep -c "$REGISTRY" "$work/self.ll" || true)
   lines=$(wc -l < "$work/self.ll" | tr -d ' ')
-  if [[ "$cells" -eq 0 ]]; then
-    ok "self_host/main.ax: 0 region cells in $lines lines of IR"
+  if [[ $((c3 + c4)) -eq 0 ]]; then
+    ok "self_host/main.ax: 0 region cells of either width in $lines lines of IR (owner registry $(onoff "$reg"))"
   else
-    bad "self_host/main.ax emits $cells region cell(s) and writes no region"
+    bad "self_host/main.ax emits $c3 three-word and $c4 four-word region cell(s) and writes no region"
   fi
 fi
 
-cat > "$work/two.ax" <<'EOF'
-(import IO)
-
-(:: main Int)
-
-(fn (main) (region a (region b 0)))
-EOF
-checks=$((checks + 1))
-if ! "$axc" emit-llvm "$work/two.ax" -o "$work/two.ll" >"$work/two.log" 2>&1; then
-  bad "could not emit the two-region probe"
-  sed 's/^/     /' "$work/two.log" | head -20
-else
-  cells=$(grep -c "$CELL" "$work/two.ll" || true)
-  resets=$(grep -c 'call i64 @__axiom_arena_reset_fn' "$work/two.ll" || true)
+# One program, two nested regions, emitted twice. With no import
+# nothing makes an owner, so the registry is off and each cell is three
+# words. Importing IO brings `File`, an owner, so the registry is on
+# and each cell is four.
+two_regions() {  # <name> <import line> <width: 3|4> <registry: 0|1>
+  local name="$1" import="$2" width="$3" want_reg="$4"
+  local word want_cell other_cell cells others reg resets
+  if [[ "$width" -eq 4 ]]; then
+    word=four; want_cell="$CELL4"; other_cell="$CELL3"
+  else
+    word=three; want_cell="$CELL3"; other_cell="$CELL4"
+  fi
+  printf '%s\n\n(:: main Int)\n\n(fn (main) (region a (region b 0)))\n' \
+    "$import" > "$work/$name.ax"
+  checks=$((checks + 1))
+  if ! "$axc" emit-llvm "$work/$name.ax" -o "$work/$name.ll" >"$work/$name.log" 2>&1; then
+    bad "could not emit the two-region probe for the $word-word cell"
+    sed 's/^/     /' "$work/$name.log" | head -20
+    return
+  fi
+  cells=$(grep -c "$want_cell" "$work/$name.ll" || true)
+  others=$(grep -c "$other_cell" "$work/$name.ll" || true)
+  reg=$(grep -c "$REGISTRY" "$work/$name.ll" || true)
+  resets=$(grep -c 'call i64 @__axiom_arena_reset_fn' "$work/$name.ll" || true)
   # the runtime's own callers of the reset (the keep helper, recovery)
   # are in every binary; two more is the two regions
-  if [[ "$cells" -eq 2 ]]; then
-    ok "two nested regions: 2 cells, $resets reset calls in the module"
+  if [[ "$reg" -ne "$want_reg" ]]; then
+    bad "the $word-word probe has the owner registry $(onoff "$reg") - it no longer picks the width it stands for"
+  elif [[ "$cells" -eq 2 && "$others" -eq 0 ]]; then
+    ok "two nested regions, owner registry $(onoff "$reg"): 2 $word-word cells, $resets reset calls in the module"
   else
-    bad "two nested regions emitted $cells cell(s), wanted 2 - the grep above is not measuring the cell"
+    bad "two nested regions emitted $cells $word-word and $others other-width cell(s), wanted 2 and 0 - the grep above is not measuring the cell"
   fi
-fi
+}
+two_regions two3 "" 3 0
+two_regions two4 "(import IO)" 4 1
 
 # ---------------------------------------------------------------
 # 2. reclaim, as a ratio
