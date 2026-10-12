@@ -16,6 +16,32 @@ its changelog too.
 
 ## Unreleased
 
+- Bring `Net` up to Rust's `std::net`. `tcpListen` and `tcpConnect`
+  take an address as text, as in `(tcpListen "0.0.0.0:8080")`;
+  `tcpListenAddr` and `tcpConnectAddr` take a `SocketAddr`, and
+  `tcpConnectTimeout` gives up after a deadline. `IpAddr` holds an IPv4
+  or IPv6 address, built with `ipV4`, `ipV6` or `ipParse`, with
+  `ipIsLoopback`, `ipIsPrivate` and the other `std::net` predicates.
+  `SocketAddr` is sealed and built with `socketAddrNew` from an
+  `IpAddr` and a `Port`. Streams read lines with `tcpReadLine`, exact
+  frames with `tcpReadExact` and ahead with `tcpPeek`, and
+  `tcpWriteSome` reports a short write. `tcpShutdown` takes
+  `ShutdownRead`, `ShutdownWrite` or `ShutdownBoth`; timeouts are
+  `Some` milliseconds or `None`, with getters; `tcpSetTtl`, `tcpNoDelay`
+  and `tcpTakeError` are new. `tcpListenerAddr` is
+  `tcpListenerLocalAddr`, and `socketAddrIp` answers an `IpAddr`.
+  `compat/BREAKING` names the replacement for every removed name.
+  **BREAKING**. Tested by `tests/stdlib/841-net-ip.ax` and
+  `tests/stdlib/843-net-stream.ax`.
+
+- Name failures with `IO.errorKind`, which answers an `ErrorKind`
+  with `std::io::ErrorKind`'s names (`NotFound`, `WouldBlock`,
+  `TimedOut`, `ConnectionRefused` and the rest), the same on every
+  target. A read or write timeout on a blocking stream answers
+  `TimedOut` everywhere. `Err` gains `errUnexpectedEof` and
+  `errInvalidData`, and `IO` gains `readBufferPut`. Tested by
+  `tests/stdlib/840-error-kind.ax`.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

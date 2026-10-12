@@ -36,17 +36,14 @@
     (println (concat "FAIL " label))))
 
 (:: loopback (-> Int SocketAddr))
-;@axiom:effect(io)
 (fn (loopback port)
-  (match (socketAddrV4 127 0 0 1 port)
-    ((Ok a) a)
-    ((Err e) (todo "a loopback address"))))
+  (socketAddrNew ipLocalhostV4 port))
 
 ; A listening, non-blocking socket on `port`.
 (:: listenOn (-> Int (Result TcpListener Error)))
 ;@axiom:effect(io)
 (fn (listenOn port)
-  (try lsn (tcpListen (loopback port))
+  (try lsn (tcpListenAddr (loopback port))
     (try _ (tcpListenerSetNonBlocking lsn true)
       (Ok lsn))))
 
@@ -103,7 +100,7 @@
                   ; Connect to the FIRST listener only, so the event that
                   ; comes back has to carry that one's token and not merely
                   ; "a token we registered".
-                  (match (tcpConnect (loopback base))
+                  (match (tcpConnectAddr (loopback base))
                     ((Err e) (say false "a client connects"))
                     ((Ok ca)
                       {
@@ -125,10 +122,10 @@
                         ; wait repeats until both listeners are ready. That
                         ; converges because both backends are
                         ; level-triggered and neither connection is accepted.
-                        (match (tcpConnect (loopback base))
+                        (match (tcpConnectAddr (loopback base))
                           ((Err e) (say false "a client connects"))
                           ((Ok cb)
-                            (match (tcpConnect (loopback (+ base 1)))
+                            (match (tcpConnectAddr (loopback (+ base 1)))
                               ((Err e) (say false "a client connects"))
                               ((Ok cc)
                                 (let (

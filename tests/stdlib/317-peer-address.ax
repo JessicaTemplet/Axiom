@@ -27,6 +27,7 @@
 (import Err)
 (import Net)
 (import Vec)
+(import Str)
 
 (:: say (-> Bool String Int))
 ;@axiom:effect(io)
@@ -35,14 +36,31 @@
     (println (concat "ok   " label))
     (println (concat "FAIL " label))))
 
+; The kernel's `sockaddr` bytes for `a`, which IO's socket calls take.
+(:: rawOf (-> SocketAddr String))
+(fn (rawOf a)
+  (let (
+    (b (strAlloc netAddrMaxBytes))
+    (ip (socketAddrIp a))
+    (port (socketAddrPort a))
+  )
+    {
+      (if (ipIsV6 ip)
+        (let ((g (ipSegments ip)))
+          (netAddr6 (strData b) port (vecGet g 0) (vecGet g 1) (vecGet g 2) (vecGet g 3) (vecGet g 4) (vecGet g 5) (vecGet g 6) (vecGet g 7)))
+        (let ((o (ipOctets ip)))
+          (netAddr4 (strData b) port (vecGet o 0) (vecGet o 1) (vecGet o 2) (vecGet o 3))))
+      b
+    }))
+
 ; A client socket bound to `from` and connected to `to`.
 (:: clientFrom (-> SocketAddr SocketAddr (Result File Error)))
 ;@axiom:effect(io)
 (fn (clientFrom from to)
-  (try s (socketOpen from.bytes)
+  (try s (socketOpen (rawOf from))
     (try _ (socketSetInt s solSocket soReuseAddr 1)
-      (try _ (socketBind s from.bytes)
-        (try _ (socketConnect s to.bytes)
+      (try _ (socketBind s (rawOf from))
+        (try _ (socketConnect s (rawOf to))
           (Ok s))))))
 
 ; One family, end to end: listen on `server`, connect from `client`, and
@@ -50,7 +68,7 @@
 (:: family (-> String SocketAddr SocketAddr String Int))
 ;@axiom:effect(io)
 (fn (family label server client ip)
-  (match (tcpListen server)
+  (match (tcpListenAddr server)
     ((Err e) (say false (concat label " listener binds")))
     ((Ok lsn)
       {
@@ -70,7 +88,7 @@
                       ((Ok peer)
                         {
                           (say (if (socketAddrIsV6 client) (socketAddrIsV6 peer) (! (socketAddrIsV6 peer))) "the peer's family is the client's")
-                          (say (strEq (socketAddrIp peer) ip) (concat "the peer's address is " ip))
+                          (say (strEq (ipText (socketAddrIp peer)) ip) (concat "the peer's address is " ip))
                           (say (== (socketAddrPort peer) (socketAddrPort client)) "the peer's port is the source port the client bound")
                           (say (strEq (socketAddrText peer) (socketAddrText client)) "and it reads back as the address the client bound")
                         }))
@@ -86,23 +104,7 @@
 (fn (main)
   (let ((base (+ 20000 (* 4 (% sysPid 2000)))))
     {
-      (match (socketAddrV4 127 0 0 1 base)
-        ((Err e) (say false "a v4 address builds"))
-        ((Ok server)
-          (match (socketAddrV4 127 0 0 1 (+ base 1))
-            ((Err e) (say false "a v4 address builds"))
-            ((Ok client) (family "a v4" server client "127.0.0.1")))))
-      (let ((loop6 vecNew))
-        {
-          (for g in 0..7
-            (vecPush loop6 0))
-          (vecPush loop6 1)
-          (match (socketAddrV6 loop6 (+ base 2))
-            ((Err e) (say false "a v6 address builds"))
-            ((Ok server)
-              (match (socketAddrV6 loop6 (+ base 3))
-                ((Err e) (say false "a v6 address builds"))
-                ((Ok client) (family "a v6" server client "::1")))))
-        })
+      (family "a v4" (socketAddrNew ipLocalhostV4 base) (socketAddrNew ipLocalhostV4 (+ base 1)) "127.0.0.1")
+      (family "a v6" (socketAddrNew ipLocalhostV6 (+ base 2)) (socketAddrNew ipLocalhostV6 (+ base 3)) "::1")
       0
     }))

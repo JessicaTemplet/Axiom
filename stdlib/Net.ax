@@ -1,40 +1,35 @@
-; Net - TCP connections and socket addresses.
+; Net - TCP connections and IP addresses.
 ;
-;     (let ((addr (unwrapOr (socketAddrParse "127.0.0.1:8080") ...)))
-;       (match (tcpListen addr)
-;         ((Ok lsn)
+;     (match (tcpListen "127.0.0.1:7000")
+;       ((Err e) (eprintln (errorText e)))
+;       ((Ok lsn)
+;         (while true
 ;           (match (tcpAccept lsn)
-;             ((Ok conn) { (tcpWrite conn "hello\n") (tcpClose conn) })
-;             ((Err e) ...)))
-;         ((Err e) ...)))
+;             ((Err e) (eprintln (errorText e)))
+;             ((Ok conn) (serve conn))))))
 ;
-; This is the whole networking surface of the standard library, and it
-; is the shape of Rust's `std::net` without UDP: a listener, a stream,
-; and the socket address both are opened on. Anything above TCP - HTTP,
-; TLS, a resolver - is a library a program brings, built on this.
+; Net is Rust's `std::net` without UDP: listeners, streams, and the
+; addresses they open on. HTTP, TLS and name lookup are libraries
+; built on top of it.
 ;
-; `TcpListener` and `TcpStream` each own a `File`, and no descriptor
-; number leaves them. Aliases share its lifetime: the last owner closes
-; the descriptor. Explicit close retires it first, so any later use
-; stops with status 85 before a reused descriptor number can reach
-; another resource.
+; A `TcpListener` or `TcpStream` owns its socket, and the last share
+; closes it. `tcpClose` and `tcpListenerClose` close early and report
+; the result; any later use stops the program with status 85, before a
+; reused descriptor number can reach another resource.
 ;
-; BLOCKING BY DEFAULT, as `std::net` is. A listener and every stream
-; this module makes block until they can answer; `tcpSetNonBlocking`
-; switches one, and then a read or write that cannot proceed answers
-; `Err` whose code `netWouldBlock` recognises. `pollerAddListener` and
-; `pollerAddStream` put either into an `IO` `Poller`.
+; Streams block until they can answer, and a timeout set with
+; `tcpSetReadTimeout` answers `TimedOut`. `tcpSetNonBlocking` switches
+; a stream, and then a read or write that can't proceed answers
+; `WouldBlock`. Match on `IO.errorKind`, which names the failure the
+; same way on every target. `pollerAddListener` and `pollerAddStream`
+; put either kind of socket into an `IO` `Poller`.
 ;
-; A CLOSED PEER IS AN ERROR, NOT A SIGNAL. Writing to a connection the
-; peer has closed raises SIGPIPE, whose default action ends the process.
-; `IO`'s socket layer sends with `MSG_NOSIGNAL` on Linux and FreeBSD and
-; gives every socket `SO_NOSIGPIPE` on Darwin and FreeBSD, so the write
-; answers `Err` EPIPE instead.
+; Writing to a peer that has gone away answers `BrokenPipe` and never
+; raises SIGPIPE: `IO` sends with `MSG_NOSIGNAL` on Linux and FreeBSD,
+; and sets `SO_NOSIGPIPE` on Darwin and FreeBSD.
 ;
-; NO NAMES. `socketAddrParse` reads numeric addresses only - there is
-; no resolver, because the only one a freestanding program could call
-; is libc's. Resolve names outside the program, or in a library that
-; speaks DNS.
+; Addresses are numeric. There is no resolver, because the only one a
+; freestanding program could call is libc's.
 (import Mem)
 (import Str)
 (import Vec)
@@ -44,91 +39,310 @@
 (import IO)
 
 ; ------------------------------------------------------------------
-; Socket addresses.
+; IP addresses.
 ; ------------------------------------------------------------------
-; An IPv4 or IPv6 address and a port: the kernel's own `sockaddr` bytes
-; for it, `netAddrMaxBytes` long, built by `Sys.netAddr4` and
-; `Sys.netAddr6`. Make one with `socketAddrParse`, `socketAddrV4` or
-; `socketAddrV6`.
-(pub struct SocketAddr
-  (bytes : String))
+; A 16-bit field: one of an IPv6 address's eight groups. Passing a
+; number outside 0..65535 where one is declared stops the program with
+; status 80.
+(pub subtype Segment is Int range 0..65536)
 
-; The error every refusal here answers: EINVAL's number on the host
-; would differ by target, so the code is the one `Err` a caller can
-; match on everywhere.
+; A TCP port, 0..65535, checked where it is passed as `Segment` is.
+; Port 0 asks the kernel to choose.
+(pub subtype Port is Int range 0..65536)
+
+; An IPv4 or IPv6 address, without a port. One type holds both
+; families, as `SocketAddr` does; `ipIsV4` and `ipIsV6` say which. Make
+; one with `ipV4`, `ipV6` or `ipParse`.
+;
+; IPv4 is the low 32 bits of `lo`. IPv6 is groups 0-3 in `hi` and 4-7
+; in `lo`, sixteen bits each in reading order. Sealed, so every address
+; is one this module built.
+(pub struct IpAddr sealed
+  (v6 : Bool)
+  (hi : Int)
+  (lo : Int))
+
+; The error every refusal here answers: EINVAL, 22 on every target, so
+; `errorKind` says `InvalidInput`.
 (:: netBadAddr (-> String String (Result a Error)))
 (fn (netBadAddr what where)
-  (Err (errContextOf (mkError 22 (concat "invalid socket address: " what)) where)))
+  (Err (errContextOf (mkError 22 (concat "invalid address: " what)) where)))
 
-; Whether `a` is a well-formed address this module built: the right
-; length and a family it knows. Every function taking one asks first,
-; because the struct is public and could be built from any string.
-(:: sockOk (-> SocketAddr Bool))
-(fn (sockOk a)
-  (let ((s a.bytes))
-    (if (!= (strLen s) netAddrMaxBytes)
-      false
-      (let ((fam (netAddrFamily (strData s))))
-        (|| (== fam afInet) (== fam afInet6))))))
+; Four 16-bit fields packed into one word, first field highest.
+(:: pack16 (-> Int Int Int Int Int))
+(fn (pack16 a b c d)
+  (| (<< a 48) (| (<< b 32) (| (<< c 16) d))))
 
-; The address `a.b.c.d:port`. Each part must be in range: 0..255 for
-; the octets and 0..65535 for the port.
-(pub :: socketAddrV4 (-> Int Int Int Int Int (Result SocketAddr Error)))
-(pub fn (socketAddrV4 a b c d port)
-  (if (|| (|| (< a 0) (> a 255)) (|| (< b 0) (> b 255)))
-    (netBadAddr "an IPv4 octet is outside 0..255" "socketAddrV4")
-    (if (|| (|| (< c 0) (> c 255)) (|| (< d 0) (> d 255)))
-      (netBadAddr "an IPv4 octet is outside 0..255" "socketAddrV4")
-      (if (|| (< port 0) (> port 65535))
-        (netBadAddr "the port is outside 0..65535" "socketAddrV4")
-        (let ((s (strAlloc netAddrMaxBytes)))
+; The IPv4 address `a.b.c.d`. Each octet is a `Byte`, so one outside
+; 0..255 stops the program with status 80; read text from outside the
+; program with `ipParse`, which answers `Err` instead.
+(pub :: ipV4 (-> Byte Byte Byte Byte IpAddr))
+(pub fn (ipV4 a b c d)
+  (IpAddr false 0 (| (<< a 24) (| (<< b 16) (| (<< c 8) d)))))
+
+; The IPv6 address with groups `g0` to `g7` in reading order: `::1` is
+; `(ipV6 0 0 0 0 0 0 0 1)`.
+(pub :: ipV6 (-> Segment Segment Segment Segment Segment Segment Segment Segment IpAddr))
+(pub fn (ipV6 g0 g1 g2 g3 g4 g5 g6 g7)
+  (IpAddr true (pack16 g0 g1 g2 g3) (pack16 g4 g5 g6 g7)))
+
+; An IPv4 address from four octets the parser has already checked.
+(:: ipOfOctets (-> (Vec Int) IpAddr))
+(fn (ipOfOctets q)
+  (IpAddr false 0 (| (<< (vecGet q 0) 24) (| (<< (vecGet q 1) 16) (| (<< (vecGet q 2) 8) (vecGet q 3))))))
+
+; An IPv6 address from eight groups the parser has already checked.
+(:: ipOfGroups (-> (Vec Int) IpAddr))
+(fn (ipOfGroups g)
+  (IpAddr true
+    (pack16 (vecGet g 0) (vecGet g 1) (vecGet g 2) (vecGet g 3))
+    (pack16 (vecGet g 4) (vecGet g 5) (vecGet g 6) (vecGet g 7))))
+
+; Octet `i` (0..3) of an IPv4 address.
+(:: ipOctet (-> IpAddr Int Int))
+(fn (ipOctet a i)
+  (& (>> a.lo (* 8 (- 3 i))) 255))
+
+; Group `i` (0..7) of an IPv6 address, or of an IPv4 address written in
+; its IPv4-mapped form `::ffff:a.b.c.d`.
+(:: ipGroup (-> IpAddr Int Int))
+(fn (ipGroup a i)
+  (if a.v6
+    (& (>>
+      (if (< i 4)
+        a.hi
+        a.lo)
+      (* 16 (- 3 (% i 4)))) 65535)
+    (if (< i 5)
+      0
+      (== i 5)
+      65535
+      (== i 6)
+      (& (>> a.lo 16) 65535)
+      (& a.lo 65535))))
+
+; Read an IP address from text: dotted-quad IPv4 such as `10.0.0.1`, or
+; IPv6 in any RFC 4291 section 2.2 form such as `fe80::1`, with no
+; brackets and no port. A zone (`%en0`) is refused, because it names an
+; interface and there is no lookup to resolve it.
+(pub :: ipParse (-> String (Result IpAddr Error)))
+(pub fn (ipParse text)
+  (let ((n (strLen text)))
+    (if (== n 0)
+      (netBadAddr "empty" "ipParse")
+      (match (strFindByte text 58 0)
+        ((Some _)
+          (match (parseV6 text 0 n)
+            ((Some gs) (Ok (ipOfGroups gs)))
+            ((None) (netBadAddr "not an IPv6 address" "ipParse"))))
+        ((None)
+          (let ((q vecNew))
+            (if (parseV4Into text 0 n q)
+              (Ok (ipOfOctets q))
+              (netBadAddr "not an IPv4 address" "ipParse"))))))))
+
+; The address as text: dotted-quad IPv4, or IPv6 in the RFC 5952 form
+; (lower case, the longest run of zero groups as `::`, an IPv4-mapped
+; address as `::ffff:a.b.c.d`).
+(pub :: ipText (-> IpAddr String))
+(pub fn (ipText a)
+  (ipTextOf (strData (sockBytes a 0))))
+
+; Whether the address is IPv4.
+(pub :: ipIsV4 (-> IpAddr Bool))
+(pub fn (ipIsV4 a)
+  (! a.v6))
+
+; Whether the address is IPv6.
+(pub :: ipIsV6 (-> IpAddr Bool))
+(pub fn (ipIsV6 a)
+  a.v6)
+
+; The address's bytes in network order: four for IPv4, sixteen for
+; IPv6.
+(pub :: ipOctets (-> IpAddr (Vec Int)))
+(pub fn (ipOctets a)
+  (let ((out vecNew))
+    {
+      (if a.v6
+        (for i in 0..8
+          (let ((g (ipGroup a i)))
+            {
+              (vecPush out (>> g 8))
+              (vecPush out (& g 255))
+            }))
+        (for i in 0..4
+          (vecPush out (ipOctet a i))))
+      out
+    }))
+
+; The eight 16-bit groups of an IPv6 address. An IPv4 address answers
+; the groups of its IPv4-mapped form, `::ffff:a.b.c.d`.
+(pub :: ipSegments (-> IpAddr (Vec Int)))
+(pub fn (ipSegments a)
+  (let ((out vecNew))
+    {
+      (for i in 0..8
+        (vecPush out (ipGroup a i)))
+      out
+    }))
+
+; Whether the address is `0.0.0.0` or `::`, which a listener binds to
+; accept connections on every interface.
+(pub :: ipIsUnspecified (-> IpAddr Bool))
+(pub fn (ipIsUnspecified a)
+  (&& (== a.hi 0) (== a.lo 0)))
+
+; Whether the address is a loopback address: `127.0.0.0/8` or `::1`.
+(pub :: ipIsLoopback (-> IpAddr Bool))
+(pub fn (ipIsLoopback a)
+  (if a.v6
+    (&& (== a.hi 0) (== a.lo 1))
+    (== (ipOctet a 0) 127)))
+
+; Whether the address is multicast: `224.0.0.0/4` or `ff00::/8`.
+(pub :: ipIsMulticast (-> IpAddr Bool))
+(pub fn (ipIsMulticast a)
+  (if a.v6
+    (== (>> (ipGroup a 0) 8) 255)
+    (== (>> (ipOctet a 0) 4) 14)))
+
+; Whether the address is private: IPv4's RFC 1918 ranges (`10.0.0.0/8`,
+; `172.16.0.0/12`, `192.168.0.0/16`), or an IPv6 unique local address
+; (`fc00::/7`, RFC 4193).
+(pub :: ipIsPrivate (-> IpAddr Bool))
+(pub fn (ipIsPrivate a)
+  (if a.v6
+    (== (& (ipGroup a 0) 65024) 64512)
+    (let (
+      (o0 (ipOctet a 0))
+      (o1 (ipOctet a 1))
+    )
+      (|| (== o0 10) (|| (&& (== o0 172) (== (& o1 240) 16)) (&& (== o0 192) (== o1 168)))))))
+
+; Whether the address is link-local: `169.254.0.0/16` or `fe80::/10`.
+(pub :: ipIsLinkLocal (-> IpAddr Bool))
+(pub fn (ipIsLinkLocal a)
+  (if a.v6
+    (== (& (ipGroup a 0) 65472) 65152)
+    (&& (== (ipOctet a 0) 169) (== (ipOctet a 1) 254))))
+
+; Whether the address is IPv4's broadcast address, `255.255.255.255`.
+; IPv6 has none, so an IPv6 address answers false.
+(pub :: ipIsBroadcast (-> IpAddr Bool))
+(pub fn (ipIsBroadcast a)
+  (&& (! a.v6) (== a.lo 4294967295)))
+
+; Whether the address is reserved for documentation: `192.0.2.0/24`,
+; `198.51.100.0/24` and `203.0.113.0/24` (RFC 5737), or `2001:db8::/32`
+; (RFC 3849).
+(pub :: ipIsDocumentation (-> IpAddr Bool))
+(pub fn (ipIsDocumentation a)
+  (if a.v6
+    (&& (== (ipGroup a 0) 8193) (== (ipGroup a 1) 3512))
+    (let ((net (>> a.lo 8)))
+      (|| (== net (+ (<< 192 16) 2)) (|| (== net (+ (<< 198 16) (+ (<< 51 8) 100))) (== net (+ (<< 203 16) 113)))))))
+
+; Whether an IPv6 address is IPv4-mapped, `::ffff:a.b.c.d`.
+(:: ipMapped (-> IpAddr Bool))
+(fn (ipMapped a)
+  (&& a.v6 (&& (== a.hi 0) (== (>> a.lo 32) 65535))))
+
+; The address with an IPv4-mapped IPv6 address turned back into IPv4,
+; and any other address unchanged. A dual-stack listener on `::` sees
+; IPv4 clients as `::ffff:a.b.c.d`; this makes them compare equal to the
+; IPv4 address they are.
+(pub :: ipToCanonical (-> IpAddr IpAddr))
+(pub fn (ipToCanonical a)
+  (if (ipMapped a)
+    (IpAddr false 0 (& a.lo 4294967295))
+    a))
+
+; An IPv4 address as its IPv4-mapped IPv6 address, `::ffff:a.b.c.d`;
+; an IPv6 address unchanged.
+(pub :: ipToV6Mapped (-> IpAddr IpAddr))
+(pub fn (ipToV6Mapped a)
+  (if a.v6
+    a
+    (IpAddr true 0 (| (<< 65535 32) a.lo))))
+
+; Whether `a` and `b` are of one family.
+(:: sameFamily (-> IpAddr IpAddr Bool))
+(fn (sameFamily a b)
+  (if a.v6
+    b.v6
+    (! b.v6)))
+
+; Whether two addresses are the same. The families must match too: an
+; IPv4 address is not equal to its IPv4-mapped form until
+; `ipToCanonical` makes it so.
+(pub :: ipEq (-> IpAddr IpAddr Bool))
+(pub fn (ipEq a b)
+  (&& (sameFamily a b) (&& (== a.hi b.hi) (== a.lo b.lo))))
+
+; -1, 0 or 1 as `a` sorts before, with or after `b`: every IPv4 address
+; before every IPv6 one, and within a family by numeric value.
+(pub :: ipCompare (-> IpAddr IpAddr Int))
+(pub fn (ipCompare a b)
+  (if (! (sameFamily a b))
+    (if a.v6
+      1
+      -1)
+    (let (
+      (mut r 0)
+      (mut i 0)
+    )
+      {
+        (while (&& (== r 0) (< i 8))
           {
-            (netAddr4
-              (strData s)
-              port
-              a
-              b
-              c
-              d)
-            (Ok (SocketAddr s))
-          })))))
+            (let (
+              (x (ipGroup a i))
+              (y (ipGroup b i))
+            )
+              (if (< x y)
+                {
+                  (set r -1)
+                  0
+                }
+                (> x y)
+                {
+                  (set r 1)
+                  0
+                }
+                0))
+            (set i (+ i 1))
+          })
+        r
+      })))
 
-; The address `[g0:g1:...:g7]:port` from eight 16-bit groups, each in
-; 0..65535. `groups` must hold exactly eight.
-(pub :: socketAddrV6 (-> (Vec Int) Int (Result SocketAddr Error)))
-(pub fn (socketAddrV6 groups port)
-  (if (!= (vecLen groups) 8)
-    (netBadAddr "an IPv6 address has eight groups" "socketAddrV6")
-    (if (|| (< port 0) (> port 65535))
-      (netBadAddr "the port is outside 0..65535" "socketAddrV6")
-      (let ((mut bad false))
-        {
-          (for g in groups
-            (if (|| (< g 0) (> g 65535))
-              {
-                (set bad true)
-                0
-              }
-              0))
-          (if bad
-            (netBadAddr "an IPv6 group is outside 0..65535" "socketAddrV6")
-            (let ((s (strAlloc netAddrMaxBytes)))
-              {
-                (netAddr6
-                  (strData s)
-                  port
-                  (vecGet groups 0)
-                  (vecGet groups 1)
-                  (vecGet groups 2)
-                  (vecGet groups 3)
-                  (vecGet groups 4)
-                  (vecGet groups 5)
-                  (vecGet groups 6)
-                  (vecGet groups 7))
-                (Ok (SocketAddr s))
-              }))
-        }))))
+; `127.0.0.1`.
+(pub :: ipLocalhostV4 IpAddr)
+(pub fn (ipLocalhostV4)
+  (ipV4 127 0 0 1))
 
+; `::1`.
+(pub :: ipLocalhostV6 IpAddr)
+(pub fn (ipLocalhostV6)
+  (ipV6 0 0 0 0 0 0 0 1))
+
+; `0.0.0.0`: bind a listener here to accept on every IPv4 interface.
+(pub :: ipUnspecifiedV4 IpAddr)
+(pub fn (ipUnspecifiedV4)
+  (ipV4 0 0 0 0))
+
+; `::`: bind a listener here to accept on every IPv6 interface.
+(pub :: ipUnspecifiedV6 IpAddr)
+(pub fn (ipUnspecifiedV6)
+  (ipV6 0 0 0 0 0 0 0 0))
+
+; `255.255.255.255`.
+(pub :: ipBroadcast IpAddr)
+(pub fn (ipBroadcast)
+  (ipV4 255 255 255 255))
+
+; ------------------------------------------------------------------
+; Reading and writing addresses as text.
+; ------------------------------------------------------------------
 ; A decimal number made of digits `s[lo..hi)`, at most `maxDigits` long
 ; and with no leading zero unless it is the single digit 0; -1 when it
 ; is not one. The leading-zero rule is the one `std::net` applies to
@@ -352,57 +566,6 @@
               None))))
     }))
 
-; Read a socket address from text: `a.b.c.d:port` for IPv4, or
-; `[ipv6]:port` with the brackets RFC 3986 section 3.2.2 requires, so
-; the port can't be mistaken for a group. Only numeric addresses: see
-; the header for why there are no names.
-(pub :: socketAddrParse (-> String (Result SocketAddr Error)))
-(pub fn (socketAddrParse text)
-  (let ((n (strLen text)))
-    (if (== n 0)
-      (netBadAddr "empty" "socketAddrParse")
-      (if (== (strByte text 0) 91)
-        ; `[`: find the `]` and the `:` right after it
-        (match (strFindByte text 93 1)
-          ((None) (netBadAddr "a `[` with no `]`" "socketAddrParse"))
-          ((Some close)
-            (if (|| (>= (+ close 1) n) (!= (strByte text (+ close 1)) 58))
-              (netBadAddr "an IPv6 address needs `]:port`" "socketAddrParse")
-              (let ((port (decField text (+ close 2) n 5)))
-                (if (|| (< port 0) (> port 65535))
-                  (netBadAddr "the port is not a number in 0..65535" "socketAddrParse")
-                  (match (parseV6 text 1 close)
-                    ((None) (netBadAddr "not an IPv6 address" "socketAddrParse"))
-                    ((Some gs) (socketAddrV6 gs port))))))
-          ))
-        ; IPv4: the last `:` separates the port
-        (let ((mut colon -1))
-          {
-            (for i in 0..n
-              (if (== (strByte text i) 58)
-                {
-                  (set colon i)
-                  0
-                }
-                0))
-            (if (< colon 0)
-              (netBadAddr "no port" "socketAddrParse")
-              (let (
-                (port (decField text (+ colon 1) n 5))
-                (q vecNew)
-              )
-                (if (|| (< port 0) (> port 65535))
-                  (netBadAddr "the port is not a number in 0..65535" "socketAddrParse")
-                  (if (parseV4Into text 0 colon q)
-                    (socketAddrV4
-                      (vecGet q 0)
-                      (vecGet q 1)
-                      (vecGet q 2)
-                      (vecGet q 3)
-                      port)
-                    (netBadAddr "not an IPv4 address; an IPv6 one goes in brackets" "socketAddrParse")))))
-          })))))
-
 ; Whether IPv6 address `p` is IPv4-mapped, `::ffff:a.b.c.d`: ten zero
 ; bytes and then two of 255 (RFC 4291 section 2.5.5.2). The sixteen
 ; address bytes start at 8 in both layouts `Sys.netAddr6` writes.
@@ -423,49 +586,221 @@
     (concat "::ffff:" (concat (fmtInt (memGetByte p 20)) (concat "." (concat (fmtInt (memGetByte p 21)) (concat "." (concat (fmtInt (memGetByte p 22)) (concat "." (fmtInt (memGetByte p 23)))))))))
     (netAddrText p)))
 
-; The address as text, `a.b.c.d:port` or `[ipv6]:port`, with IPv6 in
-; the RFC 5952 form: lower-case, the longest run of zero groups as
-; `::`, and an IPv4-mapped address as `::ffff:a.b.c.d`.
+; ------------------------------------------------------------------
+; Socket addresses.
+; ------------------------------------------------------------------
+; An IP address and a port: what a listener binds and a stream connects
+; to. Make one with `socketAddrNew` or `socketAddrParse`. It holds the
+; kernel's own `sockaddr` bytes, `netAddrMaxBytes` long, built by
+; `Sys.netAddr4` and `Sys.netAddr6`. Sealed, so every SocketAddr is one
+; this module built or the kernel answered.
+(pub struct SocketAddr sealed
+  (bytes : String))
+
+; The `sockaddr` bytes for `a` and `port`.
+(:: sockBytes (-> IpAddr Int String))
+(fn (sockBytes a port)
+  (let ((s (strAlloc netAddrMaxBytes)))
+    {
+      (if a.v6
+        (netAddr6
+          (strData s)
+          port
+          (ipGroup a 0)
+          (ipGroup a 1)
+          (ipGroup a 2)
+          (ipGroup a 3)
+          (ipGroup a 4)
+          (ipGroup a 5)
+          (ipGroup a 6)
+          (ipGroup a 7))
+        (netAddr4
+          (strData s)
+          port
+          (ipOctet a 0)
+          (ipOctet a 1)
+          (ipOctet a 2)
+          (ipOctet a 3)))
+      s
+    }))
+
+; The IP address in `sockaddr` bytes at `p`: four bytes from offset 4
+; for IPv4, sixteen from offset 8 for IPv6, in both layouts `Sys` writes
+; and the kernel answers.
+(:: ipOfSock (-> Int IpAddr))
+(fn (ipOfSock p)
+  (if (== (netAddrFamily p) afInet6)
+    (let ((g vecNew))
+      {
+        (for i in 0..8
+          (vecPush g (+ (<< (memGetByte p (+ 8 (* 2 i))) 8) (memGetByte p (+ 9 (* 2 i))))))
+        (ipOfGroups g)
+      })
+    (IpAddr false 0 (| (<< (memGetByte p 4) 24) (| (<< (memGetByte p 5) 16) (| (<< (memGetByte p 6) 8) (memGetByte p 7)))))))
+
+; The socket address of `ip` and `port`.
+(pub :: socketAddrNew (-> IpAddr Port SocketAddr))
+(pub fn (socketAddrNew ip port)
+  (SocketAddr (sockBytes ip port)))
+
+; Read a socket address from text: `a.b.c.d:port` for IPv4, or
+; `[ipv6]:port` with the brackets RFC 3986 section 3.2.2 requires, so
+; the port can't be mistaken for a group. Only numeric addresses: there
+; is no resolver.
+(pub :: socketAddrParse (-> String (Result SocketAddr Error)))
+(pub fn (socketAddrParse text)
+  (let ((n (strLen text)))
+    (if (== n 0)
+      (netBadAddr "empty" "socketAddrParse")
+      (if (== (strByte text 0) 91)
+        ; `[`: find the `]` and the `:` right after it
+        (match (strFindByte text 93 1)
+          ((None) (netBadAddr "a `[` with no `]`" "socketAddrParse"))
+          ((Some close)
+            (if (|| (>= (+ close 1) n) (!= (strByte text (+ close 1)) 58))
+              (netBadAddr "an IPv6 address needs `]:port`" "socketAddrParse")
+              (let ((port (decField text (+ close 2) n 5)))
+                (if (|| (< port 0) (> port 65535))
+                  (netBadAddr "the port is not a number in 0..65535" "socketAddrParse")
+                  (match (parseV6 text 1 close)
+                    ((None) (netBadAddr "not an IPv6 address" "socketAddrParse"))
+                    ((Some gs) (Ok (SocketAddr (sockBytes (ipOfGroups gs) port))))))))
+          ))
+        ; IPv4: the last `:` separates the port
+        (let ((mut colon -1))
+          {
+            (for i in 0..n
+              (if (== (strByte text i) 58)
+                {
+                  (set colon i)
+                  0
+                }
+                0))
+            (if (< colon 0)
+              (netBadAddr "no port" "socketAddrParse")
+              (let (
+                (port (decField text (+ colon 1) n 5))
+                (q vecNew)
+              )
+                (if (|| (< port 0) (> port 65535))
+                  (netBadAddr "the port is not a number in 0..65535" "socketAddrParse")
+                  (if (parseV4Into text 0 colon q)
+                    (Ok (SocketAddr (sockBytes (ipOfOctets q) port)))
+                    (netBadAddr "not an IPv4 address; an IPv6 one goes in brackets" "socketAddrParse")))))
+          })))))
+
+; The address as text, `a.b.c.d:port` or `[ipv6]:port`, with the IP
+; written as `ipText` writes it.
 (pub :: socketAddrText (-> SocketAddr String))
 (pub fn (socketAddrText a)
-  (if (sockOk a)
-    (let ((p (strData a.bytes)))
-      (if (== (netAddrFamily p) afInet6)
-        (concat "[" (concat (ipTextOf p) (concat "]:" (fmtInt (netAddrPort p)))))
-        (concat (ipTextOf p) (concat ":" (fmtInt (netAddrPort p))))))
-    "<invalid address>"))
+  (let ((p (strData a.bytes)))
+    (if (== (netAddrFamily p) afInet6)
+      (concat "[" (concat (ipTextOf p) (concat "]:" (fmtInt (netAddrPort p)))))
+      (concat (ipTextOf p) (concat ":" (fmtInt (netAddrPort p)))))))
 
-; The IP address alone, with no port and no brackets.
-(pub :: socketAddrIp (-> SocketAddr String))
+; The IP address.
+(pub :: socketAddrIp (-> SocketAddr IpAddr))
 (pub fn (socketAddrIp a)
-  (if (sockOk a)
-    (ipTextOf (strData a.bytes))
-    "<invalid address>"))
+  (ipOfSock (strData a.bytes)))
 
-; The port, or -1 for an address this module did not build.
+; The port.
 (pub :: socketAddrPort (-> SocketAddr Int))
 (pub fn (socketAddrPort a)
-  (if (sockOk a)
-    (netAddrPort (strData a.bytes))
-    -1))
+  (netAddrPort (strData a.bytes)))
+
+; The same address with port `port`.
+(pub :: socketAddrWithPort (-> SocketAddr Port SocketAddr))
+(pub fn (socketAddrWithPort a port)
+  (SocketAddr (sockBytes (socketAddrIp a) port)))
+
+; The same port with IP address `ip`, which may change the family.
+(pub :: socketAddrWithIp (-> SocketAddr IpAddr SocketAddr))
+(pub fn (socketAddrWithIp a ip)
+  (SocketAddr (sockBytes ip (socketAddrPort a))))
+
+; Whether the address is IPv4.
+(pub :: socketAddrIsV4 (-> SocketAddr Bool))
+(pub fn (socketAddrIsV4 a)
+  (== (netAddrFamily (strData a.bytes)) afInet))
 
 ; Whether the address is IPv6.
 (pub :: socketAddrIsV6 (-> SocketAddr Bool))
 (pub fn (socketAddrIsV6 a)
-  (if (sockOk a)
-    (== (netAddrFamily (strData a.bytes)) afInet6)
-    false))
+  (== (netAddrFamily (strData a.bytes)) afInet6))
+
+; Whether two socket addresses have the same IP address and port.
+(pub :: socketAddrEq (-> SocketAddr SocketAddr Bool))
+(pub fn (socketAddrEq a b)
+  (&& (ipEq (socketAddrIp a) (socketAddrIp b)) (== (socketAddrPort a) (socketAddrPort b))))
+
+; -1, 0 or 1 as `a` sorts before, with or after `b`: by IP address as
+; `ipCompare` orders them, then by port.
+(pub :: socketAddrCompare (-> SocketAddr SocketAddr Int))
+(pub fn (socketAddrCompare a b)
+  (let ((c (ipCompare (socketAddrIp a) (socketAddrIp b))))
+    (if (!= c 0)
+      c
+      (let (
+        (x (socketAddrPort a))
+        (y (socketAddrPort b))
+      )
+        (if (< x y)
+          -1
+          (> x y)
+          1
+          0)))))
 
 ; ------------------------------------------------------------------
-; The handles.
+; Listeners and streams.
 ; ------------------------------------------------------------------
-; A socket listening for connections.
+; A socket listening for connections. `tcpAccept` answers each one as
+; a `TcpStream`.
 (pub struct TcpListener sealed
   (file : File))
 
-; One TCP connection.
+; One TCP connection. `pending` holds bytes received but not yet
+; answered: only `tcpReadLine` and `tcpPeek` read ahead, and every
+; reader takes from it first. `nonBlocking` is what `tcpSetNonBlocking`
+; last set, which decides whether EAGAIN means a timeout.
 (pub struct TcpStream sealed
-  (file : File))
+  (file : File)
+  (mut pending : String)
+  (mut nonBlocking : Bool))
+
+; Which half of a connection `tcpShutdown` closes.
+(pub data Shutdown
+  (ShutdownRead)
+  (ShutdownWrite)
+  (ShutdownBoth))
+
+; A stream over a connected socket `f`, blocking and with nothing
+; buffered.
+(:: streamOf (-> File TcpStream))
+(fn (streamOf f)
+  (TcpStream f "" false))
+
+; `e`, from the operation `where` on `s`. On a blocking stream EAGAIN
+; can only mean a timeout set by `tcpSetReadTimeout` or
+; `tcpSetWriteTimeout` ran out, so it answers ETIMEDOUT, and
+; `errorKind` says `TimedOut` on every target. On a non-blocking
+; stream it stays EAGAIN, `WouldBlock`.
+(:: streamErr (-> TcpStream Error String Error))
+(fn (streamErr s e where)
+  (if (&& (! s.nonBlocking) (== (errCode e) eAgain))
+    (errContextOf (mkError eTimedOut "timed out") where)
+    (errContextOf e where)))
+
+; EINVAL with `what`, from the operation `where`: `InvalidInput`.
+(:: netBadArg (-> String String (Result a Error)))
+(fn (netBadArg what where)
+  (Err (errContextOf (mkError 22 what) where)))
+
+; `r` with `where` as its error's context.
+(:: netCtx (-> (Result a Error) String (Result a Error)))
+(fn (netCtx r where)
+  (match r
+    ((Ok v) (Ok v))
+    ((Err e) (Err (errContextOf e where)))))
 
 ; Watch the listener under `token` in `p`: a wake answering `token`
 ; means a connection is waiting for `tcpAccept`. See `IO.pollerAdd`.
@@ -475,7 +810,8 @@
   (pollerAdd p l.file token))
 
 ; Watch the stream under `token` in `p`: a wake answering `token` means
-; `tcpRead` will not block. See `IO.pollerAdd`.
+; a read will not block. Bytes `tcpBuffered` counts are already here
+; and wake nothing, so read until `WouldBlock` before waiting again.
 (pub :: pollerAddStream (-> Poller TcpStream Int (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (pollerAddStream p s token)
@@ -496,23 +832,29 @@
 ; ------------------------------------------------------------------
 ; Listening.
 ; ------------------------------------------------------------------
-; A socket bound to `addr` and listening, with `SO_REUSEADDR` set so a
+; A listener on the address `text` names, such as `0.0.0.0:8080` or
+; `[::1]:0`. Port 0 asks the kernel for a free port, and
+; `tcpListenerLocalAddr` says which. `SO_REUSEADDR` is set, so a
 ; restarted server can bind the port its predecessor left in TIME_WAIT.
-; Port 0 asks the kernel for a free port; `tcpListenerAddr` says which.
-(pub :: tcpListen (-> SocketAddr (Result TcpListener Error)))
+(pub :: tcpListen (-> String (Result TcpListener Error)))
 ;@axiom:effect(io)
-(pub fn (tcpListen addr)
-  (if (! (sockOk addr))
-    (netBadAddr "not built by Net" "tcpListen")
-    (match (socketOpen addr.bytes)
-      ((Err e) (Err (errContextOf e "tcpListen")))
-      ((Ok f)
-        (match (netListenOn f addr)
-          ((Err e)
-            (let ((_ (fileClose f)))
-              (Err (errContextOf e "tcpListen"))))
-          ((Ok _) (Ok (TcpListener f))))
-      ))))
+(pub fn (tcpListen text)
+  (match (socketAddrParse text)
+    ((Err e) (Err (errContextOf e "tcpListen")))
+    ((Ok addr) (tcpListenAddr addr))))
+
+; A listener on `addr`, as `tcpListen` makes one.
+(pub :: tcpListenAddr (-> SocketAddr (Result TcpListener Error)))
+;@axiom:effect(io)
+(pub fn (tcpListenAddr addr)
+  (match (socketOpen addr.bytes)
+    ((Err e) (Err (errContextOf e "tcpListen")))
+    ((Ok f)
+      (match (netListenOn f addr)
+        ((Err e)
+          (let ((_ (fileClose f)))
+            (Err (errContextOf e "tcpListen"))))
+        ((Ok _) (Ok (TcpListener f)))))))
 
 ; The setup between `socket` and a listening socket, each step's error
 ; kept. Matches rather than `andThen` lambdas: a lambda that captures
@@ -528,111 +870,352 @@
         ((Ok _) (socketListen f 128))))))
 
 ; Wait for the next connection and answer it as a blocking stream.
+; `tcpPeerAddr` says who connected.
 (pub :: tcpAccept (-> TcpListener (Result TcpStream Error)))
 ;@axiom:effect(io)
 (pub fn (tcpAccept l)
   (match (socketAccept l.file)
     ((Err e) (Err (errContextOf e "tcpAccept")))
-    ((Ok f) (Ok (TcpStream f)))))
+    ((Ok f) (Ok (streamOf f)))))
 
-; The address the listener is bound to - the kernel's choice of port
-; when it was asked for port 0.
-(pub :: tcpListenerAddr (-> TcpListener (Result SocketAddr Error)))
+; The address the listener is bound to, with the kernel's choice of
+; port when it was asked for port 0.
+(pub :: tcpListenerLocalAddr (-> TcpListener (Result SocketAddr Error)))
 ;@axiom:effect(io)
-(pub fn (tcpListenerAddr l)
-  (netNameOf l.file false "tcpListenerAddr"))
+(pub fn (tcpListenerLocalAddr l)
+  (netNameOf l.file false "tcpListenerLocalAddr"))
 
 ; Switch the listener between blocking (`false`) and non-blocking
-; (`true`). A non-blocking listener's `tcpAccept` answers `Err` EAGAIN
+; (`true`). A non-blocking listener's `tcpAccept` answers `WouldBlock`
 ; when nothing is waiting, which a poller wake avoids.
 (pub :: tcpListenerSetNonBlocking (-> TcpListener Bool (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (tcpListenerSetNonBlocking l on)
   (fileSetNonBlocking l.file on))
 
-; Close the listener. Its handle is retired first, so any later use of
-; it stops the program with status 85.
+; Set the time-to-live of packets the listener's connections send, the
+; hop limit for IPv6. Accepted streams start with it.
+(pub :: tcpListenerSetTtl (-> TcpListener Int (Result Int Error)))
+;@axiom:effect(io)
+(pub fn (tcpListenerSetTtl l ttl)
+  (netSetTtl l.file ttl "tcpListenerSetTtl"))
+
+; The listener's time-to-live, as `tcpListenerSetTtl` sets it.
+(pub :: tcpListenerTtl (-> TcpListener (Result Int Error)))
+;@axiom:effect(io)
+(pub fn (tcpListenerTtl l)
+  (netTtl l.file "tcpListenerTtl"))
+
+; The listener's pending socket error, cleared by reading it: `(Ok
+; None)` when there is none.
+(pub :: tcpListenerTakeError (-> TcpListener (Result (Option Error) Error)))
+;@axiom:effect(io)
+(pub fn (tcpListenerTakeError l)
+  (netTakeError l.file "tcpListenerTakeError"))
+
+; Close the listener now and report the result. Its last share closes
+; it anyway; after this, any use of it stops the program with status
+; 85.
 (pub :: tcpListenerClose (-> TcpListener (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (tcpListenerClose l)
   (fileClose l.file))
 
 ; ------------------------------------------------------------------
-; Streams.
+; Connecting.
 ; ------------------------------------------------------------------
-; Connect to `addr`, waiting until the connection is made or refused.
-(pub :: tcpConnect (-> SocketAddr (Result TcpStream Error)))
+; Connect to the address `text` names, such as `127.0.0.1:7000`, and
+; wait until the connection is made or refused.
+(pub :: tcpConnect (-> String (Result TcpStream Error)))
 ;@axiom:effect(io)
-(pub fn (tcpConnect addr)
-  (if (! (sockOk addr))
-    (netBadAddr "not built by Net" "tcpConnect")
+(pub fn (tcpConnect text)
+  (match (socketAddrParse text)
+    ((Err e) (Err (errContextOf e "tcpConnect")))
+    ((Ok addr) (tcpConnectAddr addr))))
+
+; Connect to `addr`, as `tcpConnect` does.
+(pub :: tcpConnectAddr (-> SocketAddr (Result TcpStream Error)))
+;@axiom:effect(io)
+(pub fn (tcpConnectAddr addr)
+  (match (socketOpen addr.bytes)
+    ((Err e) (Err (errContextOf e "tcpConnect")))
+    ((Ok f)
+      (match (socketConnect f addr.bytes)
+        ((Err e)
+          (let ((_ (fileClose f)))
+            (Err (errContextOf e "tcpConnect"))))
+        ((Ok _) (Ok (streamOf f)))))))
+
+; Connect to `addr`, waiting at most `ms` milliseconds: `TimedOut` when
+; the time runs out first. The stream answered is blocking. An `ms` of
+; 0 or less is `InvalidInput`.
+(pub :: tcpConnectTimeout (-> SocketAddr Int (Result TcpStream Error)))
+;@axiom:effect(io)
+(pub fn (tcpConnectTimeout addr ms)
+  (if (<= ms 0)
+    (netBadArg "a connect deadline is more than 0 ms" "tcpConnectTimeout")
     (match (socketOpen addr.bytes)
-      ((Err e) (Err (errContextOf e "tcpConnect")))
+      ((Err e) (Err (errContextOf e "tcpConnectTimeout")))
       ((Ok f)
-        (match (socketConnect f addr.bytes)
+        (match (socketConnectWithin f addr.bytes ms)
           ((Err e)
             (let ((_ (fileClose f)))
-              (Err (errContextOf e "tcpConnect"))))
-          ((Ok _) (Ok (TcpStream f))))
-      ))))
+              (Err (errContextOf e "tcpConnectTimeout"))))
+          ((Ok _) (Ok (streamOf f))))))))
 
-; Read into `buf[at .. at + count)`. Answers how many bytes arrived,
-; and 0 when the peer has closed its side. A range outside `buf` stops
-; the program with status 77 before the kernel sees it.
+; ------------------------------------------------------------------
+; Reading.
+; ------------------------------------------------------------------
+; Read up to `max` more bytes from the socket onto the end of the
+; buffer: `(Ok n)`, 0 at end of stream.
+(:: netFill (-> TcpStream Int String (Result Int Error)))
+;@axiom:effect(io)
+(fn (netFill s max where)
+  (let ((buf (readBufferNew max)))
+    (match (fileRead s.file buf 0 max)
+      ((Err e) (Err (streamErr s e where)))
+      ((Ok n)
+        {
+          (if (> n 0)
+            {
+              (set s.pending (concat s.pending (readBufferText buf 0 n)))
+              0
+            }
+            0)
+          (Ok n)
+        }))))
+
+; The first `n` buffered bytes, removed from the buffer.
+(:: netTake (-> TcpStream Int String))
+(fn (netTake s n)
+  (let (
+    (p s.pending)
+    (len (strLen s.pending))
+  )
+    (let ((out (strDup (strSlice p 0 n))))
+      {
+        (set s.pending (strDup (strSlice p n (- len n))))
+        out
+      })))
+
+; How many bytes a read-ahead holds: `tcpReadLine` and `tcpPeek` take
+; more than they answer, and the rest waits here for the next read. A
+; poller can't see these bytes.
+(pub :: tcpBuffered (-> TcpStream Int))
+(pub fn (tcpBuffered s)
+  (strLen s.pending))
+
+; Read into `buf[at .. at + count)`: buffered bytes first, then one read
+; of the socket. Answers how many bytes arrived, and 0 when the peer has
+; closed its side. A range outside `buf` stops the program with status
+; 77 before the kernel sees it.
 (pub :: tcpRead (-> TcpStream ReadBuffer Int Int (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (tcpRead s buf at count)
-  (fileRead s.file buf at count))
+  (if (|| (|| (< at 0) (< count 0)) (> (+ at count) (readBufferLen buf)))
+    __indexTrap
+    (if (> (strLen s.pending) 0)
+      (let ((n
+        (if (< count (strLen s.pending))
+          count
+          (strLen s.pending))))
+        (Ok (readBufferPut buf at (netTake s n))))
+      (match (fileRead s.file buf at count)
+        ((Ok n) (Ok n))
+        ((Err e) (Err (streamErr s e "tcpRead")))))))
 
-; Up to `max` bytes, as a fresh string: empty when the peer has closed
-; its side. A negative `max` stops the program with status 77.
+; Up to `max` bytes as a fresh string: buffered bytes if there are any,
+; otherwise one read of the socket. Empty when the peer has closed its
+; side. A negative `max` stops the program with status 77.
 (pub :: tcpReadSome (-> TcpStream Int (Result String Error)))
 ;@axiom:effect(io)
 (pub fn (tcpReadSome s max)
-  (let ((buf (readBufferNew max)))
-    (match (fileRead s.file buf 0 max)
-      ((Err e) (Err e))
-      ((Ok n) (Ok (readBufferText buf 0 n))))))
+  (if (< max 0)
+    __indexTrap
+    (if (> (strLen s.pending) 0)
+      (Ok (netTake s
+        (if (< max (strLen s.pending))
+          max
+          (strLen s.pending))))
+      (match (netFill s max "tcpReadSome")
+        ((Err e) (Err e))
+        ((Ok n) (Ok (netTake s n)))))))
 
-; Everything until the peer closes its side.
+; Exactly `n` bytes. A peer that closes first answers `UnexpectedEof`,
+; and the bytes that did arrive stay buffered for the next read. It
+; reads no further than `n`, so it leaves nothing behind for a poller to
+; miss. A negative `n` stops the program with status 77.
+(pub :: tcpReadExact (-> TcpStream Int (Result String Error)))
+;@axiom:effect(io)
+(pub fn (tcpReadExact s n)
+  (if (< n 0)
+    __indexTrap
+    (let (
+      (mut failed None)
+      (mut eof false)
+    )
+      {
+        (while (&& (isNone failed) (&& (! eof) (< (strLen s.pending) n)))
+          (match (netFill s (- n (strLen s.pending)) "tcpReadExact")
+            ((Err e)
+              {
+                (set failed (Some e))
+                0
+              })
+            ((Ok 0)
+              {
+                (set eof true)
+                0
+              })
+            ((Ok _) 0)))
+        (match failed
+          ((Some e) (Err e))
+          ((None)
+            (if eof
+              (Err (errContextOf (mkError errUnexpectedEof "the stream ended early") "tcpReadExact"))
+              (Ok (netTake s n)))))
+      })))
+
+; The length of buffered line text ending just before byte `nl`, a
+; newline: one shorter when a carriage return precedes it.
+(:: lineLen (-> String Int Int))
+(fn (lineLen p nl)
+  (if (&& (> nl 0) (== (strByte p (- nl 1)) 13))
+    (- nl 1)
+    nl))
+
+; The next line, without its `\n` or `\r\n`: `(Ok (Some line))`, or
+; `(Ok None)` at end of stream. A last line with no newline is answered
+; as it is. A line longer than `max` bytes answers `InvalidData`. Every
+; failure keeps the bytes that arrived, so after a timeout or
+; `WouldBlock` the next call carries on where this one stopped.
+;
+; It reads ahead in 4096-byte pieces, and `tcpBuffered` counts what is
+; left over. A negative `max` stops the program with status 77.
+(pub :: tcpReadLine (-> TcpStream Int (Result (Option String) Error)))
+;@axiom:effect(io)
+(pub fn (tcpReadLine s max)
+  (if (< max 0)
+    __indexTrap
+    (let ((mut answer None))
+      {
+        (while (isNone answer)
+          (set answer (lineStep s max)))
+        (match answer
+          ((Some r) r)
+          ((None) (Ok None)))
+      })))
+
+; One step of `tcpReadLine`: `Some` with its answer, or `None` after
+; reading more into the buffer, to look again.
+(:: lineStep (-> TcpStream Int (Option (Result (Option String) Error))))
+;@axiom:effect(io)
+(fn (lineStep s max)
+  (match (strFindByte s.pending 10 0)
+    ((Some nl)
+      (if (> (lineLen s.pending nl) max)
+        (Some (netBadData "the line is longer than the limit"))
+        (let ((line (netTake s (+ nl 1))))
+          (Some (Ok (Some (strDup (strSlice line 0 (lineLen line nl)))))))))
+    ((None)
+      ; a carriage return may still end the line at `max + 1`
+      (if (> (strLen s.pending) (+ max 1))
+        (Some (netBadData "the line is longer than the limit"))
+        (match (netFill s 4096 "tcpReadLine")
+          ((Err e) (Some (Err e)))
+          ((Ok 0)
+            (if (== (strLen s.pending) 0)
+              (Some (Ok None))
+              (> (strLen s.pending) max)
+              (Some (netBadData "the line is longer than the limit"))
+              (Some (Ok (Some (netTake s (strLen s.pending)))))))
+          ((Ok _) None))))))
+
+; `errInvalidData` from `tcpReadLine`.
+(:: netBadData (-> String (Result a Error)))
+(fn (netBadData what)
+  (Err (errContextOf (mkError errInvalidData what) "tcpReadLine")))
+
+; Up to `max` bytes that the next read will answer, without consuming
+; them: buffered bytes, or one read of the socket when nothing is
+; buffered. Empty at end of stream.
+(pub :: tcpPeek (-> TcpStream Int (Result String Error)))
+;@axiom:effect(io)
+(pub fn (tcpPeek s max)
+  (if (< max 0)
+    __indexTrap
+    (let ((filled
+      (if (&& (== (strLen s.pending) 0) (> max 0))
+        (netFill s max "tcpPeek")
+        (Ok 0))))
+      (match filled
+        ((Err e) (Err e))
+        ((Ok _)
+          (let ((n
+            (if (< max (strLen s.pending))
+              max
+              (strLen s.pending))))
+            (Ok (strDup (strSlice s.pending 0 n)))))))))
+
+; Everything until the peer closes its side, buffered bytes first.
 (pub :: tcpReadAll (-> TcpStream (Result String Error)))
 ;@axiom:effect(io)
 (pub fn (tcpReadAll s)
-  (readAll s.file))
+  (match (readAll s.file)
+    ((Err e) (Err (streamErr s e "tcpReadAll")))
+    ((Ok rest) (Ok (concat (netTake s (strLen s.pending)) rest)))))
 
-; Write all of `data`, continuing after a short write. Answers the
-; number of bytes written, which is `strLen data` unless it failed. A
-; peer that has closed answers `Err` EPIPE rather than a signal.
+; ------------------------------------------------------------------
+; Writing.
+; ------------------------------------------------------------------
+; Write all of `data`, continuing after a short write, and answer
+; `strLen data`. A peer that has closed answers `BrokenPipe` rather
+; than a signal. On a non-blocking stream use `tcpWriteSome`, which
+; says how much went before the stream would block.
 (pub :: tcpWrite (-> TcpStream String (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (tcpWrite s data)
   (match (socketSend s.file data)
     ((Ok n) (Ok n))
-    ((Err e) (Err (errContextOf e "tcpWrite")))))
+    ((Err e) (Err (streamErr s e "tcpWrite")))))
 
-; Which half of a connection `tcpShutdown` closes.
-(pub :: shutRead Int)
-(pub fn (shutRead)
-  0)
+; One write of as much of `data` as the socket takes now: `(Ok n)`,
+; where `n` can be less than `strLen data`. A non-blocking stream that
+; can take nothing answers `WouldBlock`. Write the rest with
+; `(strSlice data n ...)` when the stream is ready again.
+(pub :: tcpWriteSome (-> TcpStream String (Result Int Error)))
+;@axiom:effect(io)
+(pub fn (tcpWriteSome s data)
+  (match (socketSendSome s.file data)
+    ((Ok n) (Ok n))
+    ((Err e) (Err (streamErr s e "tcpWriteSome")))))
 
-(pub :: shutWrite Int)
-(pub fn (shutWrite)
-  1)
-
-(pub :: shutBoth Int)
-(pub fn (shutBoth)
-  2)
-
-; Close one or both halves of the connection without closing the
-; stream: after `shutWrite` the peer reads end of stream, and this side
-; can still read its answer.
-(pub :: tcpShutdown (-> TcpStream Int (Result Int Error)))
+; Close one or both halves of the connection and keep the stream:
+; after `ShutdownWrite` the peer reads end of stream, and this side can
+; still read the answer. It acts on the connection itself, so it ends
+; the connection for every process that shares the socket.
+(pub :: tcpShutdown (-> TcpStream Shutdown (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (tcpShutdown s how)
-  (if (|| (< how 0) (> how 2))
-    (Err (errContextOf (mkError 22 "shutdown takes shutRead, shutWrite or shutBoth") "tcpShutdown"))
-    (socketShutdown s.file how)))
+  (netCtx
+    (socketShutdown
+      s.file
+      (match how
+        ((ShutdownRead) 0)
+        ((ShutdownWrite) 1)
+        ((ShutdownBoth) 2)))
+    "tcpShutdown"))
 
+; Close the stream now and report the result. Its last share closes it
+; anyway; after this, any use of it stops the program with status 85.
+(pub :: tcpClose (-> TcpStream (Result Int Error)))
+;@axiom:effect(io)
+(pub fn (tcpClose s)
+  (fileClose s.file))
+
+; ------------------------------------------------------------------
+; Addresses and options.
+; ------------------------------------------------------------------
 ; The peer's address.
 (pub :: tcpPeerAddr (-> TcpStream (Result SocketAddr Error)))
 ;@axiom:effect(io)
@@ -653,46 +1236,149 @@
     ((Err e) (Err (errContextOf e where)))
     ((Ok b) (Ok (SocketAddr b)))))
 
+; Whether socket `f` is IPv6.
+(:: netIsV6 (-> File String (Result Bool Error)))
+;@axiom:effect(io)
+(fn (netIsV6 f where)
+  (match (socketAddr f false)
+    ((Err e) (Err (errContextOf e where)))
+    ((Ok b) (Ok (== (netAddrFamily (strData b)) afInet6)))))
+
+; Set IP_TTL, or IPV6_UNICAST_HOPS on an IPv6 socket.
+(:: netSetTtl (-> File Int String (Result Int Error)))
+;@axiom:effect(io)
+(fn (netSetTtl f ttl where)
+  (match (netIsV6 f where)
+    ((Err e) (Err e))
+    ((Ok v6)
+      (netCtx
+        (if v6
+          (socketSetInt f ipprotoIpv6 ipv6UnicastHops ttl)
+          (socketSetInt f ipprotoIp ipTtl ttl))
+        where))))
+
+; Read IP_TTL, or IPV6_UNICAST_HOPS on an IPv6 socket.
+(:: netTtl (-> File String (Result Int Error)))
+;@axiom:effect(io)
+(fn (netTtl f where)
+  (match (netIsV6 f where)
+    ((Err e) (Err e))
+    ((Ok v6)
+      (netCtx
+        (if v6
+          (socketGetInt f ipprotoIpv6 ipv6UnicastHops)
+          (socketGetInt f ipprotoIp ipTtl))
+        where))))
+
+; Read and clear SO_ERROR.
+(:: netTakeError (-> File String (Result (Option Error) Error)))
+;@axiom:effect(io)
+(fn (netTakeError f where)
+  (match (socketGetInt f solSocket soError)
+    ((Err e) (Err (errContextOf e where)))
+    ((Ok 0) (Ok None))
+    ((Ok code) (Ok (Some (errContextOf (mkError code "pending socket error") where))))))
+
 ; Turn Nagle's algorithm off (`true`) or back on: with it off, a small
 ; write is sent at once rather than held to be joined with the next.
 (pub :: tcpSetNoDelay (-> TcpStream Bool (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (tcpSetNoDelay s on)
-  (socketSetInt
-    s.file
-    ipprotoTcp
-    tcpNoDelayOpt
-    (if on
-      1
-      0)))
+  (netCtx
+    (socketSetInt
+      s.file
+      ipprotoTcp
+      tcpNoDelayOpt
+      (if on
+        1
+        0))
+    "tcpSetNoDelay"))
 
-; How long a read may wait before it answers `Err` (EAGAIN), in
-; microseconds; 0 waits for ever.
-(pub :: tcpSetReadTimeout (-> TcpStream Int (Result Int Error)))
+; Whether Nagle's algorithm is off, as `tcpSetNoDelay` sets it.
+(pub :: tcpNoDelay (-> TcpStream (Result Bool Error)))
 ;@axiom:effect(io)
-(pub fn (tcpSetReadTimeout s micros)
-  (match (socketSetTimeout s.file soRcvTimeo micros)
-    ((Ok n) (Ok n))
-    ((Err e) (Err (errContextOf e "tcpSetReadTimeout")))))
+(pub fn (tcpNoDelay s)
+  (match (socketGetInt s.file ipprotoTcp tcpNoDelayOpt)
+    ((Err e) (Err (errContextOf e "tcpNoDelay")))
+    ((Ok v) (Ok (!= v 0)))))
 
-; How long a write may wait before it answers `Err`, in microseconds; 0
-; waits for ever.
-(pub :: tcpSetWriteTimeout (-> TcpStream Int (Result Int Error)))
+; Set a timeout on `opt` from `Some` milliseconds, or clear it.
+(:: netSetTimeout (-> TcpStream Int (Option Int) String (Result Int Error)))
 ;@axiom:effect(io)
-(pub fn (tcpSetWriteTimeout s micros)
-  (match (socketSetTimeout s.file soSndTimeo micros)
-    ((Ok n) (Ok n))
-    ((Err e) (Err (errContextOf e "tcpSetWriteTimeout")))))
+(fn (netSetTimeout s opt ms where)
+  (match ms
+    ((None) (netCtx (socketSetTimeout s.file opt 0) where))
+    ((Some n)
+      (if (|| (<= n 0) (> n 9223372036854))
+        (netBadArg "a timeout is more than 0 ms; clear one with None" where)
+        (netCtx (socketSetTimeout s.file opt (* n 1000)) where)))))
 
-; Switch the stream between blocking (`false`) and non-blocking (`true`).
+; Read a timeout as `Some` milliseconds, rounded up, or `None`.
+(:: netTimeout (-> TcpStream Int String (Result (Option Int) Error)))
+;@axiom:effect(io)
+(fn (netTimeout s opt where)
+  (match (socketGetTimeout s.file opt)
+    ((Err e) (Err (errContextOf e where)))
+    ((Ok 0) (Ok None))
+    ((Ok us) (Ok (Some (/ (+ us 999) 1000))))))
+
+; How long a read may wait, in milliseconds, before it answers
+; `TimedOut`; `None` waits for ever. `(Some 0)` is `InvalidInput`.
+(pub :: tcpSetReadTimeout (-> TcpStream (Option Int) (Result Int Error)))
+;@axiom:effect(io)
+(pub fn (tcpSetReadTimeout s ms)
+  (netSetTimeout s soRcvTimeo ms "tcpSetReadTimeout"))
+
+; The read timeout in milliseconds, or `None`. The kernel may round it
+; to its clock's tick.
+(pub :: tcpReadTimeout (-> TcpStream (Result (Option Int) Error)))
+;@axiom:effect(io)
+(pub fn (tcpReadTimeout s)
+  (netTimeout s soRcvTimeo "tcpReadTimeout"))
+
+; How long a write may wait, in milliseconds, before it answers
+; `TimedOut`; `None` waits for ever. `(Some 0)` is `InvalidInput`.
+(pub :: tcpSetWriteTimeout (-> TcpStream (Option Int) (Result Int Error)))
+;@axiom:effect(io)
+(pub fn (tcpSetWriteTimeout s ms)
+  (netSetTimeout s soSndTimeo ms "tcpSetWriteTimeout"))
+
+; The write timeout in milliseconds, or `None`.
+(pub :: tcpWriteTimeout (-> TcpStream (Result (Option Int) Error)))
+;@axiom:effect(io)
+(pub fn (tcpWriteTimeout s)
+  (netTimeout s soSndTimeo "tcpWriteTimeout"))
+
+; Set the time-to-live of packets the stream sends, the hop limit for
+; IPv6.
+(pub :: tcpSetTtl (-> TcpStream Int (Result Int Error)))
+;@axiom:effect(io)
+(pub fn (tcpSetTtl s ttl)
+  (netSetTtl s.file ttl "tcpSetTtl"))
+
+; The stream's time-to-live, as `tcpSetTtl` sets it.
+(pub :: tcpTtl (-> TcpStream (Result Int Error)))
+;@axiom:effect(io)
+(pub fn (tcpTtl s)
+  (netTtl s.file "tcpTtl"))
+
+; The stream's pending socket error, cleared by reading it: `(Ok None)`
+; when there is none.
+(pub :: tcpTakeError (-> TcpStream (Result (Option Error) Error)))
+;@axiom:effect(io)
+(pub fn (tcpTakeError s)
+  (netTakeError s.file "tcpTakeError"))
+
+; Switch the stream between blocking (`false`) and non-blocking
+; (`true`). A non-blocking read or write that cannot proceed answers
+; `WouldBlock`.
 (pub :: tcpSetNonBlocking (-> TcpStream Bool (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (tcpSetNonBlocking s on)
-  (fileSetNonBlocking s.file on))
-
-; Close the stream. Its handle is retired first, so any later use of it
-; stops the program with status 85.
-(pub :: tcpClose (-> TcpStream (Result Int Error)))
-;@axiom:effect(io)
-(pub fn (tcpClose s)
-  (fileClose s.file))
+  (match (fileSetNonBlocking s.file on)
+    ((Err e) (Err (errContextOf e "tcpSetNonBlocking")))
+    ((Ok n)
+      {
+        (set s.nonBlocking on)
+        (Ok n)
+      })))

@@ -202,15 +202,10 @@
 ; The address to listen on: 127.0.0.1, or ::1 under AXIOM_NET_LISTEN6.
 (:: listenAddr (-> Bool Int (Result SocketAddr Error)))
 (fn (listenAddr v6 port)
-  (if v6
-    (let ((g vecNew))
-      {
-        (for i in 0..7
-          (vecPush g 0))
-        (vecPush g 1)
-        (socketAddrV6 g port)
-      })
-    (socketAddrV4 127 0 0 1 port)))
+  (socketAddrParse
+    (if v6
+      (concat "[::1]:" (fmtInt port))
+      (concat "127.0.0.1:" (fmtInt port)))))
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -236,10 +231,10 @@
         ; A FAILED LISTEN NAMES ITSELF: the operation and the errno, with
         ; the address and the length it asked for, so a wrong family, a
         ; wrong length and a port already taken read differently.
-        (match (tcpListen addr)
+        (match (tcpListenAddr addr)
           ((Err le)
             {
-              (println (concat (concat (concat (errorText le) " failed: errno ") (fmtInt le.code)) (concat (concat " addr " (socketAddrText addr)) (concat " len " (fmtInt (netAddrSize (strData addr.bytes)))))))
+              (println (concat (concat (concat (errorText le) " failed: errno ") (fmtInt le.code)) (concat (concat " addr " (socketAddrText addr)) (concat " len " (fmtInt (if (socketAddrIsV6 addr) netAddr6Bytes netAddr4Bytes))))))
               (sysExitWith 2)
             })
           ((Ok lsn)

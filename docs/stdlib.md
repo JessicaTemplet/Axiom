@@ -105,6 +105,7 @@ nothing. The other readers and writers take a `File`:
 | by path | `readFile`, `writeFile`, `appendFile`, `copyFile`, `removeFile`, `renamePath`, `fileExists`, `fileSize`, `isDir`, `readErrno`, `listDir`, `makeDir`, `makeDirAll`, `removeDir`, `cwd` |
 | wait on many | `pollerNew`, `pollerAdd`, `pollerRemove`, `pollerAddSignals`, `pollerWait`, `pollerToken`, `pollerSignal`, `pollerClose` |
 | terminals | `isTerminal`, `termSize`, and `termRaw`, which answers a `TermGuard` |
+| failures | `errorKind` names an `Error` the same way on every target, with Rust's `std::io::ErrorKind` names: `NotFound`, `WouldBlock`, `TimedOut` and the rest |
 
 `fileClose` closes early and reports the result, and any later use of
 that file stops the program with status 85. Closing a standard stream
@@ -158,65 +159,252 @@ API: [Fmt](stdlib-api.md#fmt), [Float](stdlib-api.md#float),
 
 ## Net
 
-`Net.ax` provides numeric IPv4/IPv6 addresses, TCP listeners and TCP
-streams. Streams block by default. This example creates both ends of
-a loopback connection, sends bytes and reads until the sender shuts
-its write half:
+Net gives you TCP the way Rust's `std::net` does: listeners, streams
+and the IP addresses they open on. Libraries bring HTTP, TLS, name
+lookup and UDP.
+
+This server echoes each line a client sends until the client hangs up:
 
 ```scheme
 (import IO)
 (import Err)
+(import Str)
 (import Net)
 
-(:: main (Result Int Error))
+(:: report (-> String Error Int))
+;@axiom:effect(io)
+(fn (report what e)
+  (let ((why (errorText e)))
+    (eprintln "{what}: {why}")))
+
+; Echo each line back until the client hangs up.
+(:: serve (-> TcpStream Int))
+;@axiom:effect(io)
+(fn (serve conn)
+  (match (tcpReadLine conn 4096)
+    ((Ok (Some line))
+      (match (tcpWrite conn (concat line "\n"))
+        ((Ok _) (serve conn))
+        ((Err e) (report "write" e))))
+    ((Ok (None)) 0)
+    ((Err e) (report "read" e))))
+
+(:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (try addr (socketAddrParse "127.0.0.1:0")
-    (try listener (tcpListen addr)
-      (try bound (tcpListenerAddr listener)
-        (try client (tcpConnect bound)
-          (try server (tcpAccept listener)
-            (try _ (tcpWrite client "ping")
-              (try _ (tcpShutdown client shutWrite)
-                (try message (tcpReadAll server)
-                  { (println message) (Ok 0) })))))))))
+  (match (tcpListen "127.0.0.1:7878")
+    ((Err e) (report "listen" e))
+    ((Ok lsn)
+      {
+        (println "listening on 127.0.0.1:7878")
+        (while true
+          (match (tcpAccept lsn)
+            ((Ok conn) (serve conn))
+            ((Err e) (report "accept" e))))
+        0
+      })))
 ```
+
+`tcpListen` and `tcpConnect` take an address as text, and
+`tcpListenAddr` and `tcpConnectAddr` take a `SocketAddr` you already
+hold. Each accepted connection is a `TcpStream`. When `serve` returns,
+the stream's last share goes and its socket closes. A failed accept or
+connection is reported, and the server carries on with the next one.
+
+That server handles one client at a time. The non-blocking server
+further down handles many.
+
+A client sends a line and waits up to a second for the reply:
+
+```scheme
+(import IO)
+(import Err)
+(import Str)
+(import Net)
+
+; Send one line and wait up to a second for the answer.
+(:: ask (-> TcpStream String String))
+;@axiom:effect(io)
+(fn (ask conn question)
+  (match (tcpWrite conn (concat question "\n"))
+    ((Err e) (errorText e))
+    ((Ok _)
+      (match (tcpReadLine conn 4096)
+        ((Ok (Some answer)) answer)
+        ((Ok (None)) "the server hung up")
+        ((Err e)
+          (match (errorKind e)
+            ((TimedOut) "no answer within a second")
+            (_ (errorText e))))))))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (match (tcpConnect "127.0.0.1:7878")
+    ((Err e)
+      (match (errorKind e)
+        ((ConnectionRefused)
+          {
+            (eprintln "nothing is listening on port 7878")
+            1
+          })
+        (_
+          {
+            (eprintln (errorText e))
+            1
+          })))
+    ((Ok conn)
+      (let (
+        (_ (tcpSetReadTimeout conn (Some 1000)))
+        (reply (ask conn "hello"))
+      )
+        {
+          (println reply)
+          0
+        }))))
+```
+
+Run against the echo server, it prints:
 
 ```text
-ping
+hello
 ```
 
-Port 0 lets the kernel choose an available port. `tcpListenerAddr`
-returns that address. Listeners and streams are sealed counted owners;
-the last share closes the descriptor. `tcpClose` and
-`tcpListenerClose` close early and report errors. Using a closed owner
-traps with status 85. These owners cannot be captured by `parallel`.
+Match on `errorKind` to tell failures apart: `ConnectionRefused` means
+nothing is listening, and `TimedOut` means a timeout ran out. The
+kinds are the names of Rust's `std::io::ErrorKind`, and they mean the
+same on every target.
+
+`tcpReadLine` answers one line without its `\n` or `\r\n`, and `None`
+when the peer closes. Its second argument caps the line's length, so a
+peer can't grow your memory without bound. `tcpReadExact` reads a
+fixed-size frame, and `tcpReadSome`, `tcpRead` and `tcpReadAll` read
+whatever arrives.
+
+A non-blocking server waits on a `Poller` and serves whichever sockets
+are ready:
+
+```scheme
+(import IO)
+(import Err)
+(import Str)
+(import Vec)
+(import Net)
+
+; Echo every line `conn` has ready. False once the client has gone.
+(:: drain (-> TcpStream Bool))
+;@axiom:effect(io)
+(fn (drain conn)
+  (match (tcpReadLine conn 4096)
+    ((Ok (Some line))
+      (if (isOk (tcpWrite conn (concat line "\n")))
+        (drain conn)
+        false))
+    ((Ok (None)) false)
+    ((Err e)
+      (match (errorKind e)
+        ((WouldBlock) true)
+        (_ false)))))
+
+; Accept every waiting client and watch it under its slot plus one.
+(:: acceptAll (-> TcpListener Poller (Vec (Option TcpStream)) Int))
+;@axiom:effect(io)
+(fn (acceptAll lsn p conns)
+  (match (tcpAccept lsn)
+    ((Ok conn)
+      (let (
+        (_ (tcpSetNonBlocking conn true))
+        (_ (pollerAddStream p conn (+ (vecLen conns) 1)))
+      )
+        {
+          (vecPush conns (Some conn))
+          (acceptAll lsn p conns)
+        }))
+    ((Err e)
+      (match (errorKind e)
+        ((WouldBlock) 0)
+        (_
+          (let ((why (errorText e)))
+            (eprintln "accept: {why}")))))))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (match (tcpListen "127.0.0.1:7878")
+    ((Err e)
+      {
+        (eprintln (errorText e))
+        1
+      })
+    ((Ok lsn)
+      (match (pollerNew 64)
+        ((Err e)
+          {
+            (eprintln (errorText e))
+            1
+          })
+        ((Ok p)
+          (let (
+            (conns vecNew)
+            (_ (tcpListenerSetNonBlocking lsn true))
+            (_ (pollerAddListener p lsn 0))
+          )
+            {
+              (while true
+                (let ((n (unwrapOr (pollerWait p -1) 0)))
+                  (for i in 0..n
+                    (let ((token (pollerToken p i)))
+                      (if (== token 0)
+                        (acceptAll lsn p conns)
+                        (match (vecGet conns (- token 1))
+                          ((Some conn)
+                            (if (drain conn)
+                              0
+                              {
+                                (vecSet conns (- token 1) None)
+                                0
+                              }))
+                          ((None) 0)))))))
+              0
+            }))))))
+```
+
+A non-blocking read with nothing to answer fails with `WouldBlock`, so
+`drain` reads until it does. That matters because `tcpReadLine` reads
+ahead, and the bytes it holds wake no poller; `tcpBuffered` counts
+them. Setting a slot to `None` drops the stream, which closes it and
+removes it from the poller. This example never reuses a slot.
 
 | Task | API |
 |---|---|
-| address | `socketAddrParse`, `socketAddrV4`, `socketAddrV6`; inspect with `socketAddrText`, `socketAddrIp`, `socketAddrPort`, `socketAddrIsV6` |
-| serve | `tcpListen`, `tcpAccept`, `tcpListenerAddr`, `tcpListenerClose` |
-| connect | `tcpConnect`, `tcpPeerAddr`, `tcpLocalAddr` |
-| receive | `tcpRead` into a buffer, `tcpReadSome` for up to a limit, `tcpReadAll` until EOF |
-| send | `tcpWrite` writes all bytes or returns an error |
-| finish | `tcpShutdown` with `shutRead`, `shutWrite` or `shutBoth`; `tcpClose` |
-| configure | `tcpSetNoDelay`, `tcpSetReadTimeout`, `tcpSetWriteTimeout`, `tcpSetNonBlocking` |
-| poll | `pollerAddListener` and `pollerAddStream` put either into an `IO` `Poller`; `tcpListenerSetNonBlocking` keeps a shared listener from blocking |
+| addresses | `ipV4`, `ipV6`, `ipParse`, `socketAddrNew` and `socketAddrParse` build them; `socketAddrIp`, `socketAddrPort`, `ipText` and `socketAddrText` read them; `ipIsLoopback`, `ipIsPrivate` and the other `ipIs` predicates test them |
+| listen | `tcpListen`, `tcpListenAddr`, `tcpAccept`, `tcpListenerLocalAddr` |
+| connect | `tcpConnect`, `tcpConnectAddr`, `tcpConnectTimeout`, `tcpPeerAddr`, `tcpLocalAddr` |
+| read | `tcpReadLine`, `tcpReadExact`, `tcpReadSome`, `tcpRead` into a `ReadBuffer`, `tcpReadAll`, `tcpPeek`, `tcpBuffered` |
+| write | `tcpWrite` writes everything; `tcpWriteSome` writes what fits and says how much |
+| finish | `tcpShutdown` with `ShutdownRead`, `ShutdownWrite` or `ShutdownBoth`; `tcpClose` |
+| configure | `tcpSetReadTimeout`, `tcpSetWriteTimeout`, `tcpSetNoDelay`, `tcpSetTtl` and `tcpSetNonBlocking`, with a getter for each but the last; `tcpTakeError` |
+| poll | `pollerAddListener`, `pollerAddStream`, `tcpListenerSetNonBlocking` |
 
-TCP is a byte stream: a read can return fewer bytes than requested.
-Zero bytes from `tcpRead`, or an empty `tcpReadSome`, means EOF.
-`tcpReadAll` waits for EOF, so establish a framing or shutdown convention.
-A write to a closed peer returns an error instead of raising SIGPIPE.
-
-Timeouts are in microseconds; 0 waits indefinitely. Non-blocking reads
-and writes can return a would-block error. `Sys.netWouldBlock` recognises a negative raw error;
-for a Net `Err e`, pass `(- 0 (errCode e))`.
-
-Addresses are numeric: `127.0.0.1:80` or `[::1]:80`. DNS, UDP, HTTP and
-TLS require other libraries. See the [Net API](stdlib-api.md#net) for
-all signatures and error behaviour.
+Timeouts are in milliseconds: `(Some 250)` sets one and `None` clears
+it. `tcpShutdown` half-closes a connection. After `ShutdownWrite` the
+peer reads end of stream, and you can still read its reply. A stream
+closes itself when its last share goes, and `tcpClose` closes it early
+and reports the result. Listeners and streams can't be captured by
+`parallel`.
 
 Tested by `tests/stdlib/699-net-lifetime.ax` and `tests/stdlib/651-net-closed.ax`.
+
+Addresses are numeric, as in `127.0.0.1:80` or `[::1]:80`. `ipV4`
+takes `Byte`s and `socketAddrNew` takes a `Port`, so an out-of-range
+number stops the program with status 80. Text from outside your
+program goes through `socketAddrParse`, which answers an error
+instead. A write to a peer that has gone away answers `BrokenPipe`;
+it never raises SIGPIPE.
+
+See the [Net API](stdlib-api.md#net) for every signature.
+
+Tested by `tests/stdlib/841-net-ip.ax` and `tests/stdlib/843-net-stream.ax`.
 
 <a id="json"></a>
 ## Cereal

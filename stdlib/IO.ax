@@ -1079,6 +1079,19 @@
     __indexTrap
     (strDup (strSlice buf.bytes at count))))
 
+; Copy `text` into `buf` from byte `at`, answering how many bytes it
+; copied, `strLen text`. A range outside `buf` stops the program with
+; status 77, as `fileRead`'s does.
+(pub :: readBufferPut (-> ReadBuffer Int String Int))
+(pub fn (readBufferPut buf at text)
+  (let ((n (strLen text)))
+    (if (ioOutside buf.bytes at n)
+      __indexTrap
+      {
+        (memCopy (+ (strData buf.bytes) at) (strData text) n)
+        n
+      })))
+
 ; Read at most `count` bytes from `f` into `buf[at .. at + count)`:
 ; `(Ok n)`, `(Ok 0)` at end of input, or `(Err e)`. A range outside
 ; `buf` stops the program with status 77 before the kernel sees it. A
@@ -1368,8 +1381,9 @@
         (strAlloc (if (< sigInfoSize 8) 8 sigInfoSize)))))))
 
 ; One registration record: watch `fd` (or, on the BSDs, the signal
-; `ident` under `filter`) for readability, `op` adding or deleting, with
-; `token` the wake answers.
+; `ident`) under `filter` - `pollReadFilter`, `pollWriteFilter` or
+; `pollSignalFilter` - `op` adding or deleting, with `token` the wake
+; answers. On epoll the filter is the interest mask.
 (:: pollerRec (-> Int Int Int Int String))
 (fn (pollerRec ident filter op token)
   (let ((rec (strAlloc pollEventSize)))
@@ -1388,7 +1402,7 @@
           }
           ; struct epoll_event: the interest mask, then the data word.
           {
-            (ioPutWord p 0 pollReadFilter)
+            (ioPutWord p 0 filter)
             (ioPutWord p pollEventFdOffset token)
           })
         rec
@@ -1811,10 +1825,120 @@
         (Ok off))
     }))
 
+; One send of as much of `data` as the socket takes now, retrying
+; EINTR: `(Ok n)`, where `n` can be short of `strLen data`, or `(Err e)`
+; - EAGAIN when a non-blocking socket took nothing, EPIPE when the peer
+; has closed. Unlike `socketSend`, a short send loses no count.
+(pub :: socketSendSome (-> File String (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (socketSendSome s data)
+  (let (
+    (fd (ioFd s))
+    (mut r (- 0 4))
+  )
+    {
+      (while (== r (- 0 4))
+        (set r (__syscall6
+          sysSendToNum
+          fd
+          (strData data)
+          (strLen data)
+          msgNoSignal
+          0
+          0)))
+      (ioAnswer "socketSendSome" r)
+    }))
+
+; getsockopt(fd, level, name) of a 4-byte option into `cell`, which
+; must hold 4 bytes: 0, or `-errno`.
+(:: socketOptGetRaw (-> Int Int Int String Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (socketOptGetRaw fd level name cell)
+  (let ((lenb (strAlloc 8)))
+    {
+      (ioPutInt32 (strData lenb) 0 (strLen cell))
+      (__syscall5 sysGetSockOptNum fd level name (strData cell) (strData lenb))
+    }))
+
+; Read an integer option: `(Ok value)`, or `(Err e)`.
+(pub :: socketGetInt (-> File Int Int (Result Int Error)))
+;@axiom:effect(io)
+(pub fn (socketGetInt s level name)
+  (let ((v (strAlloc 4)))
+    (let ((r (socketOptGetRaw (ioFd s) level name v)))
+      (if (< r 0)
+        (Err (ioFdError (- 0 r) "socketGetInt"))
+        (Ok (ioGetInt32 (strData v) 0))))))
+
+; Read the `soRcvTimeo` or `soSndTimeo` timeout in microseconds, 0 when
+; reads or writes wait for ever.
+(pub :: socketGetTimeout (-> File Int (Result Int Error)))
+;@axiom:effect(io)
+(pub fn (socketGetTimeout s opt)
+  (let ((tv (strAlloc 16)))
+    (let ((r (socketOptGetRaw (ioFd s) solSocket opt tv)))
+      (if (< r 0)
+        (Err (ioFdError (- 0 r) "socketGetTimeout"))
+        ; seconds in the first word, microseconds in the low four bytes
+        ; of the second, as `socketSetTimeout` writes them
+        (Ok (+ (* (ioGetWord (strData tv) 0) 1000000) (ioGetInt32 (strData tv) 8)))))))
+
+; Connect `s` to `addr`, waiting at most `ms` milliseconds: `(Ok 0)`, or
+; `(Err e)` - ETIMEDOUT when the time ran out first, or the connect's
+; own error. The connect runs non-blocking under a one-slot poller that
+; waits for the socket to become writable; the socket is blocking again
+; on every answer.
+(pub :: socketConnectWithin (-> File String Int (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (socketConnectWithin s addr ms)
+  (if (! (socketAddrOk addr))
+    (socketBadAddr "socketConnectWithin")
+    (let ((fd (ioFd s)))
+      (let ((r0 (ioSetNonBlocking fd true)))
+        (if (< r0 0)
+          (ioAnswer "socketConnectWithin" r0)
+          (let ((r (__syscall3 sysConnectNum fd (strData addr) (netAddrSize (strData addr)))))
+            (let ((res
+              (if (== r 0)
+                0
+                (!= r (- 0 eInProgress))
+                r
+                (socketAwaitConnect fd ms))))
+              (let ((back (ioSetNonBlocking fd false)))
+                (ioAnswer
+                  "socketConnectWithin"
+                  (if (< res 0)
+                    res
+                    back))))))))))
+
+; Wait up to `ms` for a non-blocking connect on `fd` to finish: 0, or
+; `-errno`, `-ETIMEDOUT` when the time ran out. A wake means the connect
+; finished either way, and SO_ERROR says which.
+(:: socketAwaitConnect (-> Int Int Int))
+;@axiom:effect(io)
+(fn (socketAwaitConnect fd ms)
+  (match (pollerNew 1)
+    ((Err e) (- 0 (errCode e)))
+    ((Ok p)
+      (let ((r (pollerApply p fd (pollerRec fd pollWriteFilter pollAddOp 0) pollAddOp)))
+        (if (< r 0)
+          r
+          (match (pollerWait p ms)
+            ((Err e) (- 0 (errCode e)))
+            ((Ok 0) (- 0 eTimedOut))
+            ((Ok _)
+              (let ((v (strAlloc 4)))
+                (let ((g (socketOptGetRaw fd solSocket soError v)))
+                  (if (< g 0)
+                    g
+                    (- 0 (ioGetInt32 (strData v) 0))))))))))))
+
 ; Switch `f` between blocking (`false`) and non-blocking (`true`),
 ; keeping its other flags. A read or write that cannot proceed on a
-; non-blocking file answers `(Err e)` with EAGAIN, which
-; `Sys.netWouldBlock` recognises from `(- 0 e.code)`.
+; non-blocking file answers `(Err e)` whose `errorKind` is `WouldBlock`.
 (pub :: fileSetNonBlocking (-> File Bool (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (fileSetNonBlocking f on)

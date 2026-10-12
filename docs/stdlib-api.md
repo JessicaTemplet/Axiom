@@ -1113,7 +1113,7 @@ two differ.
 
 ## `IO`
 
-`stdlib/IO.ax` — 69 public names
+`stdlib/IO.ax` — 74 public names
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
@@ -1159,6 +1159,7 @@ two differ.
 | `readBufferLen` | value | `(-> ReadBuffer Int)` |  | The buffer's capacity, in bytes. |
 | `readBufferByte` | value | `(-> ReadBuffer Int Int)` |  | Read one byte, with the same bounds check as strByte. |
 | `readBufferText` | value | `(-> ReadBuffer Int Int String)` | `Alloc,Mut` | Copy a checked range into an immutable String. Later reads into the buffer do not change the returned bytes. |
+| `readBufferPut` | value | `(-> ReadBuffer Int String Int)` | `Mut` | Copy `text` into `buf` from byte `at`, answering how many bytes it copied, `strLen text`. A range outside `buf` stops the program with status 77, as `fileRead`'s does. |
 | `fileRead` | value | `(-> File ReadBuffer Int Int (Result Int Error))` | `Alloc,IO,Mut` | Read at most `count` bytes from `f` into `buf[at .. at + count)`: `(Ok n)`, `(Ok 0)` at end of input, or `(Err e)`. A range outside `buf` stops the program with status 77 before the kernel sees it. A ReadBuffer cannot be captured by a parallel binding; its bytes are used by one binding at a time. |
 | `TermSize` | struct |  |  | A terminal's size in character cells. A terminal that was never sized reports 0 for both; treat 0 as unknown and fall back to 80x24. |
 | `TermGuard` | struct |  |  | A terminal in raw mode, and what it was before. Releasing the last share restores it. |
@@ -1185,7 +1186,11 @@ two differ.
 | `socketSetTimeout` | value | `(-> File Int Int (Result Int Error))` | `Alloc,IO,Mut,Unsafe` | Set the `soRcvTimeo` or `soSndTimeo` timeout, in microseconds; 0 waits for ever and a negative timeout is EINVAL. |
 | `socketAddr` | value | `(-> File Bool (Result String Error))` | `Alloc,IO,Mut,Unsafe` | The address `s` is bound to, or with `peer` true the address of the peer it is connected to, as `netAddrMaxBytes` bytes. |
 | `socketSend` | value | `(-> File String (Result Int Error))` | `Alloc,IO,Mut,Unsafe` | Send all of `data`, continuing after a short send and retrying EINTR: `(Ok n)`, or `(Err e)` - EPIPE when the peer has closed, never a signal. |
-| `fileSetNonBlocking` | value | `(-> File Bool (Result Int Error))` | `Alloc,IO,Mut` | Switch `f` between blocking (`false`) and non-blocking (`true`), keeping its other flags. A read or write that cannot proceed on a non-blocking file answers `(Err e)` with EAGAIN, which `Sys.netWouldBlock` recognises from `(- 0 e.code)`. |
+| `socketSendSome` | value | `(-> File String (Result Int Error))` | `Alloc,IO,Mut,Unsafe` | One send of as much of `data` as the socket takes now, retrying EINTR: `(Ok n)`, where `n` can be short of `strLen data`, or `(Err e)` - EAGAIN when a non-blocking socket took nothing, EPIPE when the peer has closed. Unlike `socketSend`, a short send loses no count. |
+| `socketGetInt` | value | `(-> File Int Int (Result Int Error))` | `Alloc,IO,Mut` | Read an integer option: `(Ok value)`, or `(Err e)`. |
+| `socketGetTimeout` | value | `(-> File Int (Result Int Error))` | `Alloc,IO,Mut` | Read the `soRcvTimeo` or `soSndTimeo` timeout in microseconds, 0 when reads or writes wait for ever. |
+| `socketConnectWithin` | value | `(-> File String Int (Result Int Error))` | `Alloc,IO,Mut,Unsafe` | Connect `s` to `addr`, waiting at most `ms` milliseconds: `(Ok 0)`, or `(Err e)` - ETIMEDOUT when the time ran out first, or the connect's own error. The connect runs non-blocking under a one-slot poller that waits for the socket to become writable; the socket is blocking again on every answer. |
+| `fileSetNonBlocking` | value | `(-> File Bool (Result Int Error))` | `Alloc,IO,Mut` | Switch `f` between blocking (`false`) and non-blocking (`true`), keeping its other flags. A read or write that cannot proceed on a non-blocking file answers `(Err e)` whose `errorKind` is `WouldBlock`. |
 
 ## `Intern`
 
@@ -1318,45 +1323,89 @@ two differ.
 
 ## `Net`
 
-`stdlib/Net.ax` — 35 public names
+`stdlib/Net.ax` — 79 public names
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `SocketAddr` | struct |  |  | An IPv4 or IPv6 address and a port: the kernel's own `sockaddr` bytes for it, `netAddrMaxBytes` long, built by `Sys.netAddr4` and `Sys.netAddr6`. Make one with `socketAddrParse`, `socketAddrV4` or `socketAddrV6`. |
-| `socketAddrV4` | value | `(-> Int Int Int Int Int (Result SocketAddr Error))` | `Alloc,Mut` | The address `a.b.c.d:port`. Each part must be in range: 0..255 for the octets and 0..65535 for the port. |
-| `socketAddrV6` | value | `(-> (Vec Int) Int (Result SocketAddr Error))` | `Alloc,Mut` | The address `[g0:g1:...:g7]:port` from eight 16-bit groups, each in 0..65535. `groups` must hold exactly eight. |
-| `socketAddrParse` | value | `(-> String (Result SocketAddr Error))` | `Alloc,Mut` | Read a socket address from text: `a.b.c.d:port` for IPv4, or `[ipv6]:port` with the brackets RFC 3986 section 3.2.2 requires, so the port can't be mistaken for a group. Only numeric addresses: see the header for why there are no names. |
-| `socketAddrText` | value | `(-> SocketAddr String)` | `Alloc,Mut` | The address as text, `a.b.c.d:port` or `[ipv6]:port`, with IPv6 in the RFC 5952 form: lower-case, the longest run of zero groups as `::`, and an IPv4-mapped address as `::ffff:a.b.c.d`. |
-| `socketAddrIp` | value | `(-> SocketAddr String)` | `Alloc,Mut` | The IP address alone, with no port and no brackets. |
-| `socketAddrPort` | value | `(-> SocketAddr Int)` |  | The port, or -1 for an address this module did not build. |
+| `IpAddr` | struct |  |  | An IPv4 or IPv6 address, without a port. One type holds both families, as `SocketAddr` does; `ipIsV4` and `ipIsV6` say which. Make one with `ipV4`, `ipV6` or `ipParse`. |
+| `ipV4` | value | `(-> Byte Byte Byte Byte IpAddr)` | `Alloc` | The IPv4 address `a.b.c.d`. Each octet is a `Byte`, so one outside 0..255 stops the program with status 80; read text from outside the program with `ipParse`, which answers `Err` instead. |
+| `ipV6` | value | `(-> Segment Segment Segment Segment Segment Segment Segment Segment IpAddr)` | `Alloc` | The IPv6 address with groups `g0` to `g7` in reading order: `::1` is `(ipV6 0 0 0 0 0 0 0 1)`. |
+| `ipParse` | value | `(-> String (Result IpAddr Error))` | `Alloc,Mut` | Read an IP address from text: dotted-quad IPv4 such as `10.0.0.1`, or IPv6 in any RFC 4291 section 2.2 form such as `fe80::1`, with no brackets and no port. A zone (`%en0`) is refused, because it names an interface and there is no lookup to resolve it. |
+| `ipText` | value | `(-> IpAddr String)` | `Alloc,Mut` | The address as text: dotted-quad IPv4, or IPv6 in the RFC 5952 form (lower case, the longest run of zero groups as `::`, an IPv4-mapped address as `::ffff:a.b.c.d`). |
+| `ipIsV4` | value | `(-> IpAddr Bool)` |  | Whether the address is IPv4. |
+| `ipIsV6` | value | `(-> IpAddr Bool)` |  | Whether the address is IPv6. |
+| `ipOctets` | value | `(-> IpAddr (Vec Int))` | `Alloc,Mut` | The address's bytes in network order: four for IPv4, sixteen for IPv6. |
+| `ipSegments` | value | `(-> IpAddr (Vec Int))` | `Alloc,Mut` | The eight 16-bit groups of an IPv6 address. An IPv4 address answers the groups of its IPv4-mapped form, `::ffff:a.b.c.d`. |
+| `ipIsUnspecified` | value | `(-> IpAddr Bool)` |  | Whether the address is `0.0.0.0` or `::`, which a listener binds to accept connections on every interface. |
+| `ipIsLoopback` | value | `(-> IpAddr Bool)` |  | Whether the address is a loopback address: `127.0.0.0/8` or `::1`. |
+| `ipIsMulticast` | value | `(-> IpAddr Bool)` |  | Whether the address is multicast: `224.0.0.0/4` or `ff00::/8`. |
+| `ipIsPrivate` | value | `(-> IpAddr Bool)` |  | Whether the address is private: IPv4's RFC 1918 ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), or an IPv6 unique local address (`fc00::/7`, RFC 4193). |
+| `ipIsLinkLocal` | value | `(-> IpAddr Bool)` |  | Whether the address is link-local: `169.254.0.0/16` or `fe80::/10`. |
+| `ipIsBroadcast` | value | `(-> IpAddr Bool)` |  | Whether the address is IPv4's broadcast address, `255.255.255.255`. IPv6 has none, so an IPv6 address answers false. |
+| `ipIsDocumentation` | value | `(-> IpAddr Bool)` |  | Whether the address is reserved for documentation: `192.0.2.0/24`, `198.51.100.0/24` and `203.0.113.0/24` (RFC 5737), or `2001:db8::/32` (RFC 3849). |
+| `ipToCanonical` | value | `(-> IpAddr IpAddr)` | `Alloc` | The address with an IPv4-mapped IPv6 address turned back into IPv4, and any other address unchanged. A dual-stack listener on `::` sees IPv4 clients as `::ffff:a.b.c.d`; this makes them compare equal to the IPv4 address they are. |
+| `ipToV6Mapped` | value | `(-> IpAddr IpAddr)` | `Alloc` | An IPv4 address as its IPv4-mapped IPv6 address, `::ffff:a.b.c.d`; an IPv6 address unchanged. |
+| `ipEq` | value | `(-> IpAddr IpAddr Bool)` |  | Whether two addresses are the same. The families must match too: an IPv4 address is not equal to its IPv4-mapped form until `ipToCanonical` makes it so. |
+| `ipCompare` | value | `(-> IpAddr IpAddr Int)` |  | -1, 0 or 1 as `a` sorts before, with or after `b`: every IPv4 address before every IPv6 one, and within a family by numeric value. |
+| `ipLocalhostV4` | value | `IpAddr` | `Alloc` | `127.0.0.1`. |
+| `ipLocalhostV6` | value | `IpAddr` | `Alloc` | `::1`. |
+| `ipUnspecifiedV4` | value | `IpAddr` | `Alloc` | `0.0.0.0`: bind a listener here to accept on every IPv4 interface. |
+| `ipUnspecifiedV6` | value | `IpAddr` | `Alloc` | `::`: bind a listener here to accept on every IPv6 interface. |
+| `ipBroadcast` | value | `IpAddr` | `Alloc` | `255.255.255.255`. |
+| `SocketAddr` | struct |  |  | An IP address and a port: what a listener binds and a stream connects to. Make one with `socketAddrNew` or `socketAddrParse`. It holds the kernel's own `sockaddr` bytes, `netAddrMaxBytes` long, built by `Sys.netAddr4` and `Sys.netAddr6`. Sealed, so every SocketAddr is one this module built or the kernel answered. |
+| `socketAddrNew` | value | `(-> IpAddr Port SocketAddr)` | `Alloc,Mut` | The socket address of `ip` and `port`. |
+| `socketAddrParse` | value | `(-> String (Result SocketAddr Error))` | `Alloc,Mut` | Read a socket address from text: `a.b.c.d:port` for IPv4, or `[ipv6]:port` with the brackets RFC 3986 section 3.2.2 requires, so the port can't be mistaken for a group. Only numeric addresses: there is no resolver. |
+| `socketAddrText` | value | `(-> SocketAddr String)` | `Alloc,Mut` | The address as text, `a.b.c.d:port` or `[ipv6]:port`, with the IP written as `ipText` writes it. |
+| `socketAddrIp` | value | `(-> SocketAddr IpAddr)` | `Alloc,Mut` | The IP address. |
+| `socketAddrPort` | value | `(-> SocketAddr Int)` |  | The port. |
+| `socketAddrWithPort` | value | `(-> SocketAddr Port SocketAddr)` | `Alloc,Mut` | The same address with port `port`. |
+| `socketAddrWithIp` | value | `(-> SocketAddr IpAddr SocketAddr)` | `Alloc,Mut` | The same port with IP address `ip`, which may change the family. |
+| `socketAddrIsV4` | value | `(-> SocketAddr Bool)` |  | Whether the address is IPv4. |
 | `socketAddrIsV6` | value | `(-> SocketAddr Bool)` |  | Whether the address is IPv6. |
-| `TcpListener` | struct |  |  | A socket listening for connections. |
-| `TcpStream` | struct |  |  | One TCP connection. |
+| `socketAddrEq` | value | `(-> SocketAddr SocketAddr Bool)` | `Alloc,Mut` | Whether two socket addresses have the same IP address and port. |
+| `socketAddrCompare` | value | `(-> SocketAddr SocketAddr Int)` | `Alloc,Mut` | -1, 0 or 1 as `a` sorts before, with or after `b`: by IP address as `ipCompare` orders them, then by port. |
+| `TcpListener` | struct |  |  | A socket listening for connections. `tcpAccept` answers each one as a `TcpStream`. |
+| `TcpStream` | struct |  |  | One TCP connection. `pending` holds bytes received but not yet answered: only `tcpReadLine` and `tcpPeek` read ahead, and every reader takes from it first. `nonBlocking` is what `tcpSetNonBlocking` last set, which decides whether EAGAIN means a timeout. |
+| `Shutdown` | data |  |  | Which half of a connection `tcpShutdown` closes. |
 | `pollerAddListener` | value | `(-> Poller TcpListener Int (Result Int Error))` | `Alloc,IO,Mut` | Watch the listener under `token` in `p`: a wake answering `token` means a connection is waiting for `tcpAccept`. See `IO.pollerAdd`. |
-| `pollerAddStream` | value | `(-> Poller TcpStream Int (Result Int Error))` | `Alloc,IO,Mut` | Watch the stream under `token` in `p`: a wake answering `token` means `tcpRead` will not block. See `IO.pollerAdd`. |
+| `pollerAddStream` | value | `(-> Poller TcpStream Int (Result Int Error))` | `Alloc,IO,Mut` | Watch the stream under `token` in `p`: a wake answering `token` means a read will not block. Bytes `tcpBuffered` counts are already here and wake nothing, so read until `WouldBlock` before waiting again. |
 | `pollerRemoveListener` | value | `(-> Poller TcpListener (Result Int Error))` | `Alloc,IO,Mut` | Stop watching the listener. See `IO.pollerRemove`. |
 | `pollerRemoveStream` | value | `(-> Poller TcpStream (Result Int Error))` | `Alloc,IO,Mut` | Stop watching the stream. See `IO.pollerRemove`. |
-| `tcpListen` | value | `(-> SocketAddr (Result TcpListener Error))` | `Alloc,IO,Mut` | A socket bound to `addr` and listening, with `SO_REUSEADDR` set so a restarted server can bind the port its predecessor left in TIME_WAIT. Port 0 asks the kernel for a free port; `tcpListenerAddr` says which. |
-| `tcpAccept` | value | `(-> TcpListener (Result TcpStream Error))` | `Alloc,IO,Mut` | Wait for the next connection and answer it as a blocking stream. |
-| `tcpListenerAddr` | value | `(-> TcpListener (Result SocketAddr Error))` | `Alloc,IO,Mut` | The address the listener is bound to - the kernel's choice of port when it was asked for port 0. |
-| `tcpListenerSetNonBlocking` | value | `(-> TcpListener Bool (Result Int Error))` | `Alloc,IO,Mut` | Switch the listener between blocking (`false`) and non-blocking (`true`). A non-blocking listener's `tcpAccept` answers `Err` EAGAIN when nothing is waiting, which a poller wake avoids. |
-| `tcpListenerClose` | value | `(-> TcpListener (Result Int Error))` | `Alloc,IO` | Close the listener. Its handle is retired first, so any later use of it stops the program with status 85. |
-| `tcpConnect` | value | `(-> SocketAddr (Result TcpStream Error))` | `Alloc,IO,Mut` | Connect to `addr`, waiting until the connection is made or refused. |
-| `tcpRead` | value | `(-> TcpStream ReadBuffer Int Int (Result Int Error))` | `Alloc,IO,Mut` | Read into `buf[at .. at + count)`. Answers how many bytes arrived, and 0 when the peer has closed its side. A range outside `buf` stops the program with status 77 before the kernel sees it. |
-| `tcpReadSome` | value | `(-> TcpStream Int (Result String Error))` | `Alloc,IO,Mut` | Up to `max` bytes, as a fresh string: empty when the peer has closed its side. A negative `max` stops the program with status 77. |
-| `tcpReadAll` | value | `(-> TcpStream (Result String Error))` | `Alloc,IO,Mut` | Everything until the peer closes its side. |
-| `tcpWrite` | value | `(-> TcpStream String (Result Int Error))` | `Alloc,IO,Mut` | Write all of `data`, continuing after a short write. Answers the number of bytes written, which is `strLen data` unless it failed. A peer that has closed answers `Err` EPIPE rather than a signal. |
-| `shutRead` | value | `Int` |  | Which half of a connection `tcpShutdown` closes. |
-| `shutWrite` | value | `Int` |  |  |
-| `shutBoth` | value | `Int` |  |  |
-| `tcpShutdown` | value | `(-> TcpStream Int (Result Int Error))` | `Alloc,IO,Mut` | Close one or both halves of the connection without closing the stream: after `shutWrite` the peer reads end of stream, and this side can still read its answer. |
+| `tcpListen` | value | `(-> String (Result TcpListener Error))` | `Alloc,IO,Mut` | A listener on the address `text` names, such as `0.0.0.0:8080` or `[::1]:0`. Port 0 asks the kernel for a free port, and `tcpListenerLocalAddr` says which. `SO_REUSEADDR` is set, so a restarted server can bind the port its predecessor left in TIME_WAIT. |
+| `tcpListenAddr` | value | `(-> SocketAddr (Result TcpListener Error))` | `Alloc,IO,Mut` | A listener on `addr`, as `tcpListen` makes one. |
+| `tcpAccept` | value | `(-> TcpListener (Result TcpStream Error))` | `Alloc,IO,Mut` | Wait for the next connection and answer it as a blocking stream. `tcpPeerAddr` says who connected. |
+| `tcpListenerLocalAddr` | value | `(-> TcpListener (Result SocketAddr Error))` | `Alloc,IO,Mut` | The address the listener is bound to, with the kernel's choice of port when it was asked for port 0. |
+| `tcpListenerSetNonBlocking` | value | `(-> TcpListener Bool (Result Int Error))` | `Alloc,IO,Mut` | Switch the listener between blocking (`false`) and non-blocking (`true`). A non-blocking listener's `tcpAccept` answers `WouldBlock` when nothing is waiting, which a poller wake avoids. |
+| `tcpListenerSetTtl` | value | `(-> TcpListener Int (Result Int Error))` | `Alloc,IO,Mut` | Set the time-to-live of packets the listener's connections send, the hop limit for IPv6. Accepted streams start with it. |
+| `tcpListenerTtl` | value | `(-> TcpListener (Result Int Error))` | `Alloc,IO,Mut` | The listener's time-to-live, as `tcpListenerSetTtl` sets it. |
+| `tcpListenerTakeError` | value | `(-> TcpListener (Result (Option Error) Error))` | `Alloc,IO,Mut` | The listener's pending socket error, cleared by reading it: `(Ok None)` when there is none. |
+| `tcpListenerClose` | value | `(-> TcpListener (Result Int Error))` | `Alloc,IO` | Close the listener now and report the result. Its last share closes it anyway; after this, any use of it stops the program with status 85. |
+| `tcpConnect` | value | `(-> String (Result TcpStream Error))` | `Alloc,IO,Mut` | Connect to the address `text` names, such as `127.0.0.1:7000`, and wait until the connection is made or refused. |
+| `tcpConnectAddr` | value | `(-> SocketAddr (Result TcpStream Error))` | `Alloc,IO,Mut` | Connect to `addr`, as `tcpConnect` does. |
+| `tcpConnectTimeout` | value | `(-> SocketAddr Int (Result TcpStream Error))` | `Alloc,IO,Mut` | Connect to `addr`, waiting at most `ms` milliseconds: `TimedOut` when the time runs out first. The stream answered is blocking. An `ms` of 0 or less is `InvalidInput`. |
+| `tcpBuffered` | value | `(-> TcpStream Int)` |  | How many bytes a read-ahead holds: `tcpReadLine` and `tcpPeek` take more than they answer, and the rest waits here for the next read. A poller can't see these bytes. |
+| `tcpRead` | value | `(-> TcpStream ReadBuffer Int Int (Result Int Error))` | `Alloc,IO,Mut` | Read into `buf[at .. at + count)`: buffered bytes first, then one read of the socket. Answers how many bytes arrived, and 0 when the peer has closed its side. A range outside `buf` stops the program with status 77 before the kernel sees it. |
+| `tcpReadSome` | value | `(-> TcpStream Int (Result String Error))` | `Alloc,IO,Mut` | Up to `max` bytes as a fresh string: buffered bytes if there are any, otherwise one read of the socket. Empty when the peer has closed its side. A negative `max` stops the program with status 77. |
+| `tcpReadExact` | value | `(-> TcpStream Int (Result String Error))` | `Alloc,IO,Mut` | Exactly `n` bytes. A peer that closes first answers `UnexpectedEof`, and the bytes that did arrive stay buffered for the next read. It reads no further than `n`, so it leaves nothing behind for a poller to miss. A negative `n` stops the program with status 77. |
+| `tcpReadLine` | value | `(-> TcpStream Int (Result (Option String) Error))` | `Alloc,IO,Mut` | The next line, without its `\n` or `\r\n`: `(Ok (Some line))`, or `(Ok None)` at end of stream. A last line with no newline is answered as it is. A line longer than `max` bytes answers `InvalidData`. Every failure keeps the bytes that arrived, so after a timeout or `WouldBlock` the next call carries on where this one stopped. |
+| `tcpPeek` | value | `(-> TcpStream Int (Result String Error))` | `Alloc,IO,Mut` | Up to `max` bytes that the next read will answer, without consuming them: buffered bytes, or one read of the socket when nothing is buffered. Empty at end of stream. |
+| `tcpReadAll` | value | `(-> TcpStream (Result String Error))` | `Alloc,IO,Mut` | Everything until the peer closes its side, buffered bytes first. |
+| `tcpWrite` | value | `(-> TcpStream String (Result Int Error))` | `Alloc,IO,Mut` | Write all of `data`, continuing after a short write, and answer `strLen data`. A peer that has closed answers `BrokenPipe` rather than a signal. On a non-blocking stream use `tcpWriteSome`, which says how much went before the stream would block. |
+| `tcpWriteSome` | value | `(-> TcpStream String (Result Int Error))` | `Alloc,IO,Mut` | One write of as much of `data` as the socket takes now: `(Ok n)`, where `n` can be less than `strLen data`. A non-blocking stream that can take nothing answers `WouldBlock`. Write the rest with `(strSlice data n ...)` when the stream is ready again. |
+| `tcpShutdown` | value | `(-> TcpStream Shutdown (Result Int Error))` | `Alloc,IO,Mut` | Close one or both halves of the connection and keep the stream: after `ShutdownWrite` the peer reads end of stream, and this side can still read the answer. It acts on the connection itself, so it ends the connection for every process that shares the socket. |
+| `tcpClose` | value | `(-> TcpStream (Result Int Error))` | `Alloc,IO` | Close the stream now and report the result. Its last share closes it anyway; after this, any use of it stops the program with status 85. |
 | `tcpPeerAddr` | value | `(-> TcpStream (Result SocketAddr Error))` | `Alloc,IO,Mut` | The peer's address. |
 | `tcpLocalAddr` | value | `(-> TcpStream (Result SocketAddr Error))` | `Alloc,IO,Mut` | This side's address. |
 | `tcpSetNoDelay` | value | `(-> TcpStream Bool (Result Int Error))` | `Alloc,IO,Mut` | Turn Nagle's algorithm off (`true`) or back on: with it off, a small write is sent at once rather than held to be joined with the next. |
-| `tcpSetReadTimeout` | value | `(-> TcpStream Int (Result Int Error))` | `Alloc,IO,Mut` | How long a read may wait before it answers `Err` (EAGAIN), in microseconds; 0 waits for ever. |
-| `tcpSetWriteTimeout` | value | `(-> TcpStream Int (Result Int Error))` | `Alloc,IO,Mut` | How long a write may wait before it answers `Err`, in microseconds; 0 waits for ever. |
-| `tcpSetNonBlocking` | value | `(-> TcpStream Bool (Result Int Error))` | `Alloc,IO,Mut` | Switch the stream between blocking (`false`) and non-blocking (`true`). |
-| `tcpClose` | value | `(-> TcpStream (Result Int Error))` | `Alloc,IO` | Close the stream. Its handle is retired first, so any later use of it stops the program with status 85. |
+| `tcpNoDelay` | value | `(-> TcpStream (Result Bool Error))` | `Alloc,IO,Mut` | Whether Nagle's algorithm is off, as `tcpSetNoDelay` sets it. |
+| `tcpSetReadTimeout` | value | `(-> TcpStream (Option Int) (Result Int Error))` | `Alloc,IO,Mut` | How long a read may wait, in milliseconds, before it answers `TimedOut`; `None` waits for ever. `(Some 0)` is `InvalidInput`. |
+| `tcpReadTimeout` | value | `(-> TcpStream (Result (Option Int) Error))` | `Alloc,IO,Mut` | The read timeout in milliseconds, or `None`. The kernel may round it to its clock's tick. |
+| `tcpSetWriteTimeout` | value | `(-> TcpStream (Option Int) (Result Int Error))` | `Alloc,IO,Mut` | How long a write may wait, in milliseconds, before it answers `TimedOut`; `None` waits for ever. `(Some 0)` is `InvalidInput`. |
+| `tcpWriteTimeout` | value | `(-> TcpStream (Result (Option Int) Error))` | `Alloc,IO,Mut` | The write timeout in milliseconds, or `None`. |
+| `tcpSetTtl` | value | `(-> TcpStream Int (Result Int Error))` | `Alloc,IO,Mut` | Set the time-to-live of packets the stream sends, the hop limit for IPv6. |
+| `tcpTtl` | value | `(-> TcpStream (Result Int Error))` | `Alloc,IO,Mut` | The stream's time-to-live, as `tcpSetTtl` sets it. |
+| `tcpTakeError` | value | `(-> TcpStream (Result (Option Error) Error))` | `Alloc,IO,Mut` | The stream's pending socket error, cleared by reading it: `(Ok None)` when there is none. |
+| `tcpSetNonBlocking` | value | `(-> TcpStream Bool (Result Int Error))` | `Alloc,IO,Mut` | Switch the stream between blocking (`false`) and non-blocking (`true`). A non-blocking read or write that cannot proceed answers `WouldBlock`. |
 
 ## `Par`
 
