@@ -215,18 +215,19 @@ else
   echo "     the README points at these; shipping it without them is a dead link"
 fi
 # `install.sh` runs this check itself. The gate repeats it from outside
-# instead of trusting the installer's own report.
+# instead of trusting the installer's own report, with a program of the
+# installer's probe's shape.
 probe="$work/probe"
 mkdir -p "$probe"
 cat > "$probe/p.ax" <<'AX'
-(import IO (writeStr))
+(import IO)
 
 (:: main Int)
 
 ;@axiom:effect(io)
 (fn (main)
   {
-    (writeStr stdout "installed\n")
+    (println "installed")
     7
   }
 )

@@ -1203,10 +1203,10 @@ cp -R "$repo_root/stdlib" "$inst/stdlib"
 
 mkdir -p "$work/away"
 cat >"$work/away/useio.ax" <<'EOF'
-(import IO (writeStr))
+(import IO)
 (:: main Int)
 ;@axiom:effect(io)
-(fn (main) { (writeStr stdout "installed-ok\n") 42 })
+(fn (main) { (println "installed-ok") 42 })
 EOF
 
 # The probe directory must not itself supply a stdlib, or the
