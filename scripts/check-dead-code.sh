@@ -327,7 +327,10 @@ else
 fi
 
 kept=""
-for sym in 'IO$writeStr' 'IO$ioWriteAllFrom' 'Str$strLen' 'axiom_alloc'; do
+# `println` expands to `writeOut`, which writes through `ioWriteAll`
+# with no `File` (7ccb5228); `writeStr` takes a `File` and is not on
+# this path any more.
+for sym in 'IO$writeOut' 'IO$ioWriteAllFrom' 'Str$strLen' 'axiom_alloc'; do
   nm "$work/hello" 2>/dev/null | grep -qF "$sym" || kept="$kept $sym"
 done
 if [[ -z "$kept" ]]; then

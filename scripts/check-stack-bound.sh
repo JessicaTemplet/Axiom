@@ -362,15 +362,45 @@ if pipeline "$work/hi.ax" 1 "hi"; then
 
   # Ablation for A6. `noindirect` stops excluding @__axiom_symtab, the
   # backtrace table that lists every function. Every function then looks
-  # address-taken, the one indirect call in the runtime's drop glue
-  # resolves to all of them, and hello world becomes unboundable.
-  checks=$((checks + 1))
-  ab="$(AXIOM_ABLATE_STACK_BOUND=noindirect python3 "$analyzer" $(bound_args hi) 2>&1 |
-        sed -n 's/^BOUND from main: \([0-9]*\) bytes$/\1/p')"
-  if [[ -z "$ab" ]]; then
-    note "ok   A6 ablation: =noindirect makes hello world unboundable, which A6 rejects"
-  else
-    fail "A6 ablation: =noindirect still bounded hello world at ${ab} bytes"
+  # address-taken, and the one indirect call in the runtime's drop glue
+  # (`axiom_release` calling a resource's destructor) resolves to all of
+  # them, `main` included, which closes a cycle.
+  #
+  # The ablation needs a program whose `main` reaches that call, and
+  # `println "hi"` no longer does: `writeOut` makes no `File`, and a
+  # literal is never released. So it runs on a hello world that builds
+  # its text and releases it. That probe must be bounded as it stands,
+  # or the ablation would pass on a program nothing could bound.
+  cat >"$work/hirel.ax" <<'AX'
+(import IO)
+(import Str)
+
+;@axiom:effect(io)
+(:: main Int)
+(fn (main)
+  (let ((s (concat "h" "i")))
+    {
+      (println s)
+      0
+    }))
+AX
+  if pipeline "$work/hirel.ax" 1 "hirel"; then
+    checks=$((checks + 1))
+    rb="$(python3 "$analyzer" $(bound_args hirel) 2>&1 |
+          sed -n 's/^BOUND from main: \([0-9]*\) bytes$/\1/p')"
+    if [[ -n "$rb" ]]; then
+      note "ok   A6 ablation: the released-string hello world is bounded (${rb} bytes) as it stands"
+    else
+      fail "A6 ablation: the released-string hello world got no bound, so the ablation below could not fail"
+    fi
+    checks=$((checks + 1))
+    ab="$(AXIOM_ABLATE_STACK_BOUND=noindirect python3 "$analyzer" $(bound_args hirel) 2>&1 |
+          sed -n 's/^BOUND from main: \([0-9]*\) bytes$/\1/p')"
+    if [[ -z "$ab" ]]; then
+      note "ok   A6 ablation: =noindirect makes it unboundable, which A6 rejects"
+    else
+      fail "A6 ablation: =noindirect still bounded the released-string hello world at ${ab} bytes"
+    fi
   fi
 fi
 
@@ -381,11 +411,11 @@ fi
 # fixture that would not build, a shell that cannot set `ulimit -s`, a
 # toolchain with no stack-usage table. Each prints a reason, and this
 # count fails the run when any declined. It is one per `checks`
-# increment above: ten, or thirteen when llc offers a stack-usage table
+# increment above: eleven, or fourteen when llc offers a stack-usage table
 # for A2, A3 and A3b.
 # --------------------------------------------------------------------
-expected=10
-(( su_ok )) && expected=13
+expected=11
+(( su_ok )) && expected=14
 if (( checks < expected )); then
   echo "FAIL: only $checks of $expected assertions ran. Something above declined" >&2
   echo "      to run rather than failing - a fixture that would not build, or a" >&2

@@ -528,9 +528,10 @@ echo "== 5. resources beyond memory across trap-and-recover =="
 # ---------------------------------------------------------------------
 cat > "$work/res.ax" <<'AX'
 ; args: mode n. 1 opens /dev/null inside a recovery point and traps
-; before the close; 2 closes first. Prints how many descriptors are
-; open before and after, counted in /dev/fd. 3 spawns a forked child
-; inside the extent and traps.
+; before the close; 2 closes first; 4 opens n files outside any
+; recovery point and holds them in a Vec. Prints how many descriptors
+; are open before and after, counted in /dev/fd. 3 spawns a forked
+; child inside the extent and traps.
 (import IO)
 (import Sys)
 (import Str)
@@ -563,6 +564,21 @@ cat > "$work/res.ax" <<'AX'
             ((Err e) 0))))
       (cycles mode m (- k 1))
     }))
+
+; Open `k` files and keep every one in `v`: the control for mode 1,
+; showing that the count sees descriptors something still owns.
+(:: holdAll (-> (Vec File) Int Int))
+;@axiom:effect(io)
+(fn (holdAll v k)
+  (if (== k 0)
+    0
+    (match (openPath "/dev/null" 0)
+      ((Ok f)
+        {
+          (vecPush v f)
+          (holdAll v (- k 1))
+        })
+      ((Err e) 0))))
 
 (:: child Int)
 ;@axiom:effect(io)
@@ -598,6 +614,22 @@ cat > "$work/res.ax" <<'AX'
   (let ((mode (atoiFrom (sysArg 1) 0 0)) (n (atoiFrom (sysArg 2) 0 0)))
     (if (== mode 3)
       child
+      (== mode 4)
+      (let (
+        (held vecNew)
+        (before openCount)
+      )
+        {
+          (holdAll held n)
+          (let (
+            (after openCount)
+            (kept (vecLen held))
+          )
+            {
+              (println "{before} {after}")
+              0
+            })
+        })
       (let ((before openCount))
         {
           (cycles mode __axiom_arena_mark n)
@@ -626,10 +658,15 @@ if build "$work/res.ax" "$work/res" 1; then
   }
   read -r b1 a1 <<< "$( ( ulimit -n $((nfd + 64)) 2>/dev/null; close_inherited; "$work/res" 1 "$nfd" ) )"
   read -r b2 a2 <<< "$( ( ulimit -n $((nfd + 64)) 2>/dev/null; close_inherited; "$work/res" 2 "$nfd" ) )"
-  if [[ -n "${a1:-}" && -n "${a2:-}" ]] && (( a1 - b1 == nfd && a2 == b2 )); then
-    ok "descriptors: $nfd trapped cycles leave $((a1 - b1)) open, one each (the program's to close); the control that closes first leaves $((a2 - b2))"
+  read -r b4 a4 <<< "$( ( ulimit -n $((nfd + 64)) 2>/dev/null; close_inherited; "$work/res" 4 "$nfd" ) )"
+  # MM-EXEC-20: the reset a recovery makes runs the cleanup of every
+  # owner made since its mark, so a file opened in the extent closes
+  # when the trap unwinds it. Mode 4 holds the same number of files past
+  # any reset, so a count that could not see descriptors fails here.
+  if [[ -n "${a1:-}" && -n "${a2:-}" && -n "${a4:-}" ]] && (( a1 == b1 && a2 == b2 && a4 - b4 == nfd )); then
+    ok "descriptors: $nfd trapped cycles leave $((a1 - b1)) open, because the reset closes each file the extent made (MM-EXEC-20); closing first leaves $((a2 - b2)), and holding $nfd past the reset leaves $((a4 - b4))"
   else
-    bad "descriptors: trapped cycles moved the next fd ${b1:-?} -> ${a1:-?}, the control ${b2:-?} -> ${a2:-?} (n=$nfd)"
+    bad "descriptors: trapped cycles moved the open count ${b1:-?} -> ${a1:-?}, closing first ${b2:-?} -> ${a2:-?}, holding ${b4:-?} -> ${a4:-?} (n=$nfd)"
   fi
   "$work/res" 3 0 > "$work/child.out" 2>&1 &
   bg=$!
