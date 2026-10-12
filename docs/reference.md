@@ -13,8 +13,8 @@ For installation and editor setup, start at [Read Axiom's docs](README.md).
 - [Functions](#functions), [operators](#operators), [bindings](#let-bindings) and [control flow](#control-flow)
 - [Types](#types), [aliases](#type-aliases), [data](#algebraic-data-types), [matching](#pattern-matching) and [structs](#structs)
 - [Capabilities](#capability-records), [effects](#effects), [modules](#modules-and-imports), [packages](#packages) and [macros](#macros)
-- [Formatting](#printing-and-formatting), [memory](#memory), [concurrency](#concurrency) and [Rust](#calling-rust)
-- [Library](#standard-library), [metadata](#axtag-metadata), [commands](#cli-commands), [tests](#testing) and [targets](#cross-compilation)
+- [Formatting](#printing-and-formatting), [memory](#memory), [inline assembly](#inline-assembly), [concurrency](#concurrency) and [Rust](#calling-rust)
+- [Library](#standard-library), [TCP](#talk-over-tcp-with-net), [metadata](#axtag-metadata), [commands](#cli-commands), [tests](#testing) and [targets](#cross-compilation)
 
 ## Hello, Axiom
 
@@ -803,9 +803,10 @@ Tested by `tests/stdlib/810-addr-identity.ax`.
 
 ### Inline assembly
 
-`asm` runs instructions the language has no form for. A function that
-uses it says `;@axiom:effect(unsafe)`, because the compiler can't see
-what the instructions do. Callers of that function inherit nothing.
+`asm` runs instructions the language has no form for: a cycle counter,
+a barrier, a system register. A function that uses it says
+`;@axiom:effect(unsafe)`, because the compiler can't see what the
+instructions do. Callers of that function inherit nothing.
 
 ```scheme
 (import IO)
@@ -830,27 +831,125 @@ what the instructions do. Callers of that function inherit nothing.
 42
 ```
 
-- **Arms.** Each arm names an architecture, `aarch64` or `x86_64`, at
-  most once. Building for a target whose architecture has no arm is
-  refused (`AX4008`).
-- **The template** is a string literal. `{name}` stands for an operand's
-  register, `{name:w}` for a narrower view of it (`w` on AArch64, `k` on
-  x86-64), and `{{` and `}}` for literal braces.
-- **Operands** are `(in name value)`, `(out name)` and
-  `(inout name value)`. Each can name a register, as in
-  `(in a "x8" x)`. `(clobber "x9")` names a register the instructions
-  write. An arm answers at most one value.
-- **Reserved registers.** No operand or clobber may name the stack
-  pointer, the frame pointer or AArch64's `x18`.
+An `asm` form holds one arm per architecture, `aarch64` or `x86_64`,
+each at most once. The compiler emits only the arm for the target it
+builds for, so one function can carry both. Building for a target with
+no arm is refused (`AX4008`) when your program reaches the function.
 
-The compiler checks the form: its arms, operands and registers
-(`AX3091`). It doesn't check the instructions. The template reaches the
-assembler as written, so a mistake in its text fails when `llc`
-assembles it. Not yet: that failure is reported as `AX4003` with no
-location; see the [roadmap](roadmap.md#tools).
+#### Operands
+
+| Operand | Meaning |
+|---|---|
+| `(in name value)` | `value`, an `Int`, in a register |
+| `(out name)` | a register the form answers when the instructions end |
+| `(inout name value)` | starts as `value` and is answered, in one register |
+| `(clobber "reg" ...)` | registers the instructions write that no operand names |
+
+`in`, `out` and `inout` can name their register, as in
+`(in a "x8" x)`. An arm answers at most one value. With no `out` or
+`inout`, the form answers 0. Inputs are evaluated once each, in the
+order written, before the instructions run.
+
+#### Templates
+
+The template is a string literal that reaches the assembler as
+written. `{name}` stands for an operand's register, and `{{` and `}}`
+are literal braces. `{name:m}` picks a view of the register: `w` or `x`
+on AArch64, and `b`, `h`, `w`, `k` or `q` on x86-64. Separate
+instructions with `\n`. x86-64 templates use AT&T syntax, so a
+literal `$` is written as is.
+
+This program reads a register through its 32-bit view, uses fixed
+registers with a scratch register, reads the CPU's counter, and puts a
+barrier between two reads:
+
+```scheme
+(import IO)
+
+; The low 32 bits of `x`: one register in and out, written through its
+; 32-bit view, which zeroes the top half.
+(:: low32 (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (low32 x)
+  (asm
+    (aarch64 "mov {v:w}, {v:w}" (inout v x))
+    (x86_64 "movl {v:k}, {v:k}" (inout v x))))
+
+; `x + 1` through fixed registers and a scratch register the
+; instructions overwrite.
+(:: viaRegs (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (viaRegs x)
+  (asm
+    (aarch64 "mov x9, {a}\nadd {r}, x9, #1" (out r "x0") (in a "x8" x) (clobber "x9"))
+    (x86_64 "movq {a}, %rdx\nleaq 1(%rdx), {r}" (out r "rax") (in a "rcx" x) (clobber "rdx"))))
+
+; The CPU's cycle or tick counter.
+(:: cycles Int)
+;@axiom:effect(unsafe)
+(fn (cycles)
+  (asm
+    (aarch64 "mrs {t}, cntvct_el0" (out t))
+    (x86_64 "rdtsc\nshlq $32, %rdx\norq %rdx, %rax" (out t "rax") (clobber "rdx"))))
+
+; No instructions and no operands: a barrier the compiler moves no
+; load, store or call across. It answers 0.
+(:: fence Int)
+;@axiom:effect(unsafe)
+(fn (fence)
+  (asm
+    (aarch64 "")
+    (x86_64 "")))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let (
+    (before cycles)
+    (_ fence)
+    (after cycles)
+  )
+    {
+      (println (low32 (+ 4294967296 7)))
+      (println (viaRegs 41))
+      (println (>= after before))
+      0
+    }))
+```
+
+```text
+7
+42
+true
+```
+
+#### What the compiler does, and what you promise
+
+The compiler checks the form where you write it: its arms, operands
+and register names (`AX3091`). It keeps every block, in order, as a
+side effect that clobbers memory and the condition flags, so no load,
+store or call moves across it. An `out` never shares a register with
+an input.
+
+It doesn't check the instructions. Your function promises that they:
+
+- leave the stack pointer and frame pointer as they found them, and use
+  no stack;
+- write no register but the outputs and the clobbers;
+- end by falling through, with no branch out, return or exception
+  return;
+- perform no IO, blocking or trap the function doesn't declare.
+
+No operand or clobber may name the stack pointer, the frame pointer or
+AArch64's `x18`, and `x30` may appear only as a clobber. Operands are
+`Int` words in general-purpose registers: there are no memory,
+floating-point or vector operands, though vector registers may be
+clobbered. `check` doesn't assemble the template, so a mistake in its
+text fails when `llc` assembles it. Not yet: that failure is reported
+as `AX4003` with no location; see the [roadmap](roadmap.md#tools).
 
 The restricted profile refuses `asm` unless `--allow-asm` names the
-function (`RP-9`). The rule is `MM-FFI-9` in the
+function (`RP-9`). The full contract is `MM-FFI-9` in the
 [memory model](memory-model.md).
 
 Tested by `tests/stdlib/581-inline-asm.ax` and
@@ -960,11 +1059,102 @@ hosting Axiom with `--emit-staticlib`, linking and panic boundaries.
 ## Standard library
 
 Use the [standard-library reference](stdlib.md) to choose modules and
-copy small recipes. It includes a [Net section](stdlib.md#net) for TCP.
-The [generated API](stdlib-api.md) is the complete signature and effect
+copy small recipes, and the [generated API](stdlib-api.md) is the complete signature and effect
 listing. Every module is Axiom source; hosted programs reach the kernel
 without a C library unless they link foreign code. Windows uses
 kernel32 through its platform layer.
+
+### Talk over TCP with `Net`
+
+`Net` gives you TCP the way Rust's `std::net` does. This program runs a
+server and a client in one process: the client sends a name, and the
+server answers with a greeting.
+
+```scheme
+(import Err)
+(import IO)
+(import Net)
+(import Str)
+
+; The server's side of one connection: read a name, answer a greeting.
+(:: serve (-> TcpStream Int))
+;@axiom:effect(io)
+(fn (serve conn)
+  (match (tcpReadLine conn 1024)
+    ((Ok (Some name))
+      (match (tcpWrite conn (concat "hello, " (concat name "\n")))
+        ((Ok _) 0)
+        ((Err e) (die (errorText e) 1)))
+    )
+    ((Ok (None)) 0)
+    ((Err e) (die (errorText e) 1))))
+
+; Take the next connection off the queue and serve it.
+(:: acceptOne (-> TcpListener Int))
+;@axiom:effect(io)
+(fn (acceptOne server)
+  (match (tcpAccept server)
+    ((Ok conn) (serve conn))
+    ((Err e) (die (errorText e) 1))))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (match (tcpListen "127.0.0.1:0")
+    ((Err e) (die (errorText e) 1))
+    ((Ok server)
+      (match (andThen (tcpListenerLocalAddr server) tcpConnectAddr)
+        ((Err e) (die (errorText e) 1))
+        ((Ok client)
+          (let (
+            (_ (tcpWrite client "Ada\n"))
+            (_ (acceptOne server))
+          )
+            (match (tcpReadLine client 1024)
+              ((Ok (Some reply))
+                {
+                  (println reply)
+                  0
+                }
+              )
+              (_ (die "no reply" 1))))
+        ))
+    )))
+```
+
+```text
+hello, Ada
+```
+
+- Listen and connect with an address as text, as in
+  `(tcpListen "0.0.0.0:8080")` or `(tcpConnect "10.0.0.5:22")`. Port 0
+  asks the kernel for a free port, and `tcpListenerLocalAddr` says
+  which. `tcpListenAddr` and `tcpConnectAddr` take a `SocketAddr` you
+  already hold, and `tcpConnectTimeout` gives up after a number of
+  milliseconds.
+- `(tcpReadLine conn max)` answers one line without its newline, or
+  `None` when the peer closes, and refuses a line longer than `max`.
+  `tcpReadExact` reads a fixed-size frame. `tcpWrite` writes
+  everything, and `tcpWriteSome` writes what fits and says how much.
+- Every failure is a `Result`. Match on `(errorKind e)` from `IO` to
+  tell them apart: `ConnectionRefused`, `TimedOut`, `WouldBlock`,
+  `BrokenPipe` and the rest of Rust's `std::io::ErrorKind`, the same on
+  every target.
+- Streams block by default. `(tcpSetReadTimeout conn (Some 250))`
+  bounds a wait in milliseconds. `tcpSetNonBlocking` and an `IO`
+  `Poller` serve many clients from one thread.
+- A listener or stream closes when its last share goes.
+  `(tcpShutdown conn ShutdownWrite)` half-closes the connection: the
+  peer reads end of stream, and you can still read its reply.
+- Addresses are numeric. `ipV4`, `ipV6`, `ipParse` and `socketAddrNew`
+  build them, and there is no name resolver.
+
+The [standard-library reference](stdlib.md#net) has a complete echo
+server, a client with timeouts and a non-blocking server on a
+`Poller`. The [generated API](stdlib-api.md#net) lists every
+signature.
+
+Tested by `tests/stdlib/841-net-ip.ax` and `tests/stdlib/843-net-stream.ax`.
 
 <details>
 <summary>Browse every module</summary>
