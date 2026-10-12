@@ -436,6 +436,13 @@ to the sequence of what it bound, in order. An empty tail matches, with
 empty sequences. `tests/selfhost/397-nested-repeat.ax` (170) is six
 macros over this shape.
 
+An instantiation can generate no declarations at all, from an empty
+tail or a `syntax/for` over an empty sequence. The invocation then
+leaves nothing behind. AXTAGs written above such an invocation are
+refused with `AX3027`, because no declaration is left to carry them.
+`tests/selfhost/1015-macro-empty-expansion.ax` (37) covers both routes,
+and `tests/diagnostics/1256-macro-empty-tags.ax` the refusal.
+
 A template rebuilds a repeated form once per element, with each
 sequence-bound name taking its element, in four positions:
 

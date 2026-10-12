@@ -3126,7 +3126,8 @@
   (rgn : Int)
   (unsafe : Int)
   (uses : (Vec EpUse))
-  (mayCalls : (Vec Int)))
+  (mayCalls : (Vec Int))
+  (mut pending : Int))
 
 ; The region FACTS of this function (`rgnFactsNew`, stage S3 of
 ; docs/memory-model.md): which parameters its body stores
@@ -3736,7 +3737,8 @@
       0
       0
       (vecWithCapacity 1)
-      (vecWithCapacity 1)))))
+      (vecWithCapacity 1)
+      0))))
 
 ; A primitive that PERFORMS something, registered with the effect it
 ; performs rather than with the empty set every other one gets.
@@ -3830,7 +3832,8 @@
           0
           0
           (vecWithCapacity 1)
-          (vecWithCapacity 1))))
+          (vecWithCapacity 1)
+          0)))
     }))
 
 ; ------------------------------------------------------------------
@@ -4872,7 +4875,8 @@
       0
       0
       (vecWithCapacity 1)
-      (vecWithCapacity 1)))))
+      (vecWithCapacity 1)
+      0))))
 
 ; An `extern` item. Modelled on `tcAddEffectOp` above, and for the
 ; same reason: an operation's FnEnt arrives with its effects already
@@ -4923,7 +4927,8 @@
       0
       0
       (vecWithCapacity 1)
-      (vecWithCapacity 1)))))
+      (vecWithCapacity 1)
+      0))))
 
 ; Every item in an `extern` block, and the `Mod$name` spelling too when
 ; the block came from an imported module - the same double registration
@@ -5089,7 +5094,8 @@
             0
             0
             (vecWithCapacity 1)
-            (vecWithCapacity 1))))
+            (vecWithCapacity 1)
+            0)))
         (memSetWord ent 1 ty)))))
 
 ; Whether declaration `i` is a second signature for its name in its
@@ -5153,7 +5159,8 @@
                 0
                 0
                 (vecWithCapacity 1)
-                (vecWithCapacity 1))))
+                (vecWithCapacity 1)
+                0)))
           }))))
       (memSetWord ent 2 (vecLen (nodeBVec d))))))
 
@@ -15833,6 +15840,16 @@
 ; performs, gated by where `ent` calls that parameter (`addGated`):
 ; built-in effects as they are, a custom effect only where some call is
 ; outside its handler. Any other argument is walked for its own effects.
+;
+; A callee the fixpoint has not walked yet (`fnPending`) has no record,
+; and reading that as an escape is an answer the monotone fixpoint can
+; never take back: a lambda performing `Ask`, handed to a callee
+; declared below that installs the `Ask` handler around it, kept `Ask`
+; in the caller's row when the declarations were written in that order
+; and not in the other. So a function value handed to a pending callee
+; contributes nothing yet. The callee's first walk counts as a change
+; (`inferEffectsOne`), so this call is walked again once the record
+; exists, and the answer no longer depends on declaration order.
 (pub :: walkEffectsArgVecAt (-> Int (Vec Int) Int Int (Vec a) Int Int))
 (pub fn (walkEffectsArgVecAt tc v i bound acc ent)
   (if (>= i (vecLen v))
@@ -15840,11 +15857,14 @@
     (let (
       (a (vecGet v i))
       (u (epUseFor ent i))
+      (pend (fnPending ent))
     )
       {
         (if (== (nodeTag a) TAG_E_VAR)
           {
             (unsafeSinkNote tc a bound)
+            (if (== pend 1)
+              0
             (if (== (bsIsLocal bound (nodeAName a)) 1)
               (match (bsValsOf bound (nodeAName a))
                 ((None) 0)
@@ -15866,14 +15886,16 @@
                     (nodeAName a)
                     bound
                     acc
-                    0))))
+                    0)))))
           }
           (if (== (nodeTag a) TAG_E_LAM)
+            (if (== pend 1)
+              0
             (let ((m (walkLambdaLatent tc a bound)))
               {
                 (addGated acc m.row u 0)
                 (latentApplyU bound m.uses u)
-              })
+              }))
             (walkEffects tc a bound acc)))
         (walkEffectsArgVecAt
           tc
@@ -18041,6 +18063,14 @@
     ((None) 1)
     ((Some u) 0)))
 
+; 1 while the fixpoint has yet to walk the function `ent` names, so it
+; has no record of where it calls its parameters (`walkEffectsArgVecAt`).
+(pub :: fnPending (-> Int Int))
+(pub fn (fnPending ent)
+  (if (== ent 0)
+    0
+    (memGetWord ent 12)))
+
 (pub :: epUseFor (-> Int Int (Option EpUse)))
 (pub fn (epUseFor ent j)
   (epUseFind (memGetWordVec ent 10) j 0))
@@ -18205,8 +18235,30 @@
     ; What every function-typed field can hold depends on syntax alone,
     ; so it too is complete before any row is (`fieldStoresBuild`).
     (fieldStoresBuild tc decls)
+    ; Every function the passes below will walk starts pending: no
+    ; record yet of where it calls its parameters (`fnPending`).
+    (effMarkPending tc decls 0)
     (inferEffectsRound tc decls 0 (+ (vecLen decls) 1))
   })
+
+(pub :: effMarkPending (-> Int (Vec Int) Int Int))
+(pub fn (effMarkPending tc decls i)
+  (if (>= i (vecLen decls))
+    0
+    (let ((d (vecGet decls i)))
+      {
+        (if (== (nodeTag d) TAG_D_FN)
+          (let (
+            (_m (memSetWord tc 16 (nodeModule d)))
+            (ent (findFnEnt tc (nodeAName d)))
+            (_m0 (memSetWord tc 16 0))
+          )
+            (if (== ent 0)
+              0
+              (memSetWord ent 12 1)))
+          0)
+        (effMarkPending tc decls (+ i 1))
+      })))
 
 (pub :: inferEffectsRound (-> Int (Vec Int) Int Int Int))
 ; ONE ROUND IS TWO PASSES, IN OPPOSITE DIRECTIONS, and that is a
@@ -18324,8 +18376,17 @@
               ; Where each transparent parameter is called (`EpUse`): a
               ; caller reads it, so a change is a change to this entry.
               (g4 (epUsesMerge (memGetWordVec ent 10) (bsUsesVec sc) 0))
+              ; The first walk is a change even when nothing grew: a
+              ; caller that handed this function a value while it was
+              ; pending skipped it, and has to be walked again.
+              (g5 (if (== (memGetWord ent 12) 1)
+                {
+                  (memSetWord ent 12 0)
+                  1
+                }
+                0))
             )
-              (if (|| (|| (== g1 1) (== g2 1)) (|| (== g3 1) (== g4 1)))
+              (if (|| (|| (== g1 1) (== g2 1)) (|| (|| (== g3 1) (== g4 1)) (== g5 1)))
                 1
                 0))))))))
 

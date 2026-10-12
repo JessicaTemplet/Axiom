@@ -16,6 +16,22 @@ its changelog too.
 
 ## Unreleased
 
+- Let a declaration macro generate no declarations. A `syntax/for`
+  over the fields of a struct with none, or a `decl ...` splice over an
+  empty tail, stopped the compiler with status 77; the language server
+  died the same way on a document that reached one. The invocation now
+  leaves nothing behind, and AXTAGs written above it are refused with
+  `AX3027`, since no declaration is left to carry them. Tested by
+  `tests/selfhost/1015-macro-empty-expansion.ax` and
+  `tests/diagnostics/1256-macro-empty-tags.ax`.
+
+- Give a function the same effect row whatever order its file's
+  declarations are in. A lambda handed to a function declared further
+  down that installs the handler around it kept the handled effect in
+  the caller's row, because the callee had no record yet of where it
+  calls its parameter. Tested by `scripts/check-metamorphic.sh` over
+  `tests/stdlib/760-handled-closures.ax`.
+
 - Install 0.7.8 with `install.sh` again. The installer's check program
   wrote to `stdout` without importing it from `IO`, so it stopped with
   `AX3023` and installed nothing. The check now prints with `println`,

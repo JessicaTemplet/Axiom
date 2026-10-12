@@ -8330,6 +8330,8 @@
               (memSetWord d 3 1)
               0
             }
+          (if (== (vecLen made) 0)
+            (expInstantiateNothing entryDecls decls env d)
             (let ((mod (nodeModule d)))
               (if (==
                 (cast Int mod)
@@ -8362,8 +8364,60 @@
                     (expGiveTags d made tags)
                     (expRecordGens env made (nodeAName mac) 0)
                     1
-                  })))))
+                  }))))))
         })
+    }))
+
+; An instantiation that generated no declarations: a `syntax/for` over
+; an empty sequence, or a `decl ...` splice over an empty tail, which
+; MAC-LANG-16 allows. The invocation leaves the program: from `decls`,
+; and for the entry file from `entryDecls` too, the two lists
+; `expAppendRest` keeps it in. Answering 1 runs another round, which
+; reaches the declaration that moved into its place.
+;
+; AXTAGs written above it would attach to nothing. `expGiveTags`
+; re-homes them onto the first generated declaration, and there is
+; none, so they are refused here rather than dropped.
+(pub :: expInstantiateNothing (-> (Vec Int) (Vec Int) Int Int Int))
+(pub fn (expInstantiateNothing entryDecls decls env d)
+  (if (&& (!= (memGetWord d 7) 0) (> (vecLen (memGetWordVec d 7)) 0))
+    (expDeclCallErr
+      env
+      d
+      "this invocation generates no declarations, so the AXTAGs above it attach to nothing"
+      "remove the AXTAGs, or give the invocation arguments that generate a declaration"
+      "an invocation's AXTAGs move to the first declaration it generates; with none generated, a claim written here would be accepted and never checked")
+    {
+      (expDropDecl decls d 0)
+      (if (==
+        (cast Int (nodeModule d))
+        0)
+        (expDropDecl entryDecls d 0)
+        0)
+      1
+    }))
+
+; Remove declaration `d` from `v`, found by identity, keeping the
+; order of the rest.
+(pub :: expDropDecl (-> (Vec Int) Int Int Int))
+(pub fn (expDropDecl v d i)
+  (if (>= i (vecLen v))
+    0
+    (if (== (vecGet v i) d)
+      (expDropAt v i)
+      (expDropDecl v d (+ i 1)))))
+
+; Shift `v[i+1..]` down one place and drop the last slot.
+(pub :: expDropAt (-> (Vec Int) Int Int))
+(pub fn (expDropAt v i)
+  (if (>= (+ i 1) (vecLen v))
+    {
+      (vecPop v)
+      0
+    }
+    {
+      (vecSet v i (vecGet v (+ i 1)))
+      (expDropAt v (+ i 1))
     }))
 
 (pub :: isEllipsisDecl (-> Int Int))
