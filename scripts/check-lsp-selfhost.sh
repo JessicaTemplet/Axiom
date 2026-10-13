@@ -701,16 +701,17 @@ if ratio > 2.0:
 # is the largest this server sends - five integers per token, ~23,000
 # tokens here - so the serialisation is most of the cost (measured
 # 1.31x against the 0.37x outline above). The floor is on the token
-# count: every `(:: f (-> Int Int))` line carries six tokens and every
-# `(fn (f x) (+ x N))` line seven, so a document of `floor` such pairs
-# answers at least 12 tokens per pair or the scan stopped early.
+# count: every `(:: f (-> Int Int))` line carries five tokens and every
+# `(fn (f x) (+ x N))` line six (brackets are not tokens), so a
+# document of `floor` such pairs answers eleven per pair; the floor is
+# ten per pair, or the scan stopped early.
 sem=[frame({"jsonrpc":"2.0","id":3,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":uri}}})]
 t_sem,sout=best(base+sem+tail)
 i=sout.find(b'"data":[')
 numbers=0 if i<0 else sout[i+8:sout.find(b"]",i)].count(b",")+1
 tokens=numbers//5
-if tokens < 12*floor:
-    print(f"FAIL semanticTokens/full answered {tokens} tokens on a {n}-pair document, floor {12*floor}")
+if tokens < 10*floor:
+    print(f"FAIL semanticTokens/full answered {tokens} tokens on a {n}-pair document, floor {10*floor}")
     print( "     - a server that colours nothing is fast, so the ratio below would mean nothing")
     sys.exit(1)
 scost=max(t_sem-t_open, 0.0)

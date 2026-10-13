@@ -5796,7 +5796,7 @@ def hl_obligations(src):
         if not code(m.start()):
             continue
         end = hl_form_end(src, kinds, m.start())
-        for cm in re.finditer(r"\(([A-Z]" + HL_IDENT + ")(?![:.])", src[m.start():end]):
+        for cm in re.finditer(r"\(([A-Z]" + HL_IDENT + r")(?![A-Za-z0-9_'!*+/<>=%&|^:.-])", src[m.start():end]):
             at = m.start() + cm.start(1)
             if code(at) and cm.group(1) not in HL_BUILTIN_TYPES and at - 1 not in effect_lists:
                 hl_want(obs, f"constructor use `{cm.group(1)}`", src, at, cm.group(1), "enumMember", 0, DECL)
