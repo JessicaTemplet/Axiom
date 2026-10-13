@@ -114,7 +114,8 @@ integrator would still need.
 | Every public standard library name carries a doc comment, and every module a `;;!` block | In progress |
 | `;@axiom:nolint` quiets hints and warnings by name, code or group, per declaration or per file, and never an error | Done |
 | The language server sends semantic tokens, so every editor colours keywords, functions, macros, constructors, fields and effects apart from variables | In progress |
-| A VS Code extension ships in the repository, with a TextMate grammar and the language client | In progress |
+| A VS Code extension ships in the repository, with a TextMate grammar and the language client (`editors/vscode/`) | Done |
+| The VS Code extension is published to the marketplace | Not started |
 | `axiom doc` renders the documentation and the library reference locally and opens them in your browser | In progress |
 | Debug information (DWARF), a message on SIGSEGV, and inlined frames in backtraces | Not started |
 | An assembler error inside an `asm` template is reported at the form | Not started |
