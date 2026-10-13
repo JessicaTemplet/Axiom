@@ -697,6 +697,30 @@ if ratio > 2.0:
     print( "     document, over a ceiling of 2.00x. The line index is what keeps this")
     print( "     under one - see lspLineIndex in self_host/lsp.ax.")
     sys.exit(1)
+# SEMANTIC TOKENS' COST, the same ratio on the same document. The answer
+# is the largest this server sends - five integers per token, ~23,000
+# tokens here - so the serialisation is most of the cost (measured
+# 1.31x against the 0.37x outline above). The floor is on the token
+# count: every `(:: f (-> Int Int))` line carries six tokens and every
+# `(fn (f x) (+ x N))` line seven, so a document of `floor` such pairs
+# answers at least 12 tokens per pair or the scan stopped early.
+sem=[frame({"jsonrpc":"2.0","id":3,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":uri}}})]
+t_sem,sout=best(base+sem+tail)
+i=sout.find(b'"data":[')
+numbers=0 if i<0 else sout[i+8:sout.find(b"]",i)].count(b",")+1
+tokens=numbers//5
+if tokens < 12*floor:
+    print(f"FAIL semanticTokens/full answered {tokens} tokens on a {n}-pair document, floor {12*floor}")
+    print( "     - a server that colours nothing is fast, so the ratio below would mean nothing")
+    sys.exit(1)
+scost=max(t_sem-t_open, 0.0)
+sratio=scost/t_open if t_open>0 else 0.0
+print(f"semantic tokens {tokens} tokens: didOpen {t_open:.3f}s, semanticTokens/full {scost:.3f}s, ratio {sratio:.2f}x")
+if sratio > 2.0:
+    print(f"FAIL semanticTokens/full cost {sratio:.2f}x the whole parse-and-check of the same")
+    print( "     document, over a ceiling of 2.00x. One parse, one occurrence walk and one")
+    print( "     byte scan is the budget - see SECTION HL in self_host/lsp.ax.")
+    sys.exit(1)
 PY
 )
 perf_status=$?
@@ -905,6 +929,7 @@ def build(cap, name, uri, text, p, rid):
        "codeActionProvider":("textDocument/codeAction",{**td,"range":{"start":p,"end":p},"context":{"diagnostics":[]}}),
        "typeDefinitionProvider":("textDocument/typeDefinition",{**td,"position":p}),
        "codeLensProvider":("textDocument/codeLens",td),
+       "semanticTokensProvider":("textDocument/semanticTokens/full",td),
       }
     if name=="renameProvider":
         return [("textDocument/prepareRename",{**td,"position":p}),

@@ -3910,7 +3910,7 @@
 ; nothing calls.
 (pub :: lspCapabilities Int)
 (pub fn (lspCapabilities)
-  (jsonObjPut (jsonObjPut jsonObj "capabilities" (lspFixCaps (lspViewCaps (lspNavCaps (jsonObjPut (jsonObjPut (jsonObjPut (jsonObjPut (jsonObjPut jsonObj "textDocumentSync" (jsonNum 1)) "documentSymbolProvider" (jsonBool 1)) "definitionProvider" (jsonBool 1)) "hoverProvider" (jsonBool 1)) "completionProvider" lspCompletionOptions))))) "serverInfo" (jsonObjPut (jsonObjPut jsonObj "name" (jsonStr "axiom")) "version" (jsonStr "0.7.8"))))
+  (jsonObjPut (jsonObjPut jsonObj "capabilities" (lspHlCaps (lspFixCaps (lspViewCaps (lspNavCaps (jsonObjPut (jsonObjPut (jsonObjPut (jsonObjPut (jsonObjPut jsonObj "textDocumentSync" (jsonNum 1)) "documentSymbolProvider" (jsonBool 1)) "definitionProvider" (jsonBool 1)) "hoverProvider" (jsonBool 1)) "completionProvider" lspCompletionOptions)))))) "serverInfo" (jsonObjPut (jsonObjPut jsonObj "name" (jsonStr "axiom")) "version" (jsonStr "0.7.8"))))
 
 ; `definitionProvider` and `hoverProvider` joined on 2026-08-15
 ; with the macro navigation they describe (MAC-TOOL-2). Both are
@@ -3975,7 +3975,7 @@
 ; ------------------------------------------------------------------
 (pub :: lspExtHandles (-> String Bool))
 (pub fn (lspExtHandles method)
-  (|| (lspNavHandles method) (|| (lspViewHandles method) (lspFixHandles method))))
+  (|| (lspNavHandles method) (|| (lspViewHandles method) (|| (lspFixHandles method) (lspHlHandles method)))))
 
 (pub :: lspExtDispatch (-> String Int Int (Vec String) (Vec a) (Vec String) Int))
 ;@axiom:effect(io)
@@ -3995,12 +3995,19 @@
         params
         uris
         texts)
-      (lspFixDispatch
-        method
-        id
-        params
-        uris
-        texts))))
+      (if (lspFixHandles method)
+        (lspFixDispatch
+          method
+          id
+          params
+          uris
+          texts)
+        (lspHlDispatch
+          method
+          id
+          params
+          uris
+          texts)))))
 
 ; ==================================================================
 ; SECTION NAV: references, rename, document highlights, local
@@ -14284,6 +14291,1599 @@
 
 ; ==================================================================
 ; END SECTION FIX
+; ==================================================================
+; ==================================================================
+; SECTION HL: semantic tokens
+; ==================================================================
+; `textDocument/semanticTokens/full`: the protocol's highlighting
+; channel, and the only colour an editor without tree-sitter (VS Code)
+; gets. Every identifier is coloured by WHAT IT RESOLVES TO - a
+; parameter, a `let`, this document's function, type, macro or effect,
+; a constructor, a name from elsewhere - and not by how it is spelled;
+; keywords, strings, numbers, comments, AXTAG decorators, region
+; annotations and operators come from the bytes, so a document that
+; does not parse is still highlighted, every identifier falling back to
+; a lexical rule and every declaration head keeping its colour.
+;
+; THE ROLES MIRROR `tree-sitter-axiom/queries/highlights.scm`, which is
+; the role reference for the editors that load a grammar, so the two
+; sources agree on every token whose role the grammar can see. The
+; legend is a contract with `editors/vscode`, which maps each name
+; below to a scope; the order of `lspSemanticTypes` and
+; `lspSemanticModifiers` is what the integers index, and the `SEM_*`
+; constants below ARE that order.
+;
+; TWO SOURCES, ONE SCAN. The resolution is SECTION NAV's occurrence
+; walk (`lspNavOccurrences`), expanding nothing (MAC-TOOL-3): an
+; occurrence's key says whether a name is a local binder or reference,
+; one of this document's declarations, a constructor, an effect, or
+; nothing this document declares. The bytes are read once, left to
+; right, in `lspFormEnd`'s order - a string, a `;` line, a `#| |#`
+; block, a char literal, a number, a `@r` annotation, an identifier -
+; and each identifier looks its start offset up in a bucket index over
+; the occurrences, built once per request; the occurrence list is never
+; scanned per identifier, which on this repository's own `typecheck.ax`
+; would be twenty thousand identifiers against twenty thousand
+; occurrences.
+;
+; WHAT THE BYTES KNOW THAT THE OCCURRENCES DO NOT. A struct field, a
+; macro rule, a type inside `cast`, the module of an `import`, an
+; `effect`'s operations, an `extern` item, a `region`'s name, and the
+; whole of a document that does not parse have no occurrence. The scan
+; keeps a stack of the open brackets, each with its head keyword, how
+; many items have followed the head, and the CONTEXT that head opens -
+; a type (`::`, `struct`, `type`, `extern`, `effect`, `cast`), a `data`
+; whose children are constructor forms, an `import` whose identifiers
+; are namespaces, the header list of a `fn`, `macro` or `lambda` whose
+; identifiers are parameters, a macro's rules whose patterns bind, a
+; `let` pair whose head is a binder, a `handle`'s effect list. That is
+; how `(struct Point (x : Int))` knows `x` is a field, how `(:: f (->
+; Int (Maybe Int)))` knows `Maybe` heads a type application and not a
+; constructor, and how `(fn (add x y) ...)` keeps `y` a parameter and
+; `add` a declared function on the keystroke that breaks the parse - a
+; half-typed file is the normal state, and highlighting that flickers
+; on every unbalanced paren is worse than none.
+;
+; THE ANSWER'S SHAPE is the protocol's integer array: five numbers per
+; token - line delta, start delta (from the previous token when on the
+; same line, from column 0 otherwise), length, type index, modifier
+; bitset - in UTF-16 code units, sorted, never overlapping, and never
+; spanning a line break: a multi-line string or block comment is one
+; token per line, empty pieces skipped. No `range` and no delta
+; request is offered: a client that wants either falls back to `full`,
+; and `full` is one parse.
+;
+; WHAT IT COSTS: one parse, one line index, one occurrence walk, one
+; byte scan, two bucket indexes (start offset -> occurrence, binder
+; key -> binder) and one name index over the declarations. The
+; answer's size dominates: on the gate's 2,050-declaration document
+; the request is ~23,000 tokens, five numbers each, measured at 1.31x
+; that document's `didOpen` (0.055 s against 0.042 s) where the
+; outline is 0.37x. The gate holds it under 2.00x.
+(pub :: lspHlHandles (-> String Bool))
+(pub fn (lspHlHandles method)
+  (strEq method "textDocument/semanticTokens/full"))
+
+(pub :: lspHlDispatch (-> String Int Int (Vec String) (Vec a) Int))
+;@axiom:effect(io)
+(pub fn (lspHlDispatch method id params uris texts)
+  (let ((src (docText uris texts (lspParamsUri params))))
+    (if (strEq method "textDocument/semanticTokens/full")
+      (lspReply id (lspSemanticTokens src))
+      (lspError id (- 0 32601) (concat "method not found: " method)))))
+
+; `semanticTokensProvider` carries the legend the integers index, and
+; says which of the three requests exist: `full` alone.
+(pub :: lspHlCaps (-> Int Int))
+(pub fn (lspHlCaps caps)
+  (jsonObjPut caps "semanticTokensProvider" (jsonObjPut (jsonObjPut jsonObj "legend" lspSemanticLegend) "full" (jsonBool 1))))
+
+; ------------------------------------------------------------------
+; The legend. A token type is an index into `tokenTypes`, a modifier
+; a bit of `tokenModifiers`, both in the order advertised - so the
+; constants below ARE the legend, and a type added to one without the
+; other would colour every token after it wrong. The two name lists
+; are functions so the gate can read them off the source and hold the
+; advertised legend to them.
+; ------------------------------------------------------------------
+(pub :: lspSemanticTypes (Vec String))
+(pub fn (lspSemanticTypes)
+  (let ((v vecNew))
+    {
+      (vecPush v "namespace")
+      (vecPush v "type")
+      (vecPush v "typeParameter")
+      (vecPush v "parameter")
+      (vecPush v "variable")
+      (vecPush v "property")
+      (vecPush v "enumMember")
+      (vecPush v "function")
+      (vecPush v "macro")
+      (vecPush v "keyword")
+      (vecPush v "comment")
+      (vecPush v "string")
+      (vecPush v "number")
+      (vecPush v "operator")
+      (vecPush v "decorator")
+      (vecPush v "effect")
+      (vecPush v "region")
+      v
+    }))
+
+(pub :: lspSemanticModifiers (Vec String))
+(pub fn (lspSemanticModifiers)
+  (let ((v vecNew))
+    {
+      (vecPush v "declaration")
+      (vecPush v "definition")
+      (vecPush v "readonly")
+      (vecPush v "modification")
+      (vecPush v "deprecated")
+      (vecPush v "documentation")
+      (vecPush v "defaultLibrary")
+      v
+    }))
+
+(pub :: lspSemanticLegend Int)
+(pub fn (lspSemanticLegend)
+  (jsonObjPut (jsonObjPut jsonObj "tokenTypes" (lspHlStrArr lspSemanticTypes)) "tokenModifiers" (lspHlStrArr lspSemanticModifiers)))
+
+(pub :: lspHlStrArr (-> (Vec String) Int))
+(pub fn (lspHlStrArr names)
+  (let (
+    (a jsonArr)
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen names))
+        {
+          (jsonArrPush a (jsonStr (vecGetStr names i)))
+          (set i (+ i 1))
+        })
+      a
+    }))
+
+; The token types, by index in `lspSemanticTypes`.
+(pub :: SEM_NAMESPACE Int)
+(pub fn (SEM_NAMESPACE)
+  0)
+
+(pub :: SEM_TYPE Int)
+(pub fn (SEM_TYPE)
+  1)
+
+(pub :: SEM_TYPEPARAM Int)
+(pub fn (SEM_TYPEPARAM)
+  2)
+
+(pub :: SEM_PARAMETER Int)
+(pub fn (SEM_PARAMETER)
+  3)
+
+(pub :: SEM_VARIABLE Int)
+(pub fn (SEM_VARIABLE)
+  4)
+
+(pub :: SEM_PROPERTY Int)
+(pub fn (SEM_PROPERTY)
+  5)
+
+(pub :: SEM_ENUM Int)
+(pub fn (SEM_ENUM)
+  6)
+
+(pub :: SEM_FUNCTION Int)
+(pub fn (SEM_FUNCTION)
+  7)
+
+(pub :: SEM_MACRO Int)
+(pub fn (SEM_MACRO)
+  8)
+
+(pub :: SEM_KEYWORD Int)
+(pub fn (SEM_KEYWORD)
+  9)
+
+(pub :: SEM_COMMENT Int)
+(pub fn (SEM_COMMENT)
+  10)
+
+(pub :: SEM_STRING Int)
+(pub fn (SEM_STRING)
+  11)
+
+(pub :: SEM_NUMBER Int)
+(pub fn (SEM_NUMBER)
+  12)
+
+(pub :: SEM_OPERATOR Int)
+(pub fn (SEM_OPERATOR)
+  13)
+
+(pub :: SEM_DECORATOR Int)
+(pub fn (SEM_DECORATOR)
+  14)
+
+(pub :: SEM_EFFECT Int)
+(pub fn (SEM_EFFECT)
+  15)
+
+(pub :: SEM_REGION Int)
+(pub fn (SEM_REGION)
+  16)
+
+; The modifier bits, by index in `lspSemanticModifiers`.
+(pub :: SEM_M_DECL Int)
+(pub fn (SEM_M_DECL)
+  1)
+
+(pub :: SEM_M_DEFN Int)
+(pub fn (SEM_M_DEFN)
+  2)
+
+(pub :: SEM_M_READONLY Int)
+(pub fn (SEM_M_READONLY)
+  4)
+
+(pub :: SEM_M_MOD Int)
+(pub fn (SEM_M_MOD)
+  8)
+
+(pub :: SEM_M_DEPRECATED Int)
+(pub fn (SEM_M_DEPRECATED)
+  16)
+
+(pub :: SEM_M_DOC Int)
+(pub fn (SEM_M_DOC)
+  32)
+
+(pub :: SEM_M_LIB Int)
+(pub fn (SEM_M_LIB)
+  64)
+
+; A type and its modifiers travel as one Int through the classifiers,
+; because a function answers one value: `ty + 128 * mods`. The seven
+; modifier bits fit under 128 and the seventeen types under it too.
+(pub :: lspHlPack (-> Int Int Int))
+(pub fn (lspHlPack ty mods)
+  (+ ty (* 128 mods)))
+
+; ------------------------------------------------------------------
+; The form stack: what the scan knows about where it is.
+;
+; Each open `(` or `{` is three words on a flat Vec: the HEAD code
+; (`SEM_H_*`, the keyword the form opens with), the STATE - 0 awaiting
+; the head, k >= 1 for the head seen with k-1 items after it - and
+; the CONTEXT (`SEM_C_*`) the identifiers inside it are read in. A
+; `pub` before the head leaves the state at 0, so `(pub fn` and `(fn`
+; are one shape.
+; ------------------------------------------------------------------
+(pub :: SEM_H_NONE Int)
+(pub fn (SEM_H_NONE)
+  0)
+
+(pub :: SEM_H_OTHER Int)
+(pub fn (SEM_H_OTHER)
+  1)
+
+(pub :: SEM_H_KW Int)
+(pub fn (SEM_H_KW)
+  2)
+
+(pub :: SEM_H_IMPORT Int)
+(pub fn (SEM_H_IMPORT)
+  3)
+
+(pub :: SEM_H_FN Int)
+(pub fn (SEM_H_FN)
+  4)
+
+(pub :: SEM_H_DATA Int)
+(pub fn (SEM_H_DATA)
+  5)
+
+(pub :: SEM_H_STRUCT Int)
+(pub fn (SEM_H_STRUCT)
+  6)
+
+(pub :: SEM_H_MACRO Int)
+(pub fn (SEM_H_MACRO)
+  7)
+
+(pub :: SEM_H_TYPE Int)
+(pub fn (SEM_H_TYPE)
+  8)
+
+(pub :: SEM_H_SIG Int)
+(pub fn (SEM_H_SIG)
+  9)
+
+(pub :: SEM_H_EXTERN Int)
+(pub fn (SEM_H_EXTERN)
+  10)
+
+(pub :: SEM_H_EFFECT Int)
+(pub fn (SEM_H_EFFECT)
+  11)
+
+(pub :: SEM_H_LET Int)
+(pub fn (SEM_H_LET)
+  12)
+
+(pub :: SEM_H_LAMBDA Int)
+(pub fn (SEM_H_LAMBDA)
+  13)
+
+(pub :: SEM_H_MUT Int)
+(pub fn (SEM_H_MUT)
+  14)
+
+(pub :: SEM_H_SET Int)
+(pub fn (SEM_H_SET)
+  15)
+
+(pub :: SEM_H_CAST Int)
+(pub fn (SEM_H_CAST)
+  16)
+
+(pub :: SEM_H_REGION Int)
+(pub fn (SEM_H_REGION)
+  17)
+
+(pub :: SEM_H_PARALLEL Int)
+(pub fn (SEM_H_PARALLEL)
+  18)
+
+(pub :: SEM_H_HANDLE Int)
+(pub fn (SEM_H_HANDLE)
+  19)
+
+(pub :: SEM_H_FOR Int)
+(pub fn (SEM_H_FOR)
+  20)
+
+(pub :: SEM_H_SUBTYPE Int)
+(pub fn (SEM_H_SUBTYPE)
+  21)
+
+; A `macro` of the `(macro (name params) template)` shape, once its
+; header list has opened: the forms after it are the template, not
+; rules. Set by `lspHlPush`, never by a word.
+(pub :: SEM_H_MACHDR Int)
+(pub fn (SEM_H_MACHDR)
+  22)
+
+; The contexts. EXPR is a body; TYPE is a type position, where an
+; uppercase name is a type and a lowercase name a type variable;
+; DATA is directly inside a `data`, so a nested form is a constructor
+; (CTOR) whose own nested forms are types; IMPORT and IMPLIST are the
+; module path and the imported-name list; the three HDR contexts are
+; the header lists of `fn`, `macro` and `lambda`; FORHDR the `(x k)`
+; of a `for`; LETLIST and LETPAIR the binding list of a `let` (or a
+; `parallel`) and one pair in it; RULE a rule of a `macro`, MACPAT
+; its pattern and MACPATIN a form nested in the pattern; EFFECTS the
+; effect list of a `handle`.
+(pub :: SEM_C_EXPR Int)
+(pub fn (SEM_C_EXPR)
+  0)
+
+(pub :: SEM_C_TYPE Int)
+(pub fn (SEM_C_TYPE)
+  1)
+
+(pub :: SEM_C_DATA Int)
+(pub fn (SEM_C_DATA)
+  2)
+
+(pub :: SEM_C_CTOR Int)
+(pub fn (SEM_C_CTOR)
+  3)
+
+(pub :: SEM_C_IMPORT Int)
+(pub fn (SEM_C_IMPORT)
+  4)
+
+(pub :: SEM_C_IMPLIST Int)
+(pub fn (SEM_C_IMPLIST)
+  5)
+
+(pub :: SEM_C_FNHDR Int)
+(pub fn (SEM_C_FNHDR)
+  6)
+
+(pub :: SEM_C_MACHDR Int)
+(pub fn (SEM_C_MACHDR)
+  7)
+
+(pub :: SEM_C_LAMHDR Int)
+(pub fn (SEM_C_LAMHDR)
+  8)
+
+(pub :: SEM_C_FORHDR Int)
+(pub fn (SEM_C_FORHDR)
+  9)
+
+(pub :: SEM_C_LETLIST Int)
+(pub fn (SEM_C_LETLIST)
+  10)
+
+(pub :: SEM_C_LETPAIR Int)
+(pub fn (SEM_C_LETPAIR)
+  11)
+
+(pub :: SEM_C_RULE Int)
+(pub fn (SEM_C_RULE)
+  12)
+
+(pub :: SEM_C_MACPAT Int)
+(pub fn (SEM_C_MACPAT)
+  13)
+
+(pub :: SEM_C_MACPATIN Int)
+(pub fn (SEM_C_MACPATIN)
+  14)
+
+(pub :: SEM_C_EFFECTS Int)
+(pub fn (SEM_C_EFFECTS)
+  15)
+
+; Whether `w` is one of the space-separated words in `set` -
+; `lexicon.ax`'s `lexIn`, which is private to it.
+(pub :: lspHlIn (-> String String Bool))
+(pub fn (lspHlIn w set)
+  (let (
+    (parts (strSplit set 32))
+    (mut i 0)
+    (mut hit false)
+  )
+    {
+      (while (< i (vecLen parts))
+        {
+          (if (strEq (vecGetStr parts i) w)
+            {
+              (set hit true)
+              0
+            }
+            0)
+          (set i (+ i 1))
+        })
+      hit
+    }))
+
+; The head code a word opens. The parser's own dispatch words, each
+; by the shape it gives the rest of the form; every other keyword is
+; SEM_H_KW, and a name is SEM_H_OTHER - a call, or a type application.
+(pub :: lspHlHeadCode (-> Int String Int))
+(pub fn (lspHlHeadCode st word)
+  (if (strEq word "import")
+    SEM_H_IMPORT
+    (if (strEq word "fn")
+      SEM_H_FN
+      (if (strEq word "data")
+        SEM_H_DATA
+        (if (strEq word "struct")
+          SEM_H_STRUCT
+          (if (|| (strEq word "macro") (strEq word "emacro"))
+            SEM_H_MACRO
+            (if (strEq word "type")
+              SEM_H_TYPE
+              (if (strEq word "subtype")
+                SEM_H_SUBTYPE
+                (if (strEq word "extern")
+                  SEM_H_EXTERN
+                  (if (strEq word "effect")
+                    SEM_H_EFFECT
+                    (lspHlHeadCodeMore st word)))))))))))
+
+(pub :: lspHlHeadCodeMore (-> Int String Int))
+(pub fn (lspHlHeadCodeMore st word)
+  (if (strEq word "let")
+    SEM_H_LET
+    (if (strEq word "lambda")
+      SEM_H_LAMBDA
+      (if (strEq word "mut")
+        SEM_H_MUT
+        (if (strEq word "set")
+          SEM_H_SET
+          (if (lspHlIn word "cast sizeof alignof")
+            SEM_H_CAST
+            (if (strEq word "region")
+              SEM_H_REGION
+              (if (strEq word "parallel")
+                SEM_H_PARALLEL
+                (if (strEq word "handle")
+                  SEM_H_HANDLE
+                  (if (|| (strEq word "for") (strEq word "syntax/for"))
+                    SEM_H_FOR
+                    (if (lspHlIsKeyword st word SEM_C_EXPR)
+                      SEM_H_KW
+                      SEM_H_OTHER)))))))))))
+
+; The context a form's OWN identifiers take once its head is known:
+; `import` names modules, `data` holds constructors, the type-shaped
+; declarations hold types, and a `fn`'s or a `macro`'s items are
+; expressions again. Anything else keeps what it inherited, which is
+; what `(-> A B)` inside a `::` and `(Maybe Int)` inside a
+; constructor need.
+(pub :: lspHlOwnCtx (-> Int Int Int))
+(pub fn (lspHlOwnCtx hc ctx)
+  (if (== hc SEM_H_IMPORT)
+    SEM_C_IMPORT
+    (if (== hc SEM_H_DATA)
+      SEM_C_DATA
+      (if (|| (== hc SEM_H_STRUCT) (|| (== hc SEM_H_SIG) (|| (== hc SEM_H_TYPE) (|| (== hc SEM_H_SUBTYPE) (|| (== hc SEM_H_EXTERN) (== hc SEM_H_EFFECT))))))
+        SEM_C_TYPE
+        (if (|| (== hc SEM_H_FN) (== hc SEM_H_MACRO))
+          SEM_C_EXPR
+          ctx)))))
+
+; The context a form NESTED in one of context `pctx` inherits: the
+; forms directly inside a `data` are constructors, whose own children
+; are types; an `import`'s nested list names imports; a header list's
+; children are expressions again (`(fn ((syntax/join tag T)) ...)`);
+; a `let`'s list holds pairs, and a pair's children are its value; a
+; form inside a macro pattern is more pattern.
+(pub :: lspHlInherit (-> Int Int))
+(pub fn (lspHlInherit pctx)
+  (if (== pctx SEM_C_DATA)
+    SEM_C_CTOR
+    (if (== pctx SEM_C_CTOR)
+      SEM_C_TYPE
+      (if (== pctx SEM_C_IMPORT)
+        SEM_C_IMPLIST
+        (if (|| (== pctx SEM_C_FNHDR) (|| (== pctx SEM_C_MACHDR) (|| (== pctx SEM_C_LAMHDR) (|| (== pctx SEM_C_FORHDR) (== pctx SEM_C_LETPAIR)))))
+          SEM_C_EXPR
+          (if (== pctx SEM_C_LETLIST)
+            SEM_C_LETPAIR
+            (if (|| (== pctx SEM_C_MACPAT) (== pctx SEM_C_MACPATIN))
+              SEM_C_MACPATIN
+              pctx)))))))
+
+; The context of a `(` opening as the k-th item after a head: the
+; header list of a `fn`, `macro`, `lambda` or `for` and the binding
+; list of a `let` are first; a `handle`'s effect list and a
+; `parallel`'s binding list are second (the body and the region name
+; come first); every later form inside a rules-shaped `macro` is a
+; rule, whose first form is its pattern and whose rest is the
+; template. Any other position inherits.
+(pub :: lspHlChildCtx (-> Int Int Int Int Int))
+(pub fn (lspHlChildCtx phc pstate pctx brace)
+  (if (== brace 1)
+    (lspHlInherit pctx)
+    (if (== pctx SEM_C_RULE)
+      (if (== pstate 0)
+        SEM_C_MACPAT
+        SEM_C_EXPR)
+      (if (== pstate 1)
+        (if (== phc SEM_H_FN)
+          SEM_C_FNHDR
+          (if (== phc SEM_H_MACRO)
+            SEM_C_MACHDR
+            (if (== phc SEM_H_LAMBDA)
+              SEM_C_LAMHDR
+              (if (== phc SEM_H_FOR)
+                SEM_C_FORHDR
+                (if (== phc SEM_H_LET)
+                  SEM_C_LETLIST
+                  (if (== phc SEM_H_CAST)
+                    SEM_C_TYPE
+                    (lspHlInherit pctx)))))))
+        (if (== pstate 2)
+          (if (== phc SEM_H_HANDLE)
+            SEM_C_EFFECTS
+            (if (== phc SEM_H_PARALLEL)
+              SEM_C_LETLIST
+              (if (== phc SEM_H_MACRO)
+                SEM_C_RULE
+                (lspHlInherit pctx))))
+          (if (&& (== phc SEM_H_MACRO) (> pstate 2))
+            SEM_C_RULE
+            (lspHlInherit pctx)))))))
+
+; Word `k` (0 head code, 1 state, 2 context) of the innermost open
+; form; with nothing open, a bare top-level atom reads as past any
+; head, in an expression.
+(pub :: lspHlTopAt (-> Int Int Int))
+(pub fn (lspHlTopAt st k)
+  (let (
+    (stack (memGetWordVec st 10))
+    (t (- (vecLen stack) 3))
+  )
+    (if (< t 0)
+      (if (== k 1)
+        2
+        0)
+      (vecGet stack (+ t k)))))
+
+; Open a form. The parent, if any, has now seen an item - a nested
+; form in head position is a head that is not an identifier, which
+; moves the parent past its first item; one after the head counts as
+; the item it is. A brace block has no head: its identifiers are
+; never in head position. A `macro` whose first item is a form is of
+; the header shape, and is marked so its template is not read as
+; rules.
+(pub :: lspHlPush (-> Int Int Int))
+(pub fn (lspHlPush st brace)
+  (let (
+    (stack (memGetWordVec st 10))
+    (t (- (vecLen stack) 3))
+  )
+    (let (
+      (phc (if (>= t 0)
+        (vecGet stack t)
+        SEM_H_NONE))
+      (pstate (if (>= t 0)
+        (vecGet stack (+ t 1))
+        2))
+      (pctx (if (>= t 0)
+        (vecGet stack (+ t 2))
+        SEM_C_EXPR))
+    )
+      (let ((ctx (lspHlChildCtx phc pstate pctx brace)))
+        {
+          (if (>= t 0)
+            {
+              (if (&& (== phc SEM_H_MACRO) (&& (== pstate 1) (== brace 0)))
+                {
+                  (vecSet stack t SEM_H_MACHDR)
+                  0
+                }
+                0)
+              (vecSet stack (+ t 1) (if (== pstate 0)
+                2
+                (+ pstate 1)))
+              0
+            }
+            0)
+          (vecPush stack SEM_H_NONE)
+          (vecPush stack (if (== brace 1)
+            2
+            0))
+          (vecPush stack ctx)
+          0
+        }))))
+
+; Close a form; an unbalanced closer closes nothing.
+(pub :: lspHlPop (-> Int Int))
+(pub fn (lspHlPop st)
+  (let ((stack (memGetWordVec st 10)))
+    (if (>= (vecLen stack) 3)
+      {
+        (vecPop stack)
+        (vecPop stack)
+        (vecPop stack)
+        0
+      }
+      0)))
+
+; The head of the innermost form is now known: its code, the state
+; past it, and the context it opens.
+(pub :: lspHlSetHead (-> Int Int Int))
+(pub fn (lspHlSetHead st hc)
+  (let (
+    (stack (memGetWordVec st 10))
+    (t (- (vecLen stack) 3))
+  )
+    (if (< t 0)
+      0
+      {
+        (vecSet stack t hc)
+        (vecSet stack (+ t 1) 1)
+        (vecSet stack (+ t 2) (lspHlOwnCtx hc (vecGet stack (+ t 2))))
+        0
+      })))
+
+; An item has followed the head.
+(pub :: lspHlNext (-> Int Int))
+(pub fn (lspHlNext st)
+  (let (
+    (stack (memGetWordVec st 10))
+    (t (- (vecLen stack) 3))
+  )
+    (if (if (>= t 0)
+      (>= (vecGet stack (+ t 1)) 1)
+      false)
+      {
+        (vecSet stack (+ t 1) (+ (vecGet stack (+ t 1)) 1))
+        0
+      }
+      0)))
+
+; ------------------------------------------------------------------
+; The request state, a sixteen-word block:
+;
+;   word 0   the document's text        word 8   the removed keywords
+;   word 1   the line index             word 9   (unused)
+;   word 2   the `data` array           word 10  the form stack
+;   word 3   previous token's line      word 11  occurrence index, or 0
+;   word 4   previous token's column    word 12  binder index, or 0
+;   word 5   the line of `lastOff`      word 13  declaration kinds, or 0
+;   word 6   the last offset converted  word 14  the keyword list
+;   word 7   its UTF-16 column          word 15  the document length
+;
+; Words 5-7 make the column conversion linear: a token's column is the
+; previous token's on the same line plus the units between them, so a
+; line of many tokens is walked once and not once per token.
+; ------------------------------------------------------------------
+(pub :: lspHlState (-> String (Vec Int) (Vec Int) Int))
+(pub fn (lspHlState src ix decls)
+  (let ((st (memAlloc 128)))
+    {
+      (memSetWord st 0 src)
+      (memSetWord st 1 ix)
+      (memSetWord st 2 jsonArr)
+      (memSetWord st 3 0)
+      (memSetWord st 4 0)
+      (memSetWord st 5 (- 0 1))
+      (memSetWord st 6 0)
+      (memSetWord st 7 0)
+      (memSetWord st 8 lspHlRemovedWords)
+      (memSetWord st 9 0)
+      (memSetWord st 10 vecNew)
+      (if (== (cast Int decls) 0)
+        {
+          (memSetWord st 11 0)
+          (memSetWord st 12 0)
+          (memSetWord st 13 0)
+        }
+        (let ((occs (lspNavOccurrences src decls)))
+          {
+            (memSetWord st 11 (lspHlOccIndex occs))
+            (memSetWord st 12 (lspHlBinderIndex occs))
+            (memSetWord st 13 (lspHlKinds decls))
+          }))
+      (memSetWord st 14 lspKeywords)
+      (memSetWord st 15 (strLen src))
+      st
+    }))
+
+; The words the parser names only to refuse (AX2004). Coloured as
+; keywords, and `deprecated`, so the dead form reads as one bounded
+; region rather than a call to nothing.
+(pub :: lspHlRemovedWords (Vec String))
+(pub fn (lspHlRemovedWords)
+  (let ((v vecNew))
+    {
+      (vecPush v "union")
+      (vecPush v "foreign")
+      (vecPush v "trait")
+      (vecPush v "impl")
+      (vecPush v "cond")
+      (vecPush v "begin")
+      (vecPush v "alloc")
+      (vecPush v "consume")
+      (vecPush v "define")
+      v
+    }))
+
+; ------------------------------------------------------------------
+; `textDocument/semanticTokens/full`.
+; ------------------------------------------------------------------
+(pub :: lspSemanticTokens (-> String Int))
+(pub fn (lspSemanticTokens src)
+  (let ((st (lspHlState src (lspLineIndex src) (lspNavParse src))))
+    {
+      (lspHlScan st)
+      (jsonObjPut jsonObj "data" (memGetWord st 2))
+    }))
+
+; ------------------------------------------------------------------
+; The indexes, each `fnIdxBuckets` slots of 0 or a Vec.
+; ------------------------------------------------------------------
+(pub :: lspHlBuckets (-> Int (Vec Int)))
+(pub fn (lspHlBuckets count)
+  (let (
+    (nb (fnIdxBuckets count))
+    (bs vecNew)
+    (mut i 0)
+  )
+    {
+      (while (< i nb)
+        {
+          (vecPush bs 0)
+          (set i (+ i 1))
+        })
+      bs
+    }))
+
+(pub :: lspHlBucketPut (-> (Vec Int) Int Int Int))
+(pub fn (lspHlBucketPut bs slot v)
+  {
+    (if (== (vecGet bs slot) 0)
+      {
+        (vecSet
+          bs
+          slot
+          (cast Int vecNew))
+        0
+      }
+      0)
+    (vecPush (vecGetVec bs slot) v)
+    0
+  })
+
+; Occurrences by the byte their span starts at. Spans never overlap,
+; so a start names one occurrence.
+(pub :: lspHlOccIndex (-> (Vec Int) (Vec Int)))
+(pub fn (lspHlOccIndex occs)
+  (let (
+    (bs (lspHlBuckets (vecLen occs)))
+    (mut i 0)
+  )
+    (let ((nb (vecLen bs)))
+      {
+        (while (< i (vecLen occs))
+          (let ((o (vecGet occs i)))
+            {
+              (if (!= (memGetWord o 1) 0)
+                (lspHlBucketPut bs (% (spanStart (memGetWord o 1)) nb) o)
+                0)
+              (set i (+ i 1))
+            }))
+        bs
+      })))
+
+(pub :: lspHlOccAt (-> Int Int Int))
+(pub fn (lspHlOccAt st off)
+  (if (== (memGetWord st 11) 0)
+    0
+    (let ((bs (memGetWordVec st 11)))
+      (let ((slot (vecGet bs (% off (vecLen bs)))))
+        (if (== slot 0)
+          0
+          (let (
+            (v (vecGetVec bs (% off (vecLen bs))))
+            (mut i 0)
+            (mut found 0)
+          )
+            {
+              (while (if (< i (vecLen v))
+                (== found 0)
+                false)
+                {
+                  (if (== (spanStart (memGetWord (vecGet v i) 1)) off)
+                    (set found (vecGet v i))
+                    0)
+                  (set i (+ i 1))
+                })
+              found
+            }))))))
+
+; Binder occurrences by their key, so a READ of a local learns what
+; kind of binder it refers to - the walk records the kind on the
+; binder alone - without `lspNavBinderOf`'s scan per reference.
+(pub :: lspHlBinderIndex (-> (Vec Int) (Vec Int)))
+(pub fn (lspHlBinderIndex occs)
+  (let (
+    (bs (lspHlBuckets (vecLen occs)))
+    (mut i 0)
+  )
+    (let ((nb (vecLen bs)))
+      {
+        (while (< i (vecLen occs))
+          (let ((o (vecGet occs i)))
+            {
+              (if (== (memGetWord o 2) NAV_BINDER)
+                (lspHlBucketPut bs (% (fnIdxHash (memGetWordStr o 3)) nb) o)
+                0)
+              (set i (+ i 1))
+            }))
+        bs
+      })))
+
+(pub :: lspHlBinderOf (-> Int String Int))
+(pub fn (lspHlBinderOf st key)
+  (if (== (memGetWord st 12) 0)
+    0
+    (let ((bs (memGetWordVec st 12)))
+      (let ((slot (vecGet bs (% (fnIdxHash key) (vecLen bs)))))
+        (if (== slot 0)
+          0
+          (let (
+            (v (vecGetVec bs (% (fnIdxHash key) (vecLen bs))))
+            (mut i 0)
+            (mut found 0)
+          )
+            {
+              (while (if (< i (vecLen v))
+                (== found 0)
+                false)
+                {
+                  (if (strEq (memGetWordStr (vecGet v i) 3) key)
+                    (set found (vecGet v i))
+                    0)
+                  (set i (+ i 1))
+                })
+              found
+            }))))))
+
+; This document's declarations by name - the outline's kinds plus
+; `type` aliases and `subtype`s, LAST WINS as `lspViewIdxFind`
+; resolves it, and a `::` signature where nothing else spells the
+; name - so a top-level key learns whether it is a `fn`, a type or a
+; macro in one bucket rather than one walk of the declaration list
+; per identifier.
+(pub :: lspHlKinds (-> (Vec Int) (Vec Int)))
+(pub fn (lspHlKinds decls)
+  (let (
+    (idx lspViewIdxNew)
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen decls))
+        (let ((d (vecGet decls i)))
+          {
+            (if (|| (lspNavIsNamedDecl d) (&& (== (nodeTag d) TAG_D_SIG) (&& (!= (nodeSpan d) 0) (== (lspViewIdxFind idx (nodeAName d)) 0))))
+              (lspViewIdxAdd idx (nodeAName d) d)
+              0)
+            (set i (+ i 1))
+          }))
+      idx
+    }))
+
+; ------------------------------------------------------------------
+; Emitting a token.
+; ------------------------------------------------------------------
+; One token over [s, e), which must not hold a line break. The column
+; tracking advances with every token so the next one's conversion
+; starts where this one ended.
+;
+; A `\r` at `e` is not part of the token. The line index and every
+; scanner here split on `\n` alone, so in a CRLF document a `;` line
+; and each piece of a multi-line string would run up to and including
+; the `\r` - one unit past the line a client that ends lines at
+; `\r\n` sees, on every comment of the file.
+(pub :: lspHlEmit (-> Int Int Int Int Int Int))
+(pub fn (lspHlEmit st s e0 ty mods)
+  (let ((e (lspHlTrimCr (memGetWordStr st 0) s e0)))
+    (if (<= e s)
+      0
+      (let (
+        (src (memGetWordStr st 0))
+        (ix (memGetWordVec st 1))
+      )
+        (let ((ln (lspLineOfIx ix s)))
+          {
+            (if (!= ln (memGetWord st 5))
+              {
+                (memSetWord st 5 ln)
+                (memSetWord st 6 (vecGet ix ln))
+                (memSetWord st 7 0)
+              }
+              0)
+            (let ((ch (+ (memGetWord st 7) (lspCharFrom src (memGetWord st 6) s))))
+              (let (
+                (out (memGetWord st 2))
+                (dl (- ln (memGetWord st 3)))
+              )
+                {
+                  (memSetWord st 6 s)
+                  (memSetWord st 7 ch)
+                  (jsonArrPush out (jsonNum dl))
+                  (jsonArrPush out (jsonNum (if (== dl 0)
+                    (- ch (memGetWord st 4))
+                    ch)))
+                  (jsonArrPush out (jsonNum (lspCharFrom src s e)))
+                  (jsonArrPush out (jsonNum ty))
+                  (jsonArrPush out (jsonNum mods))
+                  (memSetWord st 3 ln)
+                  (memSetWord st 4 ch)
+                  0
+                }))
+          })))))
+
+; The end of [s, e) with a trailing `\r` taken off. Only a token cut
+; at a `\n` can end in one, so identifiers and numbers are untouched.
+(pub :: lspHlTrimCr (-> String Int Int Int))
+(pub fn (lspHlTrimCr src s e)
+  (if (&& (> e s) (== (strByte src (- e 1)) 13))
+    (- e 1)
+    e))
+
+; A token that may span lines - a string, a block comment - as one
+; token per line, the empty pieces skipped.
+(pub :: lspHlEmitLines (-> Int Int Int Int Int Int))
+(pub fn (lspHlEmitLines st s e ty mods)
+  (let (
+    (src (memGetWordStr st 0))
+    (mut k s)
+  )
+    {
+      (while (< k e)
+        (let ((nl (findNewline src k e)))
+          {
+            (lspHlEmit st k nl ty mods)
+            (set k (+ nl 1))
+          }))
+      0
+    }))
+
+; A packed class, emitted.
+(pub :: lspHlEmitPacked (-> Int Int Int Int Int))
+(pub fn (lspHlEmitPacked st s e code)
+  (lspHlEmit st s e (% code 128) (/ code 128)))
+
+; ------------------------------------------------------------------
+; The scan. `lspFormEnd`'s order, for its reason: an identifier is
+; consumed whole before `'` is read as a char literal, and a `#` opens
+; a block only as `#|`. A `-` against a digit is a negative literal,
+; as `stepToken` lexes it, and is asked before the identifier rule
+; that would otherwise take the `-`. A literal counts as an item of
+; the form it sits in, so `(handle 0 (IO) h)` still finds its effect
+; list second.
+; ------------------------------------------------------------------
+(pub :: lspHlScan (-> Int Int))
+(pub fn (lspHlScan st)
+  (let (
+    (src (memGetWordStr st 0))
+    (n (memGetWord st 15))
+    (mut i 0)
+  )
+    {
+      (while (< i n)
+        (let ((ch (strByte src i)))
+          (if (== ch 34)
+            (let ((e (skipStringBody src (+ i 1) n)))
+              {
+                (lspHlEmitLines st i e SEM_STRING 0)
+                (lspHlNext st)
+                (set i e)
+              })
+            (if (== ch 59)
+              (let ((e (findNewline src i n)))
+                {
+                  (lspHlEmitPacked st i e (lspHlCommentClass src i n))
+                  (set i e)
+                })
+              (if (&& (== ch 35) (isBlockOpen src i n))
+                (let ((e (skipBlockComment src (+ i 2) n)))
+                  {
+                    (lspHlEmitLines st i e SEM_COMMENT 0)
+                    (set i e)
+                  })
+                (if (&& (== ch 39) (lspHlCharOpens src i n))
+                  (let ((e (skipCharBody src (+ i 1) n)))
+                    {
+                      (lspHlEmitLines st i e SEM_STRING 0)
+                      (lspHlNext st)
+                      (set i e)
+                    })
+                  (if (lspHlIsNumberStart src i n)
+                    (let ((e (lspHlNumberEnd src (+ i 1) n)))
+                      {
+                        (lspHlEmit st i e SEM_NUMBER 0)
+                        (lspHlNext st)
+                        (set i e)
+                      })
+                    (if (isIdentStart ch)
+                      (set i (lspHlIdent st i))
+                      (if (== ch 58)
+                        (set i (lspHlColon st i))
+                        (if (&& (== ch 64) (&& (< (+ i 1) n) (isIdentStart (strByte src (+ i 1)))))
+                          ; `@r`: a region annotation, one token with
+                          ; its `@`, as the lexer reads it.
+                          (let ((e (skipIdent src (+ i 2) n)))
+                            {
+                              (lspHlEmit st i e SEM_REGION 0)
+                              (lspHlNext st)
+                              (set i e)
+                            })
+                          {
+                            (if (== ch 40)
+                              (lspHlPush st 0)
+                              0)
+                            (if (== ch 123)
+                              (lspHlPush st 1)
+                              0)
+                            (if (|| (== ch 41) (== ch 125))
+                              (lspHlPop st)
+                              0)
+                            (set i (+ i 1))
+                          }))))))))))
+      0
+    }))
+
+; A `;` line: `;@axiom:` opens an AXTAG, which `scanAxtags` reads as
+; a claim about the declaration below it - a decorator, not a
+; comment; `;;` and `;;!` are doc comments, the prose hover and
+; `axiom doc` show; anything else is a note to the maintainer.
+(pub :: lspHlCommentClass (-> String Int Int Int))
+(pub fn (lspHlCommentClass src i n)
+  (if (&& (<= (+ i 8) n) (strEq (strSlice src (+ i 1) 7) "@axiom:"))
+    (lspHlPack SEM_DECORATOR 0)
+    (if (&& (< (+ i 1) n) (== (strByte src (+ i 1)) 59))
+      (lspHlPack SEM_COMMENT SEM_M_DOC)
+      (lspHlPack SEM_COMMENT 0))))
+
+; A `'` opens a char literal only where the lexer's `stepToken` says
+; one begins: when the byte after it exists and is not a space, `(` or
+; `[`. Any other `'` is a quote mark, which spells no token and falls
+; through to the punctuation arm. Read as an opener, it would send
+; the scan to the next `'` in the file or to EOF, and on the stray
+; quote mark of a half-typed line every line between would be painted
+; as a string.
+(pub :: lspHlCharOpens (-> String Int Int Bool))
+(pub fn (lspHlCharOpens src i n)
+  (if (>= (+ i 1) n)
+    false
+    (let ((b (strByte src (+ i 1))))
+      (&& (!= b 32) (&& (!= b 40) (!= b 91))))))
+
+(pub :: lspHlIsNumberStart (-> String Int Int Bool))
+(pub fn (lspHlIsNumberStart src i n)
+  (let ((ch (strByte src i)))
+    (if (isDigit ch)
+      true
+      (&& (== ch 45) (&& (< (+ i 1) n) (isDigit (strByte src (+ i 1))))))))
+
+; One past a number that begins before `from`: digits and `_`
+; separators, then `.digit` and more digits - `stepNumberFrom`'s rule,
+; where `1..2` is two integers around a range.
+(pub :: lspHlNumberEnd (-> String Int Int Int))
+(pub fn (lspHlNumberEnd src from n)
+  (let ((ep (skipDigits src from n)))
+    (if (&& (< (+ ep 1) n) (&& (== (strByte src ep) 46) (isDigit (strByte src (+ ep 1)))))
+      (skipDigits src (+ ep 1) n)
+      ep)))
+
+; A `::` in head position opens a signature; anywhere else on its own
+; - an effect operation, an extern item - it is the operator it is.
+; One between two identifiers is part of a qualified name and is
+; consumed by `lspHlIdent`, never seen here. A single `:` is
+; punctuation.
+(pub :: lspHlColon (-> Int Int Int))
+(pub fn (lspHlColon st i)
+  (let (
+    (src (memGetWordStr st 0))
+    (n (memGetWord st 15))
+  )
+    (if (if (< (+ i 1) n)
+      (== (strByte src (+ i 1)) 58)
+      false)
+      {
+        (if (== (lspHlTopAt st 1) 0)
+          (lspHlSetHead st SEM_H_SIG)
+          (lspHlNext st))
+        (lspHlEmit st i (+ i 2) SEM_OPERATOR 0)
+        (+ i 2)
+      }
+      (+ i 1))))
+
+; One past the end of the qualified chain beginning at `i` - segments
+; joined by `.` and `::`, as `lspNavQualSpan` reads them - or -1 when
+; no `::` joins it, in which case the identifier at `i` stands alone
+; and a `.` after it is a field access.
+(pub :: lspHlChainEnd (-> String Int Int Int))
+(pub fn (lspHlChainEnd src i n)
+  (let (
+    (mut c (skipIdent src (+ i 1) n))
+    (mut q 0)
+    (mut go 1)
+  )
+    {
+      (while (== go 1)
+        (if (&& (< (+ c 2) n) (&& (== (strByte src c) 58) (&& (== (strByte src (+ c 1)) 58) (isIdentStart (strByte src (+ c 2))))))
+          {
+            (set c (skipIdent src (+ c 3) n))
+            (set q 1)
+          }
+          (if (&& (< (+ c 1) n) (&& (== (strByte src c) 46) (isIdentStart (strByte src (+ c 1)))))
+            (set c (skipIdent src (+ c 2) n))
+            (set go 0))))
+      (if (== q 1)
+        c
+        (- 0 1))
+    }))
+
+; An identifier at `i`, or a qualified chain: every segment before the
+; last is a namespace, and the last is classified as the one
+; occurrence NAV recorded for the chain - under the last segment's
+; span, which is where `lspNavQualSpan` puts it. A lone identifier
+; followed by `.name` segments is a field access, each segment a
+; property - or a dotted module path, each segment a namespace, under
+; an `import`. Answers where the scan continues.
+(pub :: lspHlIdent (-> Int Int Int))
+(pub fn (lspHlIdent st i)
+  (let (
+    (src (memGetWordStr st 0))
+    (n (memGetWord st 15))
+  )
+    (let (
+      (e (skipIdent src (+ i 1) n))
+      (c (lspHlChainEnd src i n))
+    )
+      (if (< c 0)
+        {
+          (lspHlWord st i e)
+          (lspHlDots st e)
+        }
+        (let (
+          (mut s i)
+          (mut go 1)
+        )
+          {
+            (while (== go 1)
+              (let ((se (skipIdent src (+ s 1) n)))
+                (if (>= se c)
+                  {
+                    (lspHlWord st s se)
+                    (set go 0)
+                  }
+                  {
+                    (lspHlEmit st s se SEM_NAMESPACE 0)
+                    (set s (if (== (strByte src se) 46)
+                      (+ se 1)
+                      (+ se 2)))
+                  })))
+            c
+          })))))
+
+; The `.name` segments after an identifier ending at `e`, each a
+; property (a field read) or, under an `import`, a namespace.
+; Answers where the scan continues.
+(pub :: lspHlDots (-> Int Int Int))
+(pub fn (lspHlDots st e)
+  (let (
+    (src (memGetWordStr st 0))
+    (n (memGetWord st 15))
+    (ty (if (== (lspHlTopAt st 2) SEM_C_IMPORT)
+      SEM_NAMESPACE
+      SEM_PROPERTY))
+    (mut k e)
+  )
+    {
+      (while (&& (< (+ k 1) n) (&& (== (strByte src k) 46) (isIdentStart (strByte src (+ k 1)))))
+        (let ((se (skipIdent src (+ k 2) n)))
+          {
+            (lspHlEmit st (+ k 1) se ty 0)
+            (set k se)
+          }))
+      k
+    }))
+
+; One identifier: classified in the form it sits in, and then the form
+; moves on - a `pub` leaves the head still to come, any other head
+; word opens its context, and an item after the head is counted.
+(pub :: lspHlWord (-> Int Int Int Int))
+(pub fn (lspHlWord st s e)
+  (let (
+    (src (memGetWordStr st 0))
+    (state (lspHlTopAt st 1))
+  )
+    (let ((word (strSlice src s (- e s))))
+      {
+        (lspHlClassify
+          st
+          s
+          e
+          word
+          (== state 0)
+          (lspHlTopAt st 0)
+          state
+          (lspHlTopAt st 2))
+        (if (== state 0)
+          (if (strEq word "pub")
+            0
+            (lspHlSetHead st (lspHlHeadCode st word)))
+          (lspHlNext st))
+        0
+      })))
+
+; The head keywords the parser dispatches on, plus the words it reads
+; at the head of an inner form: `mut` before a binder or a field, the
+; `cast`/`sizeof`/`alignof` family, the `syntax/*` query vocabulary
+; and `decl` of a template, and `literals` inside a macro's rules.
+(pub :: lspHlIsKeyword (-> Int String Int Bool))
+(pub fn (lspHlIsKeyword st word ctx)
+  (if (lspHlIn word "mut cast sizeof alignof decl")
+    true
+    (if (strStartsWith word "syntax/")
+      true
+      (if (&& (== ctx SEM_C_RULE) (strEq word "literals"))
+        true
+        (== (strVecHas (memGetWordVec st 14) word) 1)))))
+
+; Spelled entirely of operator bytes: `+`, `==`, `>=`, `&&`, `->`.
+; Asked before any lookup and in any position, because an operator
+; passed as an argument is still an operator.
+(pub :: lspHlIsOpWord (-> String Int Int Bool))
+(pub fn (lspHlIsOpWord src s e)
+  (let (
+    (mut i s)
+    (mut ok true)
+  )
+    {
+      (while (&& ok (< i e))
+        {
+          (if (lspHlIsOpByte (strByte src i))
+            0
+            {
+              (set ok false)
+              0
+            })
+          (set i (+ i 1))
+        })
+      ok
+    }))
+
+(pub :: lspHlIsOpByte (-> Int Bool))
+(pub fn (lspHlIsOpByte b)
+  (|| (== b 43) (|| (== b 45) (|| (== b 42) (|| (== b 47) (|| (== b 37) (|| (== b 60) (|| (== b 62) (|| (== b 61) (|| (== b 33) (|| (== b 38) (|| (== b 124) (|| (== b 94) (== b 126))))))))))))))
+
+(pub :: lspHlIsUpper (-> Int Bool))
+(pub fn (lspHlIsUpper b)
+  (&& (>= b 65) (<= b 90)))
+
+; In a type position: an uppercase name is a type, a builtin one from
+; the library; a lowercase name is a type variable.
+(pub :: lspHlTypeClass (-> String Int))
+(pub fn (lspHlTypeClass word)
+  (if (lspHlIsUpper (strByte word 0))
+    (lspHlPack SEM_TYPE (if (strEq (lexKind word) "type")
+      SEM_M_LIB
+      0))
+    (lspHlPack SEM_TYPEPARAM 0)))
+
+; An effect name: a built-in one from the library.
+(pub :: lspHlEffectClass (-> String Int Int))
+(pub fn (lspHlEffectClass word mods)
+  (lspHlPack SEM_EFFECT (+ mods (if (strEq (lexKind word) "effect")
+    SEM_M_LIB
+    0))))
+
+(pub :: lspHlIsTypeCtx (-> Int Bool))
+(pub fn (lspHlIsTypeCtx ctx)
+  (|| (== ctx SEM_C_TYPE) (|| (== ctx SEM_C_CTOR) (== ctx SEM_C_DATA))))
+
+; ------------------------------------------------------------------
+; Classification, in the order the questions cost and decide:
+;
+;   1. `_` is nothing; `true`/`false` are library keywords; a word
+;      the parser refuses at the head is a deprecated keyword, one it
+;      dispatches on a keyword; `in`/`by` inside a `for` and
+;      `is`/`range` inside a `subtype` are keywords off the head;
+;   2. an operator spelling is an operator, from the library when the
+;      checker's builtin table knows it;
+;   3. the first item after `cast`, `sizeof` or `alignof` is a type,
+;      asked before the walk's record because the parser reads that
+;      position as a variable and the walk records a read of it;
+;   4. an identifier the walk recorded is what its key says;
+;   5. everything else is read from the form around it.
+; ------------------------------------------------------------------
+(pub :: lspHlClassify (-> Int Int Int String Bool Int Int Int Int))
+(pub fn (lspHlClassify st s e word head hc state ctx)
+  (if (strEq word "_")
+    0
+    (if (|| (strEq word "true") (strEq word "false"))
+      (lspHlEmit st s e SEM_KEYWORD SEM_M_LIB)
+      (if (&& head (== (strVecHas (memGetWordVec st 8) word) 1))
+        (lspHlEmit st s e SEM_KEYWORD SEM_M_DEPRECATED)
+        (if (|| (&& head (lspHlIsKeyword st word ctx)) (|| (&& (== hc SEM_H_FOR) (lspHlIn word "in by")) (&& (== hc SEM_H_SUBTYPE) (lspHlIn word "is range"))))
+          (lspHlEmit st s e SEM_KEYWORD 0)
+          (if (lspHlIsOpWord (memGetWordStr st 0) s e)
+            (lspHlEmit st s e SEM_OPERATOR (if (!= (lspShapeBuiltinRes word) 0)
+              SEM_M_LIB
+              0))
+            (if (&& (== state 1) (== hc SEM_H_CAST))
+              (lspHlEmitPacked st s e (lspHlTypeClass word))
+              (let ((o (lspHlOccAt st s)))
+                (lspHlEmitPacked st s e (if (!= o 0)
+                  (lspHlOccClass st o word head ctx)
+                  (lspHlFormClass st s e word head hc state ctx)))))))))))
+
+; What an occurrence's key says. A local is a parameter or a variable
+; by its binder's kind, declared at its binder, modified at a `set`,
+; readonly at the binder of a `let` that is not `mut`; a name this
+; document does not declare is a type or a type variable in a type
+; position (from the library when builtin), a constructor when
+; uppercase in an expression, a function when called and a variable
+; otherwise; an effect is an effect; a constructor key is an enum
+; member; and a declaration's key answers by the kind of declaration
+; it names.
+(pub :: lspHlOccClass (-> Int Int String Bool Int Int))
+(pub fn (lspHlOccClass st o word head ctx)
+  (let (
+    (key (memGetWordStr o 3))
+    (role (memGetWord o 2))
+  )
+    (let ((b0 (if (> (strLen key) 0)
+      (strByte key 0)
+      0)))
+      (if (|| (== b0 64) (== b0 126))
+        (lspHlLocalClass st o role key)
+        (if (== b0 63)
+          (if (lspHlIsTypeCtx ctx)
+            (lspHlTypeClass word)
+            (if (lspHlIsUpper (strByte word 0))
+              (lspHlPack SEM_ENUM 0)
+              (lspHlPack (if head
+                SEM_FUNCTION
+                SEM_VARIABLE) 0)))
+          (if (== b0 33)
+            (lspHlEffectClass word 0)
+            (if (match (strFindByte key 35 0)
+              ((None) false)
+              ((Some _) true))
+              (lspHlPack SEM_ENUM (if (== role NAV_DECL)
+                SEM_M_DECL
+                0))
+              (lspHlDeclClass st key role head))))))))
+
+(pub :: lspHlLocalClass (-> Int Int Int String Int))
+(pub fn (lspHlLocalClass st o role key)
+  (let ((b (if (== role NAV_BINDER)
+    o
+    (lspHlBinderOf st key))))
+    (let ((bkind (if (== b 0)
+      0
+      (memGetWord b 4))))
+      (lspHlPack
+        (if (|| (== bkind NAV_B_PARAM) (== bkind NAV_B_LAMBDA))
+          SEM_PARAMETER
+          SEM_VARIABLE)
+        (if (== role NAV_BINDER)
+          (+ SEM_M_DECL (if (&& (== bkind NAV_B_LET) (lspNavNot (lspHlMutBefore (memGetWordStr st 0) (spanStart (memGetWord b 1)))))
+            SEM_M_READONLY
+            0))
+          (if (== role NAV_WRITE)
+            SEM_M_MOD
+            0))))))
+
+; Whether the binder at `s` is written `(mut name ...)`: the word
+; before it, past blanks, is `mut` and nothing identifier-shaped
+; precedes that. The tree's TAG_E_LET / TAG_E_LETM distinction is not
+; on the occurrence, and the bytes carry it.
+(pub :: lspHlMutBefore (-> String Int Bool))
+(pub fn (lspHlMutBefore src s)
+  (let ((mut p (- s 1)))
+    {
+      (while (if (>= p 0)
+        (lspIsBlank (strByte src p))
+        false)
+        (set p (- p 1)))
+      (if (< p 2)
+        false
+        (if (&& (== (strByte src (- p 2)) 109) (&& (== (strByte src (- p 1)) 117) (== (strByte src p) 116)))
+          (if (>= (- p 3) 0)
+            (lspNavNot (isIdentChar (strByte src (- p 3))))
+            true)
+          false))
+    }))
+
+; A top-level key by the kind of declaration it names: a `fn` or its
+; signature is a function, `definition` at the `fn` itself; a macro
+; a macro; a type declaration a type; a name the kinds index does not
+; hold - a key nothing declares under that spelling - reads as a call
+; or a variable by position. The declaration's own name carries
+; `declaration`.
+(pub :: lspHlDeclClass (-> Int String Int Bool Int))
+(pub fn (lspHlDeclClass st key role head)
+  (let (
+    (d (if (== (memGetWord st 13) 0)
+      0
+      (lspViewIdxFind (memGetWordVec st 13) key)))
+    (declm (if (|| (== role NAV_DECL) (== role NAV_DECL_SIG))
+      SEM_M_DECL
+      0))
+  )
+    (if (== d 0)
+      (lspHlPack (if (|| (== role NAV_DECL_SIG) head)
+        SEM_FUNCTION
+        SEM_VARIABLE) declm)
+      (let ((tag (nodeTag d)))
+        (if (|| (== tag TAG_D_FN) (== tag TAG_D_SIG))
+          (lspHlPack SEM_FUNCTION (+ declm (if (&& (== tag TAG_D_FN) (== role NAV_DECL))
+            SEM_M_DEFN
+            0)))
+          (if (== tag TAG_D_MACRO)
+            (lspHlPack SEM_MACRO declm)
+            (if (lspNavIsTypeTag tag)
+              (lspHlPack SEM_TYPE declm)
+              (lspHlPack (if head
+                SEM_FUNCTION
+                SEM_VARIABLE) declm))))))))
+
+; What the form says about an identifier the walk did not record.
+; Import paths are namespaces and an import list names functions and
+; types from elsewhere; a `handle`'s list names effects; a name
+; before a single `:` is a field; the header lists declare their
+; function, macro or parameters, a macro pattern its macro and its
+; binders; the first item after `data`, `struct`, `type`, `subtype`,
+; `macro`, `effect`, `::` or `fn` is the declared name, after
+; `region` or `parallel` the region, after `mut` or `for` a binder,
+; after `set` the written variable; a `let` pair's head is its
+; binder, readonly; a constructor form's head is a constructor when
+; uppercase and the type variable list when not; in a type, uppercase
+; is a type and lowercase a type variable, except an operation or an
+; extern item before a `::` and the `symbol` clause of an extern; and
+; in an expression an uppercase name is a constructor, a lowercase
+; head a call and the rest variables.
+(pub :: lspHlFormClass (-> Int Int Int String Bool Int Int Int Int))
+(pub fn (lspHlFormClass st s e word head hc state ctx)
+  (let ((src (memGetWordStr st 0)))
+    (if (== ctx SEM_C_IMPORT)
+      (lspHlPack SEM_NAMESPACE 0)
+      (if (== ctx SEM_C_IMPLIST)
+        (lspHlPack (if (lspHlIsUpper (strByte word 0))
+          SEM_TYPE
+          SEM_FUNCTION) 0)
+        (if (== ctx SEM_C_EFFECTS)
+          (lspHlEffectClass word 0)
+          (if (lspNavColonAfter src (mkSpan s e))
+            (lspHlPack SEM_PROPERTY (if (lspHlIsTypeCtx ctx)
+              SEM_M_DECL
+              0))
+            (if (== ctx SEM_C_FNHDR)
+              (lspHlPack (if head
+                SEM_FUNCTION
+                SEM_PARAMETER) (if head
+                (+ SEM_M_DECL SEM_M_DEFN)
+                SEM_M_DECL))
+              (if (|| (== ctx SEM_C_MACHDR) (== ctx SEM_C_MACPAT))
+                (lspHlPack (if head
+                  SEM_MACRO
+                  SEM_PARAMETER) SEM_M_DECL)
+                (if (|| (== ctx SEM_C_LAMHDR) (== ctx SEM_C_MACPATIN))
+                  (lspHlPack SEM_PARAMETER SEM_M_DECL)
+                  (if (== ctx SEM_C_FORHDR)
+                    (lspHlPack SEM_VARIABLE SEM_M_DECL)
+                    (lspHlFormClassMore src e word head hc state ctx)))))))))))
+
+(pub :: lspHlFormClassMore (-> String Int String Bool Int Int Int Int))
+(pub fn (lspHlFormClassMore src e word head hc state ctx)
+  (if (&& (== ctx SEM_C_LETPAIR) head)
+    (lspHlPack SEM_VARIABLE (+ SEM_M_DECL SEM_M_READONLY))
+    (if (&& (== state 1) (|| (== hc SEM_H_MUT) (== hc SEM_H_FOR)))
+      (lspHlPack SEM_VARIABLE SEM_M_DECL)
+      (if (&& (== state 1) (== hc SEM_H_SET))
+        (lspHlPack SEM_VARIABLE SEM_M_MOD)
+        (if (&& (== state 1) (|| (== hc SEM_H_REGION) (== hc SEM_H_PARALLEL)))
+          (lspHlPack SEM_REGION 0)
+          (lspHlFormClassDecl src e word head hc state ctx))))))
+
+(pub :: lspHlFormClassDecl (-> String Int String Bool Int Int Int Int))
+(pub fn (lspHlFormClassDecl src e word head hc state ctx)
+  (if (&& (== state 1) (|| (== hc SEM_H_DATA) (|| (== hc SEM_H_STRUCT) (|| (== hc SEM_H_TYPE) (== hc SEM_H_SUBTYPE)))))
+    (lspHlPack SEM_TYPE SEM_M_DECL)
+    (if (&& (== state 1) (== hc SEM_H_EFFECT))
+      (lspHlPack SEM_EFFECT SEM_M_DECL)
+      (if (&& (== state 1) (== hc SEM_H_MACRO))
+        (lspHlPack SEM_MACRO SEM_M_DECL)
+        (if (&& (== state 1) (== hc SEM_H_SIG))
+          (lspHlPack SEM_FUNCTION SEM_M_DECL)
+          (if (&& (== state 1) (== hc SEM_H_FN))
+            (lspHlPack SEM_FUNCTION (+ SEM_M_DECL SEM_M_DEFN))
+            (if (== ctx SEM_C_CTOR)
+              (if head
+                (if (lspHlIsUpper (strByte word 0))
+                  (lspHlPack SEM_ENUM SEM_M_DECL)
+                  (lspHlPack SEM_TYPEPARAM 0))
+                (lspHlTypeClass word))
+              (if (lspHlIsTypeCtx ctx)
+                (if (&& head (lspHlColonColonAt src e))
+                  (lspHlPack SEM_FUNCTION SEM_M_DECL)
+                  (if (&& head (strEq word "symbol"))
+                    (lspHlPack SEM_PROPERTY 0)
+                    (lspHlTypeClass word)))
+                (if (lspHlIsUpper (strByte word 0))
+                  (lspHlPack SEM_ENUM 0)
+                  (lspHlPack (if head
+                    SEM_FUNCTION
+                    SEM_VARIABLE) 0))))))))))
+
+; Whether the first non-blank byte at or after `e` begins a `::` -
+; what makes the head before it an effect operation or an extern
+; item rather than a type.
+(pub :: lspHlColonColonAt (-> String Int Bool))
+(pub fn (lspHlColonColonAt src e)
+  (let (
+    (n (strLen src))
+    (k (lspNavSkipBlank src e (strLen src)))
+  )
+    (&& (< (+ k 1) n) (&& (== (strByte src k) 58) (== (strByte src (+ k 1)) 58)))))
+
+; ==================================================================
+; END SECTION HL
 ; ==================================================================
 ; ------------------------------------------------------------------
 ; The loop
