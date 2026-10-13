@@ -5370,6 +5370,620 @@ shutil.rmtree(CADIR2, ignore_errors=True)
 # END SECTION FIX TESTS
 # =====================================================================
 
+# =====================================================================
+# SECTION HL TESTS: semantic tokens.
+# =====================================================================
+# `textDocument/semanticTokens/full` over the NAV documents - the
+# hover document, NavMain, NavUser, their helpers and NavBroken - and
+# one document written HERE carrying the roles those lack: an
+# `effect` and a `handle`, a rules-shaped `emacro`, a `subtype`, a
+# `type` alias, a `region`, `@r` annotations, a `for`, a `cast`, a
+# qualified call, `true`, a string with an escape, a char, a float and
+# a negative literal. Every obligation is DERIVED from the documents'
+# bytes by a second reading of them - a string-and-comment mask and
+# the regular expressions below - never written down as a token:
+#
+#   - every `(` followed by a head keyword the parser dispatches on
+#     (KEYWORDS, derived from parser.ax above) is a `keyword` token at
+#     exactly that position, `deprecated` for a word the parser only
+#     refuses;
+#   - every `(:: name` subject is `function` + `declaration`, every
+#     `(fn (name p...)` name `function` + `declaration` + `definition`
+#     and each of its parameters `parameter` + `declaration`;
+#   - every constructor of a `(data ...)` is `enumMember` +
+#     `declaration`, the type's own name `type` + `declaration`, and a
+#     `(Ctor` inside a `fn` body `enumMember` without it;
+#   - every `(struct` field is `property` + `declaration`;
+#   - every `;;` line is `comment` + `documentation`, every `;@axiom:`
+#     line `decorator`, every other `;` line `comment`;
+#   - every string and char literal is `string`, every number
+#     `number`, every builtin type name `type` + `defaultLibrary`,
+#     every `(import` path `namespace`;
+#   - a `handle`'s effects are `effect` (`defaultLibrary` for a
+#     built-in one), an `effect`'s name `effect` + `declaration`,
+#     `(region r` and `@r` are `region`, a macro's name and its rule
+#     heads `macro` + `declaration`, a `(set x` target `variable` +
+#     `modification`, a `(mut x` binder `variable` + `declaration`
+#     without `readonly`, an operator head `operator` +
+#     `defaultLibrary`.
+#
+# The protocol's delta array is decoded by a second implementation,
+# and every token of every answer is held to what a client depends on:
+# inside the legend, non-empty, inside its line, sorted, never
+# overlapping. The legend is read off `self_host/lsp.ax`'s own two
+# lists and must equal what the server advertises. A document that
+# does not parse answers the same keywords, literals and comments as
+# its parsing twin, and the read of a parameter falls from `parameter`
+# to `variable` there - the witness that the parsing document's answer
+# came from resolution and not from spelling.
+HL_DIR = tempfile.mkdtemp(prefix="axiom-hl-")
+HL = r"""(import RefHelper)
+
+;;! Every role the legend names, in one document.
+; A maintainer's note beside a doc line.
+#| a block
+   comment |#
+(effect Tick
+  (tick :: (-> Int Int)))
+
+;; An expression macro of one rule.
+(pub emacro twiceOf
+  ((twiceOf e) (+ e e)))
+
+(pub data Shape (Dot) (Circle Int))
+
+(pub struct Box (top : Shape) (mut n : Int))
+
+(pub type Shapes = (Vec Shape))
+
+(pub subtype Small is Int range 0..10)
+
+;@axiom:restrict(no-foreign)
+(pub :: area (-> Shape Int Int))
+(pub fn (area s k)
+  (let ((base 3) (mut acc 0))
+    {
+      (set acc (+ base k))
+      (for i in 0..3
+        (set acc (+ acc i)))
+      (match s
+        ((Dot) acc)
+        ((Circle r) (twice (+ r acc))))
+    }))
+
+(:: left (-> (Pair @r) (String @r)))
+(fn (left p)
+  (match p
+    ((Pair a b) a)))
+
+(data Pair
+  (Pair String String))
+
+(:: inRegion (-> Int Int))
+(fn (inRegion n)
+  (region r (+ n 1)))
+
+(:: handled Int)
+(fn (handled)
+  (handle (area (Dot) 1) (Tick Alloc) (lambda (v) 0)))
+
+(:: main Int)
+(fn (main)
+  (+ (area (Circle 4) -2)
+     (+ (RefHelper::twice (cast Int (cast Small 6)))
+        (+ (if true (twiceOf 1) 0) ((lambda (lx) lx) 5)))))
+
+(:: greet String)
+(fn (greet) "hi\"there")
+
+(:: ch Char)
+(fn (ch) 'x')
+
+(:: pi Float)
+(fn (pi) 3.25)
+"""
+# A document the parser refuses outright: `begin` is AX2004, so the
+# whole answer comes from the bytes, and the dead head is `deprecated`.
+HL_DEAD = "(fn (f x)\n  (begin x 1))\n"
+HL_BROKEN = HL + "\n("
+for _name, _text in (("RefHelper.ax", REF_HELPER), ("NavHelper.ax", NAVHELPER),
+                     ("NavMain.ax", NAV_MAIN)):
+    open(os.path.join(HL_DIR, _name), "w", encoding="utf-8").write(_text)
+
+
+def hl_uri(name):
+    return "file://" + os.path.join(HL_DIR, name)
+
+
+# Every document, with the one that parses it is a twin of (or None).
+HL_DOCS = [
+    ("hl.ax", HL, None),
+    ("nav.ax", NAV, None),
+    ("NavMain.ax", NAV_MAIN, None),
+    ("NavUser.ax", NAV_USER, None),
+    ("RefHelper.ax", REF_HELPER, None),
+    ("NavBroken.ax", NAV_BROKEN, "NavMain.ax"),
+    ("hl-broken.ax", HL_BROKEN, "hl.ax"),
+    ("hl-dead.ax", HL_DEAD, None),
+]
+HL_PARSING = {"hl.ax", "nav.ax", "NavMain.ax", "NavUser.ax", "RefHelper.ax"}
+
+# The legend, read off the server's source: the two lists
+# `lspSemanticTypes` and `lspSemanticModifiers` push, in order. The
+# advertised legend must EQUAL them, and every name an obligation
+# below uses must be one of them.
+
+
+def hl_source_list(fn_name):
+    m = re.search(r"\(pub fn \(" + fn_name + r"\)\n  \(let \(\(v vecNew\)\)\n    \{\n"
+                  r"((?:      \(vecPush v \"[^\"]+\"\)\n)+)", _lsrc)
+    if not m:
+        sys.exit(f"FAIL: could not read `{fn_name}` out of self_host/lsp.ax - the "
+                 f"legend check would compare the server against nothing")
+    return re.findall(r'\(vecPush v "([^"]+)"\)', m.group(1))
+
+
+HL_TYPES = hl_source_list("lspSemanticTypes")
+HL_MODS = hl_source_list("lspSemanticModifiers")
+if len(HL_TYPES) < 10 or len(HL_MODS) < 4 or len(set(HL_TYPES)) != len(HL_TYPES):
+    sys.exit(f"FAIL: lsp.ax's legend reads as {HL_TYPES} / {HL_MODS} - under the floor of "
+             f"10 types and 4 modifiers, or with a name twice")
+HT = {n: i for i, n in enumerate(HL_TYPES)}
+HM = {n: 1 << i for i, n in enumerate(HL_MODS)}
+for _need in ("keyword", "function", "parameter", "variable", "enumMember", "type",
+              "property", "comment", "decorator", "string", "number", "namespace",
+              "effect", "region", "macro", "operator"):
+    if _need not in HT:
+        sys.exit(f"FAIL: the legend in lsp.ax has no `{_need}` type; the obligations "
+                 f"below name it")
+for _need in ("declaration", "definition", "readonly", "modification", "deprecated",
+              "documentation", "defaultLibrary"):
+    if _need not in HM:
+        sys.exit(f"FAIL: the legend in lsp.ax has no `{_need}` modifier")
+
+# The lexicon's builtin type and effect names, read off lexicon.ax's
+# `lexKind` table: the `type` row and the `effect` row.
+_lexsrc = open(os.path.join(REPO, "self_host", "lexicon.ax"), encoding="utf-8").read()
+
+
+def hl_lexicon_row(kind):
+    m = re.search(r'\(if \(lexIn w "([^"]+)"\)\n\s+"' + kind + '"', _lexsrc)
+    if not m:
+        sys.exit(f"FAIL: could not read the `{kind}` row of lexKind out of lexicon.ax")
+    return set(m.group(1).split())
+
+
+HL_BUILTIN_TYPES = {w for w in hl_lexicon_row("type") if w[0].isupper()}
+HL_BUILTIN_EFFECTS = hl_lexicon_row("effect")
+if len(HL_BUILTIN_TYPES) < 5 or len(HL_BUILTIN_EFFECTS) < 3:
+    sys.exit("FAIL: the lexicon's type or effect row is shorter than this file assumes")
+# The words the parser names only to refuse: lspKeywords offers five
+# of them, and `union`/`foreign`/`trait`/`impl` are the four the
+# completion test subtracts.
+HL_REMOVED = {"union", "foreign", "trait", "impl", "cond", "begin", "alloc",
+              "consume", "define"}
+HL_IDENT = r"[A-Za-z_][A-Za-z0-9_'!*+/<>=%&|^-]*"
+
+
+def hl_kinds(src):
+    """One character per index of `src`: `c` for code, `;` inside a
+    comment (line or block), `s` inside a string literal, `'` inside a
+    char literal. The second reading of the lexer's skips."""
+    out = ["c"] * len(src)
+    i, n = 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == ";":
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            for k in range(i, j):
+                out[k] = ";"
+            i = j
+        elif src.startswith("#|", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if src.startswith("#|", j):
+                    depth, j = depth + 1, j + 2
+                elif src.startswith("|#", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            for k in range(i, j):
+                out[k] = ";"
+            i = j
+        elif c == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                j += 2 if src[j] == "\\" else 1
+            for k in range(i, min(j + 1, n)):
+                out[k] = "s"
+            i = j + 1
+        elif c == "'" and i + 1 < n and src[i + 1] not in " ([" and \
+                (i == 0 or not re.match(r"[A-Za-z0-9_]", src[i - 1])):
+            j = i + 3 if src[i + 1] == "\\" else i + 2
+            for k in range(i, min(j + 1, n)):
+                out[k] = "'"
+            i = j + 1
+        else:
+            i += 1
+    return "".join(out)
+
+
+def hl_form_end(src, kinds, o):
+    """One past the `)` matching the `(` at `o`, counting only code."""
+    depth = 0
+    for i in range(o, len(src)):
+        if kinds[i] != "c":
+            continue
+        if src[i] in "({":
+            depth += 1
+        elif src[i] in ")}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return len(src)
+
+
+def hl_children(src, kinds, o):
+    """The byte of every `(` directly inside the form at `o`."""
+    out, depth = [], 0
+    for i in range(o, hl_form_end(src, kinds, o)):
+        if kinds[i] != "c":
+            continue
+        if src[i] in "({":
+            if depth == 1 and src[i] == "(":
+                out.append(i)
+            depth += 1
+        elif src[i] in ")}":
+            depth -= 1
+    return out
+
+
+def hl_pos(src, idx, text):
+    """(line, UTF-16 column, UTF-16 length) of `text` at byte `idx`."""
+    ln, line, col = line_of(src, idx)
+    return ln, u16(line[:col]), u16(text)
+
+
+def hl_want(obs, what, src, idx, text, ty, need=0, forbid=0):
+    """One obligation. Two derivations landing on one position must
+    agree - `pub` is both a head keyword and the word before one - and
+    the first is kept; a disagreement is a bug in this file."""
+    ob = (what, *hl_pos(src, idx, text), HT[ty], need, forbid)
+    for o in obs:
+        if o[1:3] == ob[1:3]:
+            if o[3:] != ob[3:]:
+                sys.exit(f"FAIL: the derivations disagree at {ob[1]}:{ob[2]}: {o[0]} and {what}")
+            return
+    obs.append(ob)
+
+
+def hl_obligations(src):
+    """Every (what, line, col, length, type, needed bits, forbidden
+    bits) the bytes of `src` imply."""
+    kinds = hl_kinds(src)
+    obs = []
+    lines = src.split("\n")
+    code = lambda i: kinds[i] == "c"  # noqa: E731
+    DECL, DEFN, RO, MOD = HM["declaration"], HM["definition"], HM["readonly"], HM["modification"]
+    DEP, DOC, LIB = HM["deprecated"], HM["documentation"], HM["defaultLibrary"]
+    # keywords at the head of a form, `pub` before one
+    for m in re.finditer(r"\((?:pub\s+)?(" + "|".join(map(re.escape, KEYWORDS)) + r")(?=[\s()])", src):
+        if code(m.start(1)):
+            w = m.group(1)
+            hl_want(obs, f"keyword `{w}`", src, m.start(1), w, "keyword",
+                    DEP if w in HL_REMOVED else 0, 0 if w in HL_REMOVED else DEP)
+    for m in re.finditer(r"\((pub)\s", src):
+        if code(m.start(1)):
+            hl_want(obs, "`pub`", src, m.start(1), "pub", "keyword", 0, DEP)
+    # `::` subjects, `fn` names and parameters
+    for m in re.finditer(r"\((?:pub\s+)?::\s+(" + HL_IDENT + ")", src):
+        if code(m.start(1)):
+            hl_want(obs, f"`::` subject `{m.group(1)}`", src, m.start(1), m.group(1),
+                    "function", DECL, DEFN)
+    for m in re.finditer(r"\((?:pub\s+)?fn\s+\((" + HL_IDENT + r")((?:\s+" + HL_IDENT + r")*)\)", src):
+        if not code(m.start(1)):
+            continue
+        hl_want(obs, f"`fn` name `{m.group(1)}`", src, m.start(1), m.group(1),
+                "function", DECL | DEFN, 0)
+        for pm in re.finditer(HL_IDENT, m.group(2)):
+            at = m.start(2) + pm.start()
+            hl_want(obs, f"parameter `{pm.group(0)}` of `{m.group(1)}`", src, at,
+                    pm.group(0), "parameter", DECL, 0)
+    # `data`: the name, then every constructor form directly inside
+    for m in re.finditer(r"\((?:pub\s+)?data\s+([A-Z]" + HL_IDENT + ")", src):
+        if not code(m.start(1)):
+            continue
+        hl_want(obs, f"data `{m.group(1)}`", src, m.start(1), m.group(1), "type", DECL, 0)
+        for c in hl_children(src, kinds, m.start()):
+            cm = re.match(r"\(([A-Z]" + HL_IDENT + ")", src[c:])
+            if cm:
+                hl_want(obs, f"constructor `{cm.group(1)}` of `{m.group(1)}`", src, c + 1,
+                        cm.group(1), "enumMember", DECL, 0)
+    # `struct`: the name and its fields
+    for m in re.finditer(r"\((?:pub\s+)?struct\s+([A-Z]" + HL_IDENT + ")", src):
+        if not code(m.start(1)):
+            continue
+        hl_want(obs, f"struct `{m.group(1)}`", src, m.start(1), m.group(1), "type", DECL, 0)
+        for c in hl_children(src, kinds, m.start()):
+            fm = re.match(r"\((?:mut\s+)?([a-z]" + HL_IDENT + r")\s*:\s", src[c:])
+            if fm:
+                hl_want(obs, f"field `{fm.group(1)}` of `{m.group(1)}`", src,
+                        c + fm.start(1), fm.group(1), "property", DECL, 0)
+    # comment lines, doc lines and AXTAG lines, whole
+    at = 0
+    for ln in lines:
+        body = ln.rstrip("\r")
+        if body.startswith(";@axiom:"):
+            hl_want(obs, "AXTAG line", src, at, body, "decorator", 0, 0)
+        elif body.startswith(";;"):
+            hl_want(obs, "doc comment line", src, at, body, "comment", DOC, 0)
+        elif body.startswith(";"):
+            hl_want(obs, "comment line", src, at, body, "comment", 0, DOC)
+        at += len(ln) + 1
+    # literals: strings and chars as runs of the mask, numbers by shape
+    for m in re.finditer(r"s+|'+", kinds):
+        text = src[m.start():m.end()]
+        if "\n" not in text:
+            hl_want(obs, f"literal {text!r}", src, m.start(), text, "string", 0, 0)
+    for m in re.finditer(r"(?<![A-Za-z0-9_])-?[0-9]+(?:\.[0-9]+)?(?![A-Za-z0-9_])", src):
+        if code(m.start()):
+            hl_want(obs, f"number `{m.group(0)}`", src, m.start(), m.group(0), "number", 0, 0)
+    # builtin types wherever they stand in code
+    for m in re.finditer(r"(?<![A-Za-z0-9_'!*+/<>=%&|^-])(" + "|".join(sorted(HL_BUILTIN_TYPES)) + r")(?![A-Za-z0-9_'!*+/<>=%&|^-])", src):
+        if code(m.start(1)):
+            hl_want(obs, f"builtin type `{m.group(1)}`", src, m.start(1), m.group(1), "type", LIB, DECL)
+    # imports: every segment of the path
+    for m in re.finditer(r"\(import\s+([A-Za-z_][A-Za-z0-9_.]*)", src):
+        if code(m.start(1)):
+            at = m.start(1)
+            for seg in m.group(1).split("."):
+                hl_want(obs, f"import `{seg}`", src, at, seg, "namespace", 0, 0)
+                at += len(seg) + 1
+    # effects: `(effect Name`, and a `handle`'s second item
+    for m in re.finditer(r"\(effect\s+([A-Z]" + HL_IDENT + ")", src):
+        if code(m.start(1)):
+            hl_want(obs, f"effect `{m.group(1)}`", src, m.start(1), m.group(1), "effect", DECL, 0)
+    effect_lists = set()
+    for m in re.finditer(r"\(handle\s", src):
+        if not code(m.start()):
+            continue
+        kids = hl_children(src, kinds, m.start())
+        if len(kids) >= 2:
+            effect_lists.add(kids[1])
+            for em in re.finditer(HL_IDENT, src[kids[1]:hl_form_end(src, kinds, kids[1])]):
+                w = em.group(0)
+                hl_want(obs, f"handled effect `{w}`", src, kids[1] + em.start(), w, "effect",
+                        LIB if w in HL_BUILTIN_EFFECTS else 0, DECL | (0 if w in HL_BUILTIN_EFFECTS else LIB))
+    # regions: `(region r`, `(parallel r` and `@r`
+    for m in re.finditer(r"\((?:region|parallel)\s+([a-z]" + HL_IDENT + ")", src):
+        if code(m.start(1)):
+            hl_want(obs, f"region `{m.group(1)}`", src, m.start(1), m.group(1), "region", 0, 0)
+    for m in re.finditer(r"@[a-z][A-Za-z0-9_]*", src):
+        if code(m.start()):
+            hl_want(obs, f"annotation `{m.group(0)}`", src, m.start(), m.group(0), "region", 0, 0)
+    # macros: the name, and the head of every rule
+    for m in re.finditer(r"\((?:pub\s+)?e?macro\s+(" + HL_IDENT + ")", src):
+        if not code(m.start(1)):
+            continue
+        hl_want(obs, f"macro `{m.group(1)}`", src, m.start(1), m.group(1), "macro", DECL, 0)
+        for c in hl_children(src, kinds, m.start()):
+            rm = re.match(r"\(\((" + HL_IDENT + ")", src[c:])
+            if rm:
+                hl_want(obs, f"rule head `{rm.group(1)}` of `{m.group(1)}`", src, c + 2,
+                        rm.group(1), "macro", DECL, 0)
+    # bindings: `(set x`, `(mut x`, and a `let`'s first pair
+    for m in re.finditer(r"\(set\s+(" + HL_IDENT + ")", src):
+        if code(m.start(1)):
+            hl_want(obs, f"set target `{m.group(1)}`", src, m.start(1), m.group(1), "variable", MOD, DECL)
+    for m in re.finditer(r"\(mut\s+([a-z]" + HL_IDENT + r")\s+[^:]", src):
+        if code(m.start(1)):
+            hl_want(obs, f"mut binder `{m.group(1)}`", src, m.start(1), m.group(1), "variable", DECL, RO | MOD)
+    for m in re.finditer(r"\(let\s+\(\((?!mut\s)([a-z]" + HL_IDENT + r")\s", src):
+        if code(m.start(1)):
+            hl_want(obs, f"let binder `{m.group(1)}`", src, m.start(1), m.group(1), "variable", DECL | RO, MOD)
+    # operator heads: the checker's builtins from the library, the arrow not
+    for m in re.finditer(r"\((\+|-|\*|/|%|==|!=|<=|>=|<|>|&&|\|\|)\s", src):
+        if code(m.start(1)):
+            hl_want(obs, f"operator `{m.group(1)}`", src, m.start(1), m.group(1), "operator", LIB, 0)
+    for m in re.finditer(r"\((->)\s", src):
+        if code(m.start(1)):
+            hl_want(obs, "arrow", src, m.start(1), "->", "operator", 0, LIB)
+    # constructors used inside a `fn`: every `(Upper` is a construction
+    # or a pattern, never a declaration - except a `handle`'s effect
+    # list, read above
+    for m in re.finditer(r"\((?:pub\s+)?fn\s", src):
+        if not code(m.start()):
+            continue
+        end = hl_form_end(src, kinds, m.start())
+        for cm in re.finditer(r"\(([A-Z]" + HL_IDENT + r")(?![A-Za-z0-9_'!*+/<>=%&|^:.-])", src[m.start():end]):
+            at = m.start() + cm.start(1)
+            if code(at) and cm.group(1) not in HL_BUILTIN_TYPES and at - 1 not in effect_lists:
+                hl_want(obs, f"constructor use `{cm.group(1)}`", src, at, cm.group(1), "enumMember", 0, DECL)
+    return obs
+
+
+def hl_decode(data):
+    """The protocol's delta array back into absolute (line, character,
+    length, type, modifiers) tuples - a second implementation of the
+    encoding, from the specification. None for anything that is not
+    five non-negative integers per token."""
+    if not isinstance(data, list) or len(data) % 5 or \
+            any(not isinstance(v, int) or isinstance(v, bool) or v < 0 for v in data):
+        return None
+    out, line, ch = [], 0, 0
+    for k in range(0, len(data), 5):
+        dl, dc, ln, ty, mods = data[k:k + 5]
+        if dl:
+            line, ch = line + dl, dc
+        else:
+            ch += dc
+        out.append((line, ch, ln, ty, mods))
+    return out
+
+
+def hl_names(t):
+    ty = HL_TYPES[t[3]] if t[3] < len(HL_TYPES) else f"?{t[3]}"
+    ms = "+".join(n for n in HL_MODS if t[4] & HM[n]) or "-"
+    return f"{t[0]}:{t[1]}+{t[2]} {ty} {ms}"
+
+
+def hl_invariants(toks, lines):
+    """Why a token list breaks what a client relies on, or ""."""
+    prev = None
+    for t in toks:
+        line, ch, ln, ty, mods = t
+        if ty >= len(HL_TYPES) or mods >= 1 << len(HL_MODS):
+            return f"token {t} indexes outside the legend"
+        if ln <= 0:
+            return f"token {hl_names(t)} is empty"
+        if line >= len(lines):
+            return f"token {hl_names(t)} is on a line the document does not have"
+        if ch + ln > u16(lines[line]):
+            return f"token {hl_names(t)} runs past the end of its line ({u16(lines[line])} units)"
+        if prev is not None and (prev[0], prev[1]) >= (line, ch):
+            return f"tokens out of order: {hl_names(prev)} then {hl_names(t)}"
+        if prev is not None and prev[0] == line and prev[1] + prev[2] > ch:
+            return f"tokens overlap: {hl_names(prev)} and {hl_names(t)}"
+        prev = t
+    return ""
+
+
+def hl_first_bad(obs, got):
+    for what, line, ch, ln, ty, need, forbid in obs:
+        t = got.get((line, ch))
+        if t is None:
+            near = [hl_names(x) for x in got.values() if x[0] == line]
+            return f"{what}: no token starts at {line}:{ch}; that line carries {near}"
+        if t[2] != ln or t[3] != ty or (t[4] & need) != need or (t[4] & forbid):
+            return (f"{what}: at {line}:{ch} the server says {hl_names(t)}, derived "
+                    f"{line}:{ch}+{ln} {HL_TYPES[ty]} needing "
+                    f"{'+'.join(n for n in HL_MODS if need & HM[n]) or '-'} and not "
+                    f"{'+'.join(n for n in HL_MODS if forbid & HM[n]) or '-'}")
+    return ""
+
+
+HL_OBS = {name: hl_obligations(text) for name, text, _ in HL_DOCS}
+# The witness reads: `pw` in NavMain's `(twice pw)` and `k` in hl's
+# `(+ base k)`, parameters while the document parses.
+HL_WITNESS = {"NavMain.ax": ("pw", ident_at(NAV_MAIN, "pw", 2)),
+              "hl.ax": ("k", ident_at(HL, "k", 2))}
+# The corpus, counted: enough obligations of enough kinds that a
+# server answering one class for everything cannot pass, and the
+# shapes the witnesses assume.
+_hl_total = sum(len(v) for v in HL_OBS.values())
+_hl_kinds = {HL_TYPES[o[4]] for v in HL_OBS.values() for o in v}
+if _hl_total < 400 or len(_hl_kinds) < 14:
+    sys.exit(f"FAIL: {_hl_total} semantic-token obligations over {len(_hl_kinds)} types - "
+             f"under the floor of 400 and 14, the derivations have stopped matching")
+if len(HL_OBS["hl.ax"]) < 120 or len(HL_OBS["hl-dead.ax"]) < 3 or \
+        not [o for o in HL_OBS["hl-dead.ax"] if o[5] & HM["deprecated"]]:
+    sys.exit("FAIL: the HL document or the refused one derives fewer obligations than "
+             "it was written to carry")
+if ident_count(NAV_MAIN, "pw") != 2 or ident_count(HL, "k") != 2:
+    sys.exit("FAIL: the witness reads are no longer where this file assumes")
+for _name, _obs in HL_OBS.items():
+    if len({(o[1], o[2]) for o in _obs}) != len(_obs):
+        _dups = [o[0] for o in _obs if [(p[1], p[2]) for p in _obs].count((o[1], o[2])) > 1]
+        sys.exit(f"FAIL: two obligations on {_name} name the same position: {_dups[:4]}")
+
+HL_FULL = "textDocument/semanticTokens/full"
+hl_msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}]
+for _i, (_name, _text, _) in enumerate(HL_DOCS):
+    hl_msgs.append(nav_open(hl_uri(_name), _text))
+    hl_msgs.append({"jsonrpc": "2.0", "id": 10 + _i, "method": HL_FULL,
+                    "params": {"textDocument": {"uri": hl_uri(_name)}}})
+hl_msgs.append({"jsonrpc": "2.0", "id": 2, "method": HL_FULL,
+                "params": {"textDocument": {"uri": hl_uri("never-opened.ax")}}})
+hl_msgs += [{"jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": None},
+            {"jsonrpc": "2.0", "method": "exit", "params": None}]
+hlp = subprocess.run([stage1, "lsp"], input=b"".join(frame(m) for m in hl_msgs),
+                     capture_output=True, cwd=HL_DIR)
+hlmsgs, hltail = unframe(hlp.stdout)
+hlresp = {m["id"]: m for m in hlmsgs if "id" in m}
+hlcaps = ((hlresp.get(1, {}).get("result") or {}).get("capabilities") or {}).get("semanticTokensProvider")
+hlpubs = {}
+for m in hlmsgs:
+    if m.get("method") == "textDocument/publishDiagnostics":
+        hlpubs.setdefault(m["params"]["uri"], m["params"]["diagnostics"])
+hl_tok = {}
+for _i, (_name, _text, _) in enumerate(HL_DOCS):
+    r = hlresp.get(10 + _i, {}).get("result")
+    hl_tok[_name] = hl_decode(r.get("data")) if isinstance(r, dict) else None
+HL_LEXICAL = {HT[n] for n in ("keyword", "string", "number", "comment", "decorator", "operator")}
+
+
+def hl_lexical(toks):
+    return {t for t in toks or [] if t[3] in HL_LEXICAL}
+
+
+hlwhy = ""
+if hlp.returncode != 0:
+    hlwhy = f"the server exited {hlp.returncode}: {hlp.stderr[:200]!r}"
+elif hlp.stderr:
+    hlwhy = f"stderr not empty: {hlp.stderr[:200]!r}"
+elif hltail:
+    hlwhy = f"{len(hltail)} trailing bytes after the last frame"
+elif 3 not in hlresp:
+    hlwhy = "the session never answered shutdown - a request killed the server"
+elif hlcaps != {"legend": {"tokenTypes": HL_TYPES, "tokenModifiers": HL_MODS}, "full": True}:
+    hlwhy = (f"semanticTokensProvider is {hlcaps!r}, want the legend read off lsp.ax "
+             f"({len(HL_TYPES)} types, {len(HL_MODS)} modifiers) with full and nothing else")
+elif hlresp.get(2, {}).get("result") != {"data": []}:
+    hlwhy = f"a URI never opened answered {hlresp.get(2)!r:.200}, want {{data: []}}"
+else:
+    for _name, _text, _twin in HL_DOCS:
+        toks = hl_tok[_name]
+        lines = _text.split("\n")
+        errs = [d for d in hlpubs.get(hl_uri(_name), []) if d.get("severity") in (1, 2)]
+        if _name in HL_PARSING and errs:
+            hlwhy = (f"{_name} does not check clean, so its resolved answers rest on a tree "
+                     f"the compiler refused: {errs[0]!r:.200}")
+        elif _name not in HL_PARSING and not [d for d in hlpubs.get(hl_uri(_name), [])
+                                               if str(d.get("code", "")).startswith(("AX1", "AX2"))]:
+            hlwhy = f"{_name} published no parse error, so it is not the unparseable document it is meant to be"
+        elif toks is None:
+            hlwhy = f"{_name}: semanticTokens/full answered {hlresp.get(10 + HL_DOCS.index((_name, _text, _twin)))!r:.200}"
+        elif len(toks) < len(HL_OBS[_name]):
+            hlwhy = f"{_name}: {len(toks)} tokens, fewer than the {len(HL_OBS[_name])} obligations"
+        elif hl_invariants(toks, lines):
+            hlwhy = f"{_name}: " + hl_invariants(toks, lines)
+        elif hl_first_bad(HL_OBS[_name], {(t[0], t[1]): t for t in toks}):
+            hlwhy = f"{_name}: " + hl_first_bad(HL_OBS[_name], {(t[0], t[1]): t for t in toks})
+        elif _twin is not None and hl_lexical(toks) != hl_lexical(hl_tok[_twin]):
+            hlwhy = (f"{_name}: its keywords, literals, comments and operators differ from "
+                     f"{_twin}'s: {sorted(hl_lexical(toks) ^ hl_lexical(hl_tok[_twin]))[:6]}")
+        if hlwhy:
+            break
+        if _name in HL_WITNESS or _twin in HL_WITNESS:
+            w, at = HL_WITNESS[_name if _name in HL_WITNESS else _twin]
+            t = {(x[0], x[1]): x for x in toks}.get((at["line"], at["start"]))
+            want = "parameter" if _twin is None else "variable"
+            if t is None or HL_TYPES[t[3]] != want:
+                hlwhy = (f"{_name}: the read of `{w}` at {at['line']}:{at['start']} is "
+                         f"{hl_names(t) if t else 'no token'}, want `{want}` - "
+                         + ("the parsing document must colour it by resolution" if _twin is None
+                            else "the document does not parse, so nothing resolved it"))
+                break
+
+if hlwhy:
+    print(f"FAIL semantic-tokens: {hlwhy}")
+    failed += 1
+else:
+    print(f"ok   semantic-tokens ({_hl_total} obligations derived from {len(HL_DOCS)} documents' "
+          f"bytes over {len(_hl_kinds)} token types - keywords at every head, `::` subjects, "
+          f"`fn` names and parameters, data constructors, struct fields, doc and AXTAG lines, "
+          f"literals, builtin types, imports, effects, regions, macros and rule heads, "
+          f"`set`/`mut`/`let` binders, operator heads, constructor uses; "
+          f"{sum(len(v) for v in hl_tok.values() if v)} tokens sorted, non-overlapping and "
+          f"inside their lines; the legend equal to lsp.ax's lists; a parameter read falling to "
+          f"variable in the unparseable twins and a refused head `deprecated`)")
+    passed += 1
+shutil.rmtree(HL_DIR, ignore_errors=True)
+# =====================================================================
+# END SECTION HL TESTS
+# =====================================================================
+
 
 # ---------------------------------------------------------------------
 # An editing session does not grow.
