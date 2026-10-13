@@ -71,6 +71,7 @@
 (import codegen)
 (import format)
 (import lexicon)
+(import doccomment)
 (import nolint)
 
 ; ------------------------------------------------------------------
@@ -2732,165 +2733,45 @@
 ; text happens to precede it on the same line.
 (pub :: lspDocComment (-> String Int String))
 (pub fn (lspDocComment src o)
-  (if (if (== o 0)
-    true
-    (!= (strByte src (- o 1)) 10))
-    ""
-    (let (
-      (mut e o)
-      (mut out "")
-      (mut docs "")
-      (mut go 1)
-    )
-      {
-        (while (== go 1)
-          (if (<= e 0)
-            (set go 0)
-            (let ((ls (lspPrevLineStart src e)))
-              (let ((line (strSlice src ls (- (- e 1) ls))))
-                (if (lspIsDocLine line)
-                  {
-                    (if (lspIsModuleDocLine line)
-                      0
-                      (let ((text (concat (lspDocStrip line) "\n")))
-                        {
-                          (set out (concat text out))
-                          (if (lspIsDocMark line)
-                            {
-                              (set docs (concat text docs))
-                              0
-                            }
-                            0)
-                        }))
-                    (set e ls)
-                  }
-                  (set go 0))))))
-        (if (== (strLen docs) 0)
-          out
-          docs)
-      })))
+  (docCommentAbove src o))
 
 ; The index of the first non-blank byte of `line`, or its length.
 (pub :: lspLineBody (-> String Int))
 (pub fn (lspLineBody line)
-  (let (
-    (n (strLen line))
-    (mut i 0)
-  )
-    {
-      (while (if (< i n)
-        (lspIsBlank (strByte line i))
-        false)
-        (set i (+ i 1)))
-      i
-    }))
+  (docLineBody line))
 
 ; A `;;` line: documentation for the declaration below its block.
 (pub :: lspIsDocMark (-> String Bool))
 (pub fn (lspIsDocMark line)
-  (let (
-    (i (lspLineBody line))
-    (n (strLen line))
-  )
-    (if (< (+ i 1) n)
-      (if (&& (== (strByte line i) 59) (== (strByte line (+ i 1)) 59))
-        (if (< (+ i 2) n)
-          (!= (strByte line (+ i 2)) 33)
-          true)
-        false)
-      false)))
+  (docIsDocMark line))
 
 ; A `;;!` line: documentation for the module the file is.
 (pub :: lspIsModuleDocLine (-> String Bool))
 (pub fn (lspIsModuleDocLine line)
-  (let (
-    (i (lspLineBody line))
-    (n (strLen line))
-  )
-    (if (< (+ i 2) n)
-      (if (== (strByte line i) 59)
-        (if (== (strByte line (+ i 1)) 59)
-          (== (strByte line (+ i 2)) 33)
-          false)
-        false)
-      false)))
+  (docIsModuleDocLine line))
 
 ; The index of the newline that ends the line starting at `p`, or
 ; the length of `src` when the last line has none.
 (pub :: lspLineEndFrom (-> String Int Int))
 (pub fn (lspLineEndFrom src p)
-  (let (
-    (n (strLen src))
-    (mut i p)
-  )
-    {
-      (while (if (< i n)
-        (!= (strByte src i) 10)
-        false)
-        (set i (+ i 1)))
-      i
-    }))
+  (docLineEndFrom src p))
 
 ; The module's own documentation: the `;;!` lines at the head of the
 ; file, with blank lines allowed before them and the block ending at
 ; the first line that is anything else. "" when the file has none.
 (pub :: lspModuleDoc (-> String String))
 (pub fn (lspModuleDoc src)
-  (let (
-    (n (strLen src))
-    (mut p 0)
-    (mut out "")
-    (mut go 1)
-  )
-    {
-      (while (== go 1)
-        (if (>= p n)
-          (set go 0)
-          (let ((e (lspLineEndFrom src p)))
-            (let ((line (strSlice src p (- e p))))
-              (if (lspIsModuleDocLine line)
-                {
-                  (set out (concat out (concat (lspDocStrip line) "\n")))
-                  (set p (+ e 1))
-                }
-                (if (== (lspLineBody line) (strLen line))
-                  (if (== (strLen out) 0)
-                    (set p (+ e 1))
-                    (set go 0))
-                  (set go 0)))))))
-      out
-    }))
+  (docModuleDoc src))
 
 ; The start of the line whose newline sits at `e - 1`.
 (pub :: lspPrevLineStart (-> String Int Int))
 (pub fn (lspPrevLineStart src e)
-  (let ((mut i (- e 1)))
-    {
-      (while (if (> i 0)
-        (!= (strByte src (- i 1)) 10)
-        false)
-        (set i (- i 1)))
-      i
-    }))
+  (docPrevLineStart src e))
 
 ; A line that is entirely a comment, and is not a banner.
 (pub :: lspIsDocLine (-> String Bool))
 (pub fn (lspIsDocLine line)
-  (let (
-    (n (strLen line))
-    (mut i 0)
-  )
-    {
-      (while (if (< i n)
-        (lspIsBlank (strByte line i))
-        false)
-        (set i (+ i 1)))
-      (if (>= i n)
-        false
-        (if (!= (strByte line i) 59)
-          false
-          (lspNotBanner line (+ i 1))))
-    }))
+  (docIsDocLine line))
 
 ; A comment body of nothing but `-` or `=` is a rule across the page,
 ; not a sentence about the declaration below it.
@@ -2903,29 +2784,11 @@
 ; PRESENT and nothing else beside it.
 (pub :: lspNotBanner (-> String Int Bool))
 (pub fn (lspNotBanner line i)
-  (let (
-    (n (strLen line))
-    (mut k i)
-    (mut rule 0)
-    (mut other 0)
-  )
-    {
-      (while (< k n)
-        {
-          (let ((b (strByte line k)))
-            (if (|| (== b 45) (== b 61))
-              (set rule 1)
-              (if (lspIsBlank b)
-                0
-                (set other 1))))
-          (set k (+ k 1))
-        })
-      (|| (== other 1) (== rule 0))
-    }))
+  (docNotBanner line i))
 
 (pub :: lspIsBlank (-> Int Bool))
 (pub fn (lspIsBlank b)
-  (|| (== b 32) (== b 9)))
+  (docIsBlank b))
 
 (pub :: lspIsSpace (-> Int Bool))
 (pub fn (lspIsSpace b)
@@ -2938,37 +2801,7 @@
 ; it wants to see the claim.
 (pub :: lspDocStrip (-> String String))
 (pub fn (lspDocStrip line)
-  (let (
-    (n (strLen line))
-    (mut i 0)
-  )
-    {
-      (while (if (< i n)
-        (lspIsBlank (strByte line i))
-        false)
-        (set i (+ i 1)))
-      (if (< i n)
-        (set i (+ i 1))
-        0)
-      (if (if (< i n)
-        (== (strByte line i) 59)
-        false)
-        {
-          (set i (+ i 1))
-          (if (if (< i n)
-            (== (strByte line i) 33)
-            false)
-            (set i (+ i 1))
-            0)
-        }
-        0)
-      (if (if (< i n)
-        (== (strByte line i) 32)
-        false)
-        (set i (+ i 1))
-        0)
-      (strSlice line i (- n i))
-    }))
+  (docStrip line))
 
 ; At most `max` lines of `s`, with the cut said out loud in the fence's
 ; own comment syntax. Hover is a tooltip: a two-hundred-constructor

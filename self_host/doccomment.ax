@@ -1,0 +1,284 @@
+;;! How a doc comment is read: which `;` lines above a form document
+;;! it, which `;;!` lines document the module, and how a line's prose
+;;! is stripped of its comment marks. Hover (`lsp.ax`) and `axiom doc`
+;;! (`doc.ax`) both read through this module, so one rule answers both.
+;
+; Every function here is a function of its arguments: a String in, a
+; String or a byte offset out. Nothing reads a file. The names carry
+; the `doc` prefix; `lsp.ax` keeps its `lsp`-prefixed names as
+; one-line wrappers so that nothing that called them moves.
+(import Str)
+
+; The comment block written directly above the form at `o`, as prose.
+;
+; A `;;` LINE IS DOCUMENTATION. When the block holds any `;;` lines,
+; they are the answer and the plain `;` lines beside them are notes
+; for the maintainer, which is the split `docs/reference.md` names
+; under "Doc comments". A block with no `;;` line answers all of its
+; `;` lines, so code written before the convention still reads. A
+; `;;!` line documents the module and belongs to no declaration, so it
+; is left out either way (`docModuleDoc` reads it).
+;
+; THE BLOCK STOPS AT A BANNER. A comment whose body is nothing but `-`
+; or `=` is a section separator: it belongs to the FILE, and what sits
+; above it documents the section rather than this declaration. Without
+; that rule, hover on the first declaration after a banner quoted the
+; banner, the section header and every line of prose introducing it.
+; A blank line ends the block too, which is what a paragraph break
+; between two declarations means.
+;
+; Only a form that begins a line has a block above it; a form that
+; sits mid-line answers "" rather than reading whatever text happens
+; to precede it.
+(pub :: docCommentAbove (-> String Int String))
+(pub fn (docCommentAbove src o)
+  (docCommentAboveMode src o 0))
+
+; The `;;` lines above the form at `o`, and nothing else: "" when the
+; block holds no `;;` line at all. This is the reading `axiom doc`
+; wants, because a declaration whose block is all maintainer notes is
+; a declaration with no documentation yet, and the page should say so
+; rather than print the notes.
+(pub :: docCommentMarked (-> String Int String))
+(pub fn (docCommentMarked src o)
+  (docCommentAboveMode src o 1))
+
+; `strict` 1 answers only the `;;` lines; 0 falls back to the whole
+; block when there are none.
+(pub :: docCommentAboveMode (-> String Int Int String))
+(pub fn (docCommentAboveMode src o strict)
+  (if (if (== o 0)
+    true
+    (!= (strByte src (- o 1)) 10))
+    ""
+    (let (
+      (mut e o)
+      (mut out "")
+      (mut docs "")
+      (mut go 1)
+    )
+      {
+        (while (== go 1)
+          (if (<= e 0)
+            (set go 0)
+            (let ((ls (docPrevLineStart src e)))
+              (let ((line (strSlice src ls (- (- e 1) ls))))
+                (if (docIsDocLine line)
+                  {
+                    (if (docIsModuleDocLine line)
+                      0
+                      (let ((text (concat (docStrip line) "\n")))
+                        {
+                          (set out (concat text out))
+                          (if (docIsDocMark line)
+                            {
+                              (set docs (concat text docs))
+                              0
+                            }
+                            0)
+                        }))
+                    (set e ls)
+                  }
+                  (set go 0))))))
+        (if (== (strLen docs) 0)
+          (if (== strict 1)
+            ""
+            out)
+          docs)
+      })))
+
+; The index of the first non-blank byte of `line`, or its length.
+(pub :: docLineBody (-> String Int))
+(pub fn (docLineBody line)
+  (let (
+    (n (strLen line))
+    (mut i 0)
+  )
+    {
+      (while (if (< i n)
+        (docIsBlank (strByte line i))
+        false)
+        (set i (+ i 1)))
+      i
+    }))
+
+; A `;;` line: documentation for the declaration below its block.
+(pub :: docIsDocMark (-> String Bool))
+(pub fn (docIsDocMark line)
+  (let (
+    (i (docLineBody line))
+    (n (strLen line))
+  )
+    (if (< (+ i 1) n)
+      (if (&& (== (strByte line i) 59) (== (strByte line (+ i 1)) 59))
+        (if (< (+ i 2) n)
+          (!= (strByte line (+ i 2)) 33)
+          true)
+        false)
+      false)))
+
+; A `;;!` line: documentation for the module the file is.
+(pub :: docIsModuleDocLine (-> String Bool))
+(pub fn (docIsModuleDocLine line)
+  (let (
+    (i (docLineBody line))
+    (n (strLen line))
+  )
+    (if (< (+ i 2) n)
+      (if (== (strByte line i) 59)
+        (if (== (strByte line (+ i 1)) 59)
+          (== (strByte line (+ i 2)) 33)
+          false)
+        false)
+      false)))
+
+; The index of the newline that ends the line starting at `p`, or
+; the length of `src` when the last line has none.
+(pub :: docLineEndFrom (-> String Int Int))
+(pub fn (docLineEndFrom src p)
+  (let (
+    (n (strLen src))
+    (mut i p)
+  )
+    {
+      (while (if (< i n)
+        (!= (strByte src i) 10)
+        false)
+        (set i (+ i 1)))
+      i
+    }))
+
+; The module's own documentation: the `;;!` lines at the head of the
+; file, with blank lines allowed before them and the block ending at
+; the first line that is anything else. "" when the file has none.
+(pub :: docModuleDoc (-> String String))
+(pub fn (docModuleDoc src)
+  (let (
+    (n (strLen src))
+    (mut p 0)
+    (mut out "")
+    (mut go 1)
+  )
+    {
+      (while (== go 1)
+        (if (>= p n)
+          (set go 0)
+          (let ((e (docLineEndFrom src p)))
+            (let ((line (strSlice src p (- e p))))
+              (if (docIsModuleDocLine line)
+                {
+                  (set out (concat out (concat (docStrip line) "\n")))
+                  (set p (+ e 1))
+                }
+                (if (== (docLineBody line) (strLen line))
+                  (if (== (strLen out) 0)
+                    (set p (+ e 1))
+                    (set go 0))
+                  (set go 0)))))))
+      out
+    }))
+
+; The start of the line whose newline sits at `e - 1`.
+(pub :: docPrevLineStart (-> String Int Int))
+(pub fn (docPrevLineStart src e)
+  (let ((mut i (- e 1)))
+    {
+      (while (if (> i 0)
+        (!= (strByte src (- i 1)) 10)
+        false)
+        (set i (- i 1)))
+      i
+    }))
+
+; A line that is entirely a comment, and is not a banner.
+(pub :: docIsDocLine (-> String Bool))
+(pub fn (docIsDocLine line)
+  (let (
+    (n (strLen line))
+    (mut i 0)
+  )
+    {
+      (while (if (< i n)
+        (docIsBlank (strByte line i))
+        false)
+        (set i (+ i 1)))
+      (if (>= i n)
+        false
+        (if (!= (strByte line i) 59)
+          false
+          (docNotBanner line (+ i 1))))
+    }))
+
+; A comment body of nothing but `-` or `=` is a rule across the page,
+; not a sentence about the declaration below it.
+;
+; AN EMPTY BODY IS NOT ONE. A bare `;` is the paragraph break inside a
+; doc block and is how nearly every multi-paragraph comment in this
+; repository is written, so a banner test that fired on "no text" cut
+; every such block down to its last paragraph - measured on `bump`,
+; whose first sentence disappeared. A banner needs a rule character
+; PRESENT and nothing else beside it.
+(pub :: docNotBanner (-> String Int Bool))
+(pub fn (docNotBanner line i)
+  (let (
+    (n (strLen line))
+    (mut k i)
+    (mut rule 0)
+    (mut other 0)
+  )
+    {
+      (while (< k n)
+        {
+          (let ((b (strByte line k)))
+            (if (|| (== b 45) (== b 61))
+              (set rule 1)
+              (if (docIsBlank b)
+                0
+                (set other 1))))
+          (set k (+ k 1))
+        })
+      (|| (== other 1) (== rule 0))
+    }))
+
+(pub :: docIsBlank (-> Int Bool))
+(pub fn (docIsBlank b)
+  (|| (== b 32) (== b 9)))
+
+; One comment line as prose: the leading blanks, the `;` (or the `;;`
+; of a doc line, or the `;;!` of a module line), and one space after
+; it. `;@axiom:effect(io)` keeps its `@`, because an AXTAG is
+; part of what the declaration claims about itself and a reader hovering
+; it wants to see the claim.
+(pub :: docStrip (-> String String))
+(pub fn (docStrip line)
+  (let (
+    (n (strLen line))
+    (mut i 0)
+  )
+    {
+      (while (if (< i n)
+        (docIsBlank (strByte line i))
+        false)
+        (set i (+ i 1)))
+      (if (< i n)
+        (set i (+ i 1))
+        0)
+      (if (if (< i n)
+        (== (strByte line i) 59)
+        false)
+        {
+          (set i (+ i 1))
+          (if (if (< i n)
+            (== (strByte line i) 33)
+            false)
+            (set i (+ i 1))
+            0)
+        }
+        0)
+      (if (if (< i n)
+        (== (strByte line i) 32)
+        false)
+        (set i (+ i 1))
+        0)
+      (strSlice line i (- n i))
+    }))
