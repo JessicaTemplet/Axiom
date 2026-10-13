@@ -16,6 +16,14 @@ its changelog too.
 
 ## Unreleased
 
+- Refuse a reference cast into a field declared `Int`. `AX3043` was a
+  warning on the grounds that the cast was deliberate, but the leak is
+  certain either way: the release walk follows declared types and
+  never frees the word. It is now an error, and the fix is to declare
+  the field's real type. With it, every statically certain defect the
+  compiler reports is an error. Tested by
+  `tests/diagnostics/1008-error-payload-untyped.ax`.
+
 - Add `axiom doc`. It renders the documentation set, one page per
   standard library module from the `;;` doc comments, and the language
   index to HTML under `~/.cache/axiom/doc` (or `--out DIR`), then opens

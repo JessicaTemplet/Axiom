@@ -355,7 +355,9 @@ failed syscall are different facts, and the type keeps them apart.
 **ERR-TYPE-5 (H). Error payload fields MUST declare their real types.**
 Not `Int`. A `String` stored through a field declared `Int` is
 invisible to reclamation and leaks, so this is a memory-safety
-obligation as much as a type-design one (`ERR-MEM-1`).
+obligation as much as a type-design one (`ERR-MEM-1`). A reference
+cast into such a field, where the checker can see the operand, is
+refused with `AX3043`.
 
 ---
 
@@ -1142,7 +1144,7 @@ This section records the codes below. All of them are built, and
 | `AX3040` `result-only-tyvar` | a type variable the caller chooses and the callee produces | The slug names the shape it was built for and stays as the machine key. The rule also covers a function-typed parameter's own variable. |
 | `AX3041` `extern-library-name` | an `extern` block's library name that isn't one | Reported by the parser. |
 | `AX3042` `undeclared-effect` | a function that performs a required effect (`IO`, `Entropy`, `Spawn` or `Block`) and doesn't declare it | |
-| `AX3043` `error-payload-untyped` | a reference smuggled through a field declared `Int` | A warning. `tests/diagnostics/1008-error-payload-untyped.ax` |
+| `AX3043` `error-payload-untyped` | a reference smuggled through a field declared `Int` | `tests/diagnostics/1008-error-payload-untyped.ax` |
 | `AX3044` `ambiguous-type` | a bare type name declared in more than one imported module | Reported by the namespace pass. |
 | `AX3045` `recursion-in-scrutinee` | a self-recursive call in the scrutinee of a `match` | A warning. `ERR-PROP-4` |
 | `AX3046` `discarded-result` | a `Result`-typed expression in statement position, its value unused | An error. A deliberate discard binds it to `_`. `tests/diagnostics/1006-discarded-result.ax` |
