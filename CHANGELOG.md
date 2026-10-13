@@ -16,6 +16,26 @@ its changelog too.
 
 ## Unreleased
 
+- Add doc comments. A `;;` line documents the declaration below it and
+  a `;;!` line at the head of a file documents the module, both in
+  Markdown; a plain `;` line is a note for the maintainer and tools
+  leave it out. Hover shows a declaration's `;;` lines and falls back
+  to the whole `;` block when there are none, and the standard library
+  reference prints the first `;;` paragraph. The standard library's
+  first paragraphs are now `;;` lines, with the coverage ratchet
+  re-derived at the measured value. Tested by `tests/lsp/drive.py` and
+  `scripts/check-stdlib-api.sh`.
+
+- Explain every word of the language on hover. A keyword, a form word
+  such as `mut` or `::`, a builtin type, a built-in effect, an
+  operator, a literal, the key or a value of an AXTAG line and the
+  module an `import` names all answer `textDocument/hover`, where they
+  answered null. The entries live in `self_host/lexicon.ax`, and
+  `axiom explain let` or `axiom explain @restrict` prints the same
+  entry in a terminal. The lexicon is held to the parser's keywords,
+  the checker's AXTAG keys and the reference's headings. Tested by
+  `tests/lsp/drive.py` and `scripts/check-tools-selfhost.sh`.
+
 - Let a declaration macro generate no declarations. A `syntax/for`
   over the fields of a struct with none, or a `decl ...` splice over an
   empty tail, stopped the compiler with status 77; the language server
@@ -37,7 +57,6 @@ its changelog too.
   `AX3023` and installed nothing. The check now prints with `println`,
   which compiles against every release `--version` can fetch, 0.2.0
   included. Tested by `scripts/check-install.sh`.
-||||||| 4ced0879
 
 - Release the `let` bindings and owning `mut` slots of a function that
   returns an `Option` or a `Result` in two registers. Its `ret` skipped

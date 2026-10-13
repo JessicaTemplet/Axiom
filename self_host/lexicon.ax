@@ -1,0 +1,778 @@
+;;! What every word of the language means: keywords, builtin types,
+;;! builtin effects, operators, literals and AXTAG keys and values,
+;;! each with the form it takes, a short explanation and the section of
+;;! `docs/reference.md` that covers it.
+;;!
+;;! Hover reads it for a word no declaration explains, `axiom explain`
+;;! answers a keyword from it, and `axiom doc` renders it as the
+;;! language index. `scripts/check-lexicon.sh` holds it to the parser's
+;;! keyword set, the checker's AXTAG keys and the reference's anchors.
+;
+; Every entry answers three strings: the FORM (what goes in the code
+; fence), the DOC (Markdown prose) and the ANCHOR (a `reference.md#...`
+; target). "" from `lexForm` means the word is not in the lexicon.
+;
+; The tables are `if` chains on the word, the shape every other table
+; in this compiler takes (`isBuiltinName`, `explainText`), so that a
+; row is one place to read and one place to edit.
+(import Str)
+
+; ------------------------------------------------------------------
+; Kinds
+; ------------------------------------------------------------------
+; Whether `w` is one of the space-separated words in `set`. The tables
+; below are sets of words, and a set written as one string reads as
+; one.
+(:: lexIn (-> String String Bool))
+(fn (lexIn w set)
+  (let (
+    (parts (strSplit set 32))
+    (mut i 0)
+    (mut hit false)
+  )
+    {
+      (while (< i (vecLen parts))
+        {
+          (if (strEq (vecGet parts i) w)
+            {
+              (set hit true)
+              0
+            }
+            0)
+          (set i (+ i 1))
+        })
+      hit
+    }))
+
+;; The kind of a lexicon word: `keyword`, `type`, `effect`, `operator`,
+;; `literal`, `form` (a word that is special inside a form) or "" when
+;; the word is not in the lexicon.
+(pub :: lexKind (-> String String))
+(pub fn (lexKind w)
+  (if (lexIn w "fn lambda let set if match while for data struct type subtype effect handle region parallel macro emacro import pub extern syntax/for alloc begin cond consume define union foreign trait impl")
+    "keyword"
+    (if (lexIn w "mut in by is range :: -> .. _ cast sizeof alignof asm syntax/join syntax/binders syntax/constructors syntax/arity syntax/fields decl")
+      "form"
+      (if (lexIn w "Int Float Bool Char String Foreign Handle Vec Option Result Addr ()")
+        "type"
+        (if (lexIn w "IO Alloc Mut Unsafe Spawn Block Entropy Div Pure")
+          "effect"
+          (if (lexIn w "+ - * / % & | ^ << >> == != < > <= >= && || !")
+            "operator"
+            (if (lexIn w "true false Some None Ok Err")
+              "literal"
+              "")))))))
+
+; ------------------------------------------------------------------
+; Forms: what goes in the code fence
+; ------------------------------------------------------------------
+;; The form a word takes, as the line a hover quotes in its fence, or
+;; "" when the word is not in the lexicon.
+(pub :: lexForm (-> String String))
+(pub fn (lexForm w)
+  (if (strEq w "fn")
+    "(fn (name param ...) body)"
+    (if (strEq w "lambda")
+      "(lambda (param ...) body)"
+      (if (strEq w "let")
+        "(let ((name value) (mut slot value) ...) body)"
+        (if (strEq w "set")
+          "(set slot value)"
+          (if (strEq w "if")
+            "(if test then else)\n(if t1 b1 t2 b2 ... else)"
+            (if (strEq w "match")
+              "(match value (pattern body) ... (_ body))"
+              (if (strEq w "while")
+                "(while test body)"
+                (if (strEq w "for")
+                  "(for i in lo..hi body)\n(for i in lo..hi by step body)\n(for x in vec body)\n(for (x i) in vec body)"
+                  (if (strEq w "data")
+                    "(data Name (Ctor Type ...) ...)\n(data Name (a) (Ctor a) ...)"
+                    (if (strEq w "struct")
+                      "(struct Name (field : Type) ...)"
+                      (if (strEq w "type")
+                        "(type Name = Type)"
+                        (if (strEq w "subtype")
+                          "(subtype Name is Int range lo..hi)"
+                          (if (strEq w "effect")
+                            "(effect Name (op :: Type) ...)"
+                            (if (strEq w "handle")
+                              "(handle body (Effect ...) handler)"
+                              (if (strEq w "region")
+                                "(region r body)"
+                                (if (strEq w "parallel")
+                                  "(parallel ((name expr) ...) body)"
+                                  (if (strEq w "macro")
+                                    "(macro (name param ...) template)\n(macro name ((name pattern ...) template) ...)"
+                                    (if (strEq w "emacro")
+                                      "(emacro name ((name pattern ...) template) ...)"
+                                      (if (strEq w "import")
+                                        "(import Module)\n(import Module (name ...))"
+                                        (if (strEq w "pub")
+                                          "(pub :: name Type)\n(pub fn (name ...) body)"
+                                          (if (strEq w "extern")
+                                            "(extern \"crate\" (name :: Type (symbol \"sym\")) ...)"
+                                            (if (strEq w "syntax/for")
+                                              "(syntax/for (C (syntax/constructors T)) template)"
+                                              (lexFormMore w))))))))))))))))))))))))
+
+(:: lexFormMore (-> String String))
+(fn (lexFormMore w)
+  (if (strEq w "alloc")
+    "(alloc Type)          ; removed"
+    (if (strEq w "begin")
+      "(begin a b c)         ; removed: write { a b c }"
+      (if (strEq w "cond")
+        "(cond (t1 b1) (t2 b2) else)   ; removed: write (if t1 b1 t2 b2 else)"
+        (if (strEq w "consume")
+          "(consume x)           ; removed"
+          (if (strEq w "define")
+            "(define (name ...) body)     ; removed: write (fn (name ...) body)"
+            (if (strEq w "union")
+              "(union Name ...)      ; removed: write (data Name ...)"
+              (if (strEq w "foreign")
+                "(foreign ...)         ; removed: write (extern ...)"
+                (if (|| (strEq w "trait") (strEq w "impl"))
+                  "(trait Name ...)  (impl Name for Type ...)   ; removed"
+                  (lexFormWords w))))))))))
+
+(:: lexFormWords (-> String String))
+(fn (lexFormWords w)
+  (if (strEq w "mut")
+    "(let ((mut name value)) body)"
+    (if (strEq w "in")
+      "(for x in xs body)"
+      (if (strEq w "by")
+        "(for i in lo..hi by step body)"
+        (if (strEq w "is")
+          "(subtype Name is Int range lo..hi)"
+          (if (strEq w "range")
+            "(subtype Name is Int range lo..hi)"
+            (if (strEq w "::")
+              "(:: name Type)"
+              (if (strEq w "->")
+                "(-> Arg ... Result)"
+                (if (strEq w "..")
+                  "lo..hi"
+                  (if (strEq w "_")
+                    "(match v (_ body))\n(f _ 2)"
+                    (if (strEq w "cast")
+                      "(cast Type value)"
+                      (if (strEq w "sizeof")
+                        "(sizeof Type)"
+                        (if (strEq w "alignof")
+                          "(alignof Type)"
+                          (if (strEq w "asm")
+                            "(asm \"template\" (out ...) (in ...))"
+                            (if (strEq w "syntax/join")
+                              "(syntax/join prefix Name)"
+                              (if (strEq w "syntax/binders")
+                                "(syntax/binders Ctor x)"
+                                (if (strEq w "syntax/constructors")
+                                  "(syntax/constructors Type)"
+                                  (if (strEq w "syntax/arity")
+                                    "(syntax/arity Ctor)"
+                                    (if (strEq w "syntax/fields")
+                                      "(syntax/fields Struct)"
+                                      (if (strEq w "decl")
+                                        "(decl declaration ...)"
+                                        (lexFormType w)))))))))))))))))))))
+
+(:: lexFormType (-> String String))
+(fn (lexFormType w)
+  (if (strEq w "Int")
+    "Int"
+    (if (strEq w "Float")
+      "Float"
+      (if (strEq w "Bool")
+        "Bool"
+        (if (strEq w "Char")
+          "Char"
+          (if (strEq w "String")
+            "String"
+            (if (strEq w "Foreign")
+              "Foreign"
+              (if (strEq w "Handle")
+                "Handle"
+                (if (strEq w "Vec")
+                  "(Vec a)"
+                  (if (strEq w "Option")
+                    "(Option a)\n(Some x)  None"
+                    (if (strEq w "Result")
+                      "(Result a e)\n(Ok x)  (Err e)"
+                      (if (strEq w "Addr")
+                        "Addr"
+                        (if (strEq w "()")
+                          "()"
+                          (lexFormEffect w))))))))))))))
+
+(:: lexFormEffect (-> String String))
+(fn (lexFormEffect w)
+  (if (lexIn w "IO Alloc Mut Unsafe Spawn Block Entropy Div Pure")
+    (concat ";@axiom:effect(" (concat (strLower w) ")"))
+    (lexFormOperator w)))
+
+(:: lexFormOperator (-> String String))
+(fn (lexFormOperator w)
+  (if (lexIn w "+ - * / % & | ^ << >>")
+    (concat "(:: " (concat w " (-> Int Int Int))"))
+    (if (lexIn w "== != < > <= >=")
+      (concat "(:: " (concat w " (-> Int Int Bool))"))
+      (if (lexIn w "&& ||")
+        (concat "(:: " (concat w " (-> Bool Bool Bool))"))
+        (if (strEq w "!")
+          "(:: ! (-> Bool Bool))"
+          (lexFormLiteral w))))))
+
+(:: lexFormLiteral (-> String String))
+(fn (lexFormLiteral w)
+  (if (lexIn w "true false")
+    (concat "(:: " (concat w " Bool)"))
+    (if (strEq w "Some")
+      "(Some value) : (Option a)"
+      (if (strEq w "None")
+        "None : (Option a)"
+        (if (strEq w "Ok")
+          "(Ok value) : (Result a e)"
+          (if (strEq w "Err")
+            "(Err error) : (Result a e)"
+            ""))))))
+
+; ------------------------------------------------------------------
+; Prose
+; ------------------------------------------------------------------
+;; The explanation of a word, as Markdown, or "" when the word is not
+;; in the lexicon.
+(pub :: lexDoc (-> String String))
+(pub fn (lexDoc w)
+  (if (strEq w "fn")
+    "Declares a named function at the top level. Its type comes from the `(:: name Type)` signature above it, and AXTAGs such as `;@axiom:effect(io)` go between the two. A function value inside an expression is a `lambda`; `(fn (x) ...)` there is refused with `AX2004`."
+    (if (strEq w "lambda")
+      "An anonymous function. It captures the bindings it uses, can be passed as a value and may be applied to fewer arguments than it takes, answering another lambda. A `lambda` with no parameters is refused with `AX3068`."
+      (if (strEq w "let")
+        "Binds names for the body. Each binding is `(name value)`; `(mut name value)` makes a slot that `set` can overwrite. A pattern can stand where a name does, `(let (((Point x y) p)) ...)`. The body's value is the form's value."
+        (if (strEq w "set")
+          "Overwrites a `mut` slot. The slot owns what it holds, so the previous value is released (`MM-MUT-1`). Writing to a binding that is not `mut` is `AX3012`."
+          (if (strEq w "if")
+            "Branches on a `Bool`. Both branches must have the same type. With more than three operands it is a chain: `(if t1 b1 t2 b2 else)` is `(if t1 b1 (if t2 b2 else))`. Use braces for a branch of several expressions."
+            (if (strEq w "match")
+              "Compares a value against patterns in order and runs the first body that fits. A pattern is a constructor with binders, a literal, a name or `_`. A `match` that misses a constructor is `AX3005`; a bare capitalised name such as `None` binds a variable rather than testing a tag, so write `(None)`."
+              (if (strEq w "while")
+                "Repeats the body while the `Bool` test is true. There is no `break` or `continue`: put the stopping condition in the test. The form answers 0."
+                (if (strEq w "for")
+                  "Counts over a range, `lo` included and `hi` excluded, with an optional `by step`, or walks a `Vec` by element or by `(x i)` element and index. The sequence is evaluated once. A `for` body is for effects, and the form answers 0."
+                  (if (strEq w "data")
+                    "Declares a sum type: a set of constructors, each with zero or more field types. Constructors start with a capital, build values when applied and take values apart in `match`. Type parameters go in a list after the name."
+                    (if (strEq w "struct")
+                      "Declares a product type with named, typed fields. Build one with the name applied positionally, `(Point 1 2)`, and read a field with a dot, `p.x`. A field without its `:` is refused with `AX3056`."
+                      (if (strEq w "type")
+                        "Gives an existing type a second name. The alias is replaced by its target wherever it is written, so it takes no type parameters (`AX3096`)."
+                        (if (strEq w "subtype")
+                          "Declares a range-constrained `Int`, `(subtype Port is Int range 1..65536)`. A value is checked against the range when it enters the subtype, and a failed check stops the program with its own message."
+                          (if (strEq w "effect")
+                            "Declares an effect: a name and the operations it provides, each with a signature. A call to an operation runs the innermost `handle` for its effect. A declared effect cannot take a built-in effect's name (`AX3054`), and an operation needs a type (`AX3055`)."
+                            (if (strEq w "handle")
+                              "Runs a body with a handler installed for an effect's operations. The list names every effect the body performs: a declared effect is intercepted and a built-in one is acknowledged and still reaches the caller. The handler's return value is the operation's result."
+                              (if (strEq w "region")
+                                "Opens a named arena scope. Values allocated inside it are released together when the body ends, and a value that would leave it is refused (`AX3059`). A type can name the region it lives in, `(Vec Int @r)`."
+                                (if (strEq w "parallel")
+                                  "Evaluates its bindings at the same time, each on its own task, and runs the body once all of them have answered. A binding may capture a parent value only by borrowing it for the extent of the form (`AX3064`)."
+                                  (if (strEq w "macro")
+                                    "Declares a macro: a template substituted at its invocation before the type checker runs. The one-rule form names the parameters in the head; the multi-rule form lists patterns and a template for each. Hygiene renames the binders a template introduces."
+                                    (if (strEq w "emacro")
+                                      "Declares an expression macro with the multi-rule form. Not yet: `macro` and `emacro` become one form; see the roadmap."
+                                      (if (strEq w "import")
+                                        "Brings a module's public names into scope, all of them or the ones listed. A module is a file in the standard library, on `AXIOM_PATH` or in a dependency. A name declared in two imported modules is `AX3014` when used bare."
+                                        (if (strEq w "pub")
+                                          "Marks a declaration as public, so other modules can import it. A signature and its function are each marked. A name used from a module that does not export it is `AX3023`."
+                                          (if (strEq w "extern")
+                                            "Binds functions from a Rust crate built by `axiom fetch`. Each item gives the Axiom type and the symbol it binds; a type that cannot cross the boundary is `AX3036`. Calling one is an `Unsafe` operation."
+                                            (if (strEq w "syntax/for")
+                                              "Inside a macro template, repeats the template once for each element of a syntax query such as `(syntax/constructors T)`, binding the pattern variable to each."
+                                              (lexDocRemoved w))))))))))))))))))))))))
+
+(:: lexDocRemoved (-> String String))
+(fn (lexDocRemoved w)
+  (if (strEq w "alloc")
+    "Removed. The form typed as a pointer and evaluated to 0, so a program holding one held no memory. Allocate with a constructor, a `struct` or a library function; the compiler refuses the word with `AX2004`."
+    (if (strEq w "begin")
+      "Removed. Sequence expressions with a brace block, `{ a b c }`, which answers its last expression. The compiler refuses the word with `AX2004`."
+      (if (strEq w "cond")
+        "Removed. Write the chain with `if`: `(if t1 b1 t2 b2 else)` nests as `(if t1 b1 (if t2 b2 else))`. The compiler refuses the word with `AX2004`."
+        (if (strEq w "consume")
+          "Removed. It was a parse-time marker that enforced nothing. Ownership follows the memory model's rules without it; the compiler refuses the word with `AX2004`."
+          (if (strEq w "define")
+            "Removed. It was the old spelling of `fn`, and a language with two spellings of one thing makes every reader learn both. The compiler refuses the word with `AX2004`."
+            (if (strEq w "union")
+              "Removed. An untagged union cannot be pattern-matched safely, since its variants are not distinguishable at run time. Use `data`; the compiler refuses the word with `AX2004`."
+              (if (strEq w "foreign")
+                "Removed. Bind native code with `extern`, which names the crate and checks each item's type. The compiler refuses the word with `AX2004`."
+                (if (lexIn w "trait impl")
+                  "Removed. Traits and impls are not part of the language; write the function you want, or derive one with a macro such as `deriveEq`. The compiler refuses the word with `AX2004`."
+                  (lexDocForm w))))))))))
+
+(:: lexDocForm (-> String String))
+(fn (lexDocForm w)
+  (if (strEq w "mut")
+    "Marks a `let` binding as a slot that `set` can overwrite. The slot owns what it holds and releases what `set` replaces (`MM-MUT-1`)."
+    (if (strEq w "in")
+      "Separates the loop variable of a `for` from the range or `Vec` it walks."
+      (if (strEq w "by")
+        "Gives a `for` over a range its stride. A negative stride counts down; a literal zero stride is refused."
+        (if (strEq w "is")
+          "In a `subtype`, names the base type the new type refines."
+          (if (strEq w "range")
+            "In a `subtype`, gives the inclusive bounds a value must satisfy."
+            (if (strEq w "::")
+              "A type signature. At the top level it declares the type of the function or constant below it, `(:: bump (-> Int Int))`. Inside an `effect`, it types an operation. Two signatures for one name are refused with `AX3006`."
+              (if (strEq w "->")
+                "A function type: the argument types, then the result. `(-> Int String)` takes an `Int` and answers a `String`; `(-> a a)` answers the type it takes."
+                (if (strEq w "..")
+                  "A range, `lo` included and `hi` excluded in `for`, both included in a `subtype`'s `range`."
+                  (if (strEq w "_")
+                    "The wildcard. In a pattern it matches anything and binds nothing. In a call, `(f _ 2)` builds a lambda over the missing arguments from left to right."
+                    (if (strEq w "cast")
+                      "Changes the declared type of a value without changing its bits. It does not make an address valid or extend a lifetime, and casting a reference to `Int` drops its share. Raw-memory uses belong behind `;@axiom:effect(unsafe)`."
+                      (if (strEq w "sizeof")
+                        "The size in bytes of a type's representation. Takes exactly one type (`AX3069`)."
+                        (if (strEq w "alignof")
+                          "The alignment in bytes of a type's representation. Takes exactly one type (`AX3069`)."
+                          (if (strEq w "asm")
+                            "Inline assembly: a template, its outputs and its inputs. A form the compiler cannot lower is `AX3091`, and an assembler error is reported at the form. See the reference's inline assembly section for the operand syntax."
+                            (if (strEq w "syntax/join")
+                              "Inside a macro template, builds a name from parts: `(syntax/join eq T)` with `T` bound to `Colour` is `eqColour`."
+                              (if (strEq w "syntax/binders")
+                                "Inside a macro template, the binder list for a constructor's fields, so a pattern can take any constructor apart without knowing its arity."
+                                (if (strEq w "syntax/constructors")
+                                  "Inside a macro template, the constructors of a `data` type, answered from the declaration list at expansion time."
+                                  (if (strEq w "syntax/arity")
+                                    "Inside a macro template, how many fields a constructor carries, folded to a literal."
+                                    (if (strEq w "syntax/fields")
+                                      "Inside a macro template, the fields of a `struct`, each as a name and a type."
+                                      (if (strEq w "decl")
+                                        "Inside a declaration macro, splices the declarations it holds into the module."
+                                        (lexDocType w)))))))))))))))))))))
+
+(:: lexDocType (-> String String))
+(fn (lexDocType w)
+  (if (strEq w "Int")
+    "A signed 64-bit integer. Arithmetic wraps. It is also the word a handle or an address is carried in at the raw-memory level, which is why a heap value returned where a signature says `Int` is refused (`AX3004`)."
+    (if (strEq w "Float")
+      "An IEEE 754 binary64 number. Convert with `intToFloat` and `floatToInt` from `Float`."
+      (if (strEq w "Bool")
+        "`true` or `false`. The test of `if` and `while`, and the result of the comparison and logical operators."
+        (if (strEq w "Char")
+          "A Unicode code point. `Utf8` and `Str` convert between characters and byte strings."
+          (if (strEq w "String")
+            "A byte string. Literals support `{name}` holes that interpolate a binding in scope. The `Str` module reads and builds them."
+            (if (strEq w "Foreign")
+              "An externally owned pointer. The compiler never follows or releases it; the code that received it is responsible for it."
+              (if (strEq w "Handle")
+                "A counted owner with an external destructor, which runs when the last share is released."
+                (if (strEq w "Vec")
+                  "A growable vector of `a`. It owns its elements and is released at the end of its scope (`MM-LIFE-2m`). Build one with `vecNew`; `Vec` has the accessors."
+                  (if (strEq w "Option")
+                    "A value that may be absent: `(Some x)` or `None`. Take it apart with `match`, writing the arms `((Some x) ...)` and `((None) ...)`. Library functions answer it instead of a sentinel."
+                    (if (strEq w "Result")
+                      "Success or failure: `(Ok x)` or `(Err e)`. The `Err` module declares it with `Error`, and `try` unwraps one inside a function that answers a `Result`. A `Result` left unused in statement position is `AX3046`."
+                      (if (strEq w "Addr")
+                        "The identity of a heap value, from `addrOf`, for comparing values by identity and hashing them without a cast."
+                        (if (strEq w "()")
+                          "The empty tuple type. It has no expression value; a function that answers nothing useful answers `Int` 0 instead."
+                          (lexDocEffect w))))))))))))))
+
+(:: lexDocEffect (-> String String))
+(fn (lexDocEffect w)
+  (if (strEq w "IO")
+    "Reaches the outside world: a syscall, an `extern` call or the command line. It propagates through calls, so a function that performs IO without declaring `;@axiom:effect(io)` is `AX3042`."
+    (if (strEq w "Alloc")
+      "Allocates, resets the arena or installs a handler. It is ambient: inferred and reported, never declared."
+      (if (strEq w "Mut")
+        "Changes heap state that something else can see. Ambient, like `Alloc`: inferred and reported, never declared."
+        (if (strEq w "Unsafe")
+          "Uses a raw-memory primitive, calls an `extern` or forges a reference. A function that does so must declare `;@axiom:effect(unsafe)` (`AX3073`), which makes it a trusted wrapper; the effect does not propagate to callers."
+          (if (strEq w "Spawn")
+            "Creates a task, thread or process."
+            (if (strEq w "Block")
+              "Waits: a join, a lock, a read that may not return at once."
+              (if (strEq w "Entropy")
+                "Draws randomness from the system or the hardware."
+                (if (strEq w "Div")
+                  "Possible divergence. Nothing infers it, so an `effect(div)` claim is refused with `AX3110`."
+                  (if (strEq w "Pure")
+                    "Performs no effect at all. Claim it with `;@axiom:effect(pure)`; a body that performs one is `AX3010`."
+                    (lexDocOperator w)))))))))))
+
+(:: lexDocOperator (-> String String))
+(fn (lexDocOperator w)
+  (if (lexIn w "+ - *")
+    "Integer arithmetic over two `Int`s, wrapping on overflow. Operators are ordinary names in head position, `(+ 1 2)`, and the `Float` module has the floating-point forms."
+    (if (lexIn w "/ %")
+      "Integer division and remainder, truncating toward zero. Division by zero stops the program."
+      (if (lexIn w "& | ^")
+        "Bitwise and, or and exclusive or over two `Int`s."
+        (if (lexIn w "<< >>")
+          "Shifts an `Int` left or right by a number of bits; the right shift is arithmetic."
+          (if (lexIn w "== !=")
+            "Equality of two `Int`s. Strings compare with `strEq`, and heap values by identity with `addrOf`."
+            (if (lexIn w "< > <= >=")
+              "Compares two `Int`s and answers a `Bool`."
+              (if (lexIn w "&& ||")
+                "Logical and, or over two `Bool`s. Both operands are evaluated."
+                (if (strEq w "!")
+                  "Logical not."
+                  (lexDocLiteral w))))))))))
+
+(:: lexDocLiteral (-> String String))
+(fn (lexDocLiteral w)
+  (if (lexIn w "true false")
+    "A `Bool` literal. The two names are reserved: a binding or declaration called `true` or `false` is refused (`AX3094`)."
+    (if (strEq w "Some")
+      "The present case of `Option`. In a pattern, `((Some x) ...)` binds the value."
+      (if (strEq w "None")
+        "The absent case of `Option`. In a pattern write `((None) ...)`: a bare `None` arm is a variable pattern that matches anything."
+        (if (strEq w "Ok")
+          "The success case of `Result`."
+          (if (strEq w "Err")
+            "The failure case of `Result`, carrying an error value."
+            ""))))))
+
+; ------------------------------------------------------------------
+; Anchors into the reference
+; ------------------------------------------------------------------
+;; The `reference.md#anchor` that covers a word, or "" when the word is
+;; not in the lexicon.
+(pub :: lexAnchor (-> String String))
+(pub fn (lexAnchor w)
+  (concat "reference.md#" (lexAnchorSlug w)))
+
+(:: lexAnchorSlug (-> String String))
+(fn (lexAnchorSlug w)
+  (if (lexIn w "fn :: ->")
+    "functions"
+    (if (strEq w "lambda")
+      "lambdas"
+      (if (strEq w "_")
+        "partial-application"
+        (if (lexIn w "let set")
+          "let-bindings"
+          (if (strEq w "mut")
+            "mutable-bindings"
+            (if (strEq w "if")
+              "if"
+              (if (strEq w "while")
+                "while-loops"
+                (if (lexIn w "for in by ..")
+                  "for-loops"
+                  (if (strEq w "data")
+                    "algebraic-data-types"
+                    (if (strEq w "match")
+                      "pattern-matching"
+                      (if (strEq w "struct")
+                        "structs"
+                        (if (strEq w "type")
+                          "type-aliases"
+                          (if (lexIn w "subtype is range")
+                            "range-constrained-subtypes"
+                            (if (lexIn w "effect handle")
+                              "effects"
+                              (if (strEq w "region")
+                                "regions"
+                                (if (strEq w "parallel")
+                                  "concurrency"
+                                  (if (lexIn w "macro emacro syntax/for syntax/join syntax/binders syntax/constructors syntax/arity syntax/fields decl")
+                                    "macros"
+                                    (if (lexIn w "import pub")
+                                      "modules-and-imports"
+                                      (if (strEq w "extern")
+                                        "calling-rust"
+                                        (if (strEq w "asm")
+                                          "inline-assembly"
+                                          (if (lexIn w "alloc begin cond consume define union foreign trait impl")
+                                            "removed-features"
+                                            (if (lexIn w "cast sizeof alignof")
+                                              "types"
+                                              (if (lexIn w "Addr Vec Option Result Some None Ok Err")
+                                                "standard-library"
+                                                (if (strEq (lexKind w) "type")
+                                                  "primitive-types"
+                                                  (if (strEq (lexKind w) "effect")
+                                                    "effects"
+                                                    (if (strEq (lexKind w) "operator")
+                                                      "operators"
+                                                      (if (lexIn w "true false")
+                                                        "literals"
+                                                        ""))))))))))))))))))))))))))))
+
+; ------------------------------------------------------------------
+; AXTAG keys and values
+; ------------------------------------------------------------------
+;; What a checked or recorded AXTAG key means, as Markdown, or "" for
+;; a key the compiler does not know. A key with a namespace of your
+;; own, `;@axiom:my:owner(...)`, is recorded without being checked.
+(pub :: lexTagKeyDoc (-> String String))
+(pub fn (lexTagKeyDoc k)
+  (if (strEq k "effect")
+    "Claims the one effect the function performs: `io`, `unsafe` or `pure`. The checker compares the claim with what the body does and refuses a mismatch (`AX3010`); a required effect left undeclared is `AX3042`. One effect per tag (`AX3076`), and purity is spelled `effect(pure)` (`AX3078`)."
+    (if (strEq k "restrict")
+      "Claims what the function never does, transitively: `no-alloc`, `no-io`, `no-unsafe`, `no-block`, `no-spawn`, `no-recursion`, `no-trap` and the others. A violated claim is `AX3049`; add `strict` to refuse a claim the walk cannot prove instead of receiving `AX3051`."
+      (if (strEq k "pre")
+        "A precondition over the arguments, checked on every call. A failed check traps with status 80. A condition the compiler cannot compile into a check is `AX3050`."
+        (if (strEq k "post")
+          "A postcondition over `result`, checked on every return. A failed check traps with status 80."
+          (if (strEq k "isr")
+            "Marks an interrupt entry point: a no-argument function checked for allocation, recursion and waiting. On `baremetal-aarch64`, `isr(irq)` binds the interrupt handler and `isr(fault)` the fault policy."
+            (if (strEq k "nolint")
+              "Quiets the named editor hints (`lint-dead-branch`, `lint-bool-if`, `lint-unused-let`) on this declaration. It never quiets a compiler error."
+              (if (strEq k "ct")
+                "Claims the function runs in constant time with respect to the named parameters, for code that handles secrets. A body that branches or indexes on one is refused (`AX3092`); a claim naming no parameter is `AX3093`."
+                (if (strEq k "deprecated")
+                  "Marks a name as deprecated with a message. Each use draws `AX3048` quoting it, and a release may retire the name under the compatibility rules."
+                  (if (strEq k "raw")
+                    "Marks a typed accessor over raw memory: a function whose `cast` sits at its return, so callers see the declared type and the evidence word is computed from it (`MM-VAL-23`)."
+                    (if (strEq k "unhandled")
+                      "`unhandled(trap)` on an `effect` declaration says that an operation reaching `main` with no handler is intended to stop the program, which turns `AX3053` off for it."
+                      (if (strEq k "syscall")
+                        "Names the effects a raw syscall number performs, so every function that names the number owes them. The value is a comma list of effect names."
+                        (if (strEq k "precondition")
+                          "Removed: contracts are `pre` and `post` (`AX3095`)."
+                          "")))))))))))))
+
+;; What a value of an AXTAG key means, or "" when the pair is not one
+;; the lexicon knows.
+(pub :: lexTagValueDoc (-> String String String))
+(pub fn (lexTagValueDoc k v)
+  (if (strEq k "effect")
+    (if (strEq v "io")
+      "The function reaches the outside world: a syscall, an `extern` call or the command line."
+      (if (strEq v "unsafe")
+        "The function uses a raw-memory primitive, calls an `extern` or forges a reference. The claim makes it a trusted wrapper, and callers inherit nothing."
+        (if (strEq v "pure")
+          "The function performs no effect. A body that performs one is `AX3010`."
+          (if (strEq v "div")
+            "Refused: nothing infers divergence, so the claim can never be checked (`AX3110`)."
+            (if (lexIn v "alloc mut spawn block entropy")
+              "An effect the compiler infers and reports. Only `io`, `unsafe` and `pure` are declared; this one is read from the body."
+              "")))))
+    (if (strEq k "restrict")
+      (lexRestrictionDoc v)
+      (if (strEq k "isr")
+        (if (strEq v "irq")
+          "The interrupt handler. On `baremetal-aarch64` the image binds it to the interrupt vector."
+          (if (strEq v "fault")
+            "The fault policy: what runs when an exception is taken instead of the default register dump and exit 81."
+            ""))
+        (if (strEq k "unhandled")
+          (if (strEq v "trap")
+            "An operation of this effect that reaches `main` unhandled stops the program, by design."
+            "")
+          (if (strEq k "nolint")
+            (if (strEq v "lint-dead-branch")
+              "The hint that an `if` test is constant, so one branch never runs."
+              (if (strEq v "lint-bool-if")
+                "The hint that an `if` answers `true` and `false`, which the test already is."
+                (if (strEq v "lint-unused-let")
+                  "The hint that a `let` binding is never read."
+                  "")))
+            ""))))))
+
+(:: lexRestrictionDoc (-> String String))
+(fn (lexRestrictionDoc v)
+  (if (strEq v "no-alloc")
+    "Nothing reachable from here allocates, resets the arena or installs a handler."
+    (if (strEq v "no-io")
+      "Nothing reachable from here performs IO."
+      (if (strEq v "no-unsafe")
+        "Nothing reachable from here uses a raw-memory primitive or calls an `extern`."
+        (if (strEq v "no-block")
+          "Nothing reachable from here waits."
+          (if (strEq v "no-spawn")
+            "Nothing reachable from here creates a task, thread or process."
+            (if (strEq v "no-entropy")
+              "Nothing reachable from here draws randomness."
+              (if (strEq v "no-recursion")
+                "No call cycle passes through here, so the stack depth is bounded."
+                (if (strEq v "no-trap")
+                  "Nothing reachable from here can stop the program with a trap: no failed contract, no out-of-range index, no division by zero."
+                  (if (strEq v "no-cast")
+                    "Nothing reachable from here uses `cast`."
+                    (if (strEq v "no-escape")
+                      "No value allocated here leaves the function."
+                      (if (strEq v "no-foreign")
+                        "Nothing reachable from here calls an `extern`."
+                        (if (strEq v "no-rendering")
+                          "Nothing reachable from here renders a value into a format string."
+                          (if (strEq v "no-wrap")
+                            "No integer arithmetic reachable from here can wrap."
+                            (if (strEq v "strict")
+                              "Refuse the claim when the walk cannot prove it (`AX3057`), instead of warning with `AX3051`."
+                              "")))))))))))))))
+
+; ------------------------------------------------------------------
+; The index
+; ------------------------------------------------------------------
+;; Every word the lexicon documents, in the order the language index
+;; lists them: keywords, forms, types, effects, operators, literals.
+(pub :: lexWords (Vec String))
+(pub fn (lexWords)
+  (let ((v vecNew))
+    {
+      (vecPush v "fn")
+      (vecPush v "lambda")
+      (vecPush v "let")
+      (vecPush v "set")
+      (vecPush v "if")
+      (vecPush v "match")
+      (vecPush v "while")
+      (vecPush v "for")
+      (vecPush v "data")
+      (vecPush v "struct")
+      (vecPush v "type")
+      (vecPush v "subtype")
+      (vecPush v "effect")
+      (vecPush v "handle")
+      (vecPush v "region")
+      (vecPush v "parallel")
+      (vecPush v "macro")
+      (vecPush v "emacro")
+      (vecPush v "import")
+      (vecPush v "pub")
+      (vecPush v "extern")
+      (vecPush v "syntax/for")
+      (vecPush v "alloc")
+      (vecPush v "begin")
+      (vecPush v "cond")
+      (vecPush v "consume")
+      (vecPush v "define")
+      (vecPush v "union")
+      (vecPush v "foreign")
+      (vecPush v "trait")
+      (vecPush v "impl")
+      (vecPush v "mut")
+      (vecPush v "in")
+      (vecPush v "by")
+      (vecPush v "is")
+      (vecPush v "range")
+      (vecPush v "::")
+      (vecPush v "->")
+      (vecPush v "..")
+      (vecPush v "_")
+      (vecPush v "cast")
+      (vecPush v "sizeof")
+      (vecPush v "alignof")
+      (vecPush v "asm")
+      (vecPush v "syntax/join")
+      (vecPush v "syntax/binders")
+      (vecPush v "syntax/constructors")
+      (vecPush v "syntax/arity")
+      (vecPush v "syntax/fields")
+      (vecPush v "decl")
+      (vecPush v "Int")
+      (vecPush v "Float")
+      (vecPush v "Bool")
+      (vecPush v "Char")
+      (vecPush v "String")
+      (vecPush v "Foreign")
+      (vecPush v "Handle")
+      (vecPush v "Vec")
+      (vecPush v "Option")
+      (vecPush v "Result")
+      (vecPush v "Addr")
+      (vecPush v "()")
+      (vecPush v "IO")
+      (vecPush v "Alloc")
+      (vecPush v "Mut")
+      (vecPush v "Unsafe")
+      (vecPush v "Spawn")
+      (vecPush v "Block")
+      (vecPush v "Entropy")
+      (vecPush v "Div")
+      (vecPush v "Pure")
+      (vecPush v "+")
+      (vecPush v "-")
+      (vecPush v "*")
+      (vecPush v "/")
+      (vecPush v "%")
+      (vecPush v "&")
+      (vecPush v "|")
+      (vecPush v "^")
+      (vecPush v "<<")
+      (vecPush v ">>")
+      (vecPush v "==")
+      (vecPush v "!=")
+      (vecPush v "<")
+      (vecPush v ">")
+      (vecPush v "<=")
+      (vecPush v ">=")
+      (vecPush v "&&")
+      (vecPush v "||")
+      (vecPush v "!")
+      (vecPush v "true")
+      (vecPush v "false")
+      (vecPush v "Some")
+      (vecPush v "None")
+      (vecPush v "Ok")
+      (vecPush v "Err")
+      v
+    }))
+
+;; Every AXTAG key the lexicon documents, checked keys first.
+(pub :: lexTagKeys (Vec String))
+(pub fn (lexTagKeys)
+  (let ((v vecNew))
+    {
+      (vecPush v "effect")
+      (vecPush v "restrict")
+      (vecPush v "pre")
+      (vecPush v "post")
+      (vecPush v "isr")
+      (vecPush v "ct")
+      (vecPush v "deprecated")
+      (vecPush v "raw")
+      (vecPush v "unhandled")
+      (vecPush v "syscall")
+      (vecPush v "nolint")
+      (vecPush v "precondition")
+      v
+    }))
+
+;; One word's entry as Markdown: the form in an `axiom` fence, its
+;; kind, the prose and the reference section. "" for an unknown word.
+(pub :: lexEntryMarkdown (-> String String))
+(pub fn (lexEntryMarkdown w)
+  (let ((form (lexForm w)))
+    (if (== (strLen form) 0)
+      ""
+      (concat
+        (concat (concat "```axiom\n" form) "\n```\n\n")
+        (concat
+          (concat (concat "*" (lexKind w)) "*\n\n")
+          (concat
+            (concat (lexDoc w) "\n\n")
+            (concat (concat "Reference: `docs/" (lexAnchor w)) "`\n")))))))
+
+;; An AXTAG's entry as Markdown: the tag in a fence, the key's prose
+;; and, when `v` is a value the lexicon knows, the value's prose. "" for
+;; an unknown key.
+(pub :: lexTagMarkdown (-> String String String))
+(pub fn (lexTagMarkdown k v)
+  (let ((kd (lexTagKeyDoc k)))
+    (if (== (strLen kd) 0)
+      ""
+      (let ((vd 
+        (if (== (strLen v) 0)
+          ""
+          (lexTagValueDoc k v))))
+        (concat
+          (concat
+            (concat "```axiom\n;@axiom:" k)
+            (if (== (strLen v) 0)
+              "\n```\n\n"
+              (concat (concat "(" v) ")\n```\n\n")))
+          (concat
+            (concat "*AXTAG*\n\n" (concat kd "\n"))
+            (concat
+              (if (== (strLen vd) 0)
+                ""
+                (concat (concat (concat "\n`" v) "`: ") (concat vd "\n")))
+              "\nReference: `docs/reference.md#axtag-metadata`\n")))))))

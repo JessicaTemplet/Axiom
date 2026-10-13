@@ -134,11 +134,11 @@
 (import Err)
 
 ; ---- the options ---------------------------------------------------------
-; `width` children at most (clamped to 1..n); `limit` bytes per answer
-; (0 or more); `deadline` nanoseconds per task from its spawn, 0 for
-; none; `grace` nanoseconds a running task gets after a cancellation;
-; `failFast` cancels the pool at the first error; `token` is `Some` a
-; token from `taskTokenNew`, or `None` for one private to the call.
+;; `width` children at most (clamped to 1..n); `limit` bytes per answer
+;; (0 or more); `deadline` nanoseconds per task from its spawn, 0 for
+;; none; `grace` nanoseconds a running task gets after a cancellation;
+;; `failFast` cancels the pool at the first error; `token` is `Some` a
+;; token from `taskTokenNew`, or `None` for one private to the call.
 (pub struct TaskOpts
   (width : Int)
   (limit : Int)
@@ -147,7 +147,7 @@
   (failFast : Bool)
   (token : (Option CancelToken)))
 
-; No deadline, a 100 ms grace, no fail-fast, a private token.
+;; No deadline, a 100 ms grace, no fail-fast, a private token.
 (pub :: taskOpts (-> Int Int TaskOpts))
 (pub fn (taskOpts width limit)
   (TaskOpts
@@ -207,7 +207,7 @@
 (pub fn (taskTooLargeCode)
   1003)
 
-; How often a sleeping pool looks at its running children: 10 ms.
+;; How often a sleeping pool looks at its running children: 10 ms.
 (pub :: taskPollNanos Int)
 (pub fn (taskPollNanos)
   10000000)
@@ -282,9 +282,9 @@
   })
 
 ; ---- the token -------------------------------------------------------------
-; A cancellation token: one owner whose value is a shared page - word 0
-; the cancelled flag, word 1 the event counter a pool sleeps on
-; (MM-PAR-16).
+;; A cancellation token: one owner whose value is a shared page - word 0
+;; the cancelled flag, word 1 the event counter a pool sleeps on
+;; (MM-PAR-16).
 (pub struct CancelToken sealed shared
   (owner : Handle))
 
@@ -295,7 +295,7 @@
 (fn (taskTokenAt t)
   (__resource_get t.owner))
 
-; A fresh token, not set, or `Err` the mapping's error.
+;; A fresh token, not set, or `Err` the mapping's error.
 (pub :: taskTokenNew (Result CancelToken Error))
 ;@axiom:effect(io)
 (pub fn (taskTokenNew)
@@ -320,13 +320,13 @@
     ((Ok z) 0)
     ((Err e) (- 0 (errCode e)))))
 
-; Set the token and wake every pool sleeping on it. Idempotent.
+;; Set the token and wake every pool sleeping on it. Idempotent.
 (pub :: taskCancel (-> CancelToken Int))
 ;@axiom:effect(io)
 (pub fn (taskCancel t)
   (taskCancelAt (taskTokenAt t)))
 
-; Whether the token is set: the poll a cooperative task makes.
+;; Whether the token is set: the poll a cooperative task makes.
 (pub :: taskCancelled (-> CancelToken Bool))
 (pub fn (taskCancelled t)
   (taskCancelledAt (taskTokenAt t)))
@@ -996,9 +996,9 @@
           ))))))
 
 ; ---- the entries ---------------------------------------------------------
-; `f i` for every `i` in `0 .. n`, at most `width` at once, each answer
-; at most `limit` bytes: one `Result` per task in submit order. No
-; deadline, no fail-fast, a private token.
+;; `f i` for every `i` in `0 .. n`, at most `width` at once, each answer
+;; at most `limit` bytes: one `Result` per task in submit order. No
+;; deadline, no fail-fast, a private token.
 (pub :: taskMap (-> (-> Int String) Int Int Int (Vec (Result String Error))))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -1006,7 +1006,7 @@
 (pub fn (taskMap f n width limit)
   (taskMapWith f n (taskOpts width limit)))
 
-; `taskMap` with every option (`TaskOpts`).
+;; `taskMap` with every option (`TaskOpts`).
 (pub :: taskMapWith (-> (-> Int String) Int TaskOpts (Vec (Result String Error))))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -1028,10 +1028,10 @@
       out
     }))
 
-; Decode each successful answer in the parent, in submit order. Task
-; failures pass through unchanged and never call `decode`. The encoded
-; answers keep `taskMap`'s byte limit; decoded storage is the decoder's
-; responsibility and the result vector holds n values.
+;; Decode each successful answer in the parent, in submit order. Task
+;; failures pass through unchanged and never call `decode`. The encoded
+;; answers keep `taskMap`'s byte limit; decoded storage is the decoder's
+;; responsibility and the result vector holds n values.
 (pub :: taskMapDecoded (-> (-> Int String) (-> String (Result a Error)) Int Int Int (Vec (Result a Error))))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -1039,10 +1039,10 @@
 (pub fn (taskMapDecoded f decode n width limit)
   (taskMapDecodedWith f decode n (taskOpts width limit)))
 
-; All task options, with parent-side decoding. Decoder errors belong to
-; their result slots; `failFast` concerns worker failures, not decoding.
-; Delivery calls `decode` before starting more work, so a slow decoder
-; can delay submission and deadline/cancellation handling.
+;; All task options, with parent-side decoding. Decoder errors belong to
+;; their result slots; `failFast` concerns worker failures, not decoding.
+;; Delivery calls `decode` before starting more work, so a slow decoder
+;; can delay submission and deadline/cancellation handling.
 (pub :: taskMapDecodedWith (-> (-> Int String) (-> String (Result a Error)) Int TaskOpts (Vec (Result a Error))))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -1070,11 +1070,11 @@
     ((Ok s) (decode s))
     ((Err e) (Err e))))
 
-; Fold the answers in submit order without keeping them: `step acc i r`
-; for each task, starting from `init`, answering the last `acc`.
-; Each answer and everything the step allocates are reclaimed on return.
-; A retained mark cell is refreshed before delivery, then reset after it.
-; The pool's state and the accumulator were allocated before that mark.
+;; Fold the answers in submit order without keeping them: `step acc i r`
+;; for each task, starting from `init`, answering the last `acc`.
+;; Each answer and everything the step allocates are reclaimed on return.
+;; A retained mark cell is refreshed before delivery, then reset after it.
+;; The pool's state and the accumulator were allocated before that mark.
 ;
 ; The caller must keep only scalar accumulator bits across a step.
 ; Saving an answer or growing a captured Vec would retain reclaimed

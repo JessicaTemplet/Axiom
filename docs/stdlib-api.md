@@ -19,7 +19,10 @@ Every name listed is `pub` in the source. The columns are:
   no effect, and a macro's cell is always blank. Treat the column as a
   lower bound: inference doesn't count the allocation a constructor
   makes (`docs/memory-model.md` MM-EXEC-9a).
-- **Summary**: the first paragraph of the comment above the definition.
+- **Summary**: the first paragraph of the `;;` doc comment above the
+  definition. A blank cell is a name with no doc comment yet.
+
+A module's `;;!` lines open its section.
 
 This page is generated from the standard library by
 `examples/axdoc/axdoc.ax`, so please don't edit it by hand.
@@ -1441,12 +1444,16 @@ two differ.
 
 `stdlib/Pre.ax` — 4 public names
 
+The standard prelude: small macros every program can use.
+
+Import with `(import Pre (when unless ...))`.
+
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `when` | macro |  |  | Axiom standard prelude — macros and utilities. |
-| `unless` | macro |  |  | ;; unless — evaluate body unless test is true ;; (unless test body) -> (if test 0 body) |
-| `deriveEq` | macro |  |  | ;; Variadic branching is the `if` statement itself: `(if t1 b1 t2 b2 ;; ... els)` is the nested chain `(if t1 b1 (if t2 b2 ... els))`, ;; built by the parser. The fixed-arity `cond2`/`cond3` helpers that ;; used to stand here are gone with the `cond` keyword (AX2004): ;; spell the nesting with `if`. ;; deriveEq — structural equality for a data type, derived at the ;; point of use: `(deriveEq Color)` generates `eqColor : Color -> ;; Color -> Bool`, one match arm per constructor, answered from the ;; declaration list at expansion time (macro-system.md MAC-CAP-5/9). ;; The nullary form: works for any sum of nullary constructors, which ;; is the enum case. Fieldful sums want the impl form written where ;; the Eq trait is in scope — see macro-system.md section 10.2. |
-| `deriveArity` | macro |  |  | ;; deriveArity — how many fields the value's constructor carries: ;; `(deriveArity Shape)` generates `arityShape : Shape -> Int`. The ;; count is `syntax/arity`'s answer, folded to a literal per arm, and ;; it is not derivable any other way at run time: a heap block records ;; its tag, never its field count (memory-model.md MM-VAL-6). |
+| `when` | macro |  |  | Run `body` when `test` is true, and answer 0 otherwise. |
+| `unless` | macro |  |  | Run `body` when `test` is false, and answer 0 otherwise. |
+| `deriveEq` | macro |  |  | Derive structural equality for a `data` type with nullary constructors: `(deriveEq Colour)` declares `eqColour`, of type `(-> Colour Colour Bool)`, with one match arm per constructor. |
+| `deriveArity` | macro |  |  | Derive a function answering how many fields a value's constructor carries: `(deriveArity Shape)` declares `arityShape`, of type `(-> Shape Int)`. |
 
 ## `Rpc`
 

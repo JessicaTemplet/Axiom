@@ -963,7 +963,10 @@ if len(KEYWORDS) < 15:
 # and needs a golden and a manifest row of its own - and this file is
 # not a diagnostics fixture, it is the OTHER SIDE of a navigation.
 NAVDIR = tempfile.mkdtemp(prefix="axiom-nav-")
-NAVHELPER = """; Add one to a number.
+NAVHELPER = """;;! The helper module the navigation tests import. A `;;!` line
+;;! documents the module and belongs to no declaration, so the hover
+;;! of the function below must not carry it.
+; Add one to a number.
 ;
 ; The paragraph a hover has to carry across a module boundary, past the
 ; blank comment line that separates two of them.
@@ -989,8 +992,10 @@ NAV = """(import NavHelper)
 
 (deriveTag Colour)
 
-; The paragraph that sits above the `::` and not above the definition.
+;; The paragraph that sits above the `::` and not above the definition.
+; A maintainer's note beside it, which hover leaves out.
 (:: helper Int)
+;@axiom:restrict(no-alloc)
 (fn (helper) 3)
 
 (:: main Int)
@@ -1018,7 +1023,16 @@ FIELD_DECL = {"line": FIELD_DX["line"], "start": FIELD_DX["start"] + 1, "end": F
 BIG_DECL = locate(NAV, "Big", 1)            # `(data Big ...)`, taller than the clamp
 IMP_USE = locate(NAV, "bump", 1)            # the imported call
 BUMP_DECL = locate(NAVHELPER, "bump", 2)    # its `fn` name, in the OTHER file
-NOTHING = locate(NAV, "syntax/join", 1)     # a name no declaration in scope has
+NOTHING = locate(NAV, "tag", 2)             # a name no declaration in scope has
+# The language itself: words no declaration explains, answered from
+# self_host/lexicon.ax. Each hover must equal what `axiom explain`
+# prints for the same word, so the two cannot drift apart.
+KW_LET = locate(NAV, "let", 1)              # the keyword at the head of a form
+TY_INT = locate(NAV, "Int", 1)              # a builtin type in a signature
+TAG_KEY = locate(NAV, "restrict", 1)        # the key of an AXTAG line
+TAG_VAL = locate(NAV, "no-alloc", 1)        # a value on the same line
+MOD_USE = locate(NAV, "NavHelper", 1)       # the module an `import` names
+SIG_PUNCT = locate(NAV, "::", 2)            # the `::` of `helper`'s signature
 
 def between(src, opener, closer):
     """The source text of one form, sliced out of the document that
@@ -1032,20 +1046,54 @@ def between(src, opener, closer):
 MACRO_TEXT = between(NAV, "(pub macro", "\n\n; A colour")
 DATA_TEXT = between(NAV, "(data Colour", "\n\n; A point")
 STRUCT_TEXT = between(NAV, "(struct Point", "\n\n(deriveTag")
-FN_SIG_TEXT = between(NAV, "(:: helper", "\n(fn (helper)")
+FN_SIG_TEXT = between(NAV, "(:: helper", "\n;@axiom:restrict")
 BUMP_SIG_TEXT = between(NAVHELPER, "(pub :: bump", "\n\n(pub fn")
 # The paragraphs, as prose: the same lines with `; ` taken off, which is
-# what the server publishes into the markdown below the fence.
+# what the server publishes into the markdown below the fence. When the
+# block holds `;;` doc lines, only those are published (with `;; `
+# taken off) and the plain `;` notes beside them are left out; a `;;!`
+# module line belongs to no declaration and is left out either way.
+# This is a second implementation of `lspDocComment`'s rule.
 def prose(src, form_opener):
-    out, i = [], src.index(form_opener)
+    lines, i = [], src.index(form_opener)
     while i > 0:
         ls = src.rfind("\n", 0, i - 1) + 1
         line = src[ls:i - 1]
         if not line.startswith(";"):
             break
-        out.insert(0, line[1:].lstrip(" ") if line[1:2] == " " else line[1:])
+        lines.insert(0, line)
         i = ls
+    lines = [l for l in lines if not l.startswith(";;!")]
+    docs = [l for l in lines if l.startswith(";;")]
+    if docs:
+        lines = docs
+    out = []
+    for line in lines:
+        body = line[2:] if line.startswith(";;") else line[1:]
+        out.append(body[1:] if body[:1] == " " else body)
     return "\n".join(out)
+
+# What the `;;`/`;` split must leave out: the note beside `helper`'s
+# doc line is in the document and must not be in its hover.
+FN_NOTE = "A maintainer's note beside it"
+# The module's own block: the `;;!` lines at the head of NavHelper.ax
+# with `;;! ` taken off, which is what a hover on `NavHelper` carries.
+MODULE_DOC = "\n".join(l[4:] if l.startswith(";;! ") else l[3:]
+                       for l in NAVHELPER.split("\n") if l.startswith(";;!"))
+if len(MODULE_DOC.split("\n")) < 2:
+    sys.exit("FAIL: the module doc block is under two lines, so it no longer "
+             "spans a line break")
+
+def explain_text(word):
+    """What `axiom explain WORD` prints: the lexicon's entry, which a
+    hover on the same word must carry verbatim."""
+    r = subprocess.run([stage1, "explain", word], capture_output=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        sys.exit(f"FAIL: `axiom explain {word}` exited {r.returncode} with "
+                 f"{r.stdout!r} - the lexicon has no entry to compare a "
+                 f"hover against")
+    return r.stdout.decode().strip()
+assert FN_NOTE in NAV and FN_NOTE not in prose(NAV, "(:: helper")
 
 MACRO_DOC = prose(NAV, "(pub macro")
 DATA_DOC = prose(NAV, "(data Colour")
@@ -1120,6 +1168,12 @@ nav_session = b"".join(frame(m) for m in [
     hov(18, BIG_DECL),
     hov(19, FIELD_USE),
     hov(20, FIELD_DECL),
+    hov(21, KW_LET),
+    hov(22, TY_INT),
+    hov(23, TAG_KEY),
+    hov(24, TAG_VAL),
+    hov(25, MOD_USE),
+    hov(26, SIG_PUNCT),
     # Two characters into `helper`: the prefix is the document's own
     # bytes, and every label must start with it.
     compl(15, FN_USE["line"], FN_USE["start"] + PREFIX_AT),
@@ -1244,6 +1298,8 @@ elif nresp.get(7, {}).get("result") is not None:
 # the wrong one of the two carries an empty block.
 elif hover_says(10, [FN_SIG_TEXT, FN_DOC], FN_USE):
     nwhy = "fn hover: " + hover_says(10, [FN_SIG_TEXT, FN_DOC], FN_USE)
+elif FN_NOTE in (nresp[10]["result"]["contents"]["value"]):
+    nwhy = "fn hover: a `;` note beside a `;;` doc line was published"
 elif "(fn (helper) 3)" in nresp[10]["result"]["contents"]["value"]:
     nwhy = ("fn hover quoted the body; a `fn` hovers as its type, and the "
             "body is what `definition` is for")
@@ -1263,9 +1319,32 @@ elif hover_says(20, [STRUCT_TEXT, "field `x` of `struct Point`"], FIELD_DECL):
 # THIS document.
 elif hover_says(13, [BUMP_SIG_TEXT, BUMP_DOC, "NavHelper"], IMP_USE):
     nwhy = "imported hover: " + hover_says(13, [BUMP_SIG_TEXT, BUMP_DOC, "NavHelper"], IMP_USE)
+elif "belongs to no declaration" in nresp[13]["result"]["contents"]["value"]:
+    nwhy = "imported hover: the module's `;;!` block was published as `bump`'s doc"
 elif nresp.get(14, {}).get("result") is not None:
     nwhy = (f"hover on a name no declaration has answered "
             f"{nresp[14]['result']}, want null")
+# The language itself. A keyword, a builtin type and the `::` of a
+# signature answer the lexicon's entry, and that entry is what `axiom
+# explain WORD` prints - compared whole, so neither copy can say
+# something the other does not.
+elif hover_says(21, [explain_text("let"), "*keyword*"], KW_LET):
+    nwhy = "keyword hover: " + hover_says(21, [explain_text("let"), "*keyword*"], KW_LET)
+elif hover_says(22, [explain_text("Int"), "*type*"], TY_INT):
+    nwhy = "type hover: " + hover_says(22, [explain_text("Int"), "*type*"], TY_INT)
+elif hover_says(26, [explain_text("::"), "*form*"], SIG_PUNCT):
+    nwhy = "signature hover: " + hover_says(26, [explain_text("::"), "*form*"], SIG_PUNCT)
+# An AXTAG line: the key answers `explain @restrict` with the key as
+# the range; a value the lexicon knows answers the key's entry plus
+# its own line, with the value as the range.
+elif hover_says(23, [explain_text("@restrict"), "*AXTAG*"], TAG_KEY):
+    nwhy = "axtag key hover: " + hover_says(23, [explain_text("@restrict"), "*AXTAG*"], TAG_KEY)
+elif hover_says(24, [";@axiom:restrict(no-alloc)", "`no-alloc`: "], TAG_VAL):
+    nwhy = "axtag value hover: " + hover_says(24, [";@axiom:restrict(no-alloc)", "`no-alloc`: "], TAG_VAL)
+# The module an import names: its `;;!` block, cut from the other
+# file, and its path.
+elif hover_says(25, ["(import NavHelper)", "*module*", os.path.basename(helper_uri), MODULE_DOC], MOD_USE):
+    nwhy = "module hover: " + hover_says(25, ["(import NavHelper)", "*module*", os.path.basename(helper_uri), MODULE_DOC], MOD_USE)
 elif hover_says(18, ["(data Big", "(B0)", "; ..."], BIG_DECL):
     nwhy = "clamped hover: " + hover_says(18, ["(data Big", "(B0)", "; ..."], BIG_DECL)
 elif f"(B{BIG_N - 1})" in nresp[18]["result"]["contents"]["value"]:
@@ -1321,7 +1400,8 @@ else:
           f"and its paragraph; 5 form texts and 4 paragraphs cut from the "
           f"documents, ranges on the WORD not the declaration; null for a "
           f"name nothing declares; a {BIG_N + 2}-line `data` cut at "
-          f"{HOVER_CLAMP})")
+          f"{HOVER_CLAMP}; `let`, `Int` and `::` equal to `axiom explain`, "
+          f"an AXTAG key and value, and NavHelper's `;;!` block on its import)")
     print(f"ok   completion ({len(its15)} item(s) all starting {PREFIX!r} with "
           f"`helper` : {HELPER_TYPE!r}, {len(its16)} at an empty prefix "
           f"carrying this document's 4 kinds and NavHelper's `bump`, and "

@@ -761,7 +761,10 @@ requests at a constructor and requires the answers to differ.
 
 `textDocument/hover` answers Markdown: an `axiom` fence quoting the
 declaration, the module below it when the name was imported, and the
-comment paragraph written above the declaration.
+declaration's [doc comment](reference.md#doc-comments). The `;;` lines
+of the block above the declaration are the doc comment, and the plain
+`;` notes beside them are left out. A block with no `;;` line is shown
+whole, so older code still reads.
 
 - A `fn` is quoted as its `(:: f T)` signature, not its body. Its
   paragraph is read from above the signature, because that's where
@@ -826,8 +829,28 @@ tell, as for a name from another module, a `lambda` or a parameter the
 call leaves unbound, the pair is shown on its own with no guess.
 
 The `range` is the word under the cursor, not the declaration, which
-for an imported name is in a different file. Hover answers `null` for a
-builtin, a keyword or a name nothing declares.
+for an imported name is in a different file.
+
+The language itself answers too, so you can read what a form means
+without leaving the editor:
+
+- A keyword or form word (`let`, `match`, `mut`, `cast`, `::`, `->`)
+  answers its shape in a fence, its kind, a paragraph and the section
+  of the [reference](reference.md) that covers it. `axiom explain let`
+  prints the same entry.
+- A builtin type (`Int`, `Option`), a built-in effect (`IO`, `Unsafe`),
+  an operator (`+`, `==`) and a literal (`true`, `None`) answer the
+  same way.
+- An AXTAG line answers its key: hover `restrict` in
+  `;@axiom:restrict(no-alloc)` for what the key claims, or `no-alloc`
+  for what that value means. `axiom explain @restrict` prints the
+  key's entry.
+- The module an `import` names answers its path and the module's
+  `;;!` doc comment.
+
+A declaration that shares a keyword's spelling still wins, because the
+lexicon is asked only after every declaration lookup has missed. Hover
+answers `null` for a name nothing declares and no entry explains.
 
 Tested by `tests/lsp/drive.py`, which cuts every quoted form and
 paragraph out of the document with its own Python copy of

@@ -463,14 +463,20 @@ echo "== documentation coverage =="
 # every one of its 118 rows carried a summary, so the documented count
 # fell by exactly 118 and the undocumented count by nothing - which is
 # the accounting this line asks for. Set AT the measured value.
+#
+# RE-DERIVED 2026-10-13: 1288 of 1501, when the `;;` doc-comment
+# convention landed. The migration turned every first paragraph into
+# `;;` lines, so the count did not move by itself; the ratchet had
+# stood at 445 while the documented surface nearly tripled. Set AT the
+# measured value.
 rows="$(grep -c '^| `' "$repo_root/$doc" || true)"
 blank="$(grep -c '^| `.*| *|$' "$repo_root/$doc" || true)"
 documented=$((rows - blank))
 echo "     $documented of $rows rows carry a summary"
-if (( documented >= 445 )); then
-  ok "documentation coverage is $documented of $rows (ratchet 445, set 2026-09-04)"
+if (( documented >= 1288 )); then
+  ok "documentation coverage is $documented of $rows (ratchet 1288, set 2026-10-13)"
 else
-  bad "documentation coverage fell to $documented, below the ratchet of 445"
+  bad "documentation coverage fell to $documented, below the ratchet of 1288"
   echo "     A public name with no comment block above it is a blank Summary"
   echo "     cell. Document it, or lower this number here with the date and"
   echo "     the accounting for why it moved."

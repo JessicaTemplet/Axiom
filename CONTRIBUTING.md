@@ -637,7 +637,9 @@ to keep up to date.
 
 ### Comments
 
-- Use `;` for line comments in Axiom source.
+- Use `;` for line comments in Axiom source, `;;` for the doc comment
+  of the declaration below and `;;!` for a module's own doc comment at
+  the head of its file ([doc comments](docs/reference.md#doc-comments)).
 - `#| ... |#` block comments exist and nest
   (`tests/selfhost/170-block-comment.ax`,
   `tests/diagnostics/335-axtag-in-block-comment.ax`), but no file in
@@ -737,23 +739,27 @@ The library's comments are its API reference.
 `scripts/check-stdlib-api.sh` keeps that page byte-identical to its
 output.
 
-- A symbol's documentation is the unbroken run of `;` comment lines
+- A symbol's documentation is the `;;` lines of the comment block
   directly above its `(pub :: NAME TYPE)`, up to a `; ---` banner. It
   goes above the signature, not the `(pub fn ...)`, because the AXTAG
-  goes there and the formatter keeps the two apart.
-- The first paragraph is the summary the reference prints, and a bare
-  `;` ends a paragraph. Write the sentence that tells a reader whether
-  to open the file first, and put measurements and refusals after it.
+  goes there and the formatter keeps the two apart. Plain `;` lines in
+  the same block are notes for maintainers: measurements, refusals and
+  the reasons behind a shape. Hover, the reference and `axiom doc`
+  leave them out.
+- The first `;;` paragraph is the summary the reference prints, and a
+  bare `;;` ends a paragraph. Write the sentence that tells a reader
+  whether to open the file first.
+- A module's own documentation is the `;;!` lines at the head of the
+  file. The reference opens the module's section with them.
 - Prose about a whole section goes inside the banner, between its two
   rules, not under it. `axiom fmt` deletes a blank line between two
   comment blocks, so a preamble under a banner joins the first
-  declaration below it and becomes that declaration's summary.
-  `assertEq` in `stdlib/Test.ax` once ended up documented by a
-  paragraph about its whole section this way.
+  declaration below it. With `;` notes that is harmless; with `;;`
+  lines it becomes that declaration's summary.
 - A blank Summary cell in the reference is an undocumented name.
   `check-stdlib-api.sh` counts them and ratchets the total, so a
-  public name with no comment block above it moves a number that
-  only a deliberate edit should move.
+  public name with no `;;` line above it moves a number that only a
+  deliberate edit should move. `axiom doc --missing` lists them.
 
 ### Example: adding a new IO function
 

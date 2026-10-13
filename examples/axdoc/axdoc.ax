@@ -143,14 +143,33 @@
 ; ------------------------------------------------------------------
 ; The documentation above a declaration
 ; ------------------------------------------------------------------
-; A comment line's text, with the leading `; ` removed.
+; A doc line's text, with the leading `;; ` (or `;;! ` on a module
+; line) removed.
 (:: commentText (-> String String))
 (fn (commentText line)
-  (if (strStartsWith line "; ")
-    (strSlice line 2 (- (strLen line) 2))
-    (if (strEq line ";")
-      ""
-      line)))
+  (if (strStartsWith line ";;! ")
+    (strSlice line 4 (- (strLen line) 4))
+    (if (strStartsWith line ";; ")
+      (strSlice line 3 (- (strLen line) 3))
+      (if (|| (strEq line ";;") (strEq line ";;!"))
+        ""
+        line))))
+
+; A `;;` line: documentation, as opposed to a `;` note for the
+; maintainer or a `;;!` line about the whole module.
+(:: isDocMark (-> String Bool))
+(fn (isDocMark line)
+  (if (strStartsWith line ";;")
+    (if (strStartsWith line ";;!")
+      false
+      true)
+    false))
+
+; A `;;!` line: the module's own documentation, at the head of the
+; file.
+(:: isModuleDocLine (-> String Bool))
+(fn (isModuleDocLine line)
+  (strStartsWith line ";;!"))
 
 ; Is this line a comment that is DOCUMENTATION rather than a banner?
 ;
@@ -168,8 +187,10 @@
         true))
     false))
 
-; The FIRST PARAGRAPH of the comment block immediately above line `i`,
-; joined into one line.
+; The FIRST PARAGRAPH of the `;;` doc lines in the comment block
+; immediately above line `i`, joined into one line. A block with no
+; `;;` line documents nothing: its `;` lines are the maintainer's
+; notes, and the reference leaves the cell blank so the gap shows.
 ;
 ; First paragraph, not the whole block: these blocks carry the reason a
 ; function exists, what it measured and what it refuses, which is what
@@ -231,23 +252,63 @@
           false
           (< j i))
           {
-            (if (isTagLine (vecGet lines j))
-              0
+            (if (isDocMark (vecGet lines j))
               (let ((t (commentText (vecGet lines j))))
                 (if (== (strLen t) 0)
-                  {
-                    (set stop true)
+                  (if (== (strLen out) 0)
                     0
-                  }
+                    {
+                      (set stop true)
+                      0
+                    })
                   {
                     (set out (if (== (strLen out) 0)
                       t
                       (concat (concat out " ") t)))
                     0
-                  })))
+                  }))
+              0)
             (set j (+ j 1))
           }))
       out
+    }))
+
+; The module's documentation: the `;;!` lines at the head of the file,
+; before anything but blank lines, as Markdown paragraphs. "" when the
+; file has none.
+(:: moduleDoc (-> (Vec String) String))
+(fn (moduleDoc lines)
+  (let (
+    (n (vecLen lines))
+    (mut i 0)
+    (mut out "")
+    (mut stop false)
+  )
+    {
+      (while (if stop
+        false
+        (< i n))
+        {
+          (let ((line (vecGet lines i)))
+            (if (isModuleDocLine line)
+              {
+                (set out (concat out (concat (commentText line) "\n")))
+                0
+              }
+              (if (== (strLen (strTrim line)) 0)
+                (if (== (strLen out) 0)
+                  0
+                  {
+                    (set stop true)
+                    0
+                  })
+                {
+                  (set stop true)
+                  0
+                })))
+          (set i (+ i 1))
+        })
+      (strTrim out)
     }))
 
 ; ------------------------------------------------------------------
@@ -425,7 +486,12 @@
                   (set i (+ i 1))
                 }))
             (concat
-              (concat (concat (concat "## `" name) "`\n\n") (concat (concat "`" path) (concat "` — " (concat (fmtInt count) " public names\n\n"))))
+              (concat
+                (concat (concat (concat "## `" name) "`\n\n") (concat (concat "`" path) (concat "` — " (concat (fmtInt count) " public names\n\n"))))
+                (let ((intro (moduleDoc lines)))
+                  (if (== (strLen intro) 0)
+                    ""
+                    (concat intro "\n\n"))))
               (if (== count 0)
                 ""
                 (concat "| Name | Kind | Type | Effects | Summary |\n|---|---|---|---|---|\n" (concat rows "\n"))))
@@ -476,4 +542,4 @@
 
 (:: header String)
 (fn (header)
-  "# Axiom standard library\n\nEvery public function, type and macro in Axiom's standard library, one\nsection per module. To find out what each module is for, start with\n[Modules at a glance](reference.md#modules-at-a-glance) in the language\nreference.\n\nEvery name listed is `pub` in the source. The columns are:\n\n- **Kind**: `value` for a function or constant, `struct`, `data`,\n  `effect` or `macro`.\n- **Type**: the signature as you write it in source, such as\n  `(-> Int Int)`.\n- **Effects**: what the compiler infers the definition does. `Alloc`\n  allocates, uses the arena or installs a handler. `IO` reaches the\n  outside world through a syscall, an `extern` call or the command\n  line. `Mut` changes heap state that something else can see. `Unsafe`\n  uses a raw-memory primitive. A blank cell means the compiler inferred\n  no effect, and a macro's cell is always blank. Treat the column as a\n  lower bound: inference doesn't count the allocation a constructor\n  makes (`docs/memory-model.md` MM-EXEC-9a).\n- **Summary**: the first paragraph of the comment above the definition.\n\nThis page is generated from the standard library by\n`examples/axdoc/axdoc.ax`, so please don't edit it by hand.\n`scripts/check-stdlib-api.sh` regenerates it in CI and fails if the\ntwo differ.\n\n")
+  "# Axiom standard library\n\nEvery public function, type and macro in Axiom's standard library, one\nsection per module. To find out what each module is for, start with\n[Modules at a glance](reference.md#modules-at-a-glance) in the language\nreference.\n\nEvery name listed is `pub` in the source. The columns are:\n\n- **Kind**: `value` for a function or constant, `struct`, `data`,\n  `effect` or `macro`.\n- **Type**: the signature as you write it in source, such as\n  `(-> Int Int)`.\n- **Effects**: what the compiler infers the definition does. `Alloc`\n  allocates, uses the arena or installs a handler. `IO` reaches the\n  outside world through a syscall, an `extern` call or the command\n  line. `Mut` changes heap state that something else can see. `Unsafe`\n  uses a raw-memory primitive. A blank cell means the compiler inferred\n  no effect, and a macro's cell is always blank. Treat the column as a\n  lower bound: inference doesn't count the allocation a constructor\n  makes (`docs/memory-model.md` MM-EXEC-9a).\n- **Summary**: the first paragraph of the `;;` doc comment above the\n  definition. A blank cell is a name with no doc comment yet.\n\nA module's `;;!` lines open its section.\n\nThis page is generated from the standard library by\n`examples/axdoc/axdoc.ax`, so please don't edit it by hand.\n`scripts/check-stdlib-api.sh` regenerates it in CI and fails if the\ntwo differ.\n\n")

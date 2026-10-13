@@ -70,6 +70,7 @@
 (import expand)
 (import codegen)
 (import format)
+(import lexicon)
 
 ; ------------------------------------------------------------------
 ; Positions
@@ -2154,6 +2155,159 @@
             range)))
       (lspHoverFieldDecl src decls wsp range))))
 
+; ------------------------------------------------------------------
+; Hover for the language itself
+;
+; A word no declaration explains still means something: `let`, `Int`,
+; `IO`, `+`, the `::` of a signature, the key and the values of an
+; AXTAG line, the module an `import` names. Each of those used to
+; answer null, which an editor shows as "nothing here". They answer
+; from `self_host/lexicon.ax` now, after every declaration lookup has
+; missed, so a declaration that happens to share a spelling with a
+; keyword still wins. An AXTAG line is asked FIRST, because the words
+; on it (`effect`, `io`, `no-alloc`) are not names in the program.
+; ------------------------------------------------------------------
+(pub :: lspMarkdownHover (-> String Int Int))
+(pub fn (lspMarkdownHover value range)
+  (jsonObjPut (jsonObjPut jsonObj "contents" (jsonObjPut (jsonObjPut jsonObj "kind" (jsonStr "markdown")) "value" (jsonStr value))) "range" range))
+
+; A lexicon word: keyword, form word, builtin type, effect, operator
+; or literal. Null when the lexicon has no entry.
+(pub :: lspLexHover (-> String Int Int))
+(pub fn (lspLexHover w range)
+  (let ((md (lexEntryMarkdown w)))
+    (if (== (strLen md) 0)
+      jsonNull
+      (lspMarkdownHover md range))))
+
+; The start of the line holding byte `off`.
+(pub :: lspLineStartAt (-> String Int Int))
+(pub fn (lspLineStartAt src off)
+  (let ((mut i off))
+    {
+      (while (if (> i 0)
+        (!= (strByte src (- i 1)) 10)
+        false)
+        (set i (- i 1)))
+      i
+    }))
+
+(pub :: lspPunctPairAt (-> String Int Int Bool))
+(pub fn (lspPunctPairAt src at n)
+  (if (>= (+ at 1) n)
+    false
+    (let (
+      (a (strByte src at))
+      (b (strByte src (+ at 1)))
+    )
+      (if (&& (== a 58) (== b 58))
+        true
+        (if (&& (== a 45) (== b 62))
+          true
+          (&& (== a 46) (== b 46)))))))
+
+; A two-byte punctuation token at the cursor - `::`, `->` or `..` -
+; as a span, or 0. The cursor may sit on either byte.
+(pub :: lspPunctSpan (-> String Int Int))
+(pub fn (lspPunctSpan src off)
+  (let ((n (strLen src)))
+    (if (lspPunctPairAt src off n)
+      (mkSpan off (+ off 2))
+      (if (if (> off 0)
+        (lspPunctPairAt src (- off 1) n)
+        false)
+        (mkSpan (- off 1) (+ off 1))
+        0))))
+
+; Past the key of an AXTAG: the bytes up to its `(` or the end of the
+; line, with trailing blanks left out.
+(pub :: lspTagKeyEnd (-> String Int Int))
+(pub fn (lspTagKeyEnd line i)
+  (let (
+    (n (strLen line))
+    (mut k i)
+  )
+    {
+      (while (if (< k n)
+        (if (== (strByte line k) 40)
+          false
+          (if (lspIsBlank (strByte line k))
+            false
+            true))
+        false)
+        (set k (+ k 1)))
+      k
+    }))
+
+(pub :: lspTagHoverKey (-> String String Int Int))
+(pub fn (lspTagHoverKey key v range)
+  (let ((md (lexTagMarkdown key v)))
+    (if (== (strLen md) 0)
+      jsonNull
+      (lspMarkdownHover md range))))
+
+; The AXTAG line under the cursor, or null when the line is not one.
+; On the key, the key's entry with the key as the range; on a value
+; the lexicon knows (`io`, `no-alloc`, `irq`), the key and value
+; together; anywhere else on the line, the key's entry over the whole
+; tag.
+(pub :: lspTagHover (-> String (Vec Int) Int Int))
+(pub fn (lspTagHover src ix off)
+  (let ((ls (lspLineStartAt src off)))
+    (let ((e (lspLineEndFrom src ls)))
+      (let ((line (strSlice src ls (- e ls))))
+        (let ((b (lspLineBody line)))
+          (if (strStartsWith (strSlice line b (- (strLen line) b)) ";@axiom:")
+            (let (
+              (ks (+ b 8))
+              (ke (lspTagKeyEnd line (+ b 8)))
+            )
+              (let (
+                (key (strSlice line ks (- ke ks)))
+                (col (- off ls))
+              )
+                (if (&& (>= col ks) (<= col ke))
+                  (lspTagHoverKey key "" (lspRangeIx src ix (mkSpan (+ ls ks) (+ ls ke))))
+                  (let ((wsp (lspWordSpan src off)))
+                    (let ((w 
+                      (if (== wsp 0)
+                        ""
+                        (strSlice src (spanStart wsp) (- (spanEnd wsp) (spanStart wsp))))))
+                      (if (if (== (strLen w) 0)
+                        true
+                        (== (strLen (lexTagValueDoc key w)) 0))
+                        (lspTagHoverKey key "" (lspRangeIx src ix (mkSpan (+ ls b) e)))
+                        (lspTagHoverKey key w (lspRangeIx src ix wsp))))))))
+            jsonNull))))))
+
+; The module an `import` in this document names: its `;;!` block and
+; its path, read through the same resolver `definition` uses. Null
+; when `w` is not an imported module's name or the resolver has no
+; unit for it.
+(pub :: lspModuleHover (-> String String (Vec Int) String Int Int))
+;@axiom:effect(io)
+(pub fn (lspModuleHover path src decls w range)
+  (if (== (lspFixFindImport decls w (- (vecLen decls) 1)) 0)
+    jsonNull
+    (let ((r (lspResolveFor path src decls)))
+      (if (== r 0)
+        jsonNull
+        (let ((units (memGetWordVec r 1)))
+          (let ((u (lspUnitOf units (cast Int w))))
+            (if (< u 0)
+              jsonNull
+              (let ((unit (vecGet units u)))
+                (let ((doc (lspModuleDoc (memGetWordStr unit 1))))
+                  (lspMarkdownHover
+                    (concat
+                      (concat (concat "```axiom\n(import " w) ")\n```\n\n*module* `")
+                      (concat
+                        (concat (memGetWordStr unit 0) "`\n")
+                        (if (== (strLen doc) 0)
+                          ""
+                          (concat "\n" doc))))
+                    range))))))))))
+
 (pub :: lspHover (-> String String Int String Int))
 ; A field path is resolved as a path first: the word under the
 ; cursor in `base.field` is only the field, and answering it as a
@@ -2169,57 +2323,74 @@
         (decls (memGetWordVec pr 1))
         (ix (lspLineIndex src))
       )
-        (let ((wsp (lspWordSpan src (lspOffsetOf src ix (jsonGet params "position")))))
-          (if (== wsp 0)
-            jsonNull
-            ; A local binding first, for the reason `definition`
-            ; asks it first: a local shadows a declaration of the
-            ; same name. 0 means the word is not one.
-            (let (
-              (w (strSlice src (spanStart wsp) (- (spanEnd wsp) (spanStart wsp))))
-              (range (lspRangeIx src ix wsp))
-            )
-              (let ((fld (lspHoverField src decls wsp range)))
-                (if (!= fld 0)
-                  fld
-                  (let ((local (lspNavLocalHover src decls ix wsp)))
-                    (if (!= local 0)
-                      local
-                      (let ((d (lspFindDecl decls w (- (vecLen decls) 1))))
-                        (if (!= d 0)
-                          (lspHoverAt
-                            src
-                            decls
-                            d
-                            range
-                            "")
-                          ; A CONSTRUCTOR is read at the `data` that
-                          ; declares it - the whole form, so its siblings
-                          ; and its field types are in the tooltip - with
-                          ; one line naming which of them is under the
-                          ; cursor. The `range` stays the WORD, which is
-                          ; what the rest of this function's header says.
-                          (let ((dat (lspFindCtorData decls w (- (vecLen decls) 1))))
-                            (if (== (lspCtorNodeOf dat w) 0)
-                              ; A GENERATED NAME, last, for `definition`'s
-                              ; reason: after every lookup misses, from
-                              ; the cache string, expanding nothing.
-                              (let ((hov (lspHoverImported
-                                (lspUriToPath uri)
-                                src
-                                decls
-                                w
-                                range)))
-                                (if (jsonIsNull hov)
-                                  (lspGenHover gen src w range)
-                                  hov))
-                              (lspHoverAtNote
-                                src
-                                decls
-                                dat
-                                range
-                                ""
-                                (lspCtorNote dat w)))))))))))))))))
+        (let ((off (lspOffsetOf src ix (jsonGet params "position"))))
+          (let ((tag (lspTagHover src ix off)))
+            (if (jsonIsNull tag)
+              (let ((wsp (lspWordSpan src off)))
+                (if (== wsp 0)
+                  ; Not on a word: `::`, `->` and `..` still mean
+                  ; something, and answer from the lexicon.
+                  (let ((psp (lspPunctSpan src off)))
+                    (if (== psp 0)
+                      jsonNull
+                      (lspLexHover (strSlice src (spanStart psp) (- (spanEnd psp) (spanStart psp))) (lspRangeIx src ix psp))))
+                  ; A local binding first, for the reason `definition`
+                  ; asks it first: a local shadows a declaration of the
+                  ; same name. 0 means the word is not one.
+                  (let (
+                    (w (strSlice src (spanStart wsp) (- (spanEnd wsp) (spanStart wsp))))
+                    (range (lspRangeIx src ix wsp))
+                  )
+                    (let ((fld (lspHoverField src decls wsp range)))
+                      (if (!= fld 0)
+                        fld
+                        (let ((local (lspNavLocalHover src decls ix wsp)))
+                          (if (!= local 0)
+                            local
+                            (let ((d (lspFindDecl decls w (- (vecLen decls) 1))))
+                              (if (!= d 0)
+                                (lspHoverAt
+                                  src
+                                  decls
+                                  d
+                                  range
+                                  "")
+                                ; A CONSTRUCTOR is read at the `data` that
+                                ; declares it - the whole form, so its siblings
+                                ; and its field types are in the tooltip - with
+                                ; one line naming which of them is under the
+                                ; cursor. The `range` stays the WORD, which is
+                                ; what the rest of this function's header says.
+                                (let ((dat (lspFindCtorData decls w (- (vecLen decls) 1))))
+                                  (if (== (lspCtorNodeOf dat w) 0)
+                                    ; A GENERATED NAME next, for `definition`'s
+                                    ; reason: after every lookup misses, from
+                                    ; the cache string, expanding nothing. Then
+                                    ; the module an import names, then the
+                                    ; language itself.
+                                    (let ((hov (lspHoverImported
+                                      (lspUriToPath uri)
+                                      src
+                                      decls
+                                      w
+                                      range)))
+                                      (if (jsonIsNull hov)
+                                        (let ((g (lspGenHover gen src w range)))
+                                          (if (jsonIsNull g)
+                                            (let ((m (lspModuleHover (lspUriToPath uri) src decls w range)))
+                                              (if (jsonIsNull m)
+                                                (lspLexHover w range)
+                                                m))
+                                            g))
+                                        hov))
+                                    (lspHoverAtNote
+                                      src
+                                      decls
+                                      dat
+                                      range
+                                      ""
+                                      (lspCtorNote dat w)))))))))))))
+              tag)))))))
 
 ; The hover object for declaration `d`, whose spans index `dsrc` and
 ; whose signature - if it has one - is in `ddecls`. `range` names the
@@ -2514,6 +2685,14 @@
 
 ; The comment block written directly above the form at `o`, as prose.
 ;
+; A `;;` LINE IS DOCUMENTATION. When the block holds any `;;` lines,
+; they are the answer and the plain `;` lines beside them are notes
+; for the maintainer, which is the split `docs/reference.md` names
+; under "Doc comments". A block with no `;;` line answers all of its
+; `;` lines, so code written before the convention still reads. A
+; `;;!` line documents the module and belongs to no declaration, so it
+; is left out either way (`lspModuleDoc` reads it).
+;
 ; This is the half of hover a signature cannot give. Every file this
 ; compiler reads documents a declaration in the lines above it - this
 ; one included - and an editor that shows the type and not the
@@ -2539,6 +2718,7 @@
     (let (
       (mut e o)
       (mut out "")
+      (mut docs "")
       (mut go 1)
     )
       {
@@ -2549,12 +2729,116 @@
               (let ((line (strSlice src ls (- (- e 1) ls))))
                 (if (lspIsDocLine line)
                   {
-                    (set out (concat (concat (lspDocStrip line) "\n") out))
+                    (if (lspIsModuleDocLine line)
+                      0
+                      (let ((text (concat (lspDocStrip line) "\n")))
+                        {
+                          (set out (concat text out))
+                          (if (lspIsDocMark line)
+                            {
+                              (set docs (concat text docs))
+                              0
+                            }
+                            0)
+                        }))
                     (set e ls)
                   }
                   (set go 0))))))
-        out
+        (if (== (strLen docs) 0)
+          out
+          docs)
       })))
+
+; The index of the first non-blank byte of `line`, or its length.
+(pub :: lspLineBody (-> String Int))
+(pub fn (lspLineBody line)
+  (let (
+    (n (strLen line))
+    (mut i 0)
+  )
+    {
+      (while (if (< i n)
+        (lspIsBlank (strByte line i))
+        false)
+        (set i (+ i 1)))
+      i
+    }))
+
+; A `;;` line: documentation for the declaration below its block.
+(pub :: lspIsDocMark (-> String Bool))
+(pub fn (lspIsDocMark line)
+  (let (
+    (i (lspLineBody line))
+    (n (strLen line))
+  )
+    (if (< (+ i 1) n)
+      (if (&& (== (strByte line i) 59) (== (strByte line (+ i 1)) 59))
+        (if (< (+ i 2) n)
+          (!= (strByte line (+ i 2)) 33)
+          true)
+        false)
+      false)))
+
+; A `;;!` line: documentation for the module the file is.
+(pub :: lspIsModuleDocLine (-> String Bool))
+(pub fn (lspIsModuleDocLine line)
+  (let (
+    (i (lspLineBody line))
+    (n (strLen line))
+  )
+    (if (< (+ i 2) n)
+      (if (== (strByte line i) 59)
+        (if (== (strByte line (+ i 1)) 59)
+          (== (strByte line (+ i 2)) 33)
+          false)
+        false)
+      false)))
+
+; The index of the newline that ends the line starting at `p`, or
+; the length of `src` when the last line has none.
+(pub :: lspLineEndFrom (-> String Int Int))
+(pub fn (lspLineEndFrom src p)
+  (let (
+    (n (strLen src))
+    (mut i p)
+  )
+    {
+      (while (if (< i n)
+        (!= (strByte src i) 10)
+        false)
+        (set i (+ i 1)))
+      i
+    }))
+
+; The module's own documentation: the `;;!` lines at the head of the
+; file, with blank lines allowed before them and the block ending at
+; the first line that is anything else. "" when the file has none.
+(pub :: lspModuleDoc (-> String String))
+(pub fn (lspModuleDoc src)
+  (let (
+    (n (strLen src))
+    (mut p 0)
+    (mut out "")
+    (mut go 1)
+  )
+    {
+      (while (== go 1)
+        (if (>= p n)
+          (set go 0)
+          (let ((e (lspLineEndFrom src p)))
+            (let ((line (strSlice src p (- e p))))
+              (if (lspIsModuleDocLine line)
+                {
+                  (set out (concat out (concat (lspDocStrip line) "\n")))
+                  (set p (+ e 1))
+                }
+                (if (== (lspLineBody line) (strLen line))
+                  (if (== (strLen out) 0)
+                    (set p (+ e 1))
+                    (set go 0))
+                  (set go 0)))))))
+      out
+    }))
 
 ; The start of the line whose newline sits at `e - 1`.
 (pub :: lspPrevLineStart (-> String Int Int))
@@ -2626,8 +2910,9 @@
 (pub fn (lspIsSpace b)
   (|| (lspIsBlank b) (|| (== b 10) (== b 13))))
 
-; One comment line as prose: the leading blanks, the `;`, and one space
-; after it. `;@axiom:effect(io)` keeps its `@`, because an AXTAG is
+; One comment line as prose: the leading blanks, the `;` (or the `;;`
+; of a doc line, or the `;;!` of a module line), and one space after
+; it. `;@axiom:effect(io)` keeps its `@`, because an AXTAG is
 ; part of what the declaration claims about itself and a reader hovering
 ; it wants to see the claim.
 (pub :: lspDocStrip (-> String String))
@@ -2643,6 +2928,18 @@
         (set i (+ i 1)))
       (if (< i n)
         (set i (+ i 1))
+        0)
+      (if (if (< i n)
+        (== (strByte line i) 59)
+        false)
+        {
+          (set i (+ i 1))
+          (if (if (< i n)
+            (== (strByte line i) 33)
+            false)
+            (set i (+ i 1))
+            0)
+        }
         0)
       (if (if (< i n)
         (== (strByte line i) 32)

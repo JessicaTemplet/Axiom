@@ -553,6 +553,96 @@ else
   echo "ok   a missing file is refused with empty stdout"
 fi
 
+# --------------------------------------------------------------------
+# explain: the lexicon
+#
+# `axiom explain WORD` answers a keyword, a builtin type, an effect, an
+# operator or a literal from `self_host/lexicon.ax`, and `explain @KEY`
+# an AXTAG key. The lexicon is a hand-written table of another
+# module's vocabulary, which is the shape that drifts, so it is held
+# to the sources it mirrors:
+#
+#   * every head keyword the parser dispatches on (`kwEq name "..."` in
+#     self_host/parser.ax) and every word the server's completion menu
+#     offers (`lspKeywords` in self_host/lsp.ax) has an entry;
+#   * every AXTAG key the checker knows (`axtagKnownKey` in
+#     self_host/typecheck.ax) has an entry;
+#   * every word the lexicon's own index lists answers, and the
+#     `Reference:` line each answer ends with names a heading or an
+#     `<a id>` that docs/reference.md has;
+#   * a word nothing knows is refused: exit 1, nothing on stdout.
+# --------------------------------------------------------------------
+echo "== explain: the lexicon, against the parser, the checker and the reference =="
+if python3 - "$work/axc" <<'PY_LEX'
+import re, subprocess, sys
+from pathlib import Path
+axc = sys.argv[1]
+parser = Path("self_host/parser.ax").read_text()
+lsp = Path("self_host/lsp.ax").read_text()
+tc = Path("self_host/typecheck.ax").read_text()
+lexicon = Path("self_host/lexicon.ax").read_text()
+ref = Path("docs/reference.md").read_text()
+
+def block(src, head):
+    i = src.index(head)
+    j = src.index("\n(pub ::", i + 1)
+    return src[i:j]
+
+keywords = set(re.findall(r'kwEq\s+\w+\s+"([^"]+)"', parser))
+keywords |= set(re.findall(r'\(vecPush v "([^"]+)"\)', block(lsp, "(pub fn (lspKeywords)")))
+tagkeys = set(re.findall(r'\(strEq key "([^"]+)"\)', block(tc, "(pub fn (axtagKnownKey key)")))
+words = re.findall(r'\(vecPush v "([^"]+)"\)', block(lexicon, "(pub fn (lexWords)"))
+lexkeys = re.findall(r'\(vecPush v "([^"]+)"\)', block(lexicon, "(pub fn (lexTagKeys)"))
+if len(keywords) < 15 or len(tagkeys) < 5 or len(words) < 40 or len(lexkeys) < 5:
+    sys.exit(f"FAIL: an extraction stopped matching: {len(keywords)} keywords, "
+             f"{len(tagkeys)} tag keys, {len(words)} lexicon words, {len(lexkeys)} lexicon keys")
+
+def slug(h):
+    h = h.strip().lower()
+    h = re.sub(r"[^\w\s-]", "", h)
+    return re.sub(r"\s+", "-", h)
+anchors = {slug(h) for h in re.findall(r"^#{1,6}\s+(.*)$", ref, re.M)}
+anchors |= set(re.findall(r'<a id="([^"]+)"></a>', ref))
+
+failed = []
+for w in sorted(keywords - set(words)):
+    failed.append(f"the parser's keyword `{w}` has no lexicon entry")
+for k in sorted(tagkeys - set(lexkeys)):
+    failed.append(f"the checker's AXTAG key `{k}` has no lexicon entry")
+for w in words:
+    # `--` ends option parsing, which `-` and `->` would otherwise start.
+    r = subprocess.run([axc, "explain", "--", w], capture_output=True)
+    out = r.stdout.decode()
+    if r.returncode != 0 or "```axiom" not in out:
+        failed.append(f"`explain {w}` exited {r.returncode} with {out[:60]!r}")
+        continue
+    m = re.search(r"Reference: `docs/reference\.md#([^`]+)`", out)
+    if not m:
+        failed.append(f"`explain {w}` ends with no Reference line")
+    elif m.group(1) not in anchors:
+        failed.append(f"`explain {w}` points at reference.md#{m.group(1)}, which no heading has")
+for k in lexkeys:
+    r = subprocess.run([axc, "explain", "@" + k], capture_output=True)
+    if r.returncode != 0 or ";@axiom:" + k not in r.stdout.decode():
+        failed.append(f"`explain @{k}` exited {r.returncode}")
+for w in ("nosuchword", "@nosuchkey"):
+    r = subprocess.run([axc, "explain", w], capture_output=True)
+    if r.returncode != 1 or r.stdout:
+        failed.append(f"`explain {w}` exited {r.returncode} with stdout {r.stdout[:40]!r}, want 1 and nothing")
+for f in failed:
+    print("     " + f)
+if failed:
+    sys.exit(1)
+print(f"     {len(words)} words and {len(lexkeys)} AXTAG keys answer; {len(keywords)} parser keywords "
+      f"and {len(tagkeys)} checker keys covered; every Reference line resolves")
+PY_LEX
+then
+  echo "ok   the lexicon covers the parser's keywords and the checker's AXTAG keys, and points into the reference"
+else
+  echo "FAIL the lexicon has drifted from the parser, the checker or the reference"
+  failed=$((failed + 1))
+fi
+
 echo
 if [[ $failed -eq 0 ]]; then
   echo "tools-selfhost: all checks passed"

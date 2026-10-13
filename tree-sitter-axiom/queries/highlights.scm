@@ -33,6 +33,10 @@
 (comment) @comment
 (block_comment) @comment
 
+; A `;;` doc comment is what hover and `axiom doc` show, so it gets
+; the documentation colour apart from a maintainer's `;` note.
+(doc_comment) @comment.documentation
+
 ; AXTAGs are agent-authored metadata that the compiler validates, not
 ; free-form prose. Highlighting them apart from comments is the point:
 ; `;@axiom:effect(io)` is a claim the compiler will check and reject

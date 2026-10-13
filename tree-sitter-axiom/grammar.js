@@ -59,6 +59,7 @@ module.exports = grammar({
   extras: $ => [
     /\s/,
     $.axtag,
+    $.doc_comment,
     $.comment,
     $.block_comment,
   ],
@@ -168,6 +169,13 @@ module.exports = grammar({
     // about the `@axiom:` prefix keeps the two from being ambiguous at
     // all.
     axtag: _ => token(seq(';@axiom:', /[^\r\n]*/)),
+
+    // A `;;` line is the doc comment of the declaration below it, and
+    // a `;;!` line the module's own; both are Markdown the tools read
+    // (docs/reference.md, "Doc comments"). One node for both: a query
+    // that wants the module form can match on the text. Listed before
+    // `comment` for the reason `axtag` is.
+    doc_comment: _ => token(seq(';;', /[^\r\n]*/)),
 
     comment: _ => token(seq(';', /[^\r\n]*/)),
 

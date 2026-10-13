@@ -62,6 +62,39 @@ A body with several expressions evaluates them in order and answers
 the last. Use braces where several expressions must occupy one
 expression position, as in an `if` branch.
 
+### Doc comments
+
+A `;;` line documents the declaration below it. A `;;!` line at the
+top of a file documents the module. Both are Markdown. A plain `;`
+line is a note for whoever maintains the code, and tools leave it out.
+
+```scheme
+;;! Counters for the examples.
+
+(import IO)
+
+;; Add one to `n`.
+;;
+;; A second paragraph, with `code` and *emphasis* as in any Markdown.
+; A note about the implementation, which hover and the reference skip.
+(:: bump (-> Int Int))
+(fn (bump n) (+ n 1))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let ((v (bump 1)))
+    {
+      (println "{v}")
+      0
+    }))
+```
+
+Write the doc comment above the `::` signature when there is one, and
+put AXTAGs between the signature and the `fn`. Hover in your editor
+shows the doc comment, the [standard library reference](stdlib-api.md)
+prints its first paragraph, and `axiom doc` renders the whole of it.
+
 ## Literals
 
 | Value | Spelling |
@@ -1261,7 +1294,7 @@ those rows, and [diagnostics](diagnostics.md) documents their format.
 | `test FILE_OR_DIR` | run named tests |
 | `new DIR`, `fetch` | create a project; fetch dependencies |
 | `symbols FILE` | inspect declarations, tags and calls |
-| `explain AX3001`, `explain --list` | explain diagnostics |
+| `explain AX3001`, `explain let`, `explain @restrict`, `explain --list` | explain a diagnostic, a word of the language or an AXTAG key |
 | `repl`, `lsp`, `version`, `help` | interactive session, editor server, version and help |
 
 `axiom help COMMAND` is the option reference. The first operand is
@@ -1287,10 +1320,16 @@ JSON with status 2; use AXSYM. Diagnostics go to standard error.
 for inspection records. Native compilation uses the AST backend;
 AXIR is not a build input. See [compiler inspection](compiler-guide.md).
 
-### Look up a diagnostic code
+### Look up a diagnostic code or a word
 
 `axiom explain AX3001` describes the error and a correction. The
 [diagnostic reference](diagnostics.md) documents codes, spans and fixes.
+
+`axiom explain let` describes a keyword, a builtin type, an effect, an
+operator or a literal, with the section of this page that covers it,
+and `axiom explain @restrict` describes an AXTAG key. Hover in your
+editor shows the same entry. An operator that starts with a dash goes
+after `--`, as in `axiom explain -- ->`.
 
 ## Testing
 

@@ -12,6 +12,7 @@
 ; one file that uses it most.
 (import IO (listDir isDir fileExists makeDir readErrno readFile removeFile renamePath stderr writeFile writeStr))
 (import lexer)
+(import lexicon)
 (import parser)
 (import diag)
 (import render)
@@ -32,6 +33,17 @@
 (import obfuscate)
 
 ; Obfuscation is selected only by compiler flags, never program argv.
+; `axiom explain WORD`: the lexicon's entry for a keyword, a builtin
+; type, an effect, an operator or a literal, or for an AXTAG key
+; written as `@key` (`@restrict`), as Markdown. "" when the lexicon
+; has no entry, so the caller reports the unknown code.
+(:: explainLexicon (-> String String))
+(fn (explainLexicon word)
+  (let ((w (strTrim word)))
+    (if (strStartsWith w "@")
+      (lexTagMarkdown (strSlice w 1 (- (strLen w) 1)) "")
+      (lexEntryMarkdown w))))
+
 (:: emitBinaryIr (-> (Vec Int) (Vec String) (Vec String) Int String))
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
@@ -2002,14 +2014,24 @@
                           0)
                         0
                       }
+                      ; A word of the language answers from the
+                      ; lexicon when no diagnostic code matches:
+                      ; `axiom explain let`, and `axiom explain
+                      ; @restrict` for an AXTAG key.
                       (let ((text (explainText (explainNormalize code))))
                         (if (== (strLen text) 0)
-                          {
-                            (writeStderrStr (concat "error: unknown diagnostic code '" (concat code "'\n")))
-                            (writeStderrStr "run `axiom explain --list` to see all known codes\n")
-                            (sysExitWith 1)
-                            1
-                          }
+                          (let ((lex (explainLexicon code)))
+                            (if (== (strLen lex) 0)
+                              {
+                                (writeStderrStr (concat "error: unknown diagnostic code or word '" (concat code "'\n")))
+                                (writeStderrStr "run `axiom explain --list` to see all known codes, or name a keyword, type, effect or `@tag`\n")
+                                (sysExitWith 1)
+                                1
+                              }
+                              {
+                                (replOut lex)
+                                0
+                              }))
                           {
                             (replOut text)
                             0
