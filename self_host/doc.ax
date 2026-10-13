@@ -59,7 +59,7 @@
   (modNames : (Vec String))
   (modNamed : (Vec Int)))
 
-; What a page's link mapper needs: the ds, the directory the page's
+; What a page's link mapper needs: the set, the directory the page's
 ; source sits in (root-relative, "" for the root), and the prefix
 ; that takes an `href` from the page's output directory back to the
 ; output root ("", "../", "../../").
@@ -149,32 +149,29 @@
     }))
 
 ; A link target as written on the page to the `href` the HTML
-; carries. `ctx` is a `DocCtx`.
-(pub :: docLink (-> Int String String))
-;@axiom:effect(unsafe)
-(pub fn (docLink ctx target)
-  (let ((c 
-    (cast DocCtx ctx)))
-    (if (|| (strStartsWith target "#") (|| (strStartsWith target "http://") (|| (strStartsWith target "https://") (|| (strStartsWith target "mailto:") (strStartsWith target "file:")))))
-      target
-      (let (
-        (path (match (strFindByte target 35 0)
-          ((None) target)
-          ((Some k) (strSlice target 0 k))))
-        (frag (match (strFindByte target 35 0)
-          ((None) "")
-          ((Some k) (strSlice target k (- (strLen target) k)))))
-      )
-        (let ((resolved 
-          (pathClean
-            (if (== (strLen c.srcDir) 0)
-              path
-              (concat (concat c.srcDir "/") path)))))
-          (let ((ds c.pages))
-            (let ((at (docIndexOf ds.srcs resolved)))
-              (if (>= at 0)
-                (concat (concat c.prefix (vecGet ds.outs at)) frag)
-                (concat (concat "file://" (concat ds.root resolved)) frag)))))))))
+; carries, for the page `c` describes.
+(pub :: docLink (-> DocCtx String String))
+(pub fn (docLink c target)
+  (if (|| (strStartsWith target "#") (|| (strStartsWith target "http://") (|| (strStartsWith target "https://") (|| (strStartsWith target "mailto:") (strStartsWith target "file:")))))
+    target
+    (let (
+      (path (match (strFindByte target 35 0)
+        ((None) target)
+        ((Some k) (strSlice target 0 k))))
+      (frag (match (strFindByte target 35 0)
+        ((None) "")
+        ((Some k) (strSlice target k (- (strLen target) k)))))
+    )
+      (let ((resolved 
+        (pathClean
+          (if (== (strLen c.srcDir) 0)
+            path
+            (concat (concat c.srcDir "/") path)))))
+        (let ((ds c.pages))
+          (let ((at (docIndexOf ds.srcs resolved)))
+            (if (>= at 0)
+              (concat (concat c.prefix (vecGet ds.outs at)) frag)
+              (concat (concat "file://" (concat ds.root resolved)) frag))))))))
 
 ; ------------------------------------------------------------------
 ; The page shell
@@ -399,8 +396,7 @@
           (let ((body 
             (mdRender
               text
-              (lambda (c t) (docLink c t))
-              (cast Int ctx)
+              (lambda (t) (docLink ctx t))
               images)))
             {
               (docWrite ds out (docPage ds out (vecGet ds.titles i) body))
@@ -411,7 +407,7 @@
 ; Modules
 ; ------------------------------------------------------------------
 ; The kind a public declaration is listed under, or "" for one the
-; reference leaves out. The same ds `examples/axdoc/axdoc.ax`
+; reference leaves out. The same set `examples/axdoc/axdoc.ax`
 ; reads: a `(pub :: …)` signature, a public `macro`, `data`, `struct`
 ; or `type`, and every `effect`, which is exported whether or not it
 ; says `pub`.
@@ -450,7 +446,7 @@
 ; One public declaration as a section: its anchor, its signature or
 ; whole form in a fence, and its `;;` doc - or the line that says
 ; there is none.
-(pub :: docDeclSection (-> DocSet Int String String Int String))
+(pub :: docDeclSection (-> DocSet DocCtx String String Int String))
 (pub fn (docDeclSection ds prefixCtx src kind d)
   (let (
     (name (nodeAName d))
@@ -469,8 +465,7 @@
               "<p class=\"nodoc\">No doc comment yet.</p>\n"
               (mdRender
                 doc
-                (lambda (c t) (docLink c t))
-                prefixCtx
+                (lambda (t) (docLink prefixCtx t))
                 vecNew))
             "</section>\n"))))))
 
@@ -486,7 +481,7 @@
   )
     (let (
       (src (readFile path))
-      (ctx (cast Int (DocCtx ds "" (docDepthPrefix out))))
+      (ctx (DocCtx ds "" (docDepthPrefix out)))
     )
       (let (
         (decls (docDecls path src))
@@ -503,8 +498,7 @@
                 frags
                 (mdRender
                   intro
-                  (lambda (c t) (docLink c t))
-                  ctx
+                  (lambda (t) (docLink ctx t))
                   vecNew))))
           (while (< j (vecLen decls))
             (let ((d (vecGet decls j)))
@@ -589,7 +583,7 @@
     (frags vecNew)
     (words lexWords)
     (keys lexTagKeys)
-    (ctx (cast Int (DocCtx ds "docs" "")))
+    (ctx (DocCtx ds "docs" ""))
     (mut i 0)
   )
     {
@@ -602,8 +596,7 @@
               frags
               (mdRender
                 (docRefLink (lexEntryMarkdown w))
-                (lambda (c t) (docLink c t))
-                ctx
+                (lambda (t) (docLink ctx t))
                 vecNew))
             (vecPush frags "</section>\n")
             (set i (+ i 1))
@@ -618,8 +611,7 @@
               frags
               (mdRender
                 (docRefLink (lexTagMarkdown k ""))
-                (lambda (c t) (docLink c t))
-                ctx
+                (lambda (t) (docLink ctx t))
                 vecNew))
             (vecPush frags "</section>\n")
             (set i (+ i 1))
@@ -635,8 +627,8 @@
 (pub fn (docRootOk root)
   (fileExists (concat root "docs/README.md")))
 
-; The directory holding the ds, slash-terminated, or "". `AXIOM_DOC`
-; when it is ds; otherwise beside the executable, resolved through
+; The directory holding the set, slash-terminated, or "". `AXIOM_DOC`
+; when it is set; otherwise beside the executable, resolved through
 ; `PATH` when the shell handed over a bare name, the way the library
 ; is found.
 (pub :: docFindRoot String)
@@ -879,7 +871,7 @@
         ; The library.
         (let ((lib docStdlibDir))
           (if (== (strLen lib) 0)
-            (writeStderrStr "warning: no standard library found; ds AXIOM_STDLIB to render it\n")
+            (writeStderrStr "warning: no standard library found; set AXIOM_STDLIB to render it\n")
             (let (
               (acc vecNew)
               (mut j 0)
@@ -970,7 +962,7 @@
 (pub fn (docMain)
   (let ((root docFindRoot))
     (if (== (strLen root) 0)
-      (die "error: no documentation ds found: ds AXIOM_DOC to a directory holding docs/, or run the compiler from an install or a source checkout\n" 1)
+      (die "error: no documentation set found: set AXIOM_DOC to a directory holding docs/, or run the compiler from an install or a source checkout\n" 1)
       (let ((ds (docBuildSet (pathWithSlash (docAbsolute root)) (pathWithSlash (docAbsolute docOutDir)))))
         (if (hasFlagAnywhere "doc" "--missing")
           (let (
