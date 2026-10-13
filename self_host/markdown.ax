@@ -1,0 +1,1535 @@
+;;! Markdown to HTML, for the subset the documentation uses: ATX
+;;! headings with GitHub-style ids, paragraphs, fenced code, tables,
+;;! nested lists, blockquotes, rules, inline code, emphasis, links,
+;;! autolinks, images and a few raw HTML tags. An Axiom fence is
+;;! highlighted with the compiler's own lexer. `axiom doc` renders
+;;! every page through this module.
+;
+; PURE. The renderer reads a String and answers a String; the one
+; thing it cannot decide on its own - where a link target goes - it
+; asks the caller through `MdEnv.link`, and the one side effect a page
+; needs - copying an image beside it - it records in `MdEnv.images`
+; for the caller to perform.
+;
+; OUTPUT IS BUILT AS FRAGMENTS and joined once with `catStrs`. A
+; renderer that `concat`ed its way through `CHANGELOG.md` would copy
+; the page once per block, which is the allocation storm diag.ax's
+; `catStrs` header warns about.
+(import Str)
+(import Vec)
+(import Fmt)
+(import core)
+(import lexer)
+(import parser (kindInt))
+(import lexicon)
+(import diag (catStrs))
+
+; What a page's links and images need from the caller: `link` maps a
+; link target as written to the `href` the page should carry; `ctx`
+; is whatever `link` wants to know (the page's location, the page
+; table); `images` collects every local image source so the caller
+; can copy the file beside the page; `slugs` holds the heading ids
+; already given out, so a repeated heading gets `-1`, `-2`.
+(pub struct MdEnv
+  (link : (-> Int String String))
+  (ctx : Int)
+  (images : (Vec String))
+  (slugs : (Vec String)))
+
+; ------------------------------------------------------------------
+; Bytes
+; ------------------------------------------------------------------
+(pub :: mdStartsAt (-> String Int String Bool))
+(pub fn (mdStartsAt s i lit)
+  (let (
+    (n (strLen s))
+    (m (strLen lit))
+  )
+    (if (> (+ i m) n)
+      false
+      (strEq (strSlice s i m) lit))))
+
+(pub :: mdIsAlnum (-> Int Bool))
+(pub fn (mdIsAlnum b)
+  (|| (&& (>= b 48) (<= b 57)) (|| (&& (>= b 65) (<= b 90)) (&& (>= b 97) (<= b 122)))))
+
+; The bytes of `s` in `[a, b)`, with `&`, `<`, `>` and `"` written as
+; entities. Runs between specials are sliced whole.
+(pub :: mdEscapeRange (-> String Int Int String))
+(pub fn (mdEscapeRange s a b)
+  (let (
+    (frags vecNew)
+    (mut i a)
+    (mut run a)
+  )
+    {
+      (while (< i b)
+        (let ((c (strByte s i)))
+          {
+            (if (|| (== c 38) (|| (== c 60) (|| (== c 62) (== c 34))))
+              {
+                (if (> i run)
+                  (vecPush frags (strSlice s run (- i run)))
+                  frags)
+                (vecPush
+                  frags
+                  (if (== c 38)
+                    "&amp;"
+                    (if (== c 60)
+                      "&lt;"
+                      (if (== c 62)
+                        "&gt;"
+                        "&quot;"))))
+                (set run (+ i 1))
+              }
+              0)
+            (set i (+ i 1))
+          }))
+      (if (> b run)
+        (vecPush frags (strSlice s run (- b run)))
+        frags)
+      (catStrs frags)
+    }))
+
+(pub :: mdEscape (-> String String))
+(pub fn (mdEscape s)
+  (mdEscapeRange s 0 (strLen s)))
+
+; A heading's id, the way GitHub forms one: lower case, letters,
+; digits, `_` and `-` kept, a space written `-`, and everything else
+; dropped - including every byte of a non-ASCII character, so an em
+; dash between two spaces leaves `--` behind, as it does there.
+(pub :: mdSlug (-> String String))
+(pub fn (mdSlug text)
+  (let (
+    (n (strLen text))
+    (out (strAlloc n))
+    (mut i 0)
+    (mut k 0)
+  )
+    {
+      (while (< i n)
+        (let ((c (strByte text i)))
+          {
+            (if (|| (mdIsAlnum c) (|| (== c 95) (== c 45)))
+              {
+                (memPutByte
+                  (strData out)
+                  k
+                  (if (&& (>= c 65) (<= c 90))
+                    (+ c 32)
+                    c))
+                (set k (+ k 1))
+              }
+              (if (== c 32)
+                {
+                  (memPutByte (strData out) k 45)
+                  (set k (+ k 1))
+                }
+                0))
+            (set i (+ i 1))
+          }))
+      (strSlice out 0 k)
+    }))
+
+; `slug`, or `slug-1`, `slug-2` ... when a heading earlier on the
+; page already took it.
+(pub :: mdUniqueSlug (-> MdEnv String String))
+(pub fn (mdUniqueSlug env slug)
+  (let (
+    (n (vecLen env.slugs))
+    (mut taken 0)
+    (mut i 0)
+  )
+    {
+      (while (< i n)
+        {
+          (if (strEq (vecGet env.slugs i) slug)
+            (set taken (+ taken 1))
+            0)
+          (set i (+ i 1))
+        })
+      (vecPush env.slugs slug)
+      (if (== taken 0)
+        slug
+        (concat (concat slug "-") (fmtInt taken)))
+    }))
+
+; The text of rendered inline HTML: tags dropped, the four entities
+; put back. A heading's id is formed from this, so `[x](y)` in a
+; heading contributes `x`, as it does on GitHub.
+(pub :: mdStripTags (-> String String))
+(pub fn (mdStripTags html)
+  (let (
+    (n (strLen html))
+    (frags vecNew)
+    (mut i 0)
+  )
+    {
+      (while (< i n)
+        (let ((c (strByte html i)))
+          (if (== c 60)
+            (let ((mut j i))
+              {
+                (while (&& (< j n) (!= (strByte html j) 62))
+                  (set j (+ j 1)))
+                (set i (+ j 1))
+              })
+            (if (mdStartsAt html i "&amp;")
+              {
+                (vecPush frags "&")
+                (set i (+ i 5))
+              }
+              (if (mdStartsAt html i "&lt;")
+                {
+                  (vecPush frags "<")
+                  (set i (+ i 4))
+                }
+                (if (mdStartsAt html i "&gt;")
+                  {
+                    (vecPush frags ">")
+                    (set i (+ i 4))
+                  }
+                  (if (mdStartsAt html i "&quot;")
+                    {
+                      (vecPush frags "\"")
+                      (set i (+ i 6))
+                    }
+                    {
+                      (vecPush frags (strSlice html i 1))
+                      (set i (+ i 1))
+                    })))))))
+      (catStrs frags)
+    }))
+
+; ------------------------------------------------------------------
+; Lines
+; ------------------------------------------------------------------
+(pub :: mdIndent (-> String Int))
+(pub fn (mdIndent line)
+  (let (
+    (n (strLen line))
+    (mut i 0)
+  )
+    {
+      (while (&& (< i n) (== (strByte line i) 32))
+        (set i (+ i 1)))
+      i
+    }))
+
+(pub :: mdIsBlank (-> String Bool))
+(pub fn (mdIsBlank line)
+  (== (strLen (strTrim line)) 0))
+
+(pub :: mdIsFence (-> String Bool))
+(pub fn (mdIsFence line)
+  (mdStartsAt line (mdIndent line) "```"))
+
+; 1 to 6 for an ATX heading, 0 otherwise.
+(pub :: mdHeadingLevel (-> String Int))
+(pub fn (mdHeadingLevel line)
+  (let (
+    (n (strLen line))
+    (mut i 0)
+  )
+    {
+      (while (&& (< i n) (&& (< i 6) (== (strByte line i) 35)))
+        (set i (+ i 1)))
+      (if (== i 0)
+        0
+        (if (>= i n)
+          i
+          (if (== (strByte line i) 32)
+            i
+            0)))
+    }))
+
+; `---`, `***` or `___`, three or more, spaces allowed between.
+(pub :: mdIsHr (-> String Bool))
+(pub fn (mdIsHr line)
+  (let (
+    (n (strLen line))
+    (mut i 0)
+    (mut mark 0)
+    (mut count 0)
+    (mut ok true)
+  )
+    {
+      (while (< i n)
+        (let ((c (strByte line i)))
+          {
+            (if (== c 32)
+              0
+              (if (|| (== c 45) (|| (== c 42) (== c 95)))
+                (if (== mark 0)
+                  {
+                    (set mark c)
+                    (set count 1)
+                  }
+                  (if (== c mark)
+                    (set count (+ count 1))
+                    {
+                      (set ok false)
+                      0
+                    }))
+                {
+                  (set ok false)
+                  0
+                }))
+            (set i (+ i 1))
+          }))
+      (&& ok (>= count 3))
+    }))
+
+; The width of a list marker at `line`'s indent - `- `, `* `, `+ `,
+; `1. `, `12) ` - counting the one space after it, or 0 when the line
+; starts no item. The item's content starts `indent + width` in.
+(pub :: mdListMarker (-> String Int))
+(pub fn (mdListMarker line)
+  (let (
+    (n (strLen line))
+    (i (mdIndent line))
+  )
+    (if (>= i n)
+      0
+      (let ((c (strByte line i)))
+        (if (|| (== c 45) (|| (== c 42) (== c 43)))
+          (if (>= (+ i 1) n)
+            2
+            (if (== (strByte line (+ i 1)) 32)
+              2
+              0))
+          (let ((mut j i))
+            {
+              (while (&& (< j n) (&& (>= (strByte line j) 48) (<= (strByte line j) 57)))
+                (set j (+ j 1)))
+              (if (|| (== j i) (> (- j i) 9))
+                0
+                (if (>= j n)
+                  0
+                  (if (|| (== (strByte line j) 46) (== (strByte line j) 41))
+                    (if (>= (+ j 1) n)
+                      (+ (- j i) 2)
+                      (if (== (strByte line (+ j 1)) 32)
+                        (+ (- j i) 2)
+                        0))
+                    0)))
+            }))))))
+
+(pub :: mdListOrdered (-> String Bool))
+(pub fn (mdListOrdered line)
+  (let ((c (strByte line (mdIndent line))))
+    (&& (>= c 48) (<= c 57))))
+
+; The number an ordered item starts with.
+(pub :: mdListNumber (-> String Int))
+(pub fn (mdListNumber line)
+  (let (
+    (n (strLen line))
+    (mut j (mdIndent line))
+    (mut v 0)
+  )
+    {
+      (while (&& (< j n) (&& (>= (strByte line j) 48) (<= (strByte line j) 57)))
+        {
+          (set v (+ (* v 10) (- (strByte line j) 48)))
+          (set j (+ j 1))
+        })
+      v
+    }))
+
+(pub :: mdIsQuote (-> String Bool))
+(pub fn (mdIsQuote line)
+  (let ((i (mdIndent line)))
+    (&& (< i 4) (== (strByte line i) 62))))
+
+(pub :: mdIsTableRow (-> String Bool))
+(pub fn (mdIsTableRow line)
+  (== (strByte line (mdIndent line)) 124))
+
+; `|---|:--:|`: pipes, dashes, colons and spaces, with a dash in it.
+(pub :: mdIsAlignRow (-> String Bool))
+(pub fn (mdIsAlignRow line)
+  (let (
+    (n (strLen line))
+    (mut i 0)
+    (mut dash false)
+    (mut ok (mdIsTableRow line))
+  )
+    {
+      (while (< i n)
+        (let ((c (strByte line i)))
+          {
+            (if (== c 45)
+              {
+                (set dash true)
+                0
+              }
+              (if (|| (== c 124) (|| (== c 58) (== c 32)))
+                0
+                {
+                  (set ok false)
+                  0
+                }))
+            (set i (+ i 1))
+          }))
+      (&& ok dash)
+    }))
+
+; A line that opens raw HTML: `<` and then a letter, `!` or `/`.
+(pub :: mdIsHtmlLine (-> String Bool))
+(pub fn (mdIsHtmlLine line)
+  (let ((i (mdIndent line)))
+    (if (!= (strByte line i) 60)
+      false
+      (let ((c (strByte line (+ i 1))))
+        (|| (mdIsAlnum c) (|| (== c 33) (== c 47)))))))
+
+; A line that ends a paragraph by starting something else.
+(pub :: mdInterrupts (-> String Bool))
+(pub fn (mdInterrupts line)
+  (|| (mdIsFence line) (|| (> (mdHeadingLevel line) 0) (|| (mdIsHr line) (|| (mdIsQuote line) (> (mdListMarker line) 0))))))
+
+; ------------------------------------------------------------------
+; Inline
+; ------------------------------------------------------------------
+; The index just past the closing `]` that matches the `[` at `i`, or
+; -1. Nested brackets count; a code span's brackets do not.
+(pub :: mdBracketEnd (-> String Int Int))
+(pub fn (mdBracketEnd s i)
+  (let (
+    (n (strLen s))
+    (mut j (+ i 1))
+    (mut depth 1)
+    (mut found (- 0 1))
+  )
+    {
+      (while (&& (< j n) (< found 0))
+        (let ((c (strByte s j)))
+          {
+            (if (== c 92)
+              (set j (+ j 1))
+              (if (== c 96)
+                (let ((mut k (+ j 1)))
+                  {
+                    (while (&& (< k n) (!= (strByte s k) 96))
+                      (set k (+ k 1)))
+                    (set j k)
+                  })
+                (if (== c 91)
+                  (set depth (+ depth 1))
+                  (if (== c 93)
+                    {
+                      (set depth (- depth 1))
+                      (if (== depth 0)
+                        (set found (+ j 1))
+                        0)
+                    }
+                    0))))
+            (set j (+ j 1))
+          }))
+      found
+    }))
+
+; The index of the `)` closing a link target opened at `i` (the byte
+; after `(`), or -1. Balanced parentheses inside the target count.
+(pub :: mdParenEnd (-> String Int Int))
+(pub fn (mdParenEnd s i)
+  (let (
+    (n (strLen s))
+    (mut j i)
+    (mut depth 0)
+    (mut found (- 0 1))
+  )
+    {
+      (while (&& (< j n) (< found 0))
+        (let ((c (strByte s j)))
+          {
+            (if (== c 40)
+              (set depth (+ depth 1))
+              (if (== c 41)
+                (if (== depth 0)
+                  (set found j)
+                  (set depth (- depth 1)))
+                (if (|| (== c 10) (== c 32))
+                  (if (== depth 0)
+                    (set found (- 0 2))
+                    0)
+                  0)))
+            (set j (+ j 1))
+          }))
+      found
+    }))
+
+; A link target as written may carry a title: `(x.md "title")`. The
+; target is the part before the first space.
+(pub :: mdTargetOf (-> String String))
+(pub fn (mdTargetOf t)
+  (match (strFindByte t 32 0)
+    ((None) t)
+    ((Some k) (strSlice t 0 k))))
+
+; Where a bare `http://` or `https://` run ends: at whitespace, `<`,
+; `>` or `"`, with trailing sentence punctuation and an unmatched `)`
+; given back to the prose.
+(pub :: mdUrlEnd (-> String Int Int))
+(pub fn (mdUrlEnd s i)
+  (let (
+    (n (strLen s))
+    (mut j i)
+    (mut opens 0)
+    (mut go true)
+  )
+    {
+      (while (&& (< j n) go)
+        (let ((c (strByte s j)))
+          (if (|| (== c 32) (|| (== c 10) (|| (== c 9) (|| (== c 60) (|| (== c 62) (== c 34))))))
+            {
+              (set go false)
+              0
+            }
+            {
+              (if (== c 40)
+                (set opens (+ opens 1))
+                0)
+              (if (== c 41)
+                (if (== opens 0)
+                  {
+                    (set go false)
+                    0
+                  }
+                  {
+                    (set opens (- opens 1))
+                    (set j (+ j 1))
+                  })
+                (set j (+ j 1)))
+            })))
+      (while (&&
+        (> j i)
+        (let ((c (strByte s (- j 1))))
+          (|| (== c 46) (|| (== c 44) (|| (== c 58) (|| (== c 59) (|| (== c 33) (== c 63))))))))
+        (set j (- j 1)))
+      j
+    }))
+
+; The raw tags the pages are allowed to carry through. Anything else
+; between angle brackets is text and is escaped.
+(pub :: mdRawTag (-> String Bool))
+(pub fn (mdRawTag name)
+  (|| (strEq name "a") (|| (strEq name "img") (|| (strEq name "details") (|| (strEq name "summary") (|| (strEq name "br") (|| (strEq name "kbd") (|| (strEq name "sub") (|| (strEq name "sup") (|| (strEq name "span") (strEq name "div")))))))))))
+
+; The tag name at `i`, which holds `<`: letters after an optional `/`.
+(pub :: mdTagNameAt (-> String Int String))
+(pub fn (mdTagNameAt s i)
+  (let (
+    (n (strLen s))
+    (mut j (+ i 1))
+  )
+    {
+      (if (&& (< j n) (== (strByte s j) 47))
+        (set j (+ j 1))
+        0)
+      (let ((from j))
+        {
+          (while (&& (< j n) (mdIsAlnum (strByte s j)))
+            (set j (+ j 1)))
+          (strSlice s from (- j from))
+        })
+    }))
+
+; The closing run of exactly `k` backticks after `from`, or -1.
+(pub :: mdCodeClose (-> String Int Int Int))
+(pub fn (mdCodeClose s from k)
+  (let (
+    (n (strLen s))
+    (mut j from)
+    (mut found (- 0 1))
+  )
+    {
+      (while (&& (< j n) (< found 0))
+        (if (== (strByte s j) 96)
+          (let ((mut m j))
+            {
+              (while (&& (< m n) (== (strByte s m) 96))
+                (set m (+ m 1)))
+              (if (== (- m j) k)
+                (set found j)
+                (set j m))
+            })
+          (set j (+ j 1))))
+      found
+    }))
+
+; The `*` or `**` closing an emphasis opened at `from`, or -1: the
+; next run of the same width whose content is non-empty and does not
+; begin with a space.
+(pub :: mdEmClose (-> String Int Int Int))
+(pub fn (mdEmClose s from k)
+  (let (
+    (n (strLen s))
+    (mut j from)
+    (mut found (- 0 1))
+  )
+    (if (|| (>= from n) (== (strByte s from) 32))
+      (- 0 1)
+      {
+        (while (&& (< j n) (< found 0))
+          (let ((c (strByte s j)))
+            (if (== c 96)
+              (let ((mut m (+ j 1)))
+                {
+                  (while (&& (< m n) (!= (strByte s m) 96))
+                    (set m (+ m 1)))
+                  (set j (+ m 1))
+                })
+              (if (&& (== c 42) (> j from))
+                (let ((mut m j))
+                  {
+                    (while (&& (< m n) (== (strByte s m) 42))
+                      (set m (+ m 1)))
+                    (if (&& (== (- m j) k) (!= (strByte s (- j 1)) 32))
+                      (set found j)
+                      (set j m))
+                  })
+                (set j (+ j 1))))))
+        found
+      })))
+
+; Inline Markdown to HTML.
+(pub :: mdInline (-> MdEnv String String))
+(pub fn (mdInline env s)
+  (let (
+    (n (strLen s))
+    (frags vecNew)
+    (mut i 0)
+  )
+    {
+      (while (< i n)
+        (let ((mut j i))
+          {
+            ; The plain run up to the next byte that could mean
+            ; something, sliced whole.
+            (while (&&
+              (< j n)
+              (let ((c (strByte s j)))
+                (if (|| (== c 92) (|| (== c 96) (|| (== c 42) (|| (== c 33) (|| (== c 91) (|| (== c 60) (|| (== c 38) (== c 62))))))))
+                  false
+                  (if (== c 104)
+                    (if (|| (mdStartsAt s j "http://") (mdStartsAt s j "https://"))
+                      false
+                      true)
+                    true))))
+              (set j (+ j 1)))
+            (if (> j i)
+              {
+                (vecPush frags (mdEscapeRange s i j))
+                (set i j)
+              }
+              0)
+            (if (< i n)
+              (set i (mdInlineSpecial env s i frags))
+              0)
+          }))
+      (catStrs frags)
+    }))
+
+; One construct starting at `i`, pushed onto `frags`; answers the
+; index to continue from. Always consumes at least one byte.
+(pub :: mdInlineSpecial (-> MdEnv String Int (Vec String) Int))
+(pub fn (mdInlineSpecial env s i frags)
+  (let (
+    (n (strLen s))
+    (c (strByte s i))
+  )
+    (if (== c 92)
+      ; A backslash escapes the punctuation after it.
+      (let ((d (strByte s (+ i 1))))
+        (if (&&
+          (< (+ i 1) n)
+          (&&
+            (> d 32)
+            (&&
+              (< d 127)
+              (if (mdIsAlnum d)
+                false
+                true))))
+          {
+            (vecPush frags (mdEscapeRange s (+ i 1) (+ i 2)))
+            (+ i 2)
+          }
+          {
+            (vecPush frags "\\")
+            (+ i 1)
+          }))
+      (if (== c 96)
+        (mdInlineCode s i frags)
+        (if (== c 42)
+          (mdInlineEm env s i frags)
+          (if (== c 33)
+            (if (== (strByte s (+ i 1)) 91)
+              (mdInlineImage env s i frags)
+              {
+                (vecPush frags "!")
+                (+ i 1)
+              })
+            (if (== c 91)
+              (mdInlineLink env s i frags)
+              (if (== c 60)
+                (mdInlineAngle s i frags)
+                (if (== c 38)
+                  {
+                    (vecPush frags "&amp;")
+                    (+ i 1)
+                  }
+                  (if (== c 62)
+                    {
+                      (vecPush frags "&gt;")
+                      (+ i 1)
+                    }
+                    ; A bare URL.
+                    (let ((e (mdUrlEnd s i)))
+                      {
+                        (vecPush frags (concat (concat "<a href=\"" (mdEscapeRange s i e)) (concat "\">" (concat (mdEscapeRange s i e) "</a>"))))
+                        e
+                      })))))))))))
+
+(pub :: mdInlineCode (-> String Int (Vec String) Int))
+(pub fn (mdInlineCode s i frags)
+  (let (
+    (n (strLen s))
+    (mut k i)
+  )
+    {
+      (while (&& (< k n) (== (strByte s k) 96))
+        (set k (+ k 1)))
+      (let ((close (mdCodeClose s k (- k i))))
+        (if (< close 0)
+          {
+            (vecPush frags (strSlice s i (- k i)))
+            k
+          }
+          (let (
+            (mut a k)
+            (mut b close)
+          )
+            {
+              ; One space each side is stripped when both are there,
+              ; which is how a code span may begin with a backtick.
+              (if (&& (> (- b a) 1) (&& (== (strByte s a) 32) (== (strByte s (- b 1)) 32)))
+                {
+                  (set a (+ a 1))
+                  (set b (- b 1))
+                }
+                0)
+              (vecPush frags (concat (concat "<code>" (mdEscapeRange s a b)) "</code>"))
+              (+ close (- k i))
+            })))
+    }))
+
+(pub :: mdInlineEm (-> MdEnv String Int (Vec String) Int))
+(pub fn (mdInlineEm env s i frags)
+  (let ((k 
+    (if (== (strByte s (+ i 1)) 42)
+      2
+      1)))
+    (let ((close (mdEmClose s (+ i k) k)))
+      (if (< close 0)
+        {
+          (vecPush frags (strSlice s i k))
+          (+ i k)
+        }
+        (let ((inner (mdInline env (strSlice s (+ i k) (- close (+ i k))))))
+          {
+            (vecPush
+              frags
+              (if (== k 2)
+                (concat (concat "<strong>" inner) "</strong>")
+                (concat (concat "<em>" inner) "</em>")))
+            (+ close k)
+          })))))
+
+(pub :: mdInlineLink (-> MdEnv String Int (Vec String) Int))
+(pub fn (mdInlineLink env s i frags)
+  (let ((te (mdBracketEnd s i)))
+    (if (|| (< te 0) (!= (strByte s te) 40))
+      {
+        (vecPush frags "[")
+        (+ i 1)
+      }
+      (let ((pe (mdParenEnd s (+ te 1))))
+        (if (< pe 0)
+          {
+            (vecPush frags "[")
+            (+ i 1)
+          }
+          (let (
+            (text (strSlice s (+ i 1) (- (- te 1) (+ i 1))))
+            (target (mdTargetOf (strSlice s (+ te 1) (- pe (+ te 1)))))
+          )
+            {
+              (vecPush frags (concat (concat "<a href=\"" (mdEscape (env.link env.ctx target))) (concat "\">" (concat (mdInline env text) "</a>"))))
+              (+ pe 1)
+            }))))))
+
+(pub :: mdInlineImage (-> MdEnv String Int (Vec String) Int))
+(pub fn (mdInlineImage env s i frags)
+  (let ((te (mdBracketEnd s (+ i 1))))
+    (if (|| (< te 0) (!= (strByte s te) 40))
+      {
+        (vecPush frags "!")
+        (+ i 1)
+      }
+      (let ((pe (mdParenEnd s (+ te 1))))
+        (if (< pe 0)
+          {
+            (vecPush frags "!")
+            (+ i 1)
+          }
+          (let (
+            (alt (strSlice s (+ i 2) (- (- te 1) (+ i 2))))
+            (src (mdTargetOf (strSlice s (+ te 1) (- pe (+ te 1)))))
+          )
+            {
+              (if (|| (strStartsWith src "http://") (|| (strStartsWith src "https://") (strStartsWith src "data:")))
+                env.images
+                (vecPush env.images src))
+              (vecPush frags (concat (concat "<img src=\"" (mdEscape src)) (concat "\" alt=\"" (concat (mdEscape alt) "\">"))))
+              (+ pe 1)
+            }))))))
+
+; `<`: a comment, an autolink, a permitted raw tag, or text.
+(pub :: mdInlineAngle (-> String Int (Vec String) Int))
+(pub fn (mdInlineAngle s i frags)
+  (let ((n (strLen s)))
+    (if (mdStartsAt s i "<!--")
+      (match (strFind s "-->" (+ i 4))
+        ((None)
+          {
+            (vecPush frags (strSlice s i (- n i)))
+            n
+          }
+        )
+        ((Some e)
+          {
+            (vecPush frags (strSlice s i (- (+ e 3) i)))
+            (+ e 3)
+          }
+        ))
+      (if (|| (mdStartsAt s i "<http://") (mdStartsAt s i "<https://"))
+        (match (strFindByte s 62 i)
+          ((None)
+            {
+              (vecPush frags "&lt;")
+              (+ i 1)
+            }
+          )
+          ((Some e)
+            {
+              (vecPush frags (concat (concat "<a href=\"" (mdEscapeRange s (+ i 1) e)) (concat "\">" (concat (mdEscapeRange s (+ i 1) e) "</a>"))))
+              (+ e 1)
+            }
+          ))
+        (let ((name (mdTagNameAt s i)))
+          (if (mdRawTag (strLower name))
+            (match (strFindByte s 62 i)
+              ((None)
+                {
+                  (vecPush frags "&lt;")
+                  (+ i 1)
+                }
+              )
+              ((Some e)
+                {
+                  (vecPush frags (strSlice s i (- (+ e 1) i)))
+                  (+ e 1)
+                }
+              ))
+            {
+              (vecPush frags "&lt;")
+              (+ i 1)
+            }))))))
+
+; ------------------------------------------------------------------
+; Axiom fences
+; ------------------------------------------------------------------
+; The class a token paints with, or "" for plain text. A keyword is a
+; POSITION: `data` names a variable in `(fn (g data) data)`, and only
+; the copy in head position is painted (replhl.ax records why).
+(pub :: mdTokenClass (-> Int String Bool String))
+(pub fn (mdTokenClass k lx isHead)
+  (if (|| (== k (kindInt TK_INT)) (== k (kindInt TK_FLOAT)))
+    "n"
+    (if (|| (== k (kindInt TK_STRING)) (== k (kindInt TK_CHARLIT)))
+      "s"
+      (if (|| (== k (kindInt TK_ERROR)) (== k (kindInt TK_ERROR_ESC)))
+        "x"
+        (if (== k (kindInt TK_REGION))
+          "t"
+          (if (== k (kindInt TK_DOUBLE_COLON))
+            (if isHead
+              "k"
+              "")
+            (if (== k (kindInt TK_RARROW))
+              "o"
+              (if (== k (kindInt TK_IDENT))
+                (let ((kind (lexKind lx)))
+                  (if (strEq kind "keyword")
+                    (if isHead
+                      "k"
+                      "")
+                    (if (strEq kind "form")
+                      "k"
+                      (if (strEq kind "type")
+                        "t"
+                        (if (strEq kind "effect")
+                          "e"
+                          (if (strEq kind "operator")
+                            "o"
+                            (if (strEq kind "literal")
+                              "l"
+                              "")))))))
+                ""))))))))
+
+(pub :: mdSpan (-> String String String))
+(pub fn (mdSpan cls text)
+  (if (== (strLen cls) 0)
+    text
+    (concat (concat (concat "<span class=\"" cls) "\">") (concat text "</span>"))))
+
+; The trivia between two tokens: comments, doc comments, AXTAGs and
+; whitespace. The scans are the lexer's own, bounded by the gap end.
+(pub :: mdHlGap (-> String Int Int (Vec String) Int))
+(pub fn (mdHlGap src a b frags)
+  (let ((mut q a))
+    {
+      (while (< q b)
+        (let ((c (strByte src q)))
+          (if (== c 59)
+            (let ((e (findNewline src q b)))
+              {
+                (vecPush
+                  frags
+                  (mdSpan
+                    (if (mdStartsAt src q ";@axiom:")
+                      "a"
+                      (if (mdStartsAt src q ";;")
+                        "d"
+                        "c"))
+                    (mdEscapeRange src q e)))
+                (set q e)
+              })
+            (if (isBlockOpen src q b)
+              (let ((e (skipBlockComment src (+ q 2) b)))
+                {
+                  (vecPush frags (mdSpan "c" (mdEscapeRange src q e)))
+                  (set q e)
+                })
+              (let ((mut r (+ q 1)))
+                {
+                  (while (&&
+                    (< r b)
+                    (&&
+                      (!= (strByte src r) 59)
+                      (if (isBlockOpen src r b)
+                        false
+                        true)))
+                    (set r (+ r 1)))
+                  (vecPush frags (mdEscapeRange src q r))
+                  (set q r)
+                })))))
+      0
+    }))
+
+; Axiom source as HTML, one `<span class>` per painted token. Total
+; by construction: `lex` answers a token stream for any bytes, and
+; every byte of the input reaches the output exactly once.
+(pub :: mdHighlight (-> String String))
+(pub fn (mdHighlight src)
+  (let (
+    (toks (lex src))
+    (n (strLen src))
+    (frags vecNew)
+    (mut pos 0)
+    (mut head false)
+    (mut i 0)
+    (mut go true)
+  )
+    {
+      (while (&& go (< i (vecLen toks)))
+        (let ((t (vecGet toks i)))
+          (let (
+            (k (kindInt (tokenKind t)))
+            (s (spanStart (tokenSpan t)))
+            (e (spanEnd (tokenSpan t)))
+          )
+            (if (== k (kindInt TK_EOF))
+              {
+                (set go false)
+                0
+              }
+              {
+                (if (> s pos)
+                  (mdHlGap src pos s frags)
+                  0)
+                (vecPush frags (mdSpan (mdTokenClass k (tokenLexeme t) head) (mdEscapeRange src s e)))
+                (set head (== k (kindInt TK_LPAREN)))
+                (set pos e)
+                (set i (+ i 1))
+              }))))
+      (if (< pos n)
+        (mdHlGap src pos n frags)
+        0)
+      (catStrs frags)
+    }))
+
+; ------------------------------------------------------------------
+; Blocks
+; ------------------------------------------------------------------
+; A fenced block. `scheme` and `axiom` fences are highlighted; the
+; rest are escaped. The info string's first word names the language.
+(pub :: mdFence (-> String String String))
+(pub fn (mdFence info body)
+  (let ((lang (mdTargetOf (strTrim info))))
+    (if (|| (strEq lang "scheme") (strEq lang "axiom"))
+      (concat (concat "<pre><code class=\"language-axiom\">" (mdHighlight body)) "</code></pre>\n")
+      (if (== (strLen lang) 0)
+        (concat (concat "<pre><code>" (mdEscape body)) "</code></pre>\n")
+        (concat (concat (concat "<pre><code class=\"language-" (mdEscape lang)) "\">") (concat (mdEscape body) "</code></pre>\n"))))))
+
+; The cells of a table row, `\|` read as a pipe, each trimmed.
+(pub :: mdCells (-> String (Vec String)))
+(pub fn (mdCells line)
+  (let (
+    (t (strTrim line))
+    (cells vecNew)
+    (mut i 0)
+    (mut start 0)
+    (frags vecNew)
+  )
+    (let ((n (strLen t)))
+      {
+        (if (== (strByte t 0) 124)
+          {
+            (set i 1)
+            (set start 1)
+          }
+          0)
+        (while (< i n)
+          (let ((c (strByte t i)))
+            (if (&& (== c 92) (== (strByte t (+ i 1)) 124))
+              {
+                (vecPush frags (strSlice t start (- i start)))
+                (vecPush frags "|")
+                (set i (+ i 2))
+                (set start i)
+              }
+              (if (== c 124)
+                {
+                  (vecPush frags (strSlice t start (- i start)))
+                  (vecPush cells (strTrim (catStrs frags)))
+                  (vecClear frags)
+                  (set i (+ i 1))
+                  (set start i)
+                }
+                (set i (+ i 1))))))
+        (if (> n start)
+          {
+            (vecPush frags (strSlice t start (- n start)))
+            (vecPush cells (strTrim (catStrs frags)))
+            0
+          }
+          0)
+        cells
+      })))
+
+(pub :: mdAlignAttr (-> String String))
+(pub fn (mdAlignAttr cell)
+  (let (
+    (n (strLen cell))
+    (l (== (strByte cell 0) 58))
+    (r (&& (> n 0) (== (strByte cell (- n 1)) 58)))
+  )
+    (if (&& l r)
+      " style=\"text-align:center\""
+      (if r
+        " style=\"text-align:right\""
+        (if l
+          " style=\"text-align:left\""
+          "")))))
+
+(pub :: mdTableRow (-> MdEnv (Vec String) (Vec String) String String))
+(pub fn (mdTableRow env cells aligns tag)
+  (let (
+    (frags vecNew)
+    (mut i 0)
+  )
+    {
+      (vecPush frags "<tr>")
+      (while (< i (vecLen cells))
+        {
+          (vecPush
+            frags
+            (concat
+              (concat
+                (concat "<" tag)
+                (if (< i (vecLen aligns))
+                  (mdAlignAttr (vecGet aligns i))
+                  ""))
+              (concat (concat ">" (mdInline env (vecGet cells i))) (concat (concat "</" tag) ">"))))
+          (set i (+ i 1))
+        })
+      (vecPush frags "</tr>\n")
+      (catStrs frags)
+    }))
+
+; Whether `line` starts an item of the same kind as a list that is
+; `ordered` or not: a bullet after a numbered item starts a new list.
+(pub :: mdSameKind (-> String Bool Bool))
+(pub fn (mdSameKind line ordered)
+  (if (mdListOrdered line)
+    ordered
+    (if ordered
+      false
+      true)))
+
+; The index one past the last line of the list that starts at `i`
+; with indent `ind`. A line indented deeper continues the item; a
+; blank followed by one does too; a line at the list's own indent
+; continues it when it starts an item, and a non-blank line that is
+; indented less and starts no block is a lazy continuation of the
+; paragraph above it.
+(pub :: mdListEnd (-> (Vec String) Int Int Int Int))
+(pub fn (mdListEnd lines i to ind)
+  (let (
+    (ordered (mdListOrdered (vecGet lines i)))
+    (mut j (+ i 1))
+    (mut go true)
+  )
+    {
+      (while (&& go (< j to))
+        (let ((line (vecGet lines j)))
+          (if (mdIsBlank line)
+            (let ((mut k j))
+              {
+                (while (&& (< k to) (mdIsBlank (vecGet lines k)))
+                  (set k (+ k 1)))
+                (if (>= k to)
+                  {
+                    (set go false)
+                    0
+                  }
+                  (let ((next (vecGet lines k)))
+                    (if (> (mdIndent next) ind)
+                      (set j k)
+                      (if (&& (== (mdIndent next) ind) (&& (> (mdListMarker next) 0) (mdSameKind next ordered)))
+                        (set j k)
+                        {
+                          (set go false)
+                          0
+                        }))))
+              })
+            (if (> (mdIndent line) ind)
+              (set j (+ j 1))
+              (if (> (mdListMarker line) 0)
+                (if (&& (== (mdIndent line) ind) (mdSameKind line ordered))
+                  (set j (+ j 1))
+                  {
+                    (set go false)
+                    0
+                  })
+                (if (|| (mdInterrupts line) (mdIsBlank (vecGet lines (- j 1))))
+                  {
+                    (set go false)
+                    0
+                  }
+                  (set j (+ j 1))))))))
+      (if go
+        to
+        j)
+    }))
+
+; Up to `w` leading spaces removed.
+(pub :: mdDedent (-> String Int String))
+(pub fn (mdDedent line w)
+  (let ((k 
+    (if (< (mdIndent line) w)
+      (mdIndent line)
+      w)))
+    (strSlice line k (- (strLen line) k))))
+
+; The tags stripped from a tight item's first paragraph, so a list
+; written without blank lines stays tight - its nested list follows
+; the item's text directly. A loose item keeps its paragraphs.
+(pub :: mdUnwrapP (-> String Bool String))
+(pub fn (mdUnwrapP html tight)
+  (if (&& tight (strStartsWith html "<p>"))
+    (match (strFind html "</p>\n" 3)
+      ((None) html)
+      ((Some e)
+        (let ((rest (strSlice html (+ e 5) (- (strLen html) (+ e 5)))))
+          (concat
+            (strSlice html 3 (- e 3))
+            (if (== (strLen rest) 0)
+              ""
+              (concat "\n" rest))))
+      ))
+    html))
+
+(pub :: mdList (-> MdEnv (Vec String) Int Int Int String))
+(pub fn (mdList env lines i end ind)
+  (let (
+    (first (vecGet lines i))
+    (frags vecNew)
+    (item vecNew)
+    (mut w 0)
+    (mut j i)
+  )
+    (let ((ordered (mdListOrdered first)))
+      {
+        (vecPush
+          frags
+          (if ordered
+            (if (== (mdListNumber first) 1)
+              "<ol>\n"
+              (concat (concat "<ol start=\"" (fmtInt (mdListNumber first))) "\">\n"))
+            "<ul>\n"))
+        (while (< j end)
+          (let ((line (vecGet lines j)))
+            {
+              (if (&& (== (mdIndent line) ind) (> (mdListMarker line) 0))
+                {
+                  (if (> (vecLen item) 0)
+                    (vecPush frags (mdItem env item))
+                    frags)
+                  (vecClear item)
+                  (set w (+ ind (mdListMarker line)))
+                  (vecPush item (strSlice line w (- (strLen line) w)))
+                }
+                (vecPush item (mdDedent line w)))
+              (set j (+ j 1))
+            }))
+        (if (> (vecLen item) 0)
+          (vecPush frags (mdItem env item))
+          frags)
+        (vecPush
+          frags
+          (if ordered
+            "</ol>\n"
+            "</ul>\n"))
+        (catStrs frags)
+      })))
+
+(pub :: mdItem (-> MdEnv (Vec String) String))
+(pub fn (mdItem env item)
+  (let (
+    (mut to (vecLen item))
+    (mut k 0)
+    (mut tight true)
+  )
+    {
+      (while (&& (> to 0) (mdIsBlank (vecGet item (- to 1))))
+        (set to (- to 1)))
+      (while (< k to)
+        {
+          (if (mdIsBlank (vecGet item k))
+            {
+              (set tight false)
+              0
+            }
+            0)
+          (set k (+ k 1))
+        })
+      (let ((body (mdBlocks env item 0 to)))
+        (concat (concat "<li>" (mdUnwrapP body tight)) "</li>\n"))
+    }))
+
+; The lines of `lines` in `[from, to)` as HTML blocks.
+(pub :: mdBlocks (-> MdEnv (Vec String) Int Int String))
+(pub fn (mdBlocks env lines from to)
+  (let (
+    (frags vecNew)
+    (mut i from)
+  )
+    {
+      (while (< i to)
+        (let ((line (vecGet lines i)))
+          (if (mdIsBlank line)
+            (set i (+ i 1))
+            (if (mdIsFence line)
+              (set i (mdBlockFence lines i to frags))
+              (if (> (mdHeadingLevel line) 0)
+                {
+                  (vecPush frags (mdHeading env line))
+                  (set i (+ i 1))
+                }
+                (if (mdIsHr line)
+                  {
+                    (vecPush frags "<hr>\n")
+                    (set i (+ i 1))
+                  }
+                  (if (mdIsQuote line)
+                    (set i (mdBlockQuote
+                      env
+                      lines
+                      i
+                      to
+                      frags))
+                    (if (> (mdListMarker line) 0)
+                      (let ((end (mdListEnd lines i to (mdIndent line))))
+                        {
+                          (vecPush frags (mdList
+                            env
+                            lines
+                            i
+                            end
+                            (mdIndent line)))
+                          (set i end)
+                        })
+                      (if (&& (mdIsTableRow line) (&& (< (+ i 1) to) (mdIsAlignRow (vecGet lines (+ i 1)))))
+                        (set i (mdBlockTable
+                          env
+                          lines
+                          i
+                          to
+                          frags))
+                        (if (mdIsHtmlLine line)
+                          (set i (mdBlockHtml lines i to frags))
+                          (if (&& (>= (mdIndent line) 4) (|| (== i from) (mdIsBlank (vecGet lines (- i 1)))))
+                            (set i (mdBlockIndented lines i to frags))
+                            (set i (mdBlockParagraph
+                              env
+                              lines
+                              i
+                              to
+                              frags)))))))))))))
+      (catStrs frags)
+    }))
+
+(pub :: mdHeading (-> MdEnv String String))
+(pub fn (mdHeading env line)
+  (let (
+    (level (mdHeadingLevel line))
+    (n (strLen line))
+  )
+    (let ((text (strTrim (strSlice line level (- n level)))))
+      (let ((inner (mdInline env text)))
+        (let ((id (mdUniqueSlug env (mdSlug (mdStripTags inner)))))
+          (concat (concat (concat (concat "<h" (fmtInt level)) " id=\"") (concat id "\">")) (concat (concat inner "</h") (concat (fmtInt level) ">\n"))))))))
+
+(pub :: mdBlockFence (-> (Vec String) Int Int (Vec String) Int))
+(pub fn (mdBlockFence lines i to frags)
+  (let (
+    (open (vecGet lines i))
+    (body vecNew)
+    (mut j (+ i 1))
+    (mut go true)
+  )
+    (let ((ind (mdIndent open)))
+      {
+        (while (&& go (< j to))
+          (let ((line (vecGet lines j)))
+            (if (&& (mdIsFence line) (== (strLen (strTrim (strSlice line (mdIndent line) (- (strLen line) (mdIndent line))))) 3))
+              {
+                (set go false)
+                0
+              }
+              {
+                (vecPush body (mdDedent line ind))
+                (vecPush body "\n")
+                (set j (+ j 1))
+              })))
+        (vecPush frags (mdFence (strSlice open (+ ind 3) (- (strLen open) (+ ind 3))) (catStrs body)))
+        (+ j 1)
+      })))
+
+(pub :: mdBlockQuote (-> MdEnv (Vec String) Int Int (Vec String) Int))
+(pub fn (mdBlockQuote env lines i to frags)
+  (let (
+    (inner vecNew)
+    (mut j i)
+  )
+    {
+      (while (&& (< j to) (mdIsQuote (vecGet lines j)))
+        (let ((line (vecGet lines j)))
+          (let ((k (+ (mdIndent line) 1)))
+            {
+              (vecPush
+                inner
+                (if (== (strByte line k) 32)
+                  (strSlice line (+ k 1) (- (strLen line) (+ k 1)))
+                  (strSlice line k (- (strLen line) k))))
+              (set j (+ j 1))
+            })))
+      (vecPush frags (concat (concat "<blockquote>\n" (mdBlocks env inner 0 (vecLen inner))) "</blockquote>\n"))
+      j
+    }))
+
+(pub :: mdBlockTable (-> MdEnv (Vec String) Int Int (Vec String) Int))
+(pub fn (mdBlockTable env lines i to frags)
+  (let (
+    (aligns (mdCells (vecGet lines (+ i 1))))
+    (mut j (+ i 2))
+  )
+    {
+      (vecPush frags "<table>\n<thead>\n")
+      (vecPush frags (mdTableRow env (mdCells (vecGet lines i)) aligns "th"))
+      (vecPush frags "</thead>\n<tbody>\n")
+      (while (&& (< j to) (mdIsTableRow (vecGet lines j)))
+        {
+          (vecPush frags (mdTableRow env (mdCells (vecGet lines j)) aligns "td"))
+          (set j (+ j 1))
+        })
+      (vecPush frags "</tbody>\n</table>\n")
+      j
+    }))
+
+; Raw HTML, one line - or, for a comment that opens and does not
+; close on its line, every line up to the one that closes it.
+(pub :: mdBlockHtml (-> (Vec String) Int Int (Vec String) Int))
+(pub fn (mdBlockHtml lines i to frags)
+  (let (
+    (line (vecGet lines i))
+    (mut j i)
+  )
+    (let ((ind (mdIndent line)))
+      (if (&&
+        (mdStartsAt line ind "<!--")
+        (match (strFind line "-->" 0)
+          ((None) true)
+          ((Some _) false)))
+        {
+          (while (&&
+            (< j to)
+            (match (strFind (vecGet lines j) "-->" 0)
+              ((None) true)
+              ((Some _) false)))
+            {
+              (vecPush frags (vecGet lines j))
+              (vecPush frags "\n")
+              (set j (+ j 1))
+            })
+          (if (< j to)
+            {
+              (vecPush frags (vecGet lines j))
+              (vecPush frags "\n")
+              0
+            }
+            0)
+          (+ j 1)
+        }
+        {
+          (vecPush frags line)
+          (vecPush frags "\n")
+          (+ i 1)
+        }))))
+
+(pub :: mdBlockIndented (-> (Vec String) Int Int (Vec String) Int))
+(pub fn (mdBlockIndented lines i to frags)
+  (let (
+    (body vecNew)
+    (mut j i)
+    (mut last i)
+  )
+    {
+      (while (&& (< j to) (|| (mdIsBlank (vecGet lines j)) (>= (mdIndent (vecGet lines j)) 4)))
+        {
+          (if (mdIsBlank (vecGet lines j))
+            0
+            (set last j))
+          (set j (+ j 1))
+        })
+      (set j i)
+      (while (<= j last)
+        {
+          (vecPush body (mdDedent (vecGet lines j) 4))
+          (vecPush body "\n")
+          (set j (+ j 1))
+        })
+      (vecPush frags (concat (concat "<pre><code>" (mdEscape (catStrs body))) "</code></pre>\n"))
+      (+ last 1)
+    }))
+
+(pub :: mdBlockParagraph (-> MdEnv (Vec String) Int Int (Vec String) Int))
+(pub fn (mdBlockParagraph env lines i to frags)
+  (let (
+    (body vecNew)
+    (mut j i)
+    (mut go true)
+  )
+    {
+      (while (&& go (< j to))
+        (let ((line (vecGet lines j)))
+          (if (|| (mdIsBlank line) (&& (> j i) (|| (mdInterrupts line) (&& (mdIsTableRow line) (&& (< (+ j 1) to) (mdIsAlignRow (vecGet lines (+ j 1))))))))
+            {
+              (set go false)
+              0
+            }
+            {
+              (if (> j i)
+                (vecPush body "\n")
+                body)
+              (vecPush body (strTrim line))
+              (set j (+ j 1))
+            })))
+      (vecPush frags (concat (concat "<p>" (mdInline env (catStrs body))) "</p>\n"))
+      j
+    }))
+
+; ------------------------------------------------------------------
+; The page
+; ------------------------------------------------------------------
+;; The first `# ` heading's text, with its backticks dropped, or ""
+;; when the page has none.
+(pub :: mdTitle (-> String String))
+(pub fn (mdTitle src)
+  (let (
+    (lines (strSplit src 10))
+    (mut i 0)
+    (mut found "")
+  )
+    {
+      (while (&& (< i (vecLen lines)) (== (strLen found) 0))
+        {
+          (if (== (mdHeadingLevel (vecGet lines i)) 1)
+            {
+              (set found (mdSlugless (strTrim (strSlice (vecGet lines i) 1 (- (strLen (vecGet lines i)) 1)))))
+              0
+            }
+            0)
+          (set i (+ i 1))
+        })
+      found
+    }))
+
+; `s` with its backticks removed.
+(pub :: mdSlugless (-> String String))
+(pub fn (mdSlugless s)
+  (let (
+    (n (strLen s))
+    (out (strAlloc n))
+    (mut i 0)
+    (mut k 0)
+  )
+    {
+      (while (< i n)
+        {
+          (if (!= (strByte s i) 96)
+            {
+              (memPutByte (strData out) k (strByte s i))
+              (set k (+ k 1))
+            }
+            0)
+          (set i (+ i 1))
+        })
+      (strSlice out 0 k)
+    }))
+
+;; Markdown to the HTML of its body. `link` maps every link target as
+;; written to the `href` to emit, with `ctx` as its first argument;
+;; local image sources are appended to `images` for the caller to
+;; copy beside the page.
+(pub :: mdRender (-> String (-> Int String String) Int (Vec String) String))
+(pub fn (mdRender src link ctx images)
+  (let ((env (MdEnv link ctx images vecNew)))
+    (let ((lines (strSplit src 10)))
+      (mdBlocks env lines 0 (vecLen lines)))))
