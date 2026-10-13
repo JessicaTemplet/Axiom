@@ -1,5 +1,5 @@
-; Tui.Edit — a line editor: buffer, cursor, kills, and a redraw that
-; survives wrapping.
+;;! Tui.Edit — a line editor: buffer, cursor, kills, and a redraw that
+;;! survives wrapping.
 ;
 ; IT KNOWS NOTHING ABOUT AXIOM, and that is what makes it stdlib and
 ; not a part of the compiler. It imports Mem, Str, Vec, Utf8, Fmt and
@@ -126,6 +126,9 @@
 ; not ownership: `vecClear` keeps the capacity, so after the first long
 ; line the gap buffers stop allocating at all.
 ; ------------------------------------------------------------------
+;; A line being edited: the code points `left` and `right` of the
+;; cursor, the kill `ring`, the prompt width and the terminal width the
+;; refresh wraps at.
 (pub struct LineEd
   (left : (Vec Int))
   (right : (Vec Int))
@@ -211,6 +214,7 @@
 ; Reading the buffer.
 ; ------------------------------------------------------------------
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
+;; How many code points the line holds.
 (pub :: ledLen (-> LineEd Int))
 (pub fn (ledLen ed)
   (+ (vecLen ed.left) (vecLen ed.right)))
@@ -342,6 +346,8 @@
   })
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
+;; Delete the code point before the cursor. Answers 1 when one was
+;; deleted, 0 at the start of the line.
 (pub :: ledBackspace (-> LineEd Int))
 (pub fn (ledBackspace ed)
   (if (== (vecLen ed.left) 0)
@@ -352,6 +358,8 @@
     }))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
+;; Delete the code point under the cursor. Answers 1 when one was
+;; deleted, 0 at the end of the line.
 (pub :: ledDelete (-> LineEd Int))
 (pub fn (ledDelete ed)
   (if (== (vecLen ed.right) 0)
@@ -374,6 +382,8 @@
     }))
 
 ;@axiom:restrict(no-io,no-foreign)
+;; Move the cursor one code point right. Answers 1 when it moved, 0 at
+;; the end of the line.
 (pub :: ledRight (-> LineEd Int))
 (pub fn (ledRight ed)
   (if (== (vecLen ed.right) 0)
@@ -384,6 +394,8 @@
     }))
 
 ;@axiom:restrict(no-io,no-foreign)
+;; Move the cursor to the start of the line. Answers how many code
+;; points it moved.
 (pub :: ledHome (-> LineEd Int))
 (pub fn (ledHome ed)
   (let ((mut n 0))
@@ -394,6 +406,8 @@
     }))
 
 ;@axiom:restrict(no-io,no-foreign)
+;; Move the cursor to the end of the line. Answers how many code points
+;; it moved.
 (pub :: ledEnd (-> LineEd Int))
 (pub fn (ledEnd ed)
   (let ((mut n 0))
@@ -426,6 +440,8 @@
 ; disagree about where a word ends.
 ; ------------------------------------------------------------------
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
+;; Whether code point `cp` is part of a word for the word-wise motions:
+;; a letter, a digit, `_` or anything outside ASCII.
 (pub :: ledIsWord (-> LineEd Int Bool))
 (pub fn (ledIsWord ed cp)
   (if (>= cp 128)
@@ -466,6 +482,8 @@
     }))
 
 ;@axiom:restrict(no-io,no-foreign)
+;; Move the cursor to the end of the next word. Answers how many code
+;; points it moved.
 (pub :: ledWordRight (-> LineEd Int))
 (pub fn (ledWordRight ed)
   (let ((mut n 0))
@@ -509,6 +527,9 @@
 ; drops the displaced String's share because the ring owns its entries.
 ; ------------------------------------------------------------------
 ;@axiom:restrict(no-io,no-foreign)
+;; Put `text` on the kill ring. A kill in the same direction `dir` as
+;; the last one extends its entry, so repeated kills yank back as one.
+;; Answers 0.
 (pub :: ledKillPush (-> LineEd String Int Int))
 (pub fn (ledKillPush ed text dir)
   {
@@ -547,6 +568,8 @@
   ed.ringIdx)
 
 ;@axiom:restrict(no-io,no-foreign)
+;; Kill from the cursor to the end of the line onto the ring. Answers
+;; how many code points were killed.
 (pub :: ledKillToEnd (-> LineEd Int))
 (pub fn (ledKillToEnd ed)
   (let ((cnt (vecLen ed.right)))
@@ -559,6 +582,8 @@
       })))
 
 ;@axiom:restrict(no-io,no-foreign)
+;; Kill from the start of the line to the cursor onto the ring. Answers
+;; how many code points were killed.
 (pub :: ledKillToStart (-> LineEd Int))
 (pub fn (ledKillToStart ed)
   (let ((cnt (vecLen ed.left)))
@@ -591,6 +616,8 @@
       })))
 
 ;@axiom:restrict(no-io,no-foreign)
+;; Kill from the cursor to the end of the next word onto the ring.
+;; Answers how many code points were killed.
 (pub :: ledKillWordRight (-> LineEd Int))
 (pub fn (ledKillWordRight ed)
   (let ((span (ledWordRightSpan ed)))
@@ -608,6 +635,8 @@
       })))
 
 ;@axiom:restrict(no-io,no-foreign)
+;; Insert the newest kill-ring entry at the cursor. Answers how many
+;; code points were inserted, 0 with an empty ring.
 (pub :: ledYank (-> LineEd Int))
 (pub fn (ledYank ed)
   (if (== (vecLen ed.ring) 0)
@@ -787,21 +816,27 @@
     ed.cols))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
+;; How many terminal columns the prompt and the whole line take, before
+;; wrapping.
 (pub :: ledContentCols (-> LineEd Int))
 (pub fn (ledContentCols ed)
   (+ ed.pcols (ledColsBefore ed (ledLen ed))))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
+;; The screen row, counted from the prompt's row, that code point `k`
+;; lands on after wrapping.
 (pub :: ledRowOf (-> LineEd Int Int))
 (pub fn (ledRowOf ed k)
   (/ (+ ed.pcols (ledColsBefore ed k)) (ledCols ed)))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
+;; The screen column that code point `k` lands on after wrapping.
 (pub :: ledColOf (-> LineEd Int Int))
 (pub fn (ledColOf ed k)
   (% (+ ed.pcols (ledColsBefore ed k)) (ledCols ed)))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
+;; How many screen rows the prompt and line take after wrapping.
 (pub :: ledRowsUsed (-> LineEd Int))
 (pub fn (ledRowsUsed ed)
   (+ (/ (ledContentCols ed) (ledCols ed)) 1))
@@ -955,6 +990,8 @@
 ; leftward on a motion.
 ; ------------------------------------------------------------------
 ;@axiom:restrict(no-io,no-foreign)
+;; Append to `out` the escape sequences that redraw the line within the
+;; terminal's width and put the cursor back. Answers 0.
 (pub :: ledRefreshWindow (-> LineEd (Vec String) Int))
 ;@axiom:effect(unsafe)
 (pub fn (ledRefreshWindow ed out)
@@ -1026,6 +1063,9 @@
 ; which is correct and merely unpainted for that one huge line.
 ; ------------------------------------------------------------------
 ;@axiom:restrict(no-io,no-foreign)
+;; Append to `out` the sequences that redraw the whole line from
+;; `painted`, the line already run through a highlighter, and put the
+;; cursor back. Answers 0.
 (pub :: ledRefreshFullPainted (-> LineEd (Vec String) String Int))
 ;@axiom:effect(unsafe)
 (pub fn (ledRefreshFullPainted ed out painted)
@@ -1086,6 +1126,9 @@
 ; editor be driven by a test that never opens a terminal.
 ; ------------------------------------------------------------------
 ;@axiom:restrict(no-io,no-foreign)
+;; Apply one key event to the line, appending any redraw to `out`.
+;; Answers `LED_DONE` on Enter, `LED_EOF` on end of input, and 0
+;; otherwise.
 (pub :: ledApply (-> LineEd KeyEv (Vec String) Int))
 (pub fn (ledApply ed ev out)
   {
@@ -1109,6 +1152,7 @@
   })
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
+;; Whether the key is a kill: Ctrl-K, Ctrl-U or Ctrl-W.
 (pub :: ledIsKillKey (-> KeyEv Bool))
 (pub fn (ledIsKillKey ev)
   (if (== ev.kind KEY_CTRL)
@@ -1122,6 +1166,7 @@
           false)))))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
+;; Whether the key is a yank: Ctrl-Y.
 (pub :: ledIsYankKey (-> KeyEv Bool))
 (pub fn (ledIsYankKey ev)
   (if (== ev.kind KEY_CTRL)
@@ -1140,6 +1185,9 @@
   (!= (& ev.mods (| MOD_ALT MOD_CTRL)) 0))
 
 ;@axiom:restrict(no-io,no-foreign)
+;; Route one key event to the editing operation it names and append any
+;; redraw to `out`. Answers `LED_DONE` on Enter, `LED_EOF` on end of
+;; input, 0 otherwise.
 (pub :: ledDispatch (-> LineEd KeyEv (Vec String) Int))
 (pub fn (ledDispatch ed ev out)
   (if (== ev.kind KEY_ENTER)

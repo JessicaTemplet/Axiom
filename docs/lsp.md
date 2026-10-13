@@ -1209,7 +1209,8 @@ under `tests/` and `docs/` into a copy in its place, and requires
 ### Lint hints
 
 On top of the checker's diagnostics, the server adds three lint Hints
-to every document that parses. `axiom check` never emits them. They
+to every document that parses, and a fourth about the tag that quiets
+them. `axiom check` never emits them. They
 have severity `Hint`, they're on for every document, and they never
 fail a build. A Hint is your editor thinking out loud, so it lives in
 the server. The checker's warnings are what the project promises about
@@ -1252,12 +1253,17 @@ signature or the `fn`:
   (if true n 0))
 ```
 
-`;@axiom:nolint(RULE)` quiets one rule, and `;@axiom:nolint(all)`
-quiets all three. The tag syntax is in
-[the reference](reference.md#nolint---quieting-the-editors-hints).
+`;@axiom:nolint(RULE)` quiets one rule, `nolint(hints)` quiets all
+three, and `nolint(AX3037)` or `nolint(warnings)` quiets the checker's
+warnings on that declaration as well; `nolint(all)` quiets both kinds.
+A tag above an `import` covers the whole file. An error is never
+quieted. A name the tag lists that nothing answers to draws a fourth
+hint, `lint-unknown-nolint`, at the tag itself. The tag syntax is in
+[the reference](reference.md#nolint-quiet-the-editors-hints).
 
 Tested by `tests/lsp/100-lint-dead-branch.ax` through
-`tests/lsp/103-lint-nolint.ax`, each with controls that must stay silent.
+`tests/lsp/105-lint-nolint-names.ax`, each with controls that must stay
+silent or stay drawn.
 
 #### Code actions for hints
 

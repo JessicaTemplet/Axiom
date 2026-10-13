@@ -1,5 +1,5 @@
-; Err — Axiom's failure type, its error record, and the propagation
-; form that binds one.
+;;! Err — Axiom's failure type, its error record, and the propagation
+;;! form that binds one.
 ;
 ; The specification is `docs/error-model.md`; this module is its
 ; `ERR-TYPE-*` and `ERR-REC-2` rules made real. Three of its decisions
@@ -25,6 +25,10 @@
 ; type-parameter list is ONE group - `(a e)` - because `(a) (e)` reads
 ; the second group as a constructor named `e`.
 ; ------------------------------------------------------------------
+;; Success or failure: `(Ok x)` carries the answer and `(Err e)` the
+;; error. Library functions answer it instead of a sentinel; take it
+;; apart with `match`, or unwrap it with `try` inside a function that
+;; answers a `Result` itself.
 (pub data Result (a e)
   (Ok a)
   (Err e))
@@ -37,6 +41,9 @@
 ; "" when nobody said. Three fields, well inside AX3029's 46-word
 ; cliff, and every one of them declared at the type it holds.
 ; ------------------------------------------------------------------
+;; What a failing library call answers inside `Err`: a stable numeric
+;; `code` (the `err*` constants), a `message` for a person, and the
+;; `context` later callers add with `withContext`.
 (pub struct Error
   (code : Int)
   (message : String)
@@ -99,18 +106,22 @@
 (pub fn (errInvalidData)
   1011)
 
+;; An `Error` with `code` and `message` and no context yet.
 (pub :: mkError (-> Int String Error))
 (pub fn (mkError code message)
   (Error code message ""))
 
+;; The error's numeric code, one of the `err*` constants.
 (pub :: errCode (-> Error Int))
 (pub fn (errCode e)
   e.code)
 
+;; The error's message.
 (pub :: errMessage (-> Error String))
 (pub fn (errMessage e)
   e.message)
 
+;; The context callers added with `withContext`, or empty.
 (pub :: errContext (-> Error String))
 (pub fn (errContext e)
   e.context)
@@ -129,18 +140,21 @@
 ; ------------------------------------------------------------------
 ; Inspecting.
 ; ------------------------------------------------------------------
+;; Whether the result is `Ok`.
 (pub :: isOk (-> (Result a e) Bool))
 (pub fn (isOk r)
   (match r
     ((Ok x) true)
     ((Err y) false)))
 
+;; Whether the result is `Err`.
 (pub :: isErr (-> (Result a e) Bool))
 (pub fn (isErr r)
   (match r
     ((Ok x) false)
     ((Err y) true)))
 
+;; The `Ok` value, or `fallback` when the result is `Err`.
 (pub :: unwrapOr (-> (Result a e) a a))
 (pub fn (unwrapOr r fallback)
   (match r
@@ -154,18 +168,22 @@
 ; between two error types is a function the program calls, and the
 ; compiler finds nothing on its behalf.
 ; ------------------------------------------------------------------
+;; Apply `f` to the `Ok` value; an `Err` passes through unchanged.
 (pub :: mapOk (-> (Result a e) (-> a b) (Result b e)))
 (pub fn (mapOk r f)
   (match r
     ((Ok x) (Ok (f x)))
     ((Err y) (Err y))))
 
+;; Apply `f` to the `Err` value; an `Ok` passes through unchanged.
 (pub :: mapErr (-> (Result a e) (-> e f) (Result a f)))
 (pub fn (mapErr r f)
   (match r
     ((Ok x) (Ok x))
     ((Err y) (Err (f y)))))
 
+;; Chain a fallible step: apply `f` to the `Ok` value and answer its
+;; result; an `Err` passes through unchanged.
 (pub :: andThen (-> (Result a e) (-> a (Result b e)) (Result b e)))
 (pub fn (andThen r f)
   (match r
@@ -198,6 +216,8 @@
 (pub fn (errContextOf e ctx)
   (Error e.code e.message ctx))
 
+;; Add `ctx` to the error's context, so a caller up the stack can say
+;; what it was doing. An `Ok` passes through unchanged.
 (pub :: withContext (-> (Result a Error) String (Result a Error)))
 (pub fn (withContext r ctx)
   (match r
@@ -211,12 +231,16 @@
 ; missing map key and a failed syscall are different facts, so there is
 ; no implicit coercion in either direction (ERR-TYPE-4).
 ; ------------------------------------------------------------------
+;; Turn an `Option` into a `Result`: `Some` becomes `Ok`, and `None`
+;; becomes `Err e`.
 (pub :: okOr (-> (Option a) e (Result a e)))
 (pub fn (okOr o e)
   (match o
     ((Some x) (Ok x))
     ((None) (Err e))))
 
+;; Turn a `Result` into an `Option`: `Ok` becomes `Some`, and `Err`
+;; becomes `None`, dropping the error.
 (pub :: toOption (-> (Result a e) (Option a)))
 (pub fn (toOption r)
   (match r
@@ -318,6 +342,7 @@
 ; checked operator exists to end. The raw operator traps it now (exit
 ; 83); this answers `(Err Overflow)` instead.
 ; ------------------------------------------------------------------
+;; The smallest `Int`, -9223372036854775808.
 (pub :: intMin Int)
 (pub fn (intMin)
   (- (- 0 9223372036854775807) 1))
@@ -361,6 +386,8 @@
       (Err (mkError errOverflow "sum is not representable"))
       (Ok s))))
 
+;; `a - b`, or `Err` with `errOverflow` when the difference does not
+;; fit an `Int`.
 (pub :: subChecked (-> Int Int (Result Int Error)))
 (pub fn (subChecked a b)
   ; A subtraction can only overflow when the operands disagree in
@@ -370,6 +397,8 @@
       (Err (mkError errOverflow "difference is not representable"))
       (Ok s))))
 
+;; `a * b`, or `Err` with `errOverflow` when the product does not fit
+;; an `Int`.
 (pub :: mulChecked (-> Int Int (Result Int Error)))
 (pub fn (mulChecked a b)
   (if (|| (== a 0) (== b 0))
@@ -394,6 +423,8 @@
           (Err (mkError errOverflow "product is not representable"))
           (Ok p))))))
 
+;; `a / b` truncated toward zero, or `Err` with `errDivideByZero` for a
+;; zero divisor and `errOverflow` for `intMin / -1`.
 (pub :: divChecked (-> Int Int (Result Int Error)))
 (pub fn (divChecked a b)
   (if (== b 0)
@@ -402,6 +433,8 @@
       (Err (mkError errOverflow "quotient is not representable"))
       (Ok (/ a b)))))
 
+;; The remainder of `a / b`, or `Err` with `errDivideByZero` for a zero
+;; divisor.
 (pub :: remChecked (-> Int Int (Result Int Error)))
 (pub fn (remChecked a b)
   (if (== b 0)
@@ -419,6 +452,8 @@
     (Err (mkError errShiftTooWide "shifted by 64 or more"))
     (Ok (<< a n))))
 
+;; `a >> n`, or `Err` with `errShiftTooWide` when `n` is negative or 64
+;; or more.
 (pub :: shrChecked (-> Int Int (Result Int Error)))
 (pub fn (shrChecked a n)
   (if (|| (< n 0) (>= n 64))

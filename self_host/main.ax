@@ -13,6 +13,7 @@
 (import IO (listDir isDir fileExists makeDir readErrno readFile removeFile renamePath stderr writeFile writeStr))
 (import lexer)
 (import lexicon)
+(import nolint)
 (import parser)
 (import diag)
 (import render)
@@ -374,17 +375,20 @@
 ; below swap in without moving any parentheses around them.
 (:: checkWithFrames (-> (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int)))
 (fn (checkWithFrames decls allDecls units ftbl)
-  (let ((cds (checkModule decls allDecls units)))
+  ; A warning a `;@axiom:nolint(...)` tag quiets is dropped here, for
+  ; `check`, `build` and `run` alike (`nolintQuietDiags`); the
+  ; language server drops the same ones, so the two agree.
+  (let ((cds (nolintQuietDiags decls (checkModule decls allDecls units))))
     {
       (expAttachFrames cds ftbl units)
       cds
     }))
 
-(:: attachTcFrames (-> Int (Vec Int) (Vec Int) (Vec a)))
-(fn (attachTcFrames tc ftbl units)
+(:: attachTcFrames (-> (Vec Int) Int (Vec Int) (Vec Int) (Vec Int)))
+(fn (attachTcFrames decls tc ftbl units)
   {
     (expAttachFrames (tcOutVec tc) ftbl units)
-    (tcOut tc)
+    (nolintQuietDiags decls (tcOutVec tc))
   })
 
 (pub :: declsHaveMainFrom (-> (Vec Int) Int Bool))
@@ -1951,7 +1955,7 @@
                                             }
                                             0)))
                                           (let ((tc (checkModuleTc decls allDecls units)))
-                                            (let ((ds (orderDiags (expMergeInto eds (attachTcFrames tc ftbl units)))))
+                                            (let ((ds (orderDiags (expMergeInto eds (attachTcFrames decls tc ftbl units)))))
                                               (if (> (countErrorDiags ds) 0)
                                                 ; A SYMBOL TABLE IS A FACT ABOUT THE
                                                 ; SOURCE, so it is printed here too.

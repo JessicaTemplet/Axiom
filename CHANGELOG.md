@@ -26,6 +26,18 @@ its changelog too.
   re-derived at the measured value. Tested by `tests/lsp/drive.py` and
   `scripts/check-stdlib-api.sh`.
 
+- Make `;@axiom:nolint(...)` quiet what Rust's `#[allow(...)]` does. It
+  takes a hint by name, a warning by its code such as `AX3037`, or a
+  group (`hints`, `warnings`, `all`); a tag above an `import` covers
+  the whole file; `axiom check`, `build` and `run` honour the warning
+  half, so the terminal and the editor agree; an error is never
+  quieted; and a name nothing answers to draws the editor hint
+  `lint-unknown-nolint` at the tag instead of being ignored. The tag's
+  one reading is `self_host/nolint.ax`. Tested by
+  `tests/diagnostics/1257-nolint-warning.ax`,
+  `tests/diagnostics/1258-nolint-file-keeps-errors.ax` and
+  `tests/lsp/104-lint-file-nolint.ax` through `105-lint-nolint-names.ax`.
+
 - Explain every word of the language on hover. A keyword, a form word
   such as `mut` or `::`, a builtin type, a built-in effect, an
   operator, a literal, the key or a value of an AXTAG line and the
