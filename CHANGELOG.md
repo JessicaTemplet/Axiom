@@ -16,6 +16,14 @@ its changelog too.
 
 ## Unreleased
 
+- Add the VS Code extension, `editors/vscode/`: a language client over
+  `axiom lsp`, a TextMate grammar that colours by role before the
+  server answers, the four commands (run, expand macro, open the
+  documentation, restart the server) and a map from the server's
+  semantic token legend to TextMate scopes. The grammar's keyword list
+  is written from the parser by `editors/vscode/scripts/sync-keywords.mjs`.
+  Install from source; it isn't on the marketplace. Tested by
+  `scripts/check-vscode.sh`.
 - Add doc comments. A `;;` line documents the declaration below it and
   a `;;!` line at the head of a file documents the module, both in
   Markdown; a plain `;` line is a note for the maintainer and tools

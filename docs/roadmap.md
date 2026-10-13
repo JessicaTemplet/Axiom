@@ -113,7 +113,8 @@ integrator would still need.
 | Hover explains every word of the language: keywords, builtin types, effects, operators, AXTAG keys and values, and imported modules | Done |
 | Every public standard library name carries a doc comment, and every module a `;;!` block | In progress |
 | The language server sends semantic tokens, so every editor colours keywords, functions, macros, constructors, fields and effects apart from variables | In progress |
-| A VS Code extension ships in the repository, with a TextMate grammar and the language client | In progress |
+| A VS Code extension ships in the repository, with a TextMate grammar and the language client (`editors/vscode/`) | Done |
+| The VS Code extension is published to the marketplace | Not started |
 | `axiom doc` renders the documentation and the library reference locally and opens them in your browser | In progress |
 | Debug information (DWARF), a message on SIGSEGV, and inlined frames in backtraces | Not started |
 | An assembler error inside an `asm` template is reported at the form | Not started |
