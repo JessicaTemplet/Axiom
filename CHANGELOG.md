@@ -28,6 +28,17 @@ its changelog too.
   every link between the rendered pages to resolve.
 - The generated library reference lists public `emacro`s. Tested by
   `scripts/check-stdlib-api.sh`.
+- Send semantic tokens. The language server answers
+  `textDocument/semanticTokens/full` from the compiler's own lexer and
+  parser, so an editor without tree-sitter colours keywords,
+  functions, macros, constructors, types, fields, parameters, effects
+  and AXTAG lines apart from variables. Every identifier is coloured
+  by what it resolves to, through the walk `references` already makes,
+  and a document that does not parse still answers from the bytes.
+  The legend is seventeen token types and seven modifiers, listed in
+  `docs/lsp.md`, and the request costs 1.31x a `didOpen` of the gate's
+  large document. Tested by `tests/lsp/drive.py`.
+
 - Add the VS Code extension, `editors/vscode/`: a language client over
   `axiom lsp`, a TextMate grammar that colours by role before the
   server answers, the four commands (run, expand macro, open the
@@ -45,6 +56,14 @@ its changelog too.
   first paragraphs are now `;;` lines, with the coverage ratchet
   re-derived at the measured value. Tested by `tests/lsp/drive.py` and
   `scripts/check-stdlib-api.sh`.
+
+- Colour the REPL by role. A name being called, a constructor or type,
+  a `;;` doc comment and a `;@axiom:` tag each get their own colour,
+  where every name was one colour and every comment another. The
+  highlighter still reads only the compiler's lexer; a small form
+  stack tells a call from a binder (a `fn`'s parameters, a `let`'s
+  slots, a `struct`'s fields, a `match` arm's pattern). Tested by
+  `tests/selfhost/272-highlight.ax`.
 
 - Make `;@axiom:nolint(...)` quiet what Rust's `#[allow(...)]` does. It
   takes a hint by name, a warning by its code such as `AX3037`, or a

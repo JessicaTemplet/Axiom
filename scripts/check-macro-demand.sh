@@ -32,7 +32,13 @@ failed=0; passed=0
 ok()   { echo "ok   $*"; passed=$((passed + 1)); }
 fail() { echo "FAIL: $*"; failed=$((failed + 1)); }
 
-WANT_POPULATION=130
+# 130 -> 132 on 2026-10-13: the two rows that arrived are
+# `tests/selfhost/1015-macro-empty-expansion.ax`'s, the fixture for a
+# declaration macro that generates nothing (its two invocations that
+# do generate carry a row each). It landed without moving this number,
+# which is the drift the pin exists to catch; no request that needs
+# expansion arrived, so MAC-TOOL-3 holds.
+WANT_POPULATION=132
 WANT_DEMAND=4
 
 echo "== population: every #generated= row over the corpus =="

@@ -913,7 +913,15 @@ floor=8192       # 8 MiB
 # machinery delta is 0.05%, and the shape is still exactly linear.
 # 800 leaves 12% over the measured 714, the margin these entries
 # keep, and the `ok` line still prints it.
-ceiling=819200   # 800 MiB, over a measured 714
+# 800 -> 920 MiB on 2026-10-13. The doc-comment work added the lexicon
+# (`self_host/lexicon.ax`, string tables for every word of the
+# language), the nolint reading, the server's semantic-tokens section
+# and a `;;` line on every public library name: CI measured 803 MiB
+# on the first of those commits, 0.4% over the ceiling, and the tree
+# with all of them peaks at 819 under this gate's own measurement. The
+# shape is the one the entries above price, more source lines, most of
+# them prose-heavy, and nothing that copies. 920 leaves 12% over 819.
+ceiling=942080   # 920 MiB, over a measured 819
 if (( peak < floor )); then
   fail "the self-compile peaked at $peak KiB, under the $((floor / 1024)) MiB floor - that is not a measurement of compiling 117,922 source lines"
 fi

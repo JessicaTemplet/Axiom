@@ -15,6 +15,7 @@
 ;   .  plain    K  keyword  i  ident   n  number  s  literal
 ;   c  comment  p  punct    E  error   ?  literal in progress
 ;   M  matched bracket      X  unmatched bracket
+;   f  call     C  constructor or type   d  doc comment   t  AXTAG
 ;
 ; Four things are asserted per case and each fails with its own exit
 ; status, so a red run names what broke rather than only that
@@ -36,7 +37,7 @@
 ;   201  The painter really painted: byte 27 appears at least 20 times
 ;        across the corpus. A highlighter wired in but emitting no
 ;        escape passes every visLen check perfectly.
-;   202  At least 9 DISTINCT class letters were produced. A classifier
+;   202  At least 12 DISTINCT class letters were produced. A classifier
 ;        answering one letter everywhere would otherwise satisfy a
 ;        length check on every case at once.
 ;
@@ -111,14 +112,14 @@
       (vecPush v (mkHCase
         "(println \"hel"
         13
-        "piiiiiii.????"
+        "pfffffff.????"
         1
         (- 0 1)))
       ; 3  the cursor just past a closer: both brackets light up
       (vecPush v (mkHCase
         "(+ 1 2)"
         7
-        "Mi.n.nM"
+        "Mf.n.nM"
         0
         0))
       ; 4  crossed families. `replParenDepth` measures 0 here and
@@ -134,7 +135,7 @@
       (vecPush v (mkHCase
         "(a ; note"
         0
-        "Xi.cccccc"
+        "Xf.cccccc"
         1
         (- 0 2)))
       ; 6  a NESTED block comment is one comment, as it is to the
@@ -142,7 +143,7 @@
       (vecPush v (mkHCase
         "(a #| x #| y |# z |# b)"
         0
-        "Mi.ccccccccccccccccc.iM"
+        "Mf.ccccccccccccccccc.iM"
         0
         22))
       ; 7  a bad escape: settled, so red immediately - and the string
@@ -198,7 +199,7 @@
       (vecPush v (mkHCase
         "(fn (f x)\n  (+ x 1))"
         19
-        "pKK.pi.ip...Mi.i.nMp"
+        "pKK.pi.ip...Mf.i.nMp"
         0
         12))
       ; 14 NON-ASCII, where bytes and columns differ: 17 bytes, 15
@@ -207,7 +208,7 @@
       (vecPush v (mkHCase
         "(f 'é' \"héllo\")"
         15
-        "pi.ssss.ssssssssp"
+        "pf.ssss.ssssssssp"
         0
         (- 0 1)))
       ; 15 the newline that ends a line comment stays PLAIN, so the
@@ -215,7 +216,7 @@
       (vecPush v (mkHCase
         "(a ; c\n b)"
         0
-        "Mi.ccc..iM"
+        "Mf.ccc..iM"
         0
         9))
       ; 16 a `#|` STRANDED by a bad escape. Its scan is bounded by the
@@ -224,7 +225,7 @@
       (vecPush v (mkHCase
         "(f \"a #| b\\q\" 1)"
         0
-        "Mi....ccccEE..nM"
+        "Mf....ccccEE..nM"
         0
         15))
       ; 17 a closer with nothing open. Depth goes NEGATIVE, which is
@@ -254,7 +255,7 @@
       (vecPush v (mkHCase
         "(g x in)"
         0
-        "Mi.i.iiM"
+        "Mf.i.iiM"
         0
         7))
       ; 21 `by` after a range's end is a keyword too, whatever the
@@ -268,7 +269,7 @@
       (vecPush v (mkHCase
         "(for i in a.b..(f x) by -1 i)"
         0
-        "MKKK.i.KK.ipipppi.ip.KK.nn.iM"
+        "MKKK.i.KK.ipipppf.ip.KK.nn.iM"
         0
         28))
       ; 23 after a container, the next word is the body, so `by` is an
@@ -279,6 +280,55 @@
         "MKKK.i.KK.ii.iiM"
         0
         15))
+      ; 24 a CALL is a name in head position that binds nothing: the
+      ;    body of a `fn` calls, its parameter list does not (case 13
+      ;    and case 1); a `struct`'s fields and a `data`'s constructors
+      ;    bind, and a capitalised name is a constructor or a type
+      ;    wherever it stands
+      (vecPush v (mkHCase
+        "(struct Point (x : Int) (y : Int))"
+        0
+        "MKKKKKK.CCCCC.pi.p.CCCp.pi.p.CCCpM"
+        0
+        33))
+      (vecPush v (mkHCase
+        "(data Colour (Red) (Green Int))"
+        0
+        "MKKKK.CCCCCC.pCCCp.pCCCCC.CCCpM"
+        0
+        30))
+      ; 26 a `match` arm's first form is its pattern, the rest calls;
+      ;    an arm headed by a bare name binds that name
+      (vecPush v (mkHCase
+        "(match v ((Some x) (f x)) (n n))"
+        0
+        "MKKKKK.i.ppCCCC.ip.pf.ipp.pi.ipM"
+        0
+        31))
+      ; 27 a `let` binding list binds every entry, and the body calls;
+      ;    `(Point 1 2)` is a construction by case
+      (vecPush v (mkHCase
+        "(let ((o (Point 1 2))) (show o.x))"
+        0
+        "MKKK.ppi.pCCCCC.n.nppp.pffff.ipipM"
+        0
+        33))
+      ; 28 a doc comment and an AXTAG are not notes: `;;` and
+      ;    `;@axiom:` get their own letters, the way the editor's
+      ;    grammar colours them apart
+      (vecPush v (mkHCase
+        ";; a doc\n;@axiom:effect(io)\n(:: main Int)"
+        0
+        "dddddddd.tttttttttttttttttt.pKK.iiii.CCCp"
+        0
+        (- 0 1)))
+      ; 29 brace and bracket blocks hold calls
+      (vecPush v (mkHCase
+        "{ (f 1) [ (g 2) ] }"
+        0
+        "M.pf.np.p.pf.np.p.M"
+        0
+        18))
       v
     }))
 
@@ -384,7 +434,7 @@
         200
         (if (< esc 20)
           201
-          (if (< (distinctLetters v) 9)
+          (if (< (distinctLetters v) 12)
             202
             (if (== bad 0)
               42
