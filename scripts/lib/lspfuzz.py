@@ -147,6 +147,7 @@ CAP_METHODS = {
     "typeHierarchyProvider": ["textDocument/prepareTypeHierarchy",
                               "typeHierarchy/supertypes",
                               "typeHierarchy/subtypes"],
+    "semanticTokensProvider": ["textDocument/semanticTokens/full"],
     "experimental": ["axiom/expandMacro"],
     "textDocumentSync": [],
 }
@@ -229,7 +230,8 @@ def gen_params(rng, method, uri, text):
     td = {"uri": uri}
     p = gen_pos(rng, text)
     if method in ("textDocument/documentSymbol", "textDocument/foldingRange",
-                  "textDocument/documentLink", "textDocument/codeLens"):
+                  "textDocument/documentLink", "textDocument/codeLens",
+                  "textDocument/semanticTokens/full"):
         return {"textDocument": td}
     if method == "workspace/symbol":
         return {"query": rng.choice(["", "vec", "main", "a", "Str", "\u00e9", "(", "x" * 300])}

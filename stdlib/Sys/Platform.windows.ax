@@ -68,34 +68,45 @@
 ; since 2026-09-03; acyclic, as the four syscall-ABI files record.
 (import Err)
 
+;; Sys.Platform - Darwin (macOS) syscall numbers and flags.
 (pub :: sysReadNum Int)
 (pub fn (sysReadNum)
   0)
 
+;; write(fd, buf, count) - BSD 4
 (pub :: sysWriteNum Int)
 (pub fn (sysWriteNum)
   0)
 
+;; open(path, flags, mode) - BSD 5
 (pub :: sysOpenNum Int)
 (pub fn (sysOpenNum)
   0)
 
+;; close(fd) - BSD 6
 (pub :: sysCloseNum Int)
 (pub fn (sysCloseNum)
   0)
 
+;; exit(status) - BSD 1
 (pub :: sysExitNum Int)
 (pub fn (sysExitNum)
   0)
 
+;; lseek(fd, offset, whence) - BSD 199
 (pub :: sysLseekNum Int)
 (pub fn (sysLseekNum)
   0)
 
+;; Darwin has a real `open`, so no `openat` indirection is needed.
+;; `Sys.ax` branches on this rather than on an OS name, so adding a
+;; platform never means editing portable code.
 (pub :: openNeedsDirFd Int)
 (pub fn (openNeedsDirFd)
   0)
 
+;; Unused on Darwin (see `openNeedsDirFd`), but defined so that
+;; `Sys.ax` type-checks against every platform module.
 (pub :: atFdCwd Int)
 (pub fn (atFdCwd)
   0)
@@ -105,10 +116,12 @@
 (pub fn (oRdonly)
   0)
 
+;; O_WRONLY | O_CREAT | O_TRUNC = 0x0001 | 0x0200 | 0x0400
 (pub :: oWronlyCreateTrunc Int)
 (pub fn (oWronlyCreateTrunc)
   577)
 
+;; O_WRONLY | O_CREAT | O_APPEND = 0x0001 | 0x0200 | 0x0008
 (pub :: oWronlyCreateAppend Int)
 (pub fn (oWronlyCreateAppend)
   1089)
@@ -125,10 +138,14 @@
 (pub fn (seekSet)
   0)
 
+;; Starting a child process.
 (pub :: spawnUsesPosixSpawn Int)
 (pub fn (spawnUsesPosixSpawn)
   0)
 
+;; fork() - BSD 2. `sysSpawn` does not reach it, because
+;; `spawnUsesPosixSpawn` selects `posix_spawn` here - but `sysForkProcess`
+;; does, and this used to be a placeholder 0 for that reason.
 (pub :: sysForkNum Int)
 ;@axiom:syscall(spawn)
 (pub fn (sysForkNum)
@@ -146,32 +163,41 @@
 (pub fn (sysExecveNum)
   0)
 
+;; wait4(pid, status, options, rusage) - BSD 7.
 (pub :: sysWait4Num Int)
 ;@axiom:syscall(block)
 (pub fn (sysWait4Num)
   0)
 
+;; posix_spawn - BSD 244.
 (pub :: sysPosixSpawnNum Int)
 ;@axiom:syscall(spawn)
 (pub fn (sysPosixSpawnNum)
   0)
 
+;; unlink(path) - BSD 10.
 (pub :: sysUnlinkNum Int)
 (pub fn (sysUnlinkNum)
   0)
 
+;; mkdir(path, mode) - BSD 136. Darwin has the plain call, so
+;; `openNeedsDirFd` is 0 here and `sysMkdir` uses the two-argument form.
 (pub :: sysMkdirNum Int)
 (pub fn (sysMkdirNum)
   0)
 
+;; rmdir(path) - BSD 137.
 (pub :: sysRmdirNum Int)
 (pub fn (sysRmdirNum)
   0)
 
+;; rename(from, to) - BSD 128. Darwin has the plain two-argument call,
+;; so `openNeedsDirFd` is 0 here and `sysRename` uses it directly.
 (pub :: sysRenameNum Int)
 (pub fn (sysRenameNum)
   0)
 
+;; Reading a directory.
 (pub :: sysGetdentsNum Int)
 (pub fn (sysGetdentsNum)
   0)
@@ -182,14 +208,17 @@
 (pub fn (dirReadNeedsPosition)
   0)
 
+;; Where the name starts inside one record. Darwin's 64-bit `dirent` is
 (pub :: direntNameOffset Int)
 (pub fn (direntNameOffset)
   19)
 
+;; The working directory.
 (pub :: cwdUsesFcntlPath Int)
 (pub fn (cwdUsesFcntlPath)
   0)
 
+;; fcntl(fd, cmd, arg) - BSD 92.
 (pub :: sysCwdNum Int)
 (pub fn (sysCwdNum)
   0)
@@ -200,6 +229,7 @@
 (pub fn (fGetPath)
   0)
 
+;; The two errno values portable code above compares against.
 (pub :: eExist Int)
 (pub fn (eExist)
   17)
@@ -209,10 +239,15 @@
 (pub fn (eIsDir)
   21)
 
+;; getpid() - BSD 20
 (pub :: sysGetPidNum Int)
 (pub fn (sysGetPidNum)
   0)
 
+;; gettimeofday(tv, tz) - BSD 116. Writes {tv_sec i64, tv_usec i32+pad}
+;; to its 16-byte buffer; the register-return interpretation was probed
+;; WRONG on arm64 (x0 is 0 on success, never seconds). Verified against
+;; the shell clock, 400,000 reads, zero backwards steps, ~200ns/call.
 (pub :: sysClockNum Int)
 (pub fn (sysClockNum)
   0)
@@ -223,50 +258,73 @@
 (pub fn (clockIsGettimeofday)
   0)
 
+;; Whether this platform can answer a MONOTONIC clock - one that never
+;; steps backwards - through a syscall. Darwin cannot, and that is the
+;; whole reason this capability exists rather than being assumed.
 (pub :: clockHasMonotonic Int)
 (pub fn (clockHasMonotonic)
   1)
 
+;; socket(domain, type, protocol) - BSD 97.
 (pub :: sysSocketNum Int)
 (pub fn (sysSocketNum)
   0)
 
+;; bind(fd, addr, addrlen) - BSD 104. THE ADDRLEN IS EXACT: 0, 4, 8, 12,
+;; 20, 24 and 28 were each probed and every one answered -22 EINVAL; only
+;; 16 - the size of `sockaddr_in` - returned 0.
 (pub :: sysBindNum Int)
 (pub fn (sysBindNum)
   0)
 
+;; listen(fd, backlog) - BSD 106.
 (pub :: sysListenNum Int)
 (pub fn (sysListenNum)
   0)
 
+;; accept(fd, addr, addrlen) - BSD 30.
 (pub :: sysAcceptNum Int)
 (pub fn (sysAcceptNum)
   0)
 
+;; connect(fd, addr, addrlen) - BSD 98. On a non-blocking socket this
+;; answers -36 EINPROGRESS rather than failing; probed.
 (pub :: sysConnectNum Int)
 (pub fn (sysConnectNum)
   0)
 
+;; setsockopt(fd, level, name, val, len) - BSD 105.
 (pub :: sysSetSockOptNum Int)
 (pub fn (sysSetSockOptNum)
   0)
 
+;; getsockopt(fd, level, name, val, lenptr) - BSD 118.
 (pub :: sysGetSockOptNum Int)
 (pub fn (sysGetSockOptNum)
   0)
 
+;; shutdown(fd, how) - BSD 134.
 (pub :: sysShutdownNum Int)
 (pub fn (sysShutdownNum)
   0)
 
+;; fcntl(fd, cmd, arg) - BSD 92, and the number `sysCwdNum` above also
+;; holds. They are NOT merged: `sysCwdNum` names "the call that answers
+;; the working directory", which is `fcntl(F_GETPATH)` here and `getcwd`
+;; on Linux, and a socket has no business reading that name.
 (pub :: sysFcntlNum Int)
 (pub fn (sysFcntlNum)
   0)
 
+;; The address family and socket type. `AF_INET` is 2 on both systems -
+;; and that agreement is a trap, because `AF_INET6` is 30 here against
+;; Linux's 10, so nothing else in this group may be assumed to match.
 (pub :: afInet Int)
 (pub fn (afInet)
   2)
 
+;; AF_INET6, AND THIS IS THE DIVERGENCE THE PARAGRAPH ABOVE WARNED
+;; ABOUT: 30 here against Linux's 10.
 (pub :: afInet6 Int)
 (pub fn (afInet6)
   10)
@@ -276,6 +334,12 @@
 (pub fn (sockStream)
   1)
 
+;; THE SOCKET-OPTION NUMBERS ARE WHERE DARWIN AND LINUX PART COMPANY, and
+;; they part completely. `SOL_SOCKET` is 0xffff here and 1 on Linux;
+;; Darwin's `SO_*` are BSD bitmask-style constants where Linux's are
+;; small sequential integers. Not one of the four below shares a value
+;; with its Linux twin, so reusing a Linux number here does not fail - it
+;; sets some other option.
 (pub :: solSocket Int)
 (pub fn (solSocket)
   1)
@@ -296,6 +360,8 @@
 (pub fn (soError)
   4)
 
+;; fcntl's file-status commands, and the flag a non-blocking socket sets.
+;; `O_NONBLOCK` is 4 here and 2048 on Linux.
 (pub :: fGetFl Int)
 (pub fn (fGetFl)
   3)
@@ -317,6 +383,10 @@
 (pub fn (oNonblock)
   2048)
 
+;; EAGAIN, which a non-blocking `accept` or `read` answers negated when
+;; there is nothing to take yet. 35 here, 11 on Linux - so a caller that
+;; compares against a literal is correct on one target and silently wrong
+;; on the other, which is the reason this is a name.
 (pub :: eAgain Int)
 (pub fn (eAgain)
   11)
@@ -385,6 +455,8 @@
 (pub fn (eInProgress)
   115)
 
+;; WHETHER `sockaddr_in` OPENS WITH A LENGTH BYTE. It does here and does
+;; not on Linux, and the two layouts cannot share a builder:
 (pub :: sockaddrHasLenByte Int)
 (pub fn (sockaddrHasLenByte)
   0)
@@ -395,10 +467,14 @@
 (pub fn (pollUsesKqueue)
   0)
 
+;; kqueue() - BSD 362. Takes no arguments.
 (pub :: sysPollCreateNum Int)
 (pub fn (sysPollCreateNum)
   0)
 
+;; kevent(kq, changelist, nchanges, eventlist, nevents, timeout) - BSD
+;; 363, and it is BOTH of epoll's calls: `sysPollCtlNum` names the same
+;; number because registering is this call with an eventlist of nothing.
 (pub :: sysPollWaitNum Int)
 (pub fn (sysPollWaitNum)
   0)
@@ -409,6 +485,7 @@
 (pub fn (sysPollCtlNum)
   0)
 
+;; `struct kevent` is 32 bytes on both 64-bit Darwin arches:
 (pub :: pollEventSize Int)
 (pub fn (pollEventSize)
   12)
@@ -418,6 +495,11 @@
 (pub fn (pollEventFdOffset)
   4)
 
+;; EVFILT_READ. THE ONE VALUE THAT GENUINELY DIVERGES: kqueue's filters
+;; are NEGATIVE small integers naming a kind of event, where epoll's are
+;; a positive bitmask. -1 here, EPOLLIN = 1 there. It is written into a
+;; SIGNED 16-BIT field, so `Sys.ax` masks it to two bytes rather than
+;; storing a word.
 (pub :: pollReadFilter Int)
 (pub fn (pollReadFilter)
   1)
@@ -428,6 +510,9 @@
 (pub fn (pollWriteFilter)
   4)
 
+;; EV_ADD and EV_DELETE, which coincide with EPOLL_CTL_ADD and
+;; EPOLL_CTL_DEL at 1 and 2. The agreement is luck rather than design, so
+;; both are named on both platforms instead of being assumed.
 (pub :: pollAddOp Int)
 (pub fn (pollAddOp)
   1)
@@ -437,6 +522,9 @@
 (pub fn (pollDelOp)
   2)
 
+;; The size of the mask argument epoll_pwait takes and kevent does not.
+;; Zero here because nothing reads it; see the Linux files for why it
+;; must be exactly 8 there.
 (pub :: pollSigsetSize Int)
 (pub fn (pollSigsetSize)
   8)
@@ -464,18 +552,28 @@
 (pub fn (signalUsesSignalFd)
   1)
 
+;; sigprocmask(how, set, oset) - BSD 48.
 (pub :: sysSigProcMaskNum Int)
 (pub fn (sysSigProcMaskNum)
   0)
 
+;; SIG_BLOCK, which is 1 HERE AND 0 ON LINUX. The values are not shared
+;; and the wrong one is `SIG_UNBLOCK` on Darwin - it would unblock the
+;; signal it was asked to block, and the process would take the default
+;; disposition and die.
 (pub :: sigBlockHow Int)
 (pub fn (sigBlockHow)
   0)
 
+;; Darwin's `sigset_t` is a single `__uint32_t` - FOUR bytes, against
+;; Linux's kernel `sigset_t` of eight. Nothing reads a size argument
+;; here, but the buffer's width is what the kernel copies.
 (pub :: sigsetBytes Int)
 (pub fn (sigsetBytes)
   8)
 
+;; Unused on Darwin (see `signalUsesSignalFd`), but defined so that
+;; `Sys.ax` type-checks against every platform module.
 (pub :: sysSignalFdNum Int)
 (pub fn (sysSignalFdNum)
   0)
@@ -485,14 +583,21 @@
 (pub fn (sigInfoSize)
   128)
 
+;; EVFILT_SIGNAL, the filter that marks an event as a signal rather than
+;; a readable socket. Unused on Linux, where the distinction is which
+;; descriptor woke instead.
 (pub :: pollSignalFilter Int)
 (pub fn (pollSignalFilter)
   0)
 
+;; kill(pid, sig) - BSD 37.
 (pub :: sysKillNum Int)
 (pub fn (sysKillNum)
   0)
 
+;; SIGTERM and SIGINT AGREE on all four targets, which is worth naming
+;; rather than assuming because most of their neighbours do not - SIGUSR1
+;; is 30 here and 10 on Linux.
 (pub :: sigTerm Int)
 (pub fn (sigTerm)
   15)
@@ -502,6 +607,9 @@
 (pub fn (sigInt)
   2)
 
+;; Whether `fork` answers 0 in the child, which is the POSIX convention
+;; and what Linux does. Darwin answers the child's pid to both, so
+;; `sysForkProcess` normalises; see `sysForkNum` above for the measurement.
 (pub :: forkChildIsZero Int)
 (pub fn (forkChildIsZero)
   1)
@@ -635,6 +743,13 @@
 ; platform module declares one public surface (`check-stdlib-api.sh`),
 ; and 0 is the answer that would be wrong loudest if it ever were read.
 ; ------------------------------------------------------------------
+;; The id `clock_gettime` is asked for the monotonic clock, where there
+;; is one. Unused here - `clockIsGettimeofday` sends both readers to
+;; `gettimeofday`, and `clockHasMonotonic` above says why - and 0 so
+;; that nobody reads a Linux number out of this file. The constant
+;; exists because the id is NOT portable: 1 is CLOCK_MONOTONIC on Linux
+;; and CLOCK_VIRTUAL, process CPU time, on FreeBSD, and `Sys.ax` carried
+;; the 1 as a literal until 2026-08-29.
 (pub :: clockMonotonicId Int)
 (pub fn (clockMonotonicId)
   0)
@@ -686,22 +801,34 @@
 ; (`check-stdlib-api.sh`), and `ttyUsesTermios` 0 keeps every one of
 ; them unread.
 ; --------------------------------------------------------------------
+;; Whether this platform's terminal control is the POSIX `termios`
+;; trio - read the attributes, edit them, write them back - reached
+;; through `ioctl`. Windows answers 0: its mechanism is
+;; `GetConsoleMode`/`SetConsoleMode` against a HANDLE, which shares no
+;; part of this shape.
 (pub :: ttyUsesTermios Int)
 (pub fn (ttyUsesTermios)
   0)
 
+;; ioctl(fd, request, arg) - BSD 54, encoded the way every number in
+;; this file is: `0x2000000 | 54` = 33554486.
+;; Probe: `SYS_ioctl = 54 (0x36)`, `SYS_ioctl encoded = 33554486`.
 (pub :: sysIoctlNum Int)
 (pub fn (sysIoctlNum)
   0)
 
+;; TIOCGETA - read the terminal attributes into a `struct termios`.
 (pub :: tcGetAttrReq Int)
 (pub fn (tcGetAttrReq)
   0)
 
+;; TIOCSETAF - write the attributes back, after draining pending output
+;; and DISCARDING pending input.
 (pub :: tcSetAttrReq Int)
 (pub fn (tcSetAttrReq)
   0)
 
+;; TIOCGWINSZ - read `struct winsize`.
 (pub :: tcWinSizeReq Int)
 (pub fn (tcWinSizeReq)
   0)
@@ -714,14 +841,25 @@
 (pub fn (termiosBytes)
   0)
 
+;; The width of one flag word, which is also the STRIDE of the four of
+;; them: `c_iflag` at 0, `c_oflag` at 8, `c_cflag` at 16, `c_lflag` at
+;; 24. Probe: `c_iflag@0 c_oflag@8 c_cflag@16 c_lflag@24`, each of
+;; `size 8`. The four offsets are `n * termiosFlagBytes` on every
+;; platform this library targets, so `Sys.ax` carries one multiplication
+;; rather than four constants per module.
 (pub :: termiosFlagBytes Int)
 (pub fn (termiosFlagBytes)
   0)
 
+;; Where the control-character array `c_cc` begins.
+;; Probe: `offsetof c_cc = 32 (size 20, NCCS 20)`.
 (pub :: termiosCcOff Int)
 (pub fn (termiosCcOff)
   0)
 
+;; The two `c_cc` slots that mean something once ICANON is off: how many
+;; bytes a `read` must collect before it returns, and how long it waits
+;; in tenths of a second. Probe: `VMIN = 16`, `VTIME = 17`.
 (pub :: termiosVminIdx Int)
 (pub fn (termiosVminIdx)
   0)
@@ -731,6 +869,8 @@
 (pub fn (termiosVtimeIdx)
   0)
 
+;; c_lflag bits. Probe: `ECHO = 0x8 (8)`, `ICANON = 0x100 (256)`,
+;; `ISIG = 0x80 (128)`, `IEXTEN = 0x400 (1024)`.
 (pub :: tiosEcho Int)
 (pub fn (tiosEcho)
   0)
@@ -750,6 +890,8 @@
 (pub fn (tiosIexten)
   0)
 
+;; c_iflag bits. Probe: `BRKINT = 0x2`, `ICRNL = 0x100`,
+;; `ISTRIP = 0x20`, `IXON = 0x200`.
 (pub :: tiosBrkint Int)
 (pub fn (tiosBrkint)
   0)
@@ -769,6 +911,8 @@
 (pub fn (tiosIxon)
   0)
 
+;; The one c_oflag bit raw mode touches. Probe: `OPOST = 0x1`, and it
+;; is 0x1 on Linux and FreeBSD too.
 (pub :: tiosOpost Int)
 (pub fn (tiosOpost)
   0)

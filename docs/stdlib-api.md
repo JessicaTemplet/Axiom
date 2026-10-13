@@ -264,27 +264,27 @@ Axqlite.AxqlMacro - AXQL statements written as Axiom forms.
 | `axqlOptFloatValue` | value | `(-> (Option Float) Value)` | `Alloc` | An optional REAL as a parameter. |
 | `axqlOptTextValue` | value | `(-> (Option String) Value)` | `Alloc` | An optional TEXT as a parameter. |
 | `axqlOptBlobValue` | value | `(-> (Option String) Value)` | `Alloc` | An optional BLOB as a parameter. |
-| `axqlPutNameOf` | emacro |  |  |  |
-| `axqlColumnOf` | emacro |  |  |  |
+| `axqlPutNameOf` | emacro |  |  | A name, as `axqlPutName` writes it, from an identifier. |
+| `axqlColumnOf` | emacro |  |  | An `axqlTable` field as its column. |
 | `axqlPutColumn` | value | `(-> QueryBuilder String String Int)` | `Alloc,Mut` | Append `name TYPE...`. |
-| `axqlFieldValue` | emacro |  |  |  |
-| `axqlReadField` | emacro |  |  |  |
-| `axqlUpdate` | emacro |  |  |  |
-| `axqlDelete` | emacro |  |  |  |
-| `axqlDropTable` | emacro |  |  |  |
-| `axqlCreateIndex` | emacro |  |  |  |
-| `axqlDropIndex` | emacro |  |  |  |
-| `axqlMark` | emacro |  |  |  |
-| `axqlFieldColumn` | emacro |  |  |  |
+| `axqlFieldValue` | emacro |  |  | An `axqlTable` field's value as a parameter. |
+| `axqlReadField` | emacro |  |  | An `axqlTable` field read from a row by its column's name. |
+| `axqlUpdate` | emacro |  |  | An UPDATE of table `t`: `(assign (column e) ...)`, then an optional `(where e)`. The word is `assign` because `set` is Axiom's own. |
+| `axqlDelete` | emacro |  |  | A DELETE from table `t`, with an optional `(where e)`. |
+| `axqlDropTable` | emacro |  |  | A DROP TABLE, with an optional `IF EXISTS`. |
+| `axqlCreateIndex` | emacro |  |  | A CREATE INDEX: optional `UNIQUE` and `IF NOT EXISTS`, the index's name, `ON`, the table, and its columns. |
+| `axqlDropIndex` | emacro |  |  | A DROP INDEX, with an optional `IF EXISTS`. |
+| `axqlMark` | emacro |  |  | One `?`, for a field of `axqlTable`'s INSERT. |
+| `axqlFieldColumn` | emacro |  |  | One `(name Type)` field of `axqlTable` as its column. |
 | `axqlTableRest` | macro |  |  | The second half of `axqlTable`, which it invokes: what it declares once the struct exists, because a struct's fields can be read by name only through `syntax/fields`, which answers only for a struct already declared. It is public because a declaration macro's own invocation is resolved where `axqlTable` is used; a program has no need to call it. |
-| `axqlSpread` | emacro |  |  |  |
-| `axqlSelect` | emacro |  |  |  |
-| `axqlFieldNames` | emacro |  |  |  |
-| `axqlMarks` | emacro |  |  |  |
-| `axqlFieldColumns` | emacro |  |  |  |
-| `axqlInsert` | emacro |  |  |  |
-| `axqlCreateTable` | emacro |  |  |  |
-| `axqlFieldValues` | emacro |  |  |  |
+| `axqlSpread` | emacro |  |  | Spread a parenthesised list into the arguments of a helper: `(axqlSpread k qb (a b c))` is `(k qb a b c)`. Public because the statement macros that use it are expanded where they are invoked. |
+| `axqlSelect` | emacro |  |  | A SELECT from table `t`: its select list (`*`, one column, or a list of columns and `(as e name)` items), then its clauses in this order, each optional: `(where e)`, `(orderBy term ...)`, `(limit n)`, and `(offset n)` after a `limit`. `n` is an Axiom `Int`, bound as a parameter. |
+| `axqlFieldNames` | emacro |  |  | `(names f ...)`, spread: names separated by `, `. Public, as the helpers `axqlTable` reaches are, because a declaration macro's expansion is resolved where it is used. |
+| `axqlMarks` | emacro |  |  | `(names f ...)`, spread: one `?` per name. |
+| `axqlFieldColumns` | emacro |  |  | `(fields (f t) ...)`, spread: each field as its column. |
+| `axqlInsert` | emacro |  |  | An INSERT into table `t`: `*` for every column in order, or the columns the rows fill, then one `(values e ...)` per row, up to 16. |
+| `axqlCreateTable` | emacro |  |  | A CREATE TABLE: an optional `IF NOT EXISTS`, the table's name, and one `(name TYPE ...)` per column, up to 32. |
+| `axqlFieldValues` | emacro |  |  | The typed values of a record's fields, as parameters. |
 | `axqlTable` | macro |  |  | A table of typed rows. `(axqlTable User users (id RowId) (name String) (age OptInt))` declares, for table `users`: |
 
 ## `Axqlite.AxqlParse`
@@ -1392,7 +1392,7 @@ malformed record, and the handlers that answer it without unwinding.
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `Fallible` | effect |  |  |  |
+| `Fallible` | effect |  |  | The effect a deep callee performs on a malformed record: `(fallibleMalformed reason)` asks the nearest handler what to do, and the handler's answer is the operation's result, so the batch loop decides without the callee unwinding. |
 | `fallibleSkipped` | value | `Int` |  | The value a handler answers to mean "skip this record": the most negative `Int`. A loop compares the value it got against this, or asks `fallibleIsSkipped`. |
 | `fallibleIsSkipped` | value | `(-> Int Bool)` |  | Whether a value is the skip sentinel. The comparison a batch loop makes once per record; it allocates nothing. |
 | `fallibleSkip` | value | `(-> String Int)` |  | Skip every malformed record: answer `fallibleSkipped`, whatever the message. A one-parameter top-level function is a value, so it is passed bare. |
@@ -1492,8 +1492,8 @@ IO - files, standard streams, terminals, readiness and sockets.
 | `writeOut` | value | `(-> String Int)` | `Alloc,IO` | Write all of `s` to standard output, or to standard error: the bytes written, or a negative errno. `println` and `eprintln` are these with the line built at expansion time. They make no `File`, so printing allocates nothing on the way out; `(writeStr stdout s)` is the same write through a `File`. |
 | `writeErr` | value | `(-> String Int)` | `Alloc,IO` | Write `s` to standard error, with no newline added. Answers the number of bytes written. |
 | `fileWrite` | value | `(-> File String (Result Int Error))` | `Alloc,IO` | Write every byte of `s` to `f`: `(Ok n)`, or `(Err e)` whose code is the errno of the write that failed. |
-| `println` | macro |  |  |  |
-| `eprintln` | macro |  |  |  |
+| `println` | macro |  |  | Print to standard output with a newline. A string literal's `{name}` holes interpolate the bindings they name, as in `(println "hello, {name}")`; any other argument is rendered, so `(println n)` prints an `Int`. |
+| `eprintln` | macro |  |  | Print to standard error with a newline, with the same holes as `println`. |
 | `readFile` | value | `(-> String String)` | `Alloc,IO,Mut` | The whole contents of the file at `path`, or "" if it cannot be read. |
 | `writeFile` | value | `(-> String String (Result Int Error))` | `Alloc,IO,Mut` | Write `s` to `path`, creating it or truncating what is there. Answers `(Ok bytes)`, or `(Err e)` whose code is the errno. |
 | `appendFile` | value | `(-> String String (Result Int Error))` | `Alloc,IO,Mut` | Add `s` to the end of `path`, creating it if absent. Answers `(Ok bytes)`, or `(Err e)` whose code is the errno. `O_APPEND` makes the seek and the write one operation, so two processes appending to one log interleave whole writes. |
