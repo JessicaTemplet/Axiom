@@ -34,6 +34,14 @@ its changelog too.
   re-derived at the measured value. Tested by `tests/lsp/drive.py` and
   `scripts/check-stdlib-api.sh`.
 
+- Colour the REPL by role. A name being called, a constructor or type,
+  a `;;` doc comment and a `;@axiom:` tag each get their own colour,
+  where every name was one colour and every comment another. The
+  highlighter still reads only the compiler's lexer; a small form
+  stack tells a call from a binder (a `fn`'s parameters, a `let`'s
+  slots, a `struct`'s fields, a `match` arm's pattern). Tested by
+  `tests/selfhost/272-highlight.ax`.
+
 - Make `;@axiom:nolint(...)` quiet what Rust's `#[allow(...)]` does. It
   takes a hint by name, a warning by its code such as `AX3037`, or a
   group (`hints`, `warnings`, `all`); a tag above an `import` covers

@@ -200,6 +200,33 @@
 (pub fn (HL_MISMATCH)
   10)
 
+; A name in head position that is being CALLED, as opposed to a
+; keyword, a binder (`(fn (g x) ...)`'s `g` and `x`, a `let`'s slot,
+; a `struct`'s field) or a constructor. The form stack in `hlScan`
+; decides which of those a head is.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: HL_CALL Int)
+(pub fn (HL_CALL)
+  11)
+
+; A capitalised name anywhere: a constructor or a type.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: HL_CTOR Int)
+(pub fn (HL_CTOR)
+  12)
+
+; A `;;` or `;;!` doc comment (docs/reference.md, "Doc comments").
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: HL_DOC Int)
+(pub fn (HL_DOC)
+  13)
+
+; A `;@axiom:` tag: a claim the compiler checks, not a note.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: HL_TAG Int)
+(pub fn (HL_TAG)
+  14)
+
 ; One ASCII letter per class, for `replHlClass`. Pure ASCII and no
 ; escapes, so the whole classification is a string a fixture can pin
 ; by hand beside the source it describes.
@@ -226,7 +253,15 @@
                     77
                     (if (== cls HL_MISMATCH)
                       88
-                      46)))))))))))
+                      (if (== cls HL_CALL)
+                        102
+                        (if (== cls HL_CTOR)
+                          67
+                          (if (== cls HL_DOC)
+                            100
+                            (if (== cls HL_TAG)
+                              116
+                              46)))))))))))))))
 
 ; The SGR parameter string a class is painted with, or "" for a class
 ; that is left unpainted. Built ONLY from style.ax's nine exported
@@ -249,7 +284,15 @@
               SGR_HELP
               (if (== cls HL_MISMATCH)
                 SGR_ERROR
-                ""))))))))
+                (if (== cls HL_CALL)
+                  SGR_TITLE
+                  (if (== cls HL_CTOR)
+                  SGR_LIST
+                    (if (== cls HL_DOC)
+                      SGR_HELP
+                      (if (== cls HL_TAG)
+                        SGR_WARN
+                        ""))))))))))))
 
 ; ------------------------------------------------------------------
 ; A classified byte range, half-open, mirroring core.ax's Span so the
@@ -417,6 +460,21 @@
 ; splits the painted buffer on newlines, and a newline wrapped in a
 ; colour escape would put the reset on the next row.
 ; ------------------------------------------------------------------
+; Which kind of line comment starts at `q`: a `;;` doc comment, a
+; `;@axiom:` tag, or a plain note.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(:: hlCommentClass (-> String Int Int Int))
+(fn (hlCommentClass src q e)
+  (if (if (< (+ q 1) e)
+    (== (strByte src (+ q 1)) 59)
+    false)
+    HL_DOC
+    (if (if (< (+ q 7) e)
+      (&& (== (strByte src (+ q 1)) 64) (&& (== (strByte src (+ q 2)) 97) (&& (== (strByte src (+ q 3)) 120) (&& (== (strByte src (+ q 4)) 105) (&& (== (strByte src (+ q 5)) 111) (&& (== (strByte src (+ q 6)) 109) (== (strByte src (+ q 7)) 58)))))))
+      false)
+      HL_TAG
+      HL_COMMENT)))
+
 ;@axiom:restrict(no-io,no-foreign)
 (:: hlGap (-> String Int Int (Vec Int) (Vec Int)))
 (fn (hlGap src a b out)
@@ -431,7 +489,7 @@
                   (- r 1)
                   r)))
                 {
-                  (hlPush out HL_COMMENT q e)
+                  (hlPush out (hlCommentClass src q e) q e)
                   (set q (if (> e q)
                     e
                     (+ q 1)))
@@ -484,9 +542,39 @@
 ; TK_ERROR_ESC is always HL_ERROR: `\q` is settled, no further
 ; keystroke makes it an escape.
 ; ------------------------------------------------------------------
+; A name that starts with a capital: a constructor or a type.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(:: hlIsUpper (-> String Bool))
+(fn (hlIsUpper lx)
+  (if (== (strLen lx) 0)
+    false
+    (&& (>= (strByte lx 0) 65) (<= (strByte lx 0) 90))))
+
+; Whether a form headed by a name is a BINDING list rather than a
+; call, from the head of the form around it and this form's ordinal
+; among its siblings: the first form after `fn`, `lambda`, `macro`,
+; `emacro`, `for` or `let` is the parameter or binding list; every
+; form inside `struct`, `data`, `effect` or `match` is a field, a
+; constructor, an operation or an arm; and a form inside a form with
+; no name at its head - `((mut 1) (y 2))` - is one binding of a list.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(:: hlBinderContext (-> String String Int Bool Bool))
+(fn (hlBinderContext parent grand ordinal first)
+  (if (== (strLen parent) 0)
+    ; A list with no head: every entry of a `let` or `parallel`
+    ; binding list binds; a `match` arm's first form is its pattern;
+    ; any other list is read like an arm. `first` says whether this
+    ; form is the first thing after its parent's head.
+    (if (|| (strEq grand "let") (strEq grand "parallel"))
+      true
+      (== ordinal 1))
+    (if (|| (strEq parent "fn") (|| (strEq parent "lambda") (|| (strEq parent "macro") (|| (strEq parent "emacro") (|| (strEq parent "for") (strEq parent "let"))))))
+      first
+      (|| (strEq parent "struct") (|| (strEq parent "data") (|| (strEq parent "effect") (strEq parent "match")))))))
+
 ;@axiom:restrict(no-io,no-foreign)
-(:: hlClassOf (-> Int Bool Int Int))
-(fn (hlClassOf t isHead n)
+(:: hlClassOf (-> Int Bool Bool Int Int))
+(fn (hlClassOf t isHead isBinder n)
   (let (
     (k (kindInt (tokenKind t)))
     (lx (tokenLexeme t))
@@ -504,7 +592,13 @@
             (if (== k (kindInt TK_IDENT))
               (if (&& isHead (hlIsKeyword lx))
                 HL_KEYWORD
-                HL_IDENT)
+                (if (hlIsUpper lx)
+                  HL_CTOR
+                  (if (&& isHead (if isBinder
+                    false
+                    true))
+                    HL_CALL
+                    HL_IDENT)))
               (if (== k (kindInt TK_ERROR))
                 (let ((b0 
                   (if (> (strLen lx) 0)
@@ -642,6 +736,17 @@
 ; that ever did overshoot cannot make coverage non-total - the
 ; property the visLen invariant rests on.
 ; ------------------------------------------------------------------
+; Set slot `i` of a stack vector, growing it with zeros to reach `i`.
+;@axiom:restrict(no-io,no-foreign)
+(:: hlStackSet (-> (Vec Int) Int Int Int))
+(fn (hlStackSet v i x)
+  {
+    (while (<= (vecLen v) i)
+      (vecPush v 0))
+    (vecSet v i x)
+    0
+  })
+
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: hlScan (-> String Int))
 (pub fn (hlScan src)
@@ -656,6 +761,16 @@
     (mut forSt 0)
     (mut forD 0)
     (mut depth 0)
+    ; The form stack: the head name of the form open at each depth
+    ; ("" for one headed by a list or a literal), how many child forms
+    ; it has opened so far, and each form's ordinal among its
+    ; siblings. `hlBinderContext` reads them to tell a call from a
+    ; binder.
+    (heads vecNew)
+    (kids vecNew)
+    (ords vecNew)
+    (seen vecNew)
+    (firsts vecNew)
   )
     {
       (while (< i (vecLen toks))
@@ -696,11 +811,71 @@
                               (- 0 1)
                               (vecLen spans)))
                           brks)
+                        ; An opener opens form `depth`: it is child number
+                        ; kids[depth-1]+1 of its parent, and its own
+                        ; head and children are not known yet.
+                        (if (hlIsOpener k)
+                          {
+                            (if (> depth 0)
+                              (vecSet kids (- depth 1) (+ (vecGet kids (- depth 1)) 1))
+                              kids)
+                            ; A brace or bracket block holds calls,
+                            ; never binders: its head is spelled so
+                            ; `hlBinderContext` answers false.
+                            (hlStackSet heads depth (cast Int (if (== k (kindInt TK_LPAREN))
+                              ""
+                              "{")))
+                            (hlStackSet kids depth 0)
+                            (hlStackSet ords depth (if (> depth 0)
+                              (vecGet kids (- depth 1))
+                              1))
+                            (hlStackSet firsts depth (if (> depth 0)
+                              (if (== (vecGet seen (- depth 1)) 0)
+                                1
+                                0)
+                              0))
+                            ; The child form itself counts as seen by
+                            ; its parent, so the form after it is not
+                            ; "first".
+                            (if (> depth 0)
+                              (vecSet seen (- depth 1) (+ (vecGet seen (- depth 1)) 1))
+                              seen)
+                            (hlStackSet seen depth 0)
+                            0
+                          }
+                          0)
+                        ; The token after a `(` is the head of form
+                        ; depth-1; anything else inside a form counts
+                        ; as seen after its head.
+                        (if (&& prevLP (== k (kindInt TK_IDENT)))
+                          {
+                            (hlStackSet heads (- depth 1) (cast Int (tokenLexeme t)))
+                            0
+                          }
+                          (if (&& (> depth 0) (if (hlIsOpener k)
+                            false
+                            (if prevLP
+                              false
+                              true)))
+                            (hlStackSet seen (- depth 1) (+ (vecGet seen (- depth 1)) 1))
+                            0))
                         (hlPush
                           spans
                           (if (|| (hlIsForIn forSt k (tokenLexeme t)) (hlIsForBy forSt k (tokenLexeme t) depth forD))
                             HL_KEYWORD
-                            (hlClassOf t prevLP n))
+                            (hlClassOf
+                              t
+                              prevLP
+                              (if (&& prevLP (>= depth 2))
+                                (hlBinderContext
+                                  (vecGetStr heads (- depth 2))
+                                  (if (>= depth 3)
+                                    (vecGetStr heads (- depth 3))
+                                    "")
+                                  (vecGet ords (- depth 1))
+                                  (== (vecGet firsts (- depth 1)) 1))
+                                false)
+                              n))
                           s
                           e)
                         (let ((next (hlForStep forSt k prevLP (tokenLexeme t) depth forD)))
