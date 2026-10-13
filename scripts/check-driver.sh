@@ -685,7 +685,7 @@ fi
 
 # ---------------------------------------------------------------
 # Help, from anywhere, on stdout, exit 0.
-for c in build check run new fetch test emit-llvm fmt explain symbols repl lsp; do
+for c in build check run new fetch test emit-llvm fmt explain symbols doc repl lsp; do
   "$s1" $c --help >h.out 2>h.err; rc=$?
   if [[ $rc == 0 ]] && grep -q "axiom $c" h.out; then
     ok "\`$c --help\` prints $c's help"
@@ -720,10 +720,11 @@ done
 missing=""
 for f in --input --output -o --target --opt --heap-ceiling --link-lib --link-search --crate \
          --emit-rust-binding --filter --diagnostic-format --emit-llvm --emit-staticlib --threads \
-         --check --builtins --calls --mir --axir --list --no-banner --help -h --version -V; do
+         --check --builtins --calls --mir --axir --list --no-banner --out --no-open --missing \
+         --help -h --version -V; do
   grep -q -- "$f" full-help.txt || missing="$missing $f"
 done
-for c in build check run new fetch test emit-llvm fmt explain symbols repl lsp version help; do
+for c in build check run new fetch test emit-llvm fmt explain symbols doc repl lsp version help; do
   grep -q -- "  $c" full-help.txt || missing="$missing cmd:$c"
 done
 [[ -z "$missing" ]] && ok "every accepted flag and command appears in --help" \

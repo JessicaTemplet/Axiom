@@ -9,6 +9,7 @@ feature you need. Detailed compiler contracts are linked separately.
 2. [Learn the language](reference.md): functions, data, effects and modules.
 3. [Choose a standard-library module](stdlib.md): collections, files, TCP, dates and more.
 4. [Configure your editor](lsp.md), or [browse complete programs](../examples/README.md).
+5. Run `axiom doc` to read these pages and the library reference in your browser, offline.
 
 The [generated API](stdlib-api.md) is the complete public-name listing.
 [What's ready today](status.md) records feature and target limits.

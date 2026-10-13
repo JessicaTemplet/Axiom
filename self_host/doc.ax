@@ -1,0 +1,1015 @@
+;;! `axiom doc`: the documentation ds and the standard library
+;;! reference as HTML on this machine, opened in the browser. The
+;;! pages come from `docs/`, the root prose files and the library
+;;! sources; the language index comes from `lexicon.ax`; every page is
+;;! rendered by `markdown.ax` and every doc comment is read by
+;;! `doccomment.ax`. `--missing` is the documentation gap report.
+;
+; WHERE THE PAGES COME FROM. `AXIOM_DOC` names the directory holding
+; `docs/`, `README.md`, `CONTRIBUTING.md`, `CHANGELOG.md` and
+; `examples/README.md`; without it the set is looked for beside the
+; executable, `<exe>/../` for an installed prefix and `<exe>/../../`
+; for a build tree, the way `codegen.ax`'s `pushExeRelStdlib` finds
+; the library. A release archive carries `docs/`, `README.md` and
+; `CHANGELOG.md`, so an installed compiler renders those; a source
+; checkout renders everything.
+;
+; WHERE THEY GO. `--out DIR`, else `$XDG_CACHE_HOME/axiom/doc`, else
+; `$HOME/.cache/axiom/doc`, else `$TMPDIR/axiom-doc`. Every page is a
+; file, one shared `style.css`, and a sidebar listing every page by
+; its first heading, so the set reads offline with no server.
+;
+; LINKS. A link to a page in the set becomes a link to its HTML; a
+; link to any other file in the tree (a gate script, a fixture, a
+; source file) becomes a `file://` link to that file, so it still
+; opens from a source checkout and visibly dangles from an install.
+(import core)
+(import Host)
+(import Mem)
+(import Str)
+(import Fmt)
+(import Vec)
+(import Sys)
+(import Path)
+(import IO (copyFile cwd die fileExists isDir listDir makeDirAll readFile stdout writeFile writeStr))
+(import lexer)
+(import parser)
+(import lexicon)
+(import markdown)
+(import doccomment)
+(import lsp (lspFormStart lspFormText lspLineIndex lspLineOfIx))
+(import codegen (pathOfCommand stdlibSearchDirs))
+(import driver (flagValue hasFlagAnywhere operandStart positionalIndex writeStderrStr))
+(import diag (catStrs))
+
+; The whole set, once found: where it is, where it goes, and the
+; pages and modules it holds. `srcs` are root-relative sources
+; (`docs/reference.md`) and `outs` their output paths
+; (`reference.html`); `modFiles` are library and named sources, with
+; `modOuts` their output paths (`stdlib/Fmt.html`, `modules/X.html`)
+; and `modNames` the module names.
+(pub struct DocSet
+  (root : String)
+  (out : String)
+  (srcs : (Vec String))
+  (outs : (Vec String))
+  (titles : (Vec String))
+  (modFiles : (Vec String))
+  (modOuts : (Vec String))
+  (modNames : (Vec String))
+  (modNamed : (Vec Int)))
+
+; What a page's link mapper needs: the ds, the directory the page's
+; source sits in (root-relative, "" for the root), and the prefix
+; that takes an `href` from the page's output directory back to the
+; output root ("", "../", "../../").
+(pub struct DocCtx
+  (pages : DocSet)
+  (srcDir : String)
+  (prefix : String))
+
+; ------------------------------------------------------------------
+; Paths
+; ------------------------------------------------------------------
+(pub :: docEndsWith (-> String String Bool))
+(pub fn (docEndsWith s suffix)
+  (let (
+    (n (strLen s))
+    (m (strLen suffix))
+  )
+    (if (> m n)
+      false
+      (strEq (strSlice s (- n m) m) suffix))))
+
+; `p` as an absolute path, resolved against the working directory
+; when it is relative, with `.` and `..` folded.
+(pub :: docAbsolute (-> String String))
+;@axiom:effect(io)
+(pub fn (docAbsolute p)
+  (if (pathIsAbsolute p)
+    (pathClean p)
+    (let ((here 
+      (match cwd
+        ((Ok d) d)
+        ((Err _) "."))))
+      (pathClean (concat (pathWithSlash here) p)))))
+
+; How many `/` separate `out` from the output root: `stdlib/Fmt.html`
+; is one level down, `stdlib/Sys/Platform.darwin.html` two.
+(pub :: docDepthPrefix (-> String String))
+(pub fn (docDepthPrefix out)
+  (let (
+    (n (strLen out))
+    (mut i 0)
+    (mut p "")
+  )
+    {
+      (while (< i n)
+        {
+          (if (== (strByte out i) 47)
+            {
+              (set p (concat p "../"))
+              0
+            }
+            0)
+          (set i (+ i 1))
+        })
+      p
+    }))
+
+; The directory part of a root-relative path, without its slash:
+; `docs/reference.md` answers `docs`, `README.md` answers "".
+(pub :: docDirOf (-> String String))
+(pub fn (docDirOf rel)
+  (let ((d (pathDir rel)))
+    (if (== (strLen d) 0)
+      ""
+      (strSlice d 0 (- (strLen d) 1)))))
+
+; ------------------------------------------------------------------
+; Links
+; ------------------------------------------------------------------
+; The index of `s` in `v`, or -1.
+(pub :: docIndexOf (-> (Vec String) String Int))
+(pub fn (docIndexOf v s)
+  (let (
+    (n (vecLen v))
+    (mut i 0)
+    (mut at (- 0 1))
+  )
+    {
+      (while (&& (< i n) (< at 0))
+        {
+          (if (strEq (vecGet v i) s)
+            (set at i)
+            0)
+          (set i (+ i 1))
+        })
+      at
+    }))
+
+; A link target as written on the page to the `href` the HTML
+; carries. `ctx` is a `DocCtx`.
+(pub :: docLink (-> Int String String))
+;@axiom:effect(unsafe)
+(pub fn (docLink ctx target)
+  (let ((c 
+    (cast DocCtx ctx)))
+    (if (|| (strStartsWith target "#") (|| (strStartsWith target "http://") (|| (strStartsWith target "https://") (|| (strStartsWith target "mailto:") (strStartsWith target "file:")))))
+      target
+      (let (
+        (path (match (strFindByte target 35 0)
+          ((None) target)
+          ((Some k) (strSlice target 0 k))))
+        (frag (match (strFindByte target 35 0)
+          ((None) "")
+          ((Some k) (strSlice target k (- (strLen target) k)))))
+      )
+        (let ((resolved 
+          (pathClean
+            (if (== (strLen c.srcDir) 0)
+              path
+              (concat (concat c.srcDir "/") path)))))
+          (let ((ds c.pages))
+            (let ((at (docIndexOf ds.srcs resolved)))
+              (if (>= at 0)
+                (concat (concat c.prefix (vecGet ds.outs at)) frag)
+                (concat (concat "file://" (concat ds.root resolved)) frag)))))))))
+
+; ------------------------------------------------------------------
+; The page shell
+; ------------------------------------------------------------------
+(pub :: docStyle String)
+(pub fn (docStyle)
+  ":root{--bg:#fdfdfc;--fg:#1e1e1c;--muted:#6b6b66;--line:#e2e2dd;--side:#f4f4f0;--link:#1a5fb4;--code:#f1f1ec;--k:#8a3fa8;--t:#0b6e6e;--e:#b45f06;--o:#5a5a55;--l:#1f7a3a;--n:#1f7a3a;--s:#9a3b1b;--c:#7a7a73;--d:#4d6f3b;--a:#a8268d;--x:#c01c28}\n@media(prefers-color-scheme:dark){:root{--bg:#17181a;--fg:#e6e6e1;--muted:#9c9c95;--line:#2d2f33;--side:#1e2023;--link:#7fb2ef;--code:#222428;--k:#d39ee8;--t:#6fd1d1;--e:#f0b45a;--o:#b5b5ad;--l:#8fd49a;--n:#8fd49a;--s:#f2a17f;--c:#8c8c85;--d:#a8c891;--a:#e58fd0;--x:#ff7b72}}\n*{box-sizing:border-box}\nhtml{font-size:17px}\nbody{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,\"Helvetica Neue\",Arial,sans-serif;line-height:1.55}\na{color:var(--link);text-decoration:none}\na:hover{text-decoration:underline}\nnav.side{position:fixed;top:0;left:0;bottom:0;width:17rem;overflow-y:auto;padding:1.25rem 1rem;background:var(--side);border-right:1px solid var(--line);font-size:.92rem}\nnav.side .brand{font-weight:700;font-size:1.1rem;margin:0 0 1rem}\nnav.side h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:1.2rem 0 .35rem}\nnav.side ul{list-style:none;margin:0;padding:0}\nnav.side li{margin:.15rem 0}\nnav.side a{color:var(--fg)}\nnav.side a.here{font-weight:700;color:var(--link)}\nmain{max-width:46rem;margin:0 auto;padding:2rem 1.25rem 4rem;margin-left:19rem}\n@media(max-width:62rem){nav.side{position:static;width:auto;border-right:0;border-bottom:1px solid var(--line);padding:1rem}main{margin-left:auto;padding:1.5rem 1rem 3rem}}\nh1,h2,h3,h4{line-height:1.25;margin:1.6em 0 .5em}\nh1{font-size:1.9rem;margin-top:.2em}\nh2{font-size:1.4rem;border-bottom:1px solid var(--line);padding-bottom:.2em}\nh3{font-size:1.12rem}\np,ul,ol,blockquote,table,pre{margin:0 0 1em}\nli{margin:.2em 0}\nli>ul,li>ol{margin-bottom:0}\ncode{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;background:var(--code);padding:.08em .3em;border-radius:3px}\npre{background:var(--code);padding:.8em 1em;border-radius:6px;overflow-x:auto;line-height:1.45}\npre code{background:none;padding:0;font-size:.88em}\nblockquote{border-left:3px solid var(--line);margin-left:0;padding-left:1em;color:var(--muted)}\ntable{border-collapse:collapse;width:100%;font-size:.94em;display:block;overflow-x:auto}\nth,td{border:1px solid var(--line);padding:.35em .6em;text-align:left;vertical-align:top}\nth{background:var(--side)}\nhr{border:0;border-top:1px solid var(--line);margin:2em 0}\nimg{max-width:100%}\n.path{color:var(--muted);margin-top:-.6em}\n.decl{margin:1.5em 0;padding-top:.4em;border-top:1px solid var(--line)}\n.decl h3{margin:.4em 0 .5em}\n.decl h3 a{color:var(--fg)}\n.kind{font-size:.75rem;font-weight:400;color:var(--muted);margin-left:.6em;text-transform:uppercase;letter-spacing:.05em}\n.nodoc{color:var(--x);font-style:italic}\n.k{color:var(--k);font-weight:600}\n.t{color:var(--t)}\n.e{color:var(--e)}\n.o{color:var(--o)}\n.l{color:var(--l)}\n.n{color:var(--n)}\n.s{color:var(--s)}\n.c{color:var(--c);font-style:italic}\n.d{color:var(--d);font-style:italic}\n.a{color:var(--a)}\n.x{color:var(--x);text-decoration:underline wavy}\n")
+
+; One sidebar entry; the page being rendered is marked.
+(pub :: docNavItem (-> String String String String String))
+(pub fn (docNavItem prefix out title here)
+  (concat
+    (concat
+      (concat "<li><a href=\"" (mdEscape (concat prefix out)))
+      (if (strEq out here)
+        "\" class=\"here\">"
+        "\">"))
+    (concat (mdEscape title) "</a></li>\n")))
+
+; The group a source page belongs to: 0 Start, 1 Guides, 2
+; Specifications.
+(pub :: docGroupOf (-> String Int))
+(pub fn (docGroupOf src)
+  (if (|| (strEq src "docs/README.md") (|| (strEq src "README.md") (|| (strEq src "docs/reference.md") (|| (strEq src "docs/stdlib.md") (|| (strEq src "docs/stdlib-api.md") (|| (strEq src "examples/README.md") (|| (strEq src "docs/status.md") (|| (strEq src "docs/roadmap.md") (|| (strEq src "CHANGELOG.md") (strEq src "CONTRIBUTING.md"))))))))))
+    0
+    (if (|| (strEq src "docs/memory-model.md") (|| (strEq src "docs/macro-system.md") (|| (strEq src "docs/error-model.md") (strEq src "docs/axqlite-format.md"))))
+      2
+      1)))
+
+; The Start group in reading order rather than file order.
+(pub :: docStartOrder (Vec String))
+(pub fn (docStartOrder)
+  (let ((v vecNew))
+    {
+      (vecPush v "docs/README.md")
+      (vecPush v "README.md")
+      (vecPush v "docs/reference.md")
+      (vecPush v "docs/stdlib.md")
+      (vecPush v "docs/stdlib-api.md")
+      (vecPush v "examples/README.md")
+      (vecPush v "docs/status.md")
+      (vecPush v "docs/roadmap.md")
+      (vecPush v "CHANGELOG.md")
+      (vecPush v "CONTRIBUTING.md")
+      v
+    }))
+
+(pub :: docNavGroup (-> DocSet String String Int String String))
+(pub fn (docNavGroup ds prefix here group heading)
+  (let (
+    (frags vecNew)
+    (mut i 0)
+  )
+    {
+      (vecPush frags (concat (concat "<h2>" heading) "</h2>\n<ul>\n"))
+      (if (== group 0)
+        (let ((order docStartOrder))
+          (while (< i (vecLen order))
+            (let ((at (docIndexOf ds.srcs (vecGet order i))))
+              {
+                (if (>= at 0)
+                  (vecPush frags (docNavItem prefix (vecGet ds.outs at) (vecGet ds.titles at) here))
+                  frags)
+                (set i (+ i 1))
+              })))
+        (while (< i (vecLen ds.srcs))
+          {
+            (if (== (docGroupOf (vecGet ds.srcs i)) group)
+              (vecPush frags (docNavItem prefix (vecGet ds.outs i) (vecGet ds.titles i) here))
+              frags)
+            (set i (+ i 1))
+          }))
+      (vecPush frags "</ul>\n")
+      (catStrs frags)
+    }))
+
+(pub :: docNavModules (-> DocSet String String Int String String))
+(pub fn (docNavModules ds prefix here named heading)
+  (let (
+    (frags vecNew)
+    (mut i 0)
+    (mut any 0)
+  )
+    {
+      (while (< i (vecLen ds.modFiles))
+        {
+          (if (== (vecGet ds.modNamed i) named)
+            {
+              (if (== any 0)
+                (vecPush frags (concat (concat "<h2>" heading) "</h2>\n<ul>\n"))
+                frags)
+              (set any 1)
+              (vecPush frags (docNavItem prefix (vecGet ds.modOuts i) (vecGet ds.modNames i) here))
+              0
+            }
+            0)
+          (set i (+ i 1))
+        })
+      (if (== any 1)
+        (vecPush frags "</ul>\n")
+        frags)
+      (catStrs frags)
+    }))
+
+(pub :: docSidebar (-> DocSet String String String))
+(pub fn (docSidebar ds prefix here)
+  (concat (concat (concat (concat "<nav class=\"side\">\n<p class=\"brand\"><a href=\"" (mdEscape (concat prefix "index.html"))) "\">Axiom</a></p>\n") (concat (docNavGroup
+    ds
+    prefix
+    here
+    0
+    "Start") (docNavGroup
+    ds
+    prefix
+    here
+    1
+    "Guides"))) (concat (concat (docNavGroup
+    ds
+    prefix
+    here
+    2
+    "Specifications") (docNavModules
+    ds
+    prefix
+    here
+    0
+    "Standard library")) (concat (docNavModules
+    ds
+    prefix
+    here
+    1
+    "Modules") (concat (concat "<h2>Language index</h2>\n<ul>\n" (docNavItem prefix "language.html" "Language index" here)) "</ul>\n</nav>\n")))))
+
+; A whole page around a rendered body.
+(pub :: docPage (-> DocSet String String String String))
+(pub fn (docPage ds out title body)
+  (let ((prefix (docDepthPrefix out)))
+    (concat
+      (concat
+        (concat
+          "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>"
+          (mdEscape
+            (if (== (strLen title) 0)
+              "Axiom"
+              (concat title " - Axiom"))))
+        (concat (concat "</title>\n<link rel=\"stylesheet\" href=\"" (mdEscape (concat prefix "style.css"))) "\">\n</head>\n<body>\n"))
+      (concat (docSidebar ds prefix out) (concat (concat "<main>\n" body) "</main>\n</body>\n</html>\n")))))
+
+; ------------------------------------------------------------------
+; Writing
+; ------------------------------------------------------------------
+; Write `text` at `out/rel`, making the directories above it.
+(pub :: docWrite (-> DocSet String String Int))
+;@axiom:effect(io)
+(pub fn (docWrite ds rel text)
+  (let ((path (concat ds.out rel)))
+    {
+      (match (makeDirAll (pathDir path))
+        ((Ok _) 0)
+        ((Err _) (die (concat (concat "error: cannot create " (pathDir path)) "\n") 1)))
+      (match (writeFile path text)
+        ((Ok _) 0)
+        ((Err _) (die (concat (concat "error: cannot write " path) "\n") 1)))
+    }))
+
+; Copy every image a page named beside its output. `fromDir` is the
+; slash-terminated directory the page's source sits in.
+(pub :: docCopyImages (-> DocSet String String (Vec String) Int))
+;@axiom:effect(io)
+(pub fn (docCopyImages ds fromDir out images)
+  (let ((mut i 0))
+    {
+      (while (< i (vecLen images))
+        (let ((img (vecGet images i)))
+          (let (
+            (from (pathClean (concat fromDir img)))
+            (to (concat ds.out (pathClean (concat (pathDir out) img))))
+          )
+            {
+              (if (fileExists from)
+                {
+                  (match (makeDirAll (pathDir to))
+                    ((Ok _) 0)
+                    ((Err _) 0))
+                  (match (copyFile from to)
+                    ((Ok _) 0)
+                    ((Err _) (writeStderrStr (concat (concat "warning: could not copy " from) "\n"))))
+                }
+                (writeStderrStr (concat (concat "warning: image not found: " from) "\n")))
+              (set i (+ i 1))
+            })))
+      0
+    }))
+
+; Render one Markdown source of the set to its page.
+;
+; A source named on the command line is held as an absolute path. It
+; is read from there, and its links resolve as a `docs/` page's do, so
+; a page written beside the documentation links into it the same way.
+(pub :: docRenderPage (-> DocSet Int Int))
+;@axiom:effect(io)
+(pub fn (docRenderPage ds i)
+  (let (
+    (src (vecGet ds.srcs i))
+    (out (vecGet ds.outs i))
+    (images vecNew)
+  )
+    (let ((named (pathIsAbsolute src)))
+      (let (
+        (srcDir (if named
+          "docs"
+          (docDirOf src)))
+        (fromDir (if named
+          (pathDir src)
+          (concat ds.root (pathWithSlash (docDirOf src)))))
+        (text (readFile
+          (if named
+            src
+            (concat ds.root src))))
+      )
+        (let ((ctx (DocCtx ds srcDir (docDepthPrefix out))))
+          (let ((body 
+            (mdRender
+              text
+              (lambda (c t) (docLink c t))
+              (cast Int ctx)
+              images)))
+            {
+              (docWrite ds out (docPage ds out (vecGet ds.titles i) body))
+              (docCopyImages ds fromDir out images)
+            }))))))
+
+; ------------------------------------------------------------------
+; Modules
+; ------------------------------------------------------------------
+; The kind a public declaration is listed under, or "" for one the
+; reference leaves out. The same ds `examples/axdoc/axdoc.ax`
+; reads: a `(pub :: …)` signature, a public `macro`, `data`, `struct`
+; or `type`, and every `effect`, which is exported whether or not it
+; says `pub`.
+(pub :: docDeclKind (-> Int String))
+(pub fn (docDeclKind d)
+  (let ((tag (nodeTag d)))
+    (if (== tag TAG_D_EFFECT)
+      "effect"
+      (if (!= (nodeVis d) 1)
+        ""
+        (if (== tag TAG_D_SIG)
+          "value"
+          (if (== tag TAG_D_MACRO)
+            "macro"
+            (if (== tag TAG_D_DATA)
+              "data"
+              (if (== tag TAG_D_STRUCT)
+                "struct"
+                (if (== tag TAG_D_ALIAS)
+                  "type"
+                  "")))))))))
+
+; The parsed declarations of `path`, or an empty vector with a line
+; on stderr when the file does not parse.
+(pub :: docDecls (-> String String (Vec Int)))
+;@axiom:effect(io)
+(pub fn (docDecls path src)
+  (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+    (if (== (memGetWord pr 0) 0)
+      {
+        (writeStderrStr (concat (concat "warning: " path) " does not parse; run `axiom check` on it\n"))
+        vecNew
+      }
+      (memGetWordVec pr 1))))
+
+; One public declaration as a section: its anchor, its signature or
+; whole form in a fence, and its `;;` doc - or the line that says
+; there is none.
+(pub :: docDeclSection (-> DocSet Int String String Int String))
+(pub fn (docDeclSection ds prefixCtx src kind d)
+  (let (
+    (name (nodeAName d))
+    (o (lspFormStart src (spanStart (nodeSpan d))))
+  )
+    (let (
+      (form (lspFormText src o))
+      (doc (docCommentMarked src o))
+    )
+      (concat
+        (concat (concat (concat "<section class=\"decl\" id=\"" (mdEscape name)) (concat "\">\n<h3><a href=\"#" (mdEscape name))) (concat (concat "\">" (mdEscape name)) (concat (concat "</a><span class=\"kind\">" kind) "</span></h3>\n")))
+        (concat
+          (concat (concat "<pre><code class=\"language-axiom\">" (mdHighlight form)) "</code></pre>\n")
+          (concat
+            (if (== (strLen doc) 0)
+              "<p class=\"nodoc\">No doc comment yet.</p>\n"
+              (mdRender
+                doc
+                (lambda (c t) (docLink c t))
+                prefixCtx
+                vecNew))
+            "</section>\n"))))))
+
+; The module page for `ds.modFiles[i]`.
+(pub :: docRenderModule (-> DocSet Int Int))
+;@axiom:effect(io)
+(pub fn (docRenderModule ds i)
+  (let (
+    (path (vecGet ds.modFiles i))
+    (out (vecGet ds.modOuts i))
+    (name (vecGet ds.modNames i))
+    (frags vecNew)
+  )
+    (let (
+      (src (readFile path))
+      (ctx (cast Int (DocCtx ds "" (docDepthPrefix out))))
+    )
+      (let (
+        (decls (docDecls path src))
+        (mut j 0)
+        (mut count 0)
+      )
+        {
+          (vecPush frags (concat (concat "<h1 id=\"module\">" (mdEscape name)) "</h1>\n"))
+          (vecPush frags (concat (concat "<p class=\"path\"><code>" (mdEscape (pathBase path))) "</code></p>\n"))
+          (let ((intro (docModuleDoc src)))
+            (if (== (strLen intro) 0)
+              frags
+              (vecPush
+                frags
+                (mdRender
+                  intro
+                  (lambda (c t) (docLink c t))
+                  ctx
+                  vecNew))))
+          (while (< j (vecLen decls))
+            (let ((d (vecGet decls j)))
+              {
+                (let ((kind (docDeclKind d)))
+                  (if (|| (== (strLen kind) 0) (== (nodeSpan d) 0))
+                    0
+                    {
+                      (if (== count 0)
+                        (vecPush frags "<h2 id=\"public-names\">Public names</h2>\n")
+                        frags)
+                      (set count (+ count 1))
+                      (vecPush frags (docDeclSection
+                        ds
+                        ctx
+                        src
+                        kind
+                        d))
+                      0
+                    }))
+                (set j (+ j 1))
+              }))
+          (if (== count 0)
+            (vecPush frags "<p class=\"nodoc\">No public names.</p>\n")
+            frags)
+          (docWrite ds out (docPage ds out name (catStrs frags)))
+        }))))
+
+; `--missing`: every public declaration of `path` with no `;;` line,
+; as `path:line: name` on stdout. Answers how many.
+(pub :: docMissingIn (-> String Int))
+;@axiom:effect(io)
+(pub fn (docMissingIn path)
+  (let ((src (readFile path)))
+    (let (
+      (decls (docDecls path src))
+      (ix (lspLineIndex src))
+      (mut j 0)
+      (mut n 0)
+    )
+      {
+        (while (< j (vecLen decls))
+          (let ((d (vecGet decls j)))
+            {
+              (if (|| (== (strLen (docDeclKind d)) 0) (== (nodeSpan d) 0))
+                0
+                (let ((o (lspFormStart src (spanStart (nodeSpan d)))))
+                  (if (== (strLen (docCommentMarked src o)) 0)
+                    {
+                      (writeStr stdout (concat (concat (concat path ":") (fmtInt (+ (lspLineOfIx ix o) 1))) (concat (concat ": " (nodeAName d)) "\n")))
+                      (set n (+ n 1))
+                    }
+                    0)))
+              (set j (+ j 1))
+            }))
+        n
+      })))
+
+; ------------------------------------------------------------------
+; The language index
+; ------------------------------------------------------------------
+; The lexicon's entries end with a line naming their reference
+; section in a code span; on this page that line is a link.
+(pub :: docRefLink (-> String String))
+(pub fn (docRefLink md)
+  (match (strFind md "Reference: `docs/" 0)
+    ((None) md)
+    ((Some at)
+      (let ((from (+ at 17)))
+        (match (strFindByte md 96 from)
+          ((None) md)
+          ((Some e)
+            (let ((target (strSlice md from (- e from))))
+              (concat (strSlice md 0 at) (concat (concat (concat "Reference: [" target) (concat "](" target)) (concat ")" (strSlice md (+ e 1) (- (strLen md) (+ e 1)))))))
+          )))
+    )))
+
+(pub :: docRenderLanguage (-> DocSet Int))
+;@axiom:effect(io)
+(pub fn (docRenderLanguage ds)
+  (let (
+    (frags vecNew)
+    (words lexWords)
+    (keys lexTagKeys)
+    (ctx (cast Int (DocCtx ds "docs" "")))
+    (mut i 0)
+  )
+    {
+      (vecPush frags "<h1 id=\"language-index\">Language index</h1>\n<p>Every word of the language: keywords, the words that are special inside a form, builtin types, effects, operators and literals, then the AXTAG keys. <code>axiom explain WORD</code> prints the same entry, and hover in your editor shows it.</p>\n<h2 id=\"words\">Words</h2>\n")
+      (while (< i (vecLen words))
+        (let ((w (vecGet words i)))
+          {
+            (vecPush frags (concat (concat (concat "<section class=\"decl\" id=\"word-" (fmtInt (+ i 1))) "\">\n<h3><code>") (concat (mdEscape w) "</code></h3>\n")))
+            (vecPush
+              frags
+              (mdRender
+                (docRefLink (lexEntryMarkdown w))
+                (lambda (c t) (docLink c t))
+                ctx
+                vecNew))
+            (vecPush frags "</section>\n")
+            (set i (+ i 1))
+          }))
+      (vecPush frags "<h2 id=\"axtag-keys\">AXTAG keys</h2>\n")
+      (set i 0)
+      (while (< i (vecLen keys))
+        (let ((k (vecGet keys i)))
+          {
+            (vecPush frags (concat (concat (concat "<section class=\"decl\" id=\"tag-" (mdEscape k)) "\">\n<h3><code>;@axiom:") (concat (mdEscape k) "</code></h3>\n")))
+            (vecPush
+              frags
+              (mdRender
+                (docRefLink (lexTagMarkdown k ""))
+                (lambda (c t) (docLink c t))
+                ctx
+                vecNew))
+            (vecPush frags "</section>\n")
+            (set i (+ i 1))
+          }))
+      (docWrite ds "language.html" (docPage ds "language.html" "Language index" (catStrs frags)))
+    }))
+
+; ------------------------------------------------------------------
+; Finding the set
+; ------------------------------------------------------------------
+(pub :: docRootOk (-> String Bool))
+;@axiom:effect(io)
+(pub fn (docRootOk root)
+  (fileExists (concat root "docs/README.md")))
+
+; The directory holding the ds, slash-terminated, or "". `AXIOM_DOC`
+; when it is ds; otherwise beside the executable, resolved through
+; `PATH` when the shell handed over a bare name, the way the library
+; is found.
+(pub :: docFindRoot String)
+;@axiom:effect(io)
+(pub fn (docFindRoot)
+  (let ((env (sysEnv "AXIOM_DOC")))
+    (if (> (strLen env) 0)
+      (if (docRootOk (pathWithSlash env))
+        (pathWithSlash env)
+        "")
+      (let (
+        (exe (pathDir (sysArg 0)))
+        (cands vecNew)
+        (mut i 0)
+        (mut found "")
+      )
+        {
+          (if (== (strLen exe) 0)
+            (let ((on (pathOfCommand (sysArg 0))))
+              (if (> (strLen on) 0)
+                {
+                  (vecPush cands (concat on "../"))
+                  (vecPush cands (concat on "../../"))
+                }
+                cands))
+            cands)
+          (vecPush cands (concat exe "../"))
+          (vecPush cands (concat exe "../../"))
+          (while (&& (< i (vecLen cands)) (== (strLen found) 0))
+            {
+              (if (docRootOk (vecGet cands i))
+                (set found (vecGet cands i))
+                "")
+              (set i (+ i 1))
+            })
+          found
+        }))))
+
+; The output directory: `--out`, else the cache.
+(pub :: docOutDir String)
+;@axiom:effect(io)
+(pub fn (docOutDir)
+  (let ((flag (flagValue "--out" 1)))
+    (if (> (strLen flag) 0)
+      flag
+      (let ((xdg (sysEnv "XDG_CACHE_HOME")))
+        (if (> (strLen xdg) 0)
+          (concat (pathWithSlash xdg) "axiom/doc")
+          (let ((home (sysEnv "HOME")))
+            (if (> (strLen home) 0)
+              (concat (pathWithSlash home) ".cache/axiom/doc")
+              (let ((tmp (sysEnv "TMPDIR")))
+                (if (> (strLen tmp) 0)
+                  (concat (pathWithSlash tmp) "axiom-doc")
+                  "/tmp/axiom-doc")))))))))
+
+; The library's directory, slash-terminated, or "".
+(pub :: docStdlibDir String)
+;@axiom:effect(io)
+(pub fn (docStdlibDir)
+  (let (
+    (dirs stdlibSearchDirs)
+    (mut i 0)
+    (mut found "")
+  )
+    {
+      (while (&& (< i (vecLen dirs)) (== (strLen found) 0))
+        {
+          (if (isDir (vecGetStr dirs i))
+            (set found (vecGetStr dirs i))
+            "")
+          (set i (+ i 1))
+        })
+      found
+    }))
+
+; Every `.ax` under `dir`, as paths relative to it, in listing order.
+(pub :: docWalk (-> String String (Vec String) (Vec String)))
+;@axiom:effect(io)
+(pub fn (docWalk dir rel acc)
+  (let (
+    (names (listDir (concat dir rel)))
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen names))
+        (let ((name (vecGet names i)))
+          {
+            (if (isDir (concat (concat dir rel) name))
+              (docWalk dir (concat (concat rel name) "/") acc)
+              (if (docEndsWith name ".ax")
+                (vecPush acc (concat rel name))
+                acc))
+            (set i (+ i 1))
+          }))
+      acc
+    }))
+
+; `Sys/Platform.darwin.ax` is the module `Sys.Platform`, built for
+; darwin; the page says both.
+(pub :: docModuleName (-> String String))
+(pub fn (docModuleName rel)
+  (let (
+    (stem (strSlice rel 0 (- (strLen rel) 3)))
+    (out (strAlloc (strLen rel)))
+    (mut i 0)
+    (mut k 0)
+    (mut dots 0)
+  )
+    {
+      (while (< i (strLen stem))
+        (let ((c (strByte stem i)))
+          {
+            (if (== c 47)
+              (memPutByte (strData out) k 46)
+              (if (== c 46)
+                {
+                  (set dots (+ dots 1))
+                  (memPutByte
+                    (strData out)
+                    k
+                    (if (== dots 1)
+                      32
+                      46))
+                }
+                (memPutByte (strData out) k c)))
+            (set k (+ k 1))
+            (set i (+ i 1))
+          }))
+      (if (== dots 0)
+        (strSlice out 0 k)
+        (let ((s (strSlice out 0 k)))
+          (match (strFindByte s 32 0)
+            ((None) s)
+            ((Some sp) (concat (concat (strSlice s 0 sp) " (") (concat (strSlice s (+ sp 1) (- (strLen s) (+ sp 1))) ")"))))))
+    }))
+
+; Every operand after the subcommand: the modules and pages to add.
+(pub :: docOperands (Vec String))
+;@axiom:effect(io)
+(pub fn (docOperands)
+  (let (
+    (v vecNew)
+    (mut i operandStart)
+    (mut go true)
+  )
+    {
+      (while go
+        (let ((p (positionalIndex i)))
+          (if (< p 0)
+            {
+              (set go false)
+              0
+            }
+            {
+              (vecPush v (sysArg p))
+              (set i (+ p 1))
+            })))
+      v
+    }))
+
+; A root prose file, when the set has it.
+(pub :: docAddRoot (-> String (Vec String) (Vec String) (Vec String) String String Int))
+;@axiom:effect(io)
+(pub fn (docAddRoot root srcs outs titles rel out)
+  (if (fileExists (concat root rel))
+    {
+      (vecPush srcs rel)
+      (vecPush outs out)
+      (vecPush titles (mdTitle (readFile (concat root rel))))
+      0
+    }
+    0))
+
+; The set: pages first, then library modules, then the operands.
+(pub :: docBuildSet (-> String String DocSet))
+;@axiom:effect(io)
+(pub fn (docBuildSet root out)
+  ; `modNamed` is a `(Vec Int)`, bound on its own so the checker
+  ; does not unify it with the vectors of strings above it.
+  (let (
+    (srcs vecNew)
+    (outs vecNew)
+    (titles vecNew)
+    (modFiles vecNew)
+    (modOuts vecNew)
+    (modNames vecNew)
+    (names (listDir (concat root "docs/")))
+  )
+    (let (
+      (modNamed vecNew)
+      (mut i 0)
+    )
+      {
+        ; `docs/*.md`, `docs/README.md` as the index.
+        (while (< i (vecLen names))
+          (let ((name (vecGet names i)))
+            {
+              (if (docEndsWith name ".md")
+                {
+                  (vecPush srcs (concat "docs/" name))
+                  (vecPush
+                    outs
+                    (if (strEq name "README.md")
+                      "index.html"
+                      (concat (strSlice name 0 (- (strLen name) 3)) ".html")))
+                  (vecPush titles (mdTitle (readFile (concat (concat root "docs/") name))))
+                }
+                titles)
+              (set i (+ i 1))
+            }))
+        (docAddRoot
+          root
+          srcs
+          outs
+          titles
+          "README.md"
+          "readme.html")
+        (docAddRoot
+          root
+          srcs
+          outs
+          titles
+          "CONTRIBUTING.md"
+          "contributing.html")
+        (docAddRoot
+          root
+          srcs
+          outs
+          titles
+          "CHANGELOG.md"
+          "changelog.html")
+        (docAddRoot
+          root
+          srcs
+          outs
+          titles
+          "examples/README.md"
+          "examples.html")
+        ; The library.
+        (let ((lib docStdlibDir))
+          (if (== (strLen lib) 0)
+            (writeStderrStr "warning: no standard library found; ds AXIOM_STDLIB to render it\n")
+            (let (
+              (acc vecNew)
+              (mut j 0)
+            )
+              (let ((rels (docWalk lib "" acc)))
+                {
+                  (while (< j (vecLen rels))
+                    (let ((rel (vecGet rels j)))
+                      {
+                        (vecPush modFiles (concat lib rel))
+                        (vecPush modOuts (concat (concat "stdlib/" (strSlice rel 0 (- (strLen rel) 3))) ".html"))
+                        (vecPush modNames (docModuleName rel))
+                        (vecPush modNamed 0)
+                        (set j (+ j 1))
+                      }))
+                  0
+                }))))
+        ; The operands: `.ax` modules under `modules/`, `.md` pages at
+        ; the root, rendered as a `docs/` page would be.
+        (let (
+          (ops docOperands)
+          (mut j 0)
+        )
+          (while (< j (vecLen ops))
+            (let ((op (vecGet ops j)))
+              {
+                (if (docEndsWith op ".md")
+                  {
+                    (vecPush srcs (docAbsolute op))
+                    (vecPush outs (concat (pathStem op) ".html"))
+                    (vecPush titles (mdTitle (readFile op)))
+                    0
+                  }
+                  {
+                    (vecPush modFiles op)
+                    (vecPush modOuts (concat (concat "modules/" (pathStem op)) ".html"))
+                    (vecPush modNames (pathStem op))
+                    (vecPush modNamed 1)
+                    0
+                  })
+                (set j (+ j 1))
+              })))
+        (DocSet
+          root
+          out
+          srcs
+          outs
+          titles
+          modFiles
+          modOuts
+          modNames
+          modNamed)
+      })))
+
+; ------------------------------------------------------------------
+; Opening the result
+; ------------------------------------------------------------------
+; `open` on darwin, `xdg-open` elsewhere, found on `PATH`; without
+; one the path is printed and that is the answer.
+(pub :: docOpen (-> String Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (docOpen index)
+  (let ((opener 
+    (if (strStartsWith hostTarget "darwin")
+      "open"
+      "xdg-open")))
+    (if (== (strLen (pathOfCommand opener)) 0)
+      0
+      (let ((v (memAlloc (* 3 8))))
+        {
+          (memSetWord v 0 (strCStr (strDup opener)))
+          (memSetWord v 1 (strCStr (strDup index)))
+          (memSetWord v 2 0)
+          (match (sysRunPath opener v sysEnvp)
+            ((Ok _) 0)
+            ((Err _) (writeStderrStr (concat (concat "warning: could not run " opener) "\n"))))
+        }))))
+
+; ------------------------------------------------------------------
+; The command
+; ------------------------------------------------------------------
+(pub :: docMain Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (docMain)
+  (let ((root docFindRoot))
+    (if (== (strLen root) 0)
+      (die "error: no documentation ds found: ds AXIOM_DOC to a directory holding docs/, or run the compiler from an install or a source checkout\n" 1)
+      (let ((ds (docBuildSet (pathWithSlash (docAbsolute root)) (pathWithSlash (docAbsolute docOutDir)))))
+        (if (hasFlagAnywhere "doc" "--missing")
+          (let (
+            (mut i 0)
+            (mut n 0)
+          )
+            {
+              (while (< i (vecLen ds.modFiles))
+                {
+                  (set n (+ n (docMissingIn (vecGet ds.modFiles i))))
+                  (set i (+ i 1))
+                })
+              (if (> n 0)
+                (sysExitWith 1)
+                0)
+            })
+          (let ((mut i 0))
+            {
+              (match (makeDirAll ds.out)
+                ((Ok _) 0)
+                ((Err _) (die (concat (concat "error: cannot create " ds.out) "\n") 1)))
+              (docWrite ds "style.css" docStyle)
+              (while (< i (vecLen ds.srcs))
+                {
+                  (docRenderPage ds i)
+                  (set i (+ i 1))
+                })
+              (set i 0)
+              (while (< i (vecLen ds.modFiles))
+                {
+                  (docRenderModule ds i)
+                  (set i (+ i 1))
+                })
+              (docRenderLanguage ds)
+              (let ((index (concat ds.out "index.html")))
+                {
+                  (writeStr stdout (concat index "\n"))
+                  (if (hasFlagAnywhere "doc" "--no-open")
+                    0
+                    (docOpen index))
+                })
+            }))))))

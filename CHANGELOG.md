@@ -16,6 +16,18 @@ its changelog too.
 
 ## Unreleased
 
+- Add `axiom doc`. It renders the documentation set, one page per
+  standard library module from the `;;` doc comments, and the language
+  index to HTML under `~/.cache/axiom/doc` (or `--out DIR`), then opens
+  the index in your browser; `--no-open` prints the path instead, a
+  `.ax` operand renders your own module beside the library's, and
+  `--missing` lists every public library name with no doc comment.
+  The renderer is `self_host/markdown.ax`; `self_host/doccomment.ax`
+  holds the doc-comment reading rule that hover and the pages share.
+  Tested by `scripts/check-tools-selfhost.sh`, which also requires
+  every link between the rendered pages to resolve.
+- The generated library reference lists public `emacro`s. Tested by
+  `scripts/check-stdlib-api.sh`.
 - Add the VS Code extension, `editors/vscode/`: a language client over
   `axiom lsp`, a TextMate grammar that colours by role before the
   server answers, the four commands (run, expand macro, open the

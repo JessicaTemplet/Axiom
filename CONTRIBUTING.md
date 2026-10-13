@@ -89,6 +89,8 @@ axiom/
 │   ├── rustbind.ax       the Rust module `--emit-rust-binding` writes for an archive
 │   ├── main.ax           the CLI entry point and subcommand dispatch
 │   ├── format.ax  repl.ax  symbols.ax  explain.ax  lsp.ax
+│   ├── doc.ax  markdown.ax  doccomment.ax
+│   │                     `axiom doc`, its Markdown renderer, and the doc-comment rule
 │   ├── replcomp.ax  replhist.ax  replhl.ax
 │   │                     the REPL's completion, history and highlighting
 │   ├── mir.ax  mireval.ax  the mid-level IR and its evaluator (test-only:

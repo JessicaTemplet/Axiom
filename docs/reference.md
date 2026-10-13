@@ -1346,6 +1346,7 @@ those rows, and [diagnostics](diagnostics.md) documents their format.
 | `new DIR`, `fetch` | create a project; fetch dependencies |
 | `symbols FILE` | inspect declarations, tags and calls |
 | `explain AX3001`, `explain let`, `explain @restrict`, `explain --list` | explain a diagnostic, a word of the language or an AXTAG key |
+| `doc` | render the docs and the library reference, and open them |
 | `repl`, `lsp`, `version`, `help` | interactive session, editor server, version and help |
 
 `axiom help COMMAND` is the option reference. The first operand is
@@ -1381,6 +1382,21 @@ operator or a literal, with the section of this page that covers it,
 and `axiom explain @restrict` describes an AXTAG key. Hover in your
 editor shows the same entry. An operator that starts with a dash goes
 after `--`, as in `axiom explain -- ->`.
+
+### Read the docs offline
+
+`axiom doc` renders this documentation set and one page per standard
+library module to HTML, then opens the index in your browser. Add
+`--no-open` to print the index's path instead, `--out DIR` to choose
+where the pages go, and name a `.ax` file to render your own module
+the same way. `axiom doc --missing` lists every public library name
+that has no `;;` doc comment yet.
+
+An installed compiler finds `docs/`, `README.md` and `CHANGELOG.md`
+beside itself. `CONTRIBUTING.md` and the examples page need a source
+checkout, or `AXIOM_DOC` naming one.
+
+Tested by `scripts/check-tools-selfhost.sh`.
 
 ## Testing
 

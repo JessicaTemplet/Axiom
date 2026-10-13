@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `explain` and `symbols`, pinned without a second compiler.
+# `explain`, `symbols` and `doc`, pinned without a second compiler.
 #
 # This gate used to be a differential against the Rust compiler: run
 # both binaries on the same input, require identical bytes. That was
@@ -642,6 +642,260 @@ else
   echo "FAIL the lexicon has drifted from the parser, the checker or the reference"
   failed=$((failed + 1))
 fi
+
+# --------------------------------------------------------------------
+# doc
+#
+# `axiom doc` renders the documentation set, one page per library
+# module and the language index. Five properties, of which only the
+# fixture's body is a golden:
+#
+#   1. every source page produced a file, every stdlib module has a
+#      page, every `(pub :: name` has an anchor on its module page, and
+#      the language index carries every lexicon word and AXTAG key;
+#   2. every internal link - an `href` to a local file, with or without
+#      `#anchor` - resolves to a file that exists and, with an anchor,
+#      to an `id` that file has. This is the gap-finder: a heading
+#      renamed in one page and linked from another fails here. Floor
+#      200 links, so a sweep that found nothing cannot pass;
+#   3. `--missing` names exactly the declarations whose Summary cell in
+#      docs/stdlib-api.md is blank, and exits 1 iff there are any. The
+#      two are different readers of the same doc comments
+#      (`self_host/doccomment.ax` and `examples/axdoc/axdoc.ax`), so a
+#      drift between them shows here;
+#   4. tests/tools/doc-render.md, one of every construct the renderer
+#      knows, renders byte for byte to tests/tools/doc-render.golden -
+#      the page's <main>, so the sidebar that lists every page is not
+#      pinned and a new document does not move the golden;
+#   5. refusals: no documentation set is exit 1, one stderr line and
+#      nothing on stdout; an unwritable --out is exit 1.
+#
+# A negative probe renders a page with a dangling anchor and a link to
+# a file that is not there, and requires the link check to say so.
+# --------------------------------------------------------------------
+doc_check() {  # <repo_root> <site> -> exit 0 when every property holds
+  python3 - "$1" "$2" <<'PY_DOC'
+import glob, html, os, re, sys
+root, site = sys.argv[1], sys.argv[2]
+bad = []
+pages = {p: open(p, encoding="utf-8").read()
+         for p in glob.glob(os.path.join(site, "**", "*.html"), recursive=True)}
+ids = {p: set(re.findall(r'\sid="([^"]+)"', t)) for p, t in pages.items()}
+
+want = {os.path.join(site, "index.html"): "docs/README.md"}
+for d in sorted(glob.glob(os.path.join(root, "docs", "*.md"))):
+    b = os.path.basename(d)
+    if b != "README.md":
+        want[os.path.join(site, b[:-3] + ".html")] = "docs/" + b
+for src, out in (("README.md", "readme.html"), ("CONTRIBUTING.md", "contributing.html"),
+                 ("CHANGELOG.md", "changelog.html"), ("examples/README.md", "examples.html")):
+    if os.path.exists(os.path.join(root, src)):
+        want[os.path.join(site, out)] = src
+for out, src in want.items():
+    if out not in pages:
+        bad.append(f"{src} produced no page at {os.path.relpath(out, site)}")
+if not os.path.exists(os.path.join(site, "style.css")):
+    bad.append("style.css was not written")
+
+checked, dangling = 0, []
+for p, t in pages.items():
+    here = os.path.relpath(p, site)
+    for href in re.findall(r'href="([^"]+)"', t):
+        href = html.unescape(href)
+        if re.match(r"(https?:|mailto:)", href):
+            continue
+        checked += 1
+        if href.startswith("file://"):
+            if not os.path.exists(href[7:].partition("#")[0]):
+                dangling.append(f"{here} -> {href}: no such file")
+            continue
+        path, _, frag = href.partition("#")
+        target = p if path == "" else os.path.normpath(os.path.join(os.path.dirname(p), path))
+        if path and target not in pages and not os.path.exists(target):
+            dangling.append(f"{here} -> {href}: no such file")
+        elif frag and target in ids and frag not in ids[target]:
+            dangling.append(f"{here} -> {href}: no id {frag!r}")
+    for src in re.findall(r'<img src="([^"]+)"', t):
+        if re.match(r"(https?:|data:)", src):
+            continue
+        checked += 1
+        if not os.path.exists(os.path.normpath(os.path.join(os.path.dirname(p), src))):
+            dangling.append(f"{here} -> image {src}: no such file")
+for d in dangling[:30]:
+    print("     " + d)
+if dangling:
+    bad.append(f"{len(dangling)} internal links do not resolve")
+if checked < 200:
+    bad.append(f"only {checked} internal links checked; the floor is 200")
+
+mods = sorted(glob.glob(os.path.join(root, "stdlib", "**", "*.ax"), recursive=True))
+names = 0
+for m in mods:
+    rel = os.path.relpath(m, os.path.join(root, "stdlib"))
+    page = os.path.join(site, "stdlib", rel[:-3] + ".html")
+    if page not in pages:
+        bad.append(f"stdlib module {rel} has no page")
+        continue
+    for name in re.findall(r"^\(pub :: ([^\s)]+)", open(m, encoding="utf-8").read(), re.M):
+        names += 1
+        if name not in ids[page]:
+            bad.append(f"{rel}: `{name}` has no anchor on its page")
+if len(mods) < 40 or names < 500:
+    bad.append(f"{len(mods)} modules and {names} public names found; the floors are 40 and 500")
+
+lexicon = open(os.path.join(root, "self_host", "lexicon.ax"), encoding="utf-8").read()
+def block(src, head):
+    i = src.index(head)
+    return src[i:src.index("\n(pub ::", i + 1)]
+words = re.findall(r'\(vecPush v "([^"]+)"\)', block(lexicon, "(pub fn (lexWords)"))
+keys = re.findall(r'\(vecPush v "([^"]+)"\)', block(lexicon, "(pub fn (lexTagKeys)"))
+heads = [html.unescape(h) for h in re.findall(r"<h3><code>([^<]*)</code></h3>",
+                                                pages.get(os.path.join(site, "language.html"), ""))]
+for w in words:
+    if w not in heads:
+        bad.append(f"the language index lacks the word `{w}`")
+for k in keys:
+    if ";@axiom:" + k not in heads:
+        bad.append(f"the language index lacks the AXTAG key `{k}`")
+if len(words) < 40 or len(keys) < 5:
+    bad.append(f"{len(words)} words and {len(keys)} keys extracted from the lexicon")
+
+print(f"     {len(pages)} pages, {checked} links checked, {len(mods)} modules, "
+      f"{names} public names, {len(words)} words, {len(keys)} AXTAG keys")
+for b in bad:
+    print("     " + b)
+sys.exit(1 if bad else 0)
+PY_DOC
+}
+
+echo "== doc: the documentation set renders, and every link resolves =="
+docout="$work/doc"
+if ! (cd "$neutral" && AXIOM_DOC="$repo_root" "$work/axc" doc "$repo_root/tests/tools/doc-render.md" \
+        --out "$docout" --no-open >"$work/doc.out" 2>"$work/doc.err"); then
+  echo "FAIL doc: rendering exited non-zero"
+  sed 's/^/     /' "$work/doc.err" | head -5
+  failed=$((failed + 1))
+elif [[ "$(cat "$work/doc.out")" != "$docout/index.html" ]] || [[ -s "$work/doc.err" ]]; then
+  echo "FAIL doc: stdout was '$(cat "$work/doc.out")' (want the index path) and stderr $(wc -c <"$work/doc.err" | tr -d ' ') bytes"
+  sed 's/^/     /' "$work/doc.err" | head -5
+  failed=$((failed + 1))
+elif doc_check "$repo_root" "$docout"; then
+  echo "ok   every page, module and public name rendered, and every link resolves"
+else
+  echo "FAIL doc: a page, a name or a link is missing (listed above)"
+  failed=$((failed + 1))
+fi
+
+# The negative probe: the link check must see a dangling anchor and a
+# link to a file that is not there. The anchor is on the probe's own
+# page and the file is not a document, so `check-doc-drift.sh`, which
+# reads every `.md` link target this script names, has nothing to
+# resolve here.
+printf '# Probe\n\nA [bad anchor](#no-such-heading-anywhere) and a\n[bad file](../no-such-dir/x.ax).\n' > "$work/doc-probe.md"
+(cd "$neutral" && AXIOM_DOC="$repo_root" "$work/axc" doc "$work/doc-probe.md" \
+   --out "$work/doc-probe" --no-open >/dev/null 2>&1)
+if doc_check "$repo_root" "$work/doc-probe" >"$work/doc-probe.log" 2>&1; then
+  echo "FAIL doc: the link check passed a page with a dangling anchor and a missing file"
+  failed=$((failed + 1))
+elif ! grep -q 'no-such-heading-anywhere' "$work/doc-probe.log" || ! grep -q 'no-such-dir' "$work/doc-probe.log"; then
+  echo "FAIL doc: the link check failed the probe without naming both of its bad links"
+  sed 's/^/     /' "$work/doc-probe.log" | tail -4
+  failed=$((failed + 1))
+else
+  echo "ok   the link check names a dangling anchor and a missing file"
+fi
+
+echo "== doc: the renderer fixture, against the golden =="
+doc_golden="tests/tools/doc-render.golden"
+sed -n '/^<main>$/,/^<\/main>$/p' "$docout/doc-render.html" > "$work/doc-render.body"
+if [[ "${AXIOM_BLESS:-0}" == 1 ]]; then
+  cp "$work/doc-render.body" "$repo_root/$doc_golden"
+  echo "blessed $doc_golden"
+fi
+if [[ ! -f "$doc_golden" ]]; then
+  echo "FAIL doc: $doc_golden is missing; run with AXIOM_BLESS=1"
+  failed=$((failed + 1))
+elif ! cmp -s "$doc_golden" "$work/doc-render.body"; then
+  echo "FAIL doc: the fixture's rendering differs from $doc_golden"
+  diff "$doc_golden" "$work/doc-render.body" | head -12 | sed 's/^/     /'
+  failed=$((failed + 1))
+elif [[ ! -f "$docout/assets/doc-render.svg" ]]; then
+  echo "FAIL doc: the fixture's image was not copied beside the page"
+  failed=$((failed + 1))
+elif (( $(grep -c '<span class="' "$doc_golden") < 10 )) || ! grep -q '<table>' "$doc_golden" \
+     || ! grep -q '<ol start="3">' "$doc_golden" || ! grep -q 'id="repeated-heading-1"' "$doc_golden"; then
+  echo "FAIL doc: the golden lost a construct the fixture exercises (highlighting, a table, a numbered list, a duplicate heading)"
+  failed=$((failed + 1))
+else
+  echo "ok   the fixture renders as the golden says ($(wc -l <"$doc_golden" | tr -d ' ') lines)"
+fi
+
+echo "== doc: --missing names exactly the reference's blank summaries =="
+(cd "$neutral" && AXIOM_DOC="$repo_root" "$work/axc" doc --missing >"$work/doc.missing" 2>"$work/doc.missing.err"); mrc=$?
+# The reference covers one `Sys/Platform` file (check-stdlib-api.sh
+# names `darwin`); the other five declare the same names and are left
+# out of this comparison for the same reason.
+grep -v 'Sys/Platform\.\(baremetal\|freebsd\|linux\|windows\)' "$work/doc.missing" \
+  | sed -E 's/.*: //' | sort > "$work/doc.missing.names"
+grep '^| `.*| *|$' "$repo_root/docs/stdlib-api.md" | sed -E 's/^\| `([^`]*)`.*/\1/' | sort > "$work/doc.blank.names"
+mn=$(grep -c . "$work/doc.missing.names" || true)
+if [[ -s "$work/doc.missing.err" ]]; then
+  echo "FAIL doc: --missing wrote to stderr"
+  sed 's/^/     /' "$work/doc.missing.err" | head -3
+  failed=$((failed + 1))
+elif ! cmp -s "$work/doc.missing.names" "$work/doc.blank.names"; then
+  echo "FAIL doc: --missing and docs/stdlib-api.md disagree about which names have no doc comment"
+  diff "$work/doc.blank.names" "$work/doc.missing.names" | head -8 | sed 's/^/     /'
+  failed=$((failed + 1))
+elif { (( mn > 0 )) && [[ $mrc != 1 ]]; } || { (( mn == 0 )) && [[ $mrc != 0 ]]; }; then
+  echo "FAIL doc: --missing listed $mn names and exited $mrc"
+  failed=$((failed + 1))
+elif ! python3 - "$work/doc.missing" <<'PY_MISS'
+import sys
+bad = 0
+for line in open(sys.argv[1], encoding="utf-8"):
+    path, ln, _ = line.rstrip("\n").split(":", 2)
+    text = open(path, encoding="utf-8").read().split("\n")[int(ln) - 1]
+    if not (text.startswith("(pub ") or text.startswith("(effect ")):
+        print(f"     {path}:{ln} is not a public declaration: {text[:50]!r}")
+        bad += 1
+sys.exit(1 if bad else 0)
+PY_MISS
+then
+  echo "FAIL doc: a --missing line names a line that is not a public declaration"
+  failed=$((failed + 1))
+else
+  echo "ok   --missing names $mn declarations, the same $mn the reference leaves blank, each at its own line"
+fi
+
+echo "== doc: refusals =="
+mkdir -p "$work/nodocs/bin"
+cp "$work/axc" "$work/nodocs/bin/axiom"
+(cd "$neutral" && AXIOM_DOC=/nonexistent "$work/nodocs/bin/axiom" doc --out "$work/doc-nd" --no-open \
+   >"$work/nd.out" 2>"$work/nd.err"); rc=$?
+if [[ $rc == 1 && ! -s "$work/nd.out" && "$(grep -c . "$work/nd.err")" == 1 && ! -d "$work/doc-nd" ]]; then
+  ok_nd=1
+else
+  echo "FAIL doc: AXIOM_DOC=/nonexistent exited $rc with $(wc -c <"$work/nd.out" | tr -d ' ') bytes on stdout and $(grep -c . "$work/nd.err") stderr lines"
+  failed=$((failed + 1))
+fi
+(cd "$neutral" && env -u AXIOM_DOC "$work/nodocs/bin/axiom" doc --out "$work/doc-nd" --no-open \
+   >"$work/nd2.out" 2>"$work/nd2.err"); rc=$?
+if [[ $rc == 1 && ! -s "$work/nd2.out" && "$(grep -c . "$work/nd2.err")" == 1 ]]; then
+  [[ "${ok_nd:-0}" == 1 ]] && echo "ok   no documentation set: exit 1, one stderr line, nothing on stdout, nothing written"
+else
+  echo "FAIL doc: with no AXIOM_DOC and no docs/ beside the binary, exit $rc with $(grep -c . "$work/nd2.err") stderr lines"
+  failed=$((failed + 1))
+fi
+(cd "$neutral" && AXIOM_DOC="$repo_root" "$work/axc" doc --out /dev/null/axiom-doc --no-open \
+   >"$work/uw.out" 2>"$work/uw.err"); rc=$?
+if [[ $rc == 1 && ! -s "$work/uw.out" ]] && grep -q 'error:' "$work/uw.err"; then
+  echo "ok   an unwritable --out is refused with exit 1"
+else
+  echo "FAIL doc: --out /dev/null/axiom-doc exited $rc: $(head -1 "$work/uw.err")"
+  failed=$((failed + 1))
+fi
+
 
 echo
 if [[ $failed -eq 0 ]]; then
