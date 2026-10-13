@@ -620,11 +620,62 @@ On `baremetal-aarch64`, `isr(irq)` binds the interrupt handler and
 `isr(fault)` supplies a fault policy. See the [embedded guide](embedded-guide.md)
 for signatures, startup and interrupt assumptions.
 
-### nolint: quiet the editor's Hints
+<a id="nolint-quiet-the-editors-hints"></a>
+### nolint: quiet hints and warnings
 
-`nolint` suppresses the selected editor hints; it does not suppress
-compiler errors. Effect-inference facts and metadata are described in
+`;@axiom:nolint(...)` is Axiom's `#[allow(...)]`. While you prototype,
+it keeps the editor's hints and the compiler's warnings out of your
+way, one declaration or one file at a time. It never quiets an error.
+
+Name what to quiet: a hint (`lint-dead-branch`, `lint-bool-if`,
+`lint-unused-let`), a warning by its code (`AX3037`), or a group
+(`hints`, `warnings`, `all`). The tag goes above either half of a
+declaration:
+
+```scheme
+(struct Box
+  (f : (-> Int Int)))
+
+;@axiom:nolint(AX3037)
+(:: call (-> Box Int))
+;@axiom:effect(pure)
+(fn (call b)
+  (b.f 1))
+
+;@axiom:nolint(lint-dead-branch, lint-unused-let)
+(:: sketch (-> Int Int))
+(fn (sketch n)
+  (let ((later n))
+    (if true
+      n
+      0)))
+
+(:: main Int)
+(fn (main)
+  (+ (call (Box (lambda (x) x))) (sketch 2)))
+```
+
+`call` keeps its unverifiable purity claim without the AX3037 warning,
+and `sketch` draws no hints. Both compile and run as before.
+
+A tag above an `import` covers the whole file, like Rust's `#![allow]`
+at the top of a module:
+
+```scheme fragment
+;@axiom:nolint(all)
+(import IO)
+```
+
+`axiom check`, `build` and `run` honour the warning half, so the
+terminal and the editor agree. A name nothing answers to, such as
+`nolint(lint-unused-lte)`, draws the editor hint `lint-unknown-nolint`
+at the tag and quiets nothing. Your editor offers a *Suppress* code
+action on every hint, which writes the tag for you.
+
+Effect-inference facts and metadata are described in
 [symbol tags](diagnostics.md#read-symbol-tags) and [diagnostics](diagnostics.md).
+Tested by `tests/diagnostics/1257-nolint-warning.ax` and
+`tests/lsp/105-lint-nolint-names.ax`.
 
 ## Modules and imports
 

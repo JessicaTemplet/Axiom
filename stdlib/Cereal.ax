@@ -1,7 +1,7 @@
-; Cereal — typed serialisation for JSON, TOML and YAML.
-; Codecs share CerealValue and return Result with explicit resource limits.
-; The json* functions retain the raw-handle migration API for JSON-RPC.
-; Raw consumers require live Cereal handles; new code uses typed values.
+;;! Cereal — typed serialisation for JSON, TOML and YAML.
+;;! Codecs share CerealValue and return Result with explicit resource limits.
+;;! The json* functions retain the raw-handle migration API for JSON-RPC.
+;;! Raw consumers require live Cereal handles; new code uses typed values.
 (import Mem)
 (import Str)
 (import Fmt)
@@ -54,10 +54,12 @@
       v
     }))
 
+;; The JSON `null` value.
 (pub :: jsonNull Int)
 (pub fn (jsonNull)
   (jsonMake JNULL 0 0))
 
+;; A JSON boolean: `true` for a non-zero `b`, `false` for 0.
 (pub :: jsonBool (-> Int Int))
 (pub fn (jsonBool b)
   (jsonMake
@@ -73,14 +75,17 @@
 (pub fn (jsonNum n)
   (jsonMake JNUM n (fmtInt n)))
 
+;; A JSON string holding `s`.
 (pub :: jsonStr (-> String Int))
 (pub fn (jsonStr s)
   (jsonMake JSTR s 0))
 
+;; An empty JSON array; add to it with `jsonArrPush`.
 (pub :: jsonArr Int)
 (pub fn (jsonArr)
   (jsonMake JARR vecNew 0))
 
+;; An empty JSON object; add to it with `jsonObjPut`.
 (pub :: jsonObj Int)
 (pub fn (jsonObj)
   (jsonMake JOBJ vecNew vecNew))
@@ -94,10 +99,12 @@
     JNULL
     (memGetWord v 0)))
 
+;; Whether the value is JSON `null`.
 (pub :: jsonIsNull (-> Int Bool))
 (pub fn (jsonIsNull v)
   (== (jsonTag v) JNULL))
 
+;; A JSON boolean as 1 or 0, and 0 for any other value.
 (pub :: jsonBoolVal (-> Int Int))
 (pub fn (jsonBoolVal v)
   (if (== (jsonTag v) JBOOL)
@@ -113,24 +120,30 @@
     (memGetWord v 1)
     0))
 
+;; A JSON number as the text it was written with, and empty for any
+;; other value.
 (pub :: jsonNumText (-> Int String))
 (pub fn (jsonNumText v)
   (if (== (jsonTag v) JNUM)
     (memGetWordStr v 2)
     ""))
 
+;; A JSON string's text, and empty for any other value.
 (pub :: jsonStrVal (-> Int String))
 (pub fn (jsonStrVal v)
   (if (== (jsonTag v) JSTR)
     (memGetWordStr v 1)
     ""))
 
+;; How many elements a JSON array holds, and 0 for any other value.
 (pub :: jsonArrLen (-> Int Int))
 (pub fn (jsonArrLen v)
   (if (== (jsonTag v) JARR)
     (vecLen (memGetWordVec v 1))
     0))
 
+;; Element `i` of a JSON array, or JSON `null` when `v` is not an array
+;; or `i` is out of range.
 (pub :: jsonArrGet (-> Int Int Int))
 (pub fn (jsonArrGet v i)
   (if (== (jsonTag v) JARR)
@@ -139,6 +152,8 @@
       (vecGet (memGetWordVec v 1) i))
     0))
 
+;; Append `x` to a JSON array. Any other value is left alone. Answers
+;; `v`.
 (pub :: jsonArrPush (-> Int Int Int))
 (pub fn (jsonArrPush v x)
   {
@@ -148,6 +163,7 @@
     v
   })
 
+;; How many members a JSON object holds, and 0 for any other value.
 (pub :: jsonObjLen (-> Int Int))
 (pub fn (jsonObjLen v)
   (if (== (jsonTag v) JOBJ)
@@ -205,10 +221,14 @@
       (jsonObjValAt v i)
       (jsonGetFrom v key (+ i 1)))))
 
+;; The integer under `key` in a JSON object, or 0 when the key is
+;; absent or not a number.
 (pub :: jsonGetInt (-> Int String Int))
 (pub fn (jsonGetInt v key)
   (jsonInt (jsonGet v key)))
 
+;; The string under `key` in a JSON object, or empty when the key is
+;; absent or not a string.
 (pub :: jsonGetStr (-> Int String String))
 (pub fn (jsonGetStr v key)
   (jsonStrVal (jsonGet v key)))
@@ -452,6 +472,8 @@
 ; ------------------------------------------------------------------
 ; Serialisation
 ; ------------------------------------------------------------------
+;; The value as JSON text, on one line with no spaces, strings escaped
+;; as JSON requires.
 (pub :: jsonWrite (-> Int String))
 (pub fn (jsonWrite v)
   (let ((pieces vecNew))
@@ -1040,6 +1062,8 @@
 ; a migration interface; new code uses CerealValue and Result throughout.
 (import Err)
 
+;; A parsed document from any of the three formats: null, a boolean, an
+;; integer, a float, text, a list or an object of `CerealMember`s.
 (pub data CerealValue
   (CNull)
   (CBool Bool)
@@ -1049,12 +1073,17 @@
   (CArray (Vec CerealValue))
   (CObject (Vec CerealMember)))
 
+;; One `key: value` member of a `CObject`.
 (pub struct CerealMember
   (key : String)
   (value : CerealValue))
 
+;; Which text format to read or write: JSON, TOML or YAML.
 (pub data CerealFormat (CerealJson) (CerealToml) (CerealYaml))
 
+;; What a parse may cost: the nesting `depth`, the input `bytes` and
+;; the `nodes` it may build. Past any of them the parse answers `Err`
+;; instead of running on.
 (pub struct CerealLimits
   (depth : Int)
   (bytes : Int)
@@ -1066,6 +1095,7 @@
 (pub data Codec (a)
   (Codec (-> a (Result CerealValue Error)) (-> CerealValue (Result a Error))))
 
+;; The default limits: depth 64, one MiB of input, 100000 nodes.
 (pub :: cerealLimits CerealLimits)
 (pub fn (cerealLimits) (CerealLimits 64 1048576 100000))
 
@@ -1123,6 +1153,8 @@
       ((Some n) (Ok (CInt n)))
       ((None) (Ok (CNumber (strDup text)))))))
 
+;; The member under `key` of a `CObject`, or `None` when the key is
+;; absent or the value is not an object.
 (pub :: cerealObjectGet (-> CerealValue String (Option CerealValue)))
 (pub fn (cerealObjectGet value key)
   (match value
@@ -1138,6 +1170,8 @@
         (Some member.value)
         (cerealMemberGet members key (+ i 1))))))
 
+;; The member under `key` of a `CObject`, or `Err` naming the missing
+;; key.
 (pub :: cerealRequired (-> CerealValue String (Result CerealValue Error)))
 (pub fn (cerealRequired value key)
   (match value
@@ -1147,6 +1181,7 @@
         ((None) (cerealError (concat "missing field: " key)))))
     (_ (cerealError "expected a dictionary"))))
 
+;; The `CInt` inside, or `Err` when the value is not an integer.
 (pub :: cerealInt (-> CerealValue (Result Int Error)))
 (pub fn (cerealInt value)
   (match value
@@ -1157,12 +1192,14 @@
         ((None) (cerealError "expected an integer within Int range"))))
     (_ (cerealError "expected an integer"))))
 
+;; The `CText` inside, or `Err` when the value is not text.
 (pub :: cerealText (-> CerealValue (Result String Error)))
 (pub fn (cerealText value)
   (match value
     ((CText s) (Ok s))
     (_ (cerealError "expected a string"))))
 
+;; The `CBool` inside, or `Err` when the value is not a boolean.
 (pub :: cerealBool (-> CerealValue (Result Bool Error)))
 (pub fn (cerealBool value)
   (match value
@@ -1178,18 +1215,25 @@
 (:: cerealIdentity (-> CerealValue (Result CerealValue Error)))
 (fn (cerealIdentity value) (Ok value))
 
+;; The `Codec` that reads and writes an `Int`.
 (pub :: cerealIntCodec (Codec Int))
 (pub fn (cerealIntCodec) (Codec cerealIntValue cerealInt))
+;; The `Codec` that reads and writes a `String`.
 (pub :: cerealTextCodec (Codec String))
 (pub fn (cerealTextCodec) (Codec cerealTextValue cerealText))
+;; The `Codec` that reads and writes a `Bool`.
 (pub :: cerealBoolCodec (Codec Bool))
 (pub fn (cerealBoolCodec) (Codec cerealBoolValue cerealBool))
+;; The `Codec` that passes a `CerealValue` through unchanged, for a
+;; field you want to keep as a tree.
 (pub :: cerealValueCodec (Codec CerealValue))
 (pub fn (cerealValueCodec) (Codec cerealIdentity cerealIdentity))
 
+;; Encode `value` with the codec into a `CerealValue` tree.
 (pub :: cerealToValue (-> (Codec a) a (Result CerealValue Error)))
 (pub fn (cerealToValue codec value)
   (match codec ((Codec encode decode) (encode value))))
+;; Decode a `CerealValue` tree with the codec.
 (pub :: cerealFromValue (-> (Codec a) CerealValue (Result a Error)))
 (pub fn (cerealFromValue codec value)
   (match codec ((Codec encode decode) (decode value))))
@@ -1225,6 +1269,7 @@
         }))
     (_ (cerealError "expected an array"))))
 
+;; The `Codec` for a `Vec` of what `codec` handles, as a list.
 (pub :: cerealVecCodec (-> (Codec a) (Codec (Vec a))))
 (pub fn (cerealVecCodec codec)
   (Codec
@@ -1242,6 +1287,7 @@
     (_ (match (cerealFromValue codec value)
       ((Err error) (Err error)) ((Ok item) (Ok (Some item)))))))
 
+;; The `Codec` for an `Option` of what `codec` handles: `None` is null.
 (pub :: cerealOptionCodec (-> (Codec a) (Codec (Option a))))
 (pub fn (cerealOptionCodec codec)
   (Codec (lambda (value) (cerealOptionToValue codec value))
@@ -1883,6 +1929,8 @@
     (if (strEq (vecGet items i) wanted) i
       (cerealStringIndex items wanted (+ i 1)))))
 
+;; Write a `CerealValue` tree in `format` under the given limits.
+;; Invalid limits answer `Err`.
 (pub :: cerealEncodeWith (-> CerealFormat CerealLimits CerealValue (Result String Error)))
 (pub fn (cerealEncodeWith format limits value)
   (if (! (cerealLimitsValid limits))
@@ -1900,10 +1948,13 @@
                 (Ok (jsonJoin writer.pieces))
                 (cerealError writer.problem)) })) })))
 
+;; Write a `CerealValue` tree in `format` under the default limits.
 (pub :: cerealEncode (-> CerealFormat CerealValue (Result String Error)))
 (pub fn (cerealEncode format value)
   (cerealEncodeWith format cerealLimits value))
 
+;; Parse `source` in `format` into a `CerealValue` tree under the given
+;; limits. Past a limit, or on malformed input, it answers `Err`.
 (pub :: cerealDecodeWith (-> CerealFormat CerealLimits String (Result CerealValue Error)))
 (pub fn (cerealDecodeWith format limits source)
   (if (! (cerealLimitsValid limits))
@@ -1923,16 +1974,22 @@
                 { (ccValue check value 0)
                   (if (strEq check.problem "") (Ok value) (cerealError check.problem)) }))))))))
 
+;; Parse `source` in `format` into a `CerealValue` tree under the
+;; default limits.
 (pub :: cerealDecode (-> CerealFormat String (Result CerealValue Error)))
 (pub fn (cerealDecode format source)
   (cerealDecodeWith format cerealLimits source))
 
+;; Encode `value` with the codec and write it in `format`: the one call
+;; for turning a typed value into text.
 (pub :: cerealSerialize (-> CerealFormat (Codec a) a (Result String Error)))
 (pub fn (cerealSerialize format codec value)
   (match (cerealToValue codec value)
     ((Err e) (Err e))
     ((Ok tree) (cerealEncode format tree))))
 
+;; Parse `source` in `format` and decode it with the codec: the one
+;; call for turning text into a typed value.
 (pub :: cerealDeserialize (-> CerealFormat (Codec a) String (Result a Error)))
 (pub fn (cerealDeserialize format codec source)
   (match (cerealDecode format source)
@@ -2310,11 +2367,13 @@
 (:: cyWrite (-> CerealValue CerealWriter Int Int))
 (fn (cyWrite value writer depth) (cjWrite value writer depth))
 
+;; `cerealSerialize` under the given limits.
 (pub :: cerealSerializeWith (-> CerealFormat CerealLimits (Codec a) a (Result String Error)))
 (pub fn (cerealSerializeWith format limits codec value)
   (match (cerealToValue codec value)
     ((Err error) (Err error)) ((Ok tree) (cerealEncodeWith format limits tree))))
 
+;; `cerealDeserialize` under the given limits.
 (pub :: cerealDeserializeWith (-> CerealFormat CerealLimits (Codec a) String (Result a Error)))
 (pub fn (cerealDeserializeWith format limits codec source)
   (match (cerealDecodeWith format limits source)

@@ -27,6 +27,14 @@ its changelog too.
   `docs/lsp.md`, and the request costs 1.31x a `didOpen` of the gate's
   large document. Tested by `tests/lsp/drive.py`.
 
+- Add the VS Code extension, `editors/vscode/`: a language client over
+  `axiom lsp`, a TextMate grammar that colours by role before the
+  server answers, the four commands (run, expand macro, open the
+  documentation, restart the server) and a map from the server's
+  semantic token legend to TextMate scopes. The grammar's keyword list
+  is written from the parser by `editors/vscode/scripts/sync-keywords.mjs`.
+  Install from source; it isn't on the marketplace. Tested by
+  `scripts/check-vscode.sh`.
 - Add doc comments. A `;;` line documents the declaration below it and
   a `;;!` line at the head of a file documents the module, both in
   Markdown; a plain `;` line is a note for the maintainer and tools
@@ -36,6 +44,18 @@ its changelog too.
   first paragraphs are now `;;` lines, with the coverage ratchet
   re-derived at the measured value. Tested by `tests/lsp/drive.py` and
   `scripts/check-stdlib-api.sh`.
+
+- Make `;@axiom:nolint(...)` quiet what Rust's `#[allow(...)]` does. It
+  takes a hint by name, a warning by its code such as `AX3037`, or a
+  group (`hints`, `warnings`, `all`); a tag above an `import` covers
+  the whole file; `axiom check`, `build` and `run` honour the warning
+  half, so the terminal and the editor agree; an error is never
+  quieted; and a name nothing answers to draws the editor hint
+  `lint-unknown-nolint` at the tag instead of being ignored. The tag's
+  one reading is `self_host/nolint.ax`. Tested by
+  `tests/diagnostics/1257-nolint-warning.ax`,
+  `tests/diagnostics/1258-nolint-file-keeps-errors.ax` and
+  `tests/lsp/104-lint-file-nolint.ax` through `105-lint-nolint-names.ax`.
 
 - Explain every word of the language on hover. A keyword, a form word
   such as `mut` or `::`, a builtin type, a built-in effect, an

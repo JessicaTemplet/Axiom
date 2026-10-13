@@ -142,10 +142,11 @@ attached gets colour from the compiler's own lexer and parser. See
 grammar too where your editor has tree-sitter: it colours brackets by
 depth and keeps working while the server is busy.
 
-VS Code has no tree-sitter, so its highlighting needs a TextMate
-grammar, which this repository doesn't ship. The Neovim, Helix and
-VS Code sections each end with a check that tells you which of the two
-pieces you have.
+VS Code has no tree-sitter, so its highlighting comes from the TextMate
+grammar in the extension at [`editors/vscode/`](../editors/vscode/README.md)
+and from the server's semantic tokens. The Neovim, Helix and VS Code
+sections each end with a check that tells you which of the two pieces
+you have.
 
 The editor finds the server through its `PATH`, so `axiom` must be on
 it. Otherwise, write the absolute path where the configurations below
@@ -388,79 +389,43 @@ the rest.
 
 ### VS Code
 
-There is no published Axiom extension. You can build one from the two
-files below, `package.json` and `extension.js`, in a directory of their
-own. Run `npm install`, open the directory in VS Code, and press F5.
-That starts an Extension Development Host with the extension loaded.
+The extension lives in the repository at
+[`editors/vscode/`](../editors/vscode/README.md). It runs `axiom lsp`
+over stdio, contributes a TextMate grammar and maps the server's
+semantic tokens to colours. Install it from source:
 
+```bash
+cd editors/vscode
+npm install
+npx @vscode/vsce package
+code --install-extension axiom-language-*.vsix
+```
+
+Or open `editors/vscode` in VS Code and press F5 for an Extension
+Development Host with the extension loaded. The `axiom.serverPath`
+setting names the executable when `axiom` isn't on VS Code's `PATH`.
 `vscode-languageclient` asks the server for inlay hints, code lenses
-and everything else it advertises, with no extra setup. The two
-commands are the only code that isn't boilerplate.
+and everything else it advertises, and the two code-lens commands,
+`axiom.run` and `axiom.expandMacro`, are in the command palette too,
+beside `Axiom: Open the documentation` (which runs `axiom doc`) and
+`Axiom: Restart the language server`.
 
-Highlighting isn't included. VS Code has no tree-sitter, and the
-server doesn't send semantic tokens. [Highlighting](#highlighting)
-explains why that's settled. So a `.ax` file stays uncoloured until
-the extension contributes a TextMate grammar, which this repository
-doesn't ship.
+Colour comes from two places. The grammar colours a file as soon as
+it opens, by role: keywords in head position, a declared name by what
+it declares, builtin types and effects, AXTAGs and doc comments. It
+works in a file that doesn't parse yet. The server's semantic tokens
+then refine it, so a `let` binding and a parameter stop looking like
+calls.
 
-```json
-{
-  "name": "axiom-editor",
-  "displayName": "Axiom",
-  "version": "0.0.1",
-  "publisher": "local",
-  "engines": { "vscode": "^1.85.0" },
-  "main": "./extension.js",
-  "activationEvents": ["onLanguage:axiom"],
-  "contributes": {
-    "languages": [{ "id": "axiom", "aliases": ["Axiom"], "extensions": [".ax"] }],
-    "commands": [
-      { "command": "axiom.run", "title": "Axiom: Run" },
-      { "command": "axiom.expandMacro", "title": "Axiom: Expand Macro" }
-    ]
-  },
-  "dependencies": { "vscode-languageclient": "^9.0.1" }
-}
-```
+To check the client, open a `.ax` file and hover a function name. A
+tooltip quoting its `(:: f T)` signature means the client connected.
+If it didn't, the *Output* panel's *Axiom* channel shows the server's
+stderr. To check colour, *Developer: Inspect Editor Tokens and Scopes*
+on a keyword shows a `keyword.control.axiom` scope from the grammar
+and, once the server has answered, a `keyword` semantic token.
 
-```js
-// extension.js
-const vscode = require("vscode");
-const { LanguageClient } = require("vscode-languageclient/node");
-let client;
-function activate(context) {
-  client = new LanguageClient("axiom", "Axiom",
-    { command: "axiom", args: ["lsp"] },
-    { documentSelector: [{ scheme: "file", language: "axiom" }] });
-  context.subscriptions.push(
-    vscode.commands.registerCommand("axiom.run", (path) => {
-      const t = vscode.window.createTerminal("axiom run");
-      t.show();
-      t.sendText("axiom run " + JSON.stringify(path));
-    }),
-    vscode.commands.registerCommand("axiom.expandMacro", async (uri, position) => {
-      const r = await client.sendRequest("axiom/expandMacro", { textDocument: { uri }, position });
-      if (!r) { vscode.window.showInformationMessage("Nothing to expand here"); return; }
-      const doc = await vscode.workspace.openTextDocument(
-        { language: "axiom", content: "; " + r.name + "\n" + r.expansion + "\n" });
-      await vscode.window.showTextDocument(doc, { preview: true });
-    }));
-  client.start();
-}
-function deactivate() { return client && client.stop(); }
-module.exports = { activate, deactivate };
-```
-
-To check the client, open a `.ax` file in the Extension Development
-Host and hover a function name. A tooltip quoting its `(:: f T)`
-signature means the client connected. If it didn't, the *Output*
-panel's *Axiom* channel shows the server's stderr.
-
-Colour is a separate check. *Developer: Inspect Editor Tokens and
-Scopes* shows a TextMate scope only once a grammar is contributed
-under `contributes.grammars`. Without one, the row reads *no grammar*.
-You'll also want a `language-configuration.json` that names `;` as the
-line comment and lists the bracket pairs.
+Not yet: published to the marketplace. See the
+[roadmap](roadmap.md).
 
 ## What each request answers
 
@@ -1220,7 +1185,8 @@ under `tests/` and `docs/` into a copy in its place, and requires
 ### Lint hints
 
 On top of the checker's diagnostics, the server adds three lint Hints
-to every document that parses. `axiom check` never emits them. They
+to every document that parses, and a fourth about the tag that quiets
+them. `axiom check` never emits them. They
 have severity `Hint`, they're on for every document, and they never
 fail a build. A Hint is your editor thinking out loud, so it lives in
 the server. The checker's warnings are what the project promises about
@@ -1263,12 +1229,17 @@ signature or the `fn`:
   (if true n 0))
 ```
 
-`;@axiom:nolint(RULE)` quiets one rule, and `;@axiom:nolint(all)`
-quiets all three. The tag syntax is in
-[the reference](reference.md#nolint---quieting-the-editors-hints).
+`;@axiom:nolint(RULE)` quiets one rule, `nolint(hints)` quiets all
+three, and `nolint(AX3037)` or `nolint(warnings)` quiets the checker's
+warnings on that declaration as well; `nolint(all)` quiets both kinds.
+A tag above an `import` covers the whole file. An error is never
+quieted. A name the tag lists that nothing answers to draws a fourth
+hint, `lint-unknown-nolint`, at the tag itself. The tag syntax is in
+[the reference](reference.md#nolint-quiet-the-editors-hints).
 
 Tested by `tests/lsp/100-lint-dead-branch.ax` through
-`tests/lsp/103-lint-nolint.ax`, each with controls that must stay silent.
+`tests/lsp/105-lint-nolint-names.ax`, each with controls that must stay
+silent or stay drawn.
 
 #### Code actions for hints
 

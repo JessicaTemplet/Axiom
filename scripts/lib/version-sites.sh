@@ -158,6 +158,7 @@ rust/Cargo.lock|7|lock_version|lock_replace
 rust/examples/nostd/Cargo.lock|4|lock_version|lock_replace
 tree-sitter-axiom/package.json|1|json_version|json_replace
 tree-sitter-axiom/tree-sitter.json|1|json_version|json_replace
+editors/vscode/package.json|1|json_version|json_replace
 README.md|1|ax_version|ax_replace
 docs/status.md|1|ax_version|ax_replace
 docs/reference.md|1|ax_version|ax_replace

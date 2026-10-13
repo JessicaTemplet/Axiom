@@ -1,4 +1,4 @@
-; IO - files, standard streams, terminals, readiness and sockets.
+;;! IO - files, standard streams, terminals, readiness and sockets.
 ;
 ; Every descriptor a program can reach is held by an owner this module
 ; declares: a `File` (a file, a socket or a standard stream), a `Poller`
@@ -71,12 +71,16 @@
 (pub fn (stdin)
   (File (__resource_new fileKeep 0)))
 
+;; The process's standard output as a `File`, for `fileWrite` and
+;; friends. One shared owner: it is never closed by scope.
 (pub :: stdout File)
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (stdout)
   (File (__resource_new fileKeep 1)))
 
+;; The process's standard error as a `File`. One shared owner: it is
+;; never closed by scope.
 (pub :: stderr File)
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
@@ -258,6 +262,8 @@
 (pub fn (writeOut s)
   (ioWriteAll 1 (strData s) (strLen s)))
 
+;; Write `s` to standard error, with no newline added. Answers the
+;; number of bytes written.
 (pub :: writeErr (-> String Int))
 ;@axiom:effect(io)
 (pub fn (writeErr s)
@@ -936,6 +942,7 @@
 ; ------------------------------------------------------------------
 ; Process exit
 ; ------------------------------------------------------------------
+;; End the process with status `code`, running no further code.
 (pub :: exit (-> Int Int))
 ;@axiom:effect(io)
 (pub fn (exit code)
@@ -1335,6 +1342,9 @@
 ; it, so a descriptor number a later file reuses is never reported
 ; under the old token.
 ; ------------------------------------------------------------------
+;; The readiness poller `stdin` and the socket calls share: one owned
+;; poll set, so two parts of a program cannot register the same
+;; descriptor twice.
 (pub struct Poller sealed
   (owner : Handle)
   (events : String)
