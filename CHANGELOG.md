@@ -16,6 +16,17 @@ its changelog too.
 
 ## Unreleased
 
+- Send semantic tokens. The language server answers
+  `textDocument/semanticTokens/full` from the compiler's own lexer and
+  parser, so an editor without tree-sitter colours keywords,
+  functions, macros, constructors, types, fields, parameters, effects
+  and AXTAG lines apart from variables. Every identifier is coloured
+  by what it resolves to, through the walk `references` already makes,
+  and a document that does not parse still answers from the bytes.
+  The legend is seventeen token types and seven modifiers, listed in
+  `docs/lsp.md`, and the request costs 1.31x a `didOpen` of the gate's
+  large document. Tested by `tests/lsp/drive.py`.
+
 - Add doc comments. A `;;` line documents the declaration below it and
   a `;;!` line at the head of a file documents the module, both in
   Markdown; a plain `;` line is a note for the maintainer and tools

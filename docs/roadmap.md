@@ -112,7 +112,7 @@ integrator would still need.
 | Doc comments: `;;` documents the declaration below and `;;!` the module, and hover, the library reference and `axiom doc` read them | Done |
 | Hover explains every word of the language: keywords, builtin types, effects, operators, AXTAG keys and values, and imported modules | Done |
 | Every public standard library name carries a doc comment, and every module a `;;!` block | In progress |
-| The language server sends semantic tokens, so every editor colours keywords, functions, macros, constructors, fields and effects apart from variables | In progress |
+| The language server sends semantic tokens, so every editor colours keywords, functions, macros, constructors, fields and effects apart from variables | Done |
 | A VS Code extension ships in the repository, with a TextMate grammar and the language client | In progress |
 | `axiom doc` renders the documentation and the library reference locally and opens them in your browser | In progress |
 | Debug information (DWARF), a message on SIGSEGV, and inlined frames in backtraces | Not started |

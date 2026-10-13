@@ -133,13 +133,14 @@ without the other:
 
 | | What it gives | Which editors use it |
 |---|---|---|
-| the language server (`axiom lsp`) | every request on this page: navigation, hover, completion, hints, formatting, fixes, expansion | all of them |
-| the tree-sitter grammar ([`tree-sitter-axiom/`](../tree-sitter-axiom/README.md)) | all of the highlighting: `highlights.scm` colours by syntactic role, and `rainbows.scm` colours bracket pairs by depth | Helix, Neovim (nvim-treesitter), Emacs 29+ (`treesit`), Zed, the `tree-sitter` CLI |
+| the language server (`axiom lsp`) | every request on this page: navigation, hover, completion, hints, formatting, fixes, expansion, semantic tokens | all of them |
+| the tree-sitter grammar ([`tree-sitter-axiom/`](../tree-sitter-axiom/README.md)) | highlighting without a server: `highlights.scm` colours by syntactic role, and `rainbows.scm` colours bracket pairs by depth | Helix, Neovim (nvim-treesitter), Emacs 29+ (`treesit`), Zed, the `tree-sitter` CLI |
 
-The server colours nothing, because it offers no semantic tokens. See
-[Highlighting](#highlighting) for why. With the server attached and no
-grammar installed, a buffer stays plain text, however well every
-request is answered. Install the grammar to get colour.
+The server also sends semantic tokens, so an editor with the server
+attached gets colour from the compiler's own lexer and parser. See
+[Highlighting](#highlighting) for what each token means. Install the
+grammar too where your editor has tree-sitter: it colours brackets by
+depth and keeps working while the server is busy.
 
 VS Code has no tree-sitter, so its highlighting needs a TextMate
 grammar, which this repository doesn't ship. The Neovim, Helix and
@@ -998,6 +999,16 @@ Signature help, inlay hints, folding ranges, selection ranges, document
 links and workspace symbols are tested by `SECTION VIEW TESTS` in
 `tests/lsp/drive.py`.
 
+#### Semantic tokens
+
+`textDocument/semanticTokens/full` answers every token of the
+document with its type and modifiers, in the protocol's integer
+array. [Highlighting](#highlighting) lists the legend and what each
+token marks. A document that doesn't parse still answers: keywords,
+literals, comments and every declaration's own name come from the
+bytes, and only the colour of a resolved reference needs the tree.
+Tested by `SECTION HL TESTS` in `tests/lsp/drive.py`.
+
 ### Changing and running
 
 #### Formatting
@@ -1287,34 +1298,61 @@ program still traps 71.
 
 ## Highlighting
 
-The server doesn't send `textDocument/semanticTokens`, and we don't
-plan to add it. Highlighting comes only from
-`tree-sitter-axiom/queries/highlights.scm`. Two sources of colour can
-disagree about the same token, and one can't. A single highlighter
-means your editor never contradicts itself, and there's no second
-highlighter to keep in step with the grammar.
+The server sends `textDocument/semanticTokens/full`: one token per
+word of the document, classified by the compiler's own lexer and
+parser. An editor that reads semantic tokens colours keywords,
+functions, macros, constructors, types, fields, parameters, effects
+and AXTAGs apart from variables, in every editor the same way.
 
-`highlights.scm` colours by syntactic role:
+Every identifier is coloured by what it resolves to, through the same
+walk that answers `references`: a parameter, a `let`, a function or
+macro this document declares, a constructor, an effect. Keywords,
+literals, comments, AXTAG lines, region annotations and operators come
+from the bytes, so a document that doesn't parse is still coloured.
+The whole request expands no macros, which is the
+[cost rule](#the-cost-rule) below.
 
-- a declaration's name by what it declares;
-- an application's head as a call;
-- a constructor in a pattern as a constructor;
-- an AXTAG as an attribute, not a comment.
+The legend the server advertises is the contract an editor extension
+maps to scopes. The token types, in the order the integers index them:
 
-`queries/rainbows.scm` colours each bracket pair by its nesting depth,
-with every bracket-opening rule of the grammar as a scope.
+| Token type | What it marks |
+|---|---|
+| `keyword` | a head keyword the parser dispatches on, `pub`, `mut`, `cast`, the `syntax/*` words; `true` and `false` with `defaultLibrary`; a removed word such as `cond` with `deprecated` |
+| `function` | a `fn` name (`declaration`, and `definition` at the `fn` itself), a `::` subject, an effect operation, an `extern` item, a call |
+| `macro` | a `macro` or `emacro` name and its rule heads |
+| `type` | a `data`, `struct`, `type` or `subtype` name and every type in a signature, field or `cast`; a builtin such as `Int` with `defaultLibrary` |
+| `typeParameter` | a lowercase name in a type position |
+| `enumMember` | a constructor, declared or applied, and a positional struct build |
+| `property` | a struct or constructor field at its declaration, and a `.field` read |
+| `parameter` | a `fn` or `lambda` parameter, `declaration` at its binder |
+| `variable` | a `let` binder (`readonly` unless `mut`), a `set` target (`modification`), every other local |
+| `effect` | an `effect` name and the effects a `handle` lists; a built-in one with `defaultLibrary` |
+| `region` | `@r` in a type, and the name of a `region` or `parallel` form |
+| `namespace` | an `import` path and the module of a qualified `Mod::name` |
+| `operator` | `+`, `==`, `&&` and the other builtin operators with `defaultLibrary`; `->`, `::` and `=` without |
+| `string` | a string or char literal |
+| `number` | an integer or float literal |
+| `comment` | a `;` line and each line of a `#| |#` block; a `;;` doc line with `documentation` |
+| `decorator` | an `;@axiom:` line, whole |
+
+The modifiers, in bit order: `declaration`, `definition`, `readonly`,
+`modification`, `deprecated`, `documentation`, `defaultLibrary`. Only
+`full` is offered. A client that wants a range or a delta falls back
+to `full`, which is one parse. The roles mirror
+`tree-sitter-axiom/queries/highlights.scm`, so an editor with both
+sources sees the same colour from each.
+
+`highlights.scm` stays for the editors that have tree-sitter (Helix,
+Neovim, Emacs 29 and Zed). `queries/rainbows.scm` colours each
+bracket pair by its nesting depth, which semantic tokens don't do.
 `scripts/check-tree-sitter.sh` tests both against every `.ax` file in
 the repository.
 
-Editors that use tree-sitter (Helix, Neovim, Emacs 29 and Zed) get all
-of this. VS Code reads semantic tokens but not tree-sitter, so it gets
-no highlighting from this repository.
+The REPL colours Axiom a third way. `self_host/replhl.ax` paints
+source from the compiler's own lexer, because a REPL has no editor to
+consult.
 
-The REPL is the one place that colours Axiom another way.
-`self_host/replhl.ax` paints source from the compiler's own lexer,
-because a REPL has no tree-sitter grammar loaded and no editor to
-consult. An editor has both, and a second opinion there would only let
-the two drift apart.
+Tested by `tests/lsp/drive.py`.
 
 ## The cost rule
 
