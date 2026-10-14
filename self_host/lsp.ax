@@ -14541,6 +14541,13 @@
 (pub fn (SEM_H_MACHDR)
   22)
 
+; `(syntax/join a B)`: the parts of a name a template builds. They are
+; read as plain words, whatever the form around the join expects of
+; the name, as the tree-sitter queries read them.
+(pub :: SEM_H_JOIN Int)
+(pub fn (SEM_H_JOIN)
+  23)
+
 ; The contexts. EXPR is a body; TYPE is a type position, where an
 ; uppercase name is a type and a lowercase name a type variable;
 ; DATA is directly inside a `data`, so a nested form is a constructor
@@ -14683,9 +14690,11 @@
                   SEM_H_HANDLE
                   (if (|| (strEq word "for") (strEq word "syntax/for"))
                     SEM_H_FOR
-                    (if (lspHlIsKeyword st word SEM_C_EXPR)
-                      SEM_H_KW
-                      SEM_H_OTHER)))))))))))
+                    (if (strEq word "syntax/join")
+                      SEM_H_JOIN
+                      (if (lspHlIsKeyword st word SEM_C_EXPR)
+                        SEM_H_KW
+                        SEM_H_OTHER))))))))))))
 
 ; The context a form's OWN identifiers take once its head is known:
 ; `import` names modules, `data` holds constructors, the type-shaped
@@ -14701,7 +14710,7 @@
       SEM_C_DATA
       (if (|| (== hc SEM_H_STRUCT) (|| (== hc SEM_H_SIG) (|| (== hc SEM_H_TYPE) (|| (== hc SEM_H_SUBTYPE) (|| (== hc SEM_H_EXTERN) (== hc SEM_H_EFFECT))))))
         SEM_C_TYPE
-        (if (|| (== hc SEM_H_FN) (== hc SEM_H_MACRO))
+        (if (|| (== hc SEM_H_FN) (|| (== hc SEM_H_MACRO) (== hc SEM_H_JOIN)))
           SEM_C_EXPR
           ctx)))))
 
@@ -15544,9 +15553,9 @@
     0
     (if (|| (strEq word "true") (strEq word "false"))
       (lspHlEmit st s e SEM_KEYWORD SEM_M_LIB)
-      (if (&& head (== (strVecHas (memGetWordVec st 8) word) 1))
+      (if (&& head (&& (lspHlFormHead ctx word) (== (strVecHas (memGetWordVec st 8) word) 1)))
         (lspHlEmit st s e SEM_KEYWORD SEM_M_DEPRECATED)
-        (if (|| (&& head (lspHlIsKeyword st word ctx)) (|| (&& (== hc SEM_H_FOR) (lspHlIn word "in by")) (&& (== hc SEM_H_SUBTYPE) (lspHlIn word "is range"))))
+        (if (|| (&& head (&& (lspHlFormHead ctx word) (lspHlIsKeyword st word ctx))) (|| (&& (== hc SEM_H_FOR) (lspHlIn word "in by")) (&& (== hc SEM_H_SUBTYPE) (lspHlIn word "is range"))))
           (lspHlEmit st s e SEM_KEYWORD 0)
           (if (lspHlIsOpWord (memGetWordStr st 0) s e)
             (lspHlEmit st s e SEM_OPERATOR (if (!= (lspShapeBuiltinRes word) 0)
@@ -15554,10 +15563,25 @@
               0))
             (if (&& (== state 1) (== hc SEM_H_CAST))
               (lspHlEmitPacked st s e (lspHlTypeClass word))
-              (let ((o (lspHlOccAt st s)))
-                (lspHlEmitPacked st s e (if (!= o 0)
-                  (lspHlOccClass st o word head ctx)
-                  (lspHlFormClass st s e word head hc state ctx)))))))))))
+              ; A `parallel`'s region name is a region, as a
+              ; `region`'s is, though the walk records it as a binding.
+              (if (&& (== state 1) (== hc SEM_H_PARALLEL))
+                (lspHlEmit st s e SEM_REGION 0)
+                (let ((o (lspHlOccAt st s)))
+                  (lspHlEmitPacked st s e (if (!= o 0)
+                    (lspHlOccClass st o word head ctx)
+                    (lspHlFormClass st s e word head hc state ctx))))))))))))
+
+; Can a keyword stand at the head of a bracket in context `ctx`? Not
+; where the head is a binder or a field: `(let ((for 5)) ...)` binds a
+; variable named `for`, and `(struct S (consume : Int))` declares a
+; field named `consume`, as the parser reads them. `mut` heads a
+; binding or a field, and a `syntax/` word builds a name anywhere.
+(pub :: lspHlFormHead (-> Int String Bool))
+(pub fn (lspHlFormHead ctx word)
+  (if (|| (strEq word "mut") (strStartsWith word "syntax/"))
+    true
+    (! (|| (== ctx SEM_C_LETPAIR) (|| (== ctx SEM_C_FNHDR) (|| (== ctx SEM_C_MACHDR) (|| (== ctx SEM_C_LAMHDR) (|| (== ctx SEM_C_FORHDR) (|| (== ctx SEM_C_MACPAT) (|| (== ctx SEM_C_MACPATIN) (== ctx SEM_C_TYPE)))))))))))
 
 ; What an occurrence's key says. A local is a parameter or a variable
 ; by its binder's kind, declared at its binder, modified at a `set`,

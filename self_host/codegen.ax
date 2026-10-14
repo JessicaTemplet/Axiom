@@ -10,7 +10,7 @@
 (import Err)
 (import Path)
 (import parser)
-(import typecheck (tyResolve tyIsBareFloat))
+(import typecheck (tyResolve tyIsBareFloat declHasAxtag))
 (import namespace)
 (import diag)
 (import expand)
@@ -734,7 +734,38 @@
   (arity : Int)
   (stash : Int)
   (ret : Int)
-  (consume : Int))
+  (consume : Int)
+  (transfer : Int))
+
+; Word 10 of an FSig: 1 when the declaration carries
+; `;@axiom:result(owned)` (MM-LIFE-2n), so a call's type-variable
+; result is OWNED by the caller rather than lent. Read from the tags
+; `attachAxtags` left on either half of the declaration; a signature
+; built here before its `fn` is seen is marked when the `fn` arrives.
+(pub :: fsigTransfer (-> Int String Int))
+(pub fn (fsigTransfer cg name)
+  (let ((e (findFSigCg cg (mangledForCg cg name))))
+    (if (== e 0)
+      0
+      (memGetWord e 10))))
+
+; Mark every FSig whose `::` or `fn` carries `result(owned)`.
+(pub :: markTransferSigs (-> (Vec Int) (Vec Int) Int Int))
+(pub fn (markTransferSigs decls sigs i)
+  (if (>= i (vecLen decls))
+    0
+    (let ((d (vecGet decls i)))
+      {
+        (if (|| (== (nodeTag d) TAG_D_SIG) (== (nodeTag d) TAG_D_FN))
+          (if (== (declHasAxtag d "result(owned)") 1)
+            (let ((e (findFSig sigs (nodeAName d))))
+              (if (== e 0)
+                0
+                (memSetWord e 10 1)))
+            0)
+          0)
+        (markTransferSigs decls sigs (+ i 1))
+      })))
 
 (pub :: scanFloatSigs (-> (Vec Int) (Vec Int) Int (Vec Int)))
 (pub fn (scanFloatSigs decls sigs i)
@@ -754,6 +785,7 @@
                 (cgTakesEvidence (nodeTy d))
                 1
                 (- 0 1)
+                0
                 0
                 0
                 0)))
@@ -798,6 +830,7 @@
                   0
                   1
                   (arrowArity (nodeB f))
+                  0
                   0
                   0
                   0)))
@@ -14888,7 +14921,11 @@
       (_2 (memSetWord cg 13 fulls))
       (_2t (memSetWord cg 26 tcode))
       (_2p (parScan cg allDecls))
-      (_3 (memSetWord cg 15 (scanFloatSigs allDecls vecNew 0)))
+      (_3 (memSetWord cg 15 (let ((sigs (scanFloatSigs allDecls vecNew 0)))
+        {
+          (markTransferSigs allDecls sigs 0)
+          sigs
+        })))
       (_4 (memSetWord cg 19 vecNew))
     )
       (let ((cg0 (scanDecls allDecls cg 0)))
@@ -21552,8 +21589,13 @@
 (pub :: emitOverApplied (-> String (Vec Int) Int Int (Vec Int) Int Int))
 ;@axiom:effect(io)
 (pub fn (emitOverApplied fnName args stamp cg evs snode)
-  (if (isDefinedFnCg cg fnName)
-    (let ((ar (fnArityOfCg cg fnName)))
+  ; Asked by the MANGLED name: the index holds each declaration under
+  ; its own spelling, which for an imported function is `Mod$name`.
+  ; Asked by the bare name, an imported callee was never found, so
+  ; `((vecGet v 0) 41)` passed the 41 to `vecGet` itself and answered
+  ; an address (tests/stdlib/848-over-apply-imported.ax).
+  (if (isDefinedFnCg cg (mangledForCg cg fnName))
+    (let ((ar (fnArityOfCg cg (mangledForCg cg fnName))))
       (if (|| (<= (vecLen args) ar) (== ar 0))
         (emitCall
           fnName
@@ -22139,7 +22181,10 @@
             args
             regs
             (+ i 1))
-          (let ((lent (lendClass cg a)) (reg (cast String (vecGet regs i))))
+          (let ((lent (let ((l (lendClass cg a)))
+            (if (== l 0)
+              (transferClass cg a)
+              l))) (reg (cast String (vecGet regs i))))
             (releaseOwnedArgs
               (if (>= lent 2)
                 (let ((cgR (emitEvwRead cg)))
@@ -22171,7 +22216,7 @@
 (pub fn (argOwnedRelease cg fnName args i)
   (let ((cls (fnResultClass cg fnName)))
     (if (|| (== cls 0) (== cls 2))
-      (if (&& (|| (== (valueOwnedRef cg (vecGet args i)) 1) (!= (lendClass cg (vecGet args i)) 0)) (&& (== (isStaticSentinelNode cg (vecGet args i)) 0) (&& (== (isNullaryConNode cg (vecGet args i)) 0) (&& (== (& (fnCallStashMask cg fnName args) (| (paramBit i) (ownerBit i))) 0) (&& (== (& (fnConsumeMask cg fnName) (| (paramBit i) (ownerBit i))) 0) (|| (== cls 2) (== (& (fnRetMask cg fnName) (anyBit i)) 0)))))))
+      (if (&& (|| (== (valueOwnedRef cg (vecGet args i)) 1) (|| (!= (lendClass cg (vecGet args i)) 0) (!= (transferClass cg (vecGet args i)) 0))) (&& (== (isStaticSentinelNode cg (vecGet args i)) 0) (&& (== (isNullaryConNode cg (vecGet args i)) 0) (&& (== (& (fnCallStashMask cg fnName args) (| (paramBit i) (ownerBit i))) 0) (&& (== (& (fnConsumeMask cg fnName) (| (paramBit i) (ownerBit i))) 0) (|| (== cls 2) (== (& (fnRetMask cg fnName) (anyBit i)) 0)))))))
         1
         0)
       0)))
@@ -24096,6 +24141,11 @@
                 0))
             ; the same for a value a call lends: `letBorrowClass`
             (borrowCls (letBorrowClass cg1 valExpr name body))
+            ; a value a call TRANSFERS is already the binding's share
+            ; (MM-LIFE-2n): nothing to take, and the same hand-back at
+            ; scope end as a borrowed one - plain for a counted type,
+            ; under the evidence bit for a type variable
+            (ownCls (letTransferClass cg1 valExpr name body))
           )
             ; a `let` of an OWNING `mut` slot's value takes its own share
             ; whatever the walk says: a `set` of the slot releases what it
@@ -24113,7 +24163,7 @@
                   (emitRetainIfEvBit cg1 valReg (- borrowCls 2))
                   cg1))))
               (let ((releasable
-                (if (|| (== fieldAlias 1) (== borrowCls 1))
+                (if (|| (== fieldAlias 1) (|| (== borrowCls 1) (== ownCls 1)))
                   1
                   (if (== slotAlias 1)
                     (let ((bnd (binderSummary body)))
@@ -24201,12 +24251,15 @@
                           ; a share taken under an evidence bit goes back
                           ; under the same bit; a jump out of the body
                           ; skips it, which leaks
-                          (if (&& (>= borrowCls 2) (!= (memGetWord cgB 31) 1))
+                          (if (&& (|| (>= borrowCls 2) (>= ownCls 2)) (!= (memGetWord cgB 31) 1))
                             (let (
                               (res (strDup (memGetWordStr cgB 2)))
                               (cgW (emitEvwRead cgB))
+                              (bitCls (if (>= borrowCls 2)
+                                borrowCls
+                                ownCls))
                             )
-                              (let ((cgR (emitRcIfBitOf cgW valReg (- borrowCls 2) (strDup (memGetWordStr cgW 2)) 0)))
+                              (let ((cgR (emitRcIfBitOf cgW valReg (- bitCls 2) (strDup (memGetWordStr cgW 2)) 0)))
                                 {
                                   (memSetWord cgR 2 res)
                                   cgR
@@ -24235,12 +24288,57 @@
         0
         cls))))
 
+; The same question for a value a call transfers (`transferClass`): the
+; class to hand the binding's own share back under at scope end when
+; the binding does not escape, else 0 (the share then leaves with it).
+(pub :: letTransferClass (-> Int Int String Int Int))
+(pub fn (letTransferClass cg valExpr name body)
+  (let ((cls (transferClass cg valExpr)))
+    (if (== cls 0)
+      0
+      (if (== (escapes cg name body 1 (binderSummary body)) 1)
+        0
+        cls))))
+
 ; The class of a counted value a call LENDS: a signed global applied at
 ; its arity whose declared result is a type variable, which retains
 ; nothing on return (`vecGet`), at a counted instantiation. 1 for a
 ; counted type, `2+k` for this function's type variable k, 0 otherwise.
 (pub :: lendClass (-> Int Int Int))
 (pub fn (lendClass cg valExpr)
+  (if (== (tyvarResultTransfers cg valExpr) 1)
+    0
+    (tyvarResultClass cg valExpr)))
+
+; The class of a counted value a call TRANSFERS: the same shape as a
+; lent one, from a function that says `;@axiom:result(owned)`
+; (MM-LIFE-2n, `vecPop`), so the caller holds the share and must hand
+; it back - at a `let`'s scope end, after a call it was an argument
+; to, or on the spot when it is discarded. 0 for a lent or unknown
+; result.
+(pub :: transferClass (-> Int Int Int))
+(pub fn (transferClass cg valExpr)
+  (if (== (tyvarResultTransfers cg valExpr) 1)
+    (tyvarResultClass cg valExpr)
+    0))
+
+; Does the call's callee say `result(owned)`?
+(pub :: tyvarResultTransfers (-> Int Int Int))
+(pub fn (tyvarResultTransfers cg valExpr)
+  (if (!= (nodeTag valExpr) TAG_E_APP)
+    0
+    (let ((hd (spineHead valExpr)))
+      (if (!= (nodeTag hd) TAG_E_VAR)
+        0
+        (fsigTransfer cg (nodeAName hd))))))
+
+; The class of a counted type-variable result: a signed global applied
+; at its arity whose declared result is a type variable, at a counted
+; instantiation. 1 for a counted type, `2+k` for this function's type
+; variable k, 0 otherwise. Whether the share is lent or transferred is
+; the callee's claim, read by `lendClass` and `transferClass`.
+(pub :: tyvarResultClass (-> Int Int Int))
+(pub fn (tyvarResultClass cg valExpr)
   (if (!= (nodeTag valExpr) TAG_E_APP)
     0
     (let ((hd (spineHead valExpr)))
@@ -26651,7 +26749,25 @@
             false
             (== (valueOwnedRef cg1 e) 1))
             (emitReleaseOf cg1 (strDup (memGetWordStr cg1 2)))
-            cg1)))
+            ; a TRANSFERRED type-variable result discarded here is
+            ; the caller's share too (MM-LIFE-2n): plain for a
+            ; counted type, under the evidence bit for a variable
+            (let ((tcls (if (>= (+ i 1) (vecLen exprs))
+              0
+              (transferClass cg1 e))))
+              (if (== tcls 1)
+                (emitReleaseOf cg1 (strDup (memGetWordStr cg1 2)))
+                (if (>= tcls 2)
+                  (let (
+                    (res (strDup (memGetWordStr cg1 2)))
+                    (cgW (emitEvwRead cg1))
+                  )
+                    (let ((cgR (emitRcIfBitOf cgW res (- tcls 2) (strDup (memGetWordStr cgW 2)) 0)))
+                      {
+                        (memSetWord cgR 2 res)
+                        cgR
+                      }))
+                  cg1))))))
           (emitSeq exprs cg2 (+ i 1)))))))
 
 ; A bare string *is* a `Str`: it evaluates to the address of the static

@@ -1,6 +1,7 @@
 # axiom explain, every code and every spelling.
 # AX1001-AX5001 were materialized from the Rust compiler at commit 1041f11 on
 # 2026-08-08; AX3018 and above (macros, visibility, limits, traits, effects, the
+  [93mAX3123[0m  a `?` with no tail to propagate to  (try-position)
 # FFI boundary, type soundness) postdate it and originate in self_host/explain.ax. The list COLOUR is RECONSTRUCTED, not captured. AX2004 was REWRITTEN on 2026-08-18 when the `extern` FFI landed: its captured text said generated code links no C library, which stopped being true for a program that binds a std Rust crate. AX3010 was REWRITTEN on 2026-08-25 when it was PROMOTED from a warning to an ERROR: its captured text described a mismatch an agent could correct at leisure, and it now refuses the build. On 2026-09-04 twenty more were EXPANDED - AX1002-AX1005, AX2001-AX2003, AX3001-AX3009, AX3011 and AX4001-AX4003, every one under sixty words against a median of 166 - each to what the code means, why the compiler fires it, a program that draws it (run through the tree's compiler with --diagnostic-format=ai before it was written in), the fix, and the neighbouring codes; AX1002's captured text had also said a string ends at the end of its line, and the lexer reads to the next quote or the end of the file. Those twenty-two are the codes in the AX1001-AX5001 range that are no longer the 2026-08-08 bytes. AX2004 was EXPANDED on 2026-09-20 for the `cond` removal: the `cond` paragraph (what the variadic `if` covers, the rewrite, the one deliberate join change) and `cond` joining the AX2001 neighbour list.
 ### explain --list
 [1;96mKnown Axiom diagnostic codes:[0m
@@ -102,7 +103,7 @@
   [93mAX3095[0m  a `;@axiom:precondition(...)` tag, which was removed  (precondition-removed)
   [93mAX3096[0m  a type alias with type parameters  (parameterised-alias)
   [93mAX3110[0m  an effect claim nothing in the compiler can check  (axtag-never-checked)
-  [93mAX3123[0m  a `?` with no tail to propagate to  (try-position)
+  [93mAX3116[0m  a `result(...)` claim the compiler cannot read  (result-claim)
   [93mAX4001[0m  no `main` function  (missing-main)
   [93mAX4002[0m  code generation failed  (codegen-failure)
   [93mAX4003[0m  external toolchain command failed  (toolchain-failure)
@@ -2989,6 +2990,32 @@ and it measures IO, Alloc, Mut and Unsafe.
 A claim naming an effect the walk DOES produce stays AX3010 when the
 body does not support it.
 
+### explain AX3116
+AX3116 - a `result(...)` claim the compiler cannot read
+
+`;@axiom:result(owned)` says that a function's type-variable result
+carries a share the caller owns, so the caller's code releases it: at
+a `let`'s scope end, after a call it was an argument to, or on the
+spot when it is discarded. `vecPop` makes the claim: it zeroes the
+vector's slot and hands the element's share to the caller, which a
+type variable result could not say by itself (docs/memory-model.md
+MM-LIFE-2n).
+
+    ;@axiom:result(lent)
+    (:: top (-> (Vec a) a))          ; refused: the one value is `owned`
+
+    ;@axiom:result(owned)
+    (:: first (-> (Vec a) a))        ; refused: `first` is not trusted
+    (fn (first v) (vecGet v 0))
+
+The checker cannot see that a share was transferred through a raw
+load, so the claim is accepted only inside a trusted encapsulation: a
+declaration that also says `;@axiom:effect(unsafe)` on the same half,
+or whose body performs an unsafe operation itself. A safe function's
+result ownership is inferred from its body and needs no claim.
+
+Write `result(owned)` beside `effect(unsafe)`, or drop the claim.
+
 ### explain AX3123
 AX3123 - a `?` with no tail to propagate to
 
@@ -3484,7 +3511,7 @@ run `axiom explain --list` to see all known codes, or name a keyword, type, effe
   [93mAX3095[0m  a `;@axiom:precondition(...)` tag, which was removed  (precondition-removed)
   [93mAX3096[0m  a type alias with type parameters  (parameterised-alias)
   [93mAX3110[0m  an effect claim nothing in the compiler can check  (axtag-never-checked)
-  [93mAX3123[0m  a `?` with no tail to propagate to  (try-position)
+  [93mAX3116[0m  a `result(...)` claim the compiler cannot read  (result-claim)
   [93mAX4001[0m  no `main` function  (missing-main)
   [93mAX4002[0m  code generation failed  (codegen-failure)
   [93mAX4003[0m  external toolchain command failed  (toolchain-failure)

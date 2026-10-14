@@ -144,7 +144,9 @@ depth and keeps working while the server is busy.
 
 VS Code has no tree-sitter, so its highlighting comes from the TextMate
 grammar in the extension at [`editors/vscode/`](../editors/vscode/README.md)
-and from the server's semantic tokens. The Neovim, Helix and VS Code
+and from the server's semantic tokens. The tree-sitter queries give each
+token the role VS Code gives it, apart from uses that only resolution
+can colour (see the [grammar's notes](../tree-sitter-axiom/README.md#colours-match-vs-code)). The Neovim, Helix and VS Code
 sections each end with a check that tells you which of the two pieces
 you have.
 
@@ -297,16 +299,24 @@ because Helix reads the whole string as one command name. With no
 `textDocument/formatting`, which runs the same `fmtFormat` as the
 command.
 
-Then build the grammar and install the queries. Helix loads queries
-from its runtime directory, not from the grammar's own `queries/`:
+Then build the grammar and link its queries into Helix's runtime.
+Link all three files so checkout updates also update the colours,
+local bindings and rainbow brackets:
 
 ```bash
 mkdir -p ~/.config/helix/runtime/queries/axiom
-cp /path/to/axiom/tree-sitter-axiom/queries/highlights.scm \
-   /path/to/axiom/tree-sitter-axiom/queries/rainbows.scm \
-   ~/.config/helix/runtime/queries/axiom/
+for query in highlights locals rainbows; do
+  ln -sfn /path/to/axiom/tree-sitter-axiom/queries/$query.scm \
+    ~/.config/helix/runtime/queries/axiom/$query.scm
+done
 hx --grammar build            # compiles the [[grammar]] entries above
 ```
+
+Use your checkout's absolute path in both `source` and the links.
+After a grammar update, run `hx --grammar build` again and restart
+Helix. Its health check reports whether files exist; an older parser
+or copied query can still report a tick while missing newer syntax,
+such as `for`, `in` or `by`.
 
 Always check the result. `hx --health axiom` must show a green tick
 for the server, the parser and the highlight queries:

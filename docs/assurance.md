@@ -82,6 +82,7 @@ is in [the memory model](memory-model.md)).
 | R-B9 | A recovery point allocates nothing, and a contained trap leaves the heap consistent | `MM-ALLOC-23` | `tests/stdlib/560-recover-record.ax` |
 | R-B10 | A typed read or write checks its range before the kernel sees it | `MM-EXEC-9f` | `tests/stdlib/610-typed-io-bounds.ax` |
 | — | Releasing the last share of a `File`, socket or database connection closes it once | `MM-EXEC-17` | `tests/stdlib/697-resource-owner.ax`, `tests/stdlib/698-file-lifetime.ax` |
+| — | An element `vecPop` hands over is released by the caller, through the `result(owned)` claim a trusted function makes | `MM-LIFE-2n` | `tests/stdlib/846-vec-pop-release.ax`, `scripts/check-container-reclaim.sh` |
 | — | A `mut` local of a reference type releases the value a `set` overwrites and its last value at scope end, each once, and a lambda that captured it keeps its own share | `MM-MUT-1`, `MM-VAL-16` | `tests/stdlib/708-mut-slot-reassign.ax`, `tests/stdlib/709-mut-slot-capture.ax` |
 
 A `mut` local releases only when the compiler can show that no read of
@@ -143,8 +144,8 @@ the neighbourhood of the corpus.
 
 ## Known defects
 
-- A counted element taken out of a `Vec` by `vecPop`, and a vector
-  passed straight to `vecGet` without a binding, are never released.
+- A vector passed straight to `vecGet` without a binding is never
+  released.
 - Safe code can still turn a reference into a word with `(cast Int v)`,
   or by storing it in an `Int` container slot or through `memSetWord`.
   A value that leaves this way stops being tracked. A function result

@@ -51,7 +51,8 @@ integrator would still need.
 | A container owns its elements: a `Vec` is released at scope end, and ownership follows the element type, not the constructor | Done | `MM-LIFE-2m`, `tests/stdlib/770-vec-files.ax` |
 | An element passed beside its container to a function that overwrites its slot keeps a share, as one bound by a `let` does | Done | `MM-LIFE-2m`, `tests/stdlib/778-vec-lent-argument.ax` |
 | A field passed beside its struct, or a result typed by a type variable, keeps a share for the call | Not started | `MM-LIFE-2m` |
-| An element taken out with `vecPop` is released, and a vector passed straight to `vecGet` is not leaked | Not started | `MM-LIFE-2m` |
+| An element taken out with `vecPop` is released: a trusted function declares `result(owned)` and the caller hands the share back | Done | `MM-LIFE-2n`, `tests/stdlib/846-vec-pop-release.ax` |
+| A vector passed straight to `vecGet` is not leaked | Not started | `MM-LIFE-2m` |
 | `vecFree` and `mapFree` leave safe code, so an early drop can't free a block still in use | Not started | |
 | CI builds the compiler with a poisoned allocator and checks it still reaches its fixpoint | Not started | |
 | No cast, `Int` container or raw store lets a heap value become an untracked word in safe code | Not started | `MM-VAL-24` |
@@ -118,6 +119,8 @@ integrator would still need.
 | `;@axiom:nolint` quiets hints and warnings by name, code or group, per declaration or per file, and never an error | Done |
 | The language server sends semantic tokens, so every editor colours keywords, functions, macros, constructors, fields and effects apart from variables | Done |
 | A VS Code extension ships in the repository, with a TextMate grammar and the language client (`editors/vscode/`) | Done |
+| Tree-sitter colours each token the way VS Code does, gated character by character | Done |
+| Tree-sitter colours a use of a top-level function or macro, or of an imported name, by what it resolves to | Not started |
 | The VS Code extension is published to the marketplace | Not started |
 | `axiom doc` renders the documentation and the library reference locally and opens them in your browser | Done |
 | Debug information (DWARF), a message on SIGSEGV, and inlined frames in backtraces | Not started |

@@ -269,7 +269,7 @@ gate_axdl_unknown_kind() {
 # from the tree first, which is what makes an ablation of `self_host/`
 # visible to it.
 #
-# Ninety-four gates call this, so `$AXIOM_AXC` lets one CI step build
+# Ninety-five gates call this, so `$AXIOM_AXC` lets one CI step build
 # the compiler once (`scripts/build-shared-axc.sh`). That cache is
 # content-addressed: the binary is used only when `$AXIOM_AXC.stamp`
 # equals `gate_source_stamp` for the tree as it is now. Change a byte
