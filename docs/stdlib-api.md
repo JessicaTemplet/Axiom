@@ -1628,7 +1628,7 @@ Intern - a string interner, in Axiom.
 | `internSlotOf` | value | `(-> String Int Int)` |  | The slot `s` probes first, in [0, cap). |
 | `internNew` | value | `Int` | `Alloc,Mut` | `internDefaultCap` is a *slot* count, so it is passed straight to `internAllocTable` and not through `internWithCapacity`, which takes a *string* count and doubles it. Routing it through the latter would make a fresh interner 128 slots while its own documentation said 64. |
 | `internWithCapacity` | value | `(-> Int Int)` | `Alloc,Mut` | An interner sized so `want` distinct strings fit without rehashing. |
-| `internFree` | value | `(-> Int Int)` | `Unsafe` | Hand `it` back: the slot table, the `Vec`, and one share of every string in it. Answers 0, as `Vec.vecFree` and `Map.mapFree` do. `it` must be a live interner owning this share. Its raw Int handle and any unretained views into it must not be used after release. |
+| `internFree` | value | `(-> Int Int)` | `Unsafe` | Hand `it` back: the slot table, the `Vec`, and one share of every string in it. Answers 0. `it` must be a live interner owning this share. Its raw Int handle and any unretained views into it must not be used after release. |
 | `internCap` | value | `(-> Int Int)` |  | How many strings the table can hold before it grows. |
 | `internCount` | value | `(-> Int Int)` |  | How many distinct strings have been interned. Ids are exactly 0..internCount-1, with no gaps - that is what "dense" means here, and it is what lets a caller size a side table by `internCount` and index it by id. |
 | `internLookup` | value | `(-> Int Int String)` | `Alloc,Mut` | The string with id `id`, or an empty `Str` if `id` was never handed out. |
@@ -1698,7 +1698,7 @@ Raw consumers require live Cereal handles; new code uses typed values.
 
 ## `Map`
 
-`stdlib/Map.ax` — 24 public names
+`stdlib/Map.ax` — 23 public names
 
 Map - an open-addressing hash map from `Int` keys to word values, in
 Axiom.
@@ -1711,7 +1711,6 @@ Axiom.
 | `mapNew` | value | `Map` | `Alloc,Mut` | An empty `Map` with `mapDefaultCap` slots. |
 | `mapWithCapacity` | value | `(-> Int Map)` | `Alloc,Mut` | An empty `Map` sized so that `want` entries fit without rehashing. |
 | `mapRoundUpPow2` | value | `(-> Int Int)` |  | `n` rounded up to a power of two, at least `mapDefaultCap`. |
-| `mapFree` | value | `(-> Map Int)` | `Unsafe` | Hand `m` back early: the three arrays go with it, and on a table that owns its values so does one share of every value still in it. Answers 0, as `Vec.vecFree` does and for the same reason. The caller must own the released share and must not use the handle again; a caller that simply stops using a map needs nothing here, because the compiler releases it at the end of its scope. |
 | `mapLen` | value | `(-> Map Int)` |  | How many keys the map holds. |
 | `mapCap` | value | `(-> Map Int)` |  | How many slots the map has before it grows. |
 | `mapUsed` | value | `(-> Map Int)` |  | Slots that are live or tombstoned. Exposed because it is the number that explains a rehash, and a test that could not see it would have to infer growth from timing. |
@@ -2436,7 +2435,7 @@ Utf8 - the character layer over `Str`'s bytes.
 
 ## `Vec`
 
-`stdlib/Vec.ax` — 21 public names
+`stdlib/Vec.ax` — 20 public names
 
 Vec - a growable array of machine words, in Axiom.
 
@@ -2444,7 +2443,6 @@ Vec - a growable array of machine words, in Axiom.
 |---|---|---|---|---|
 | `vecNew` | value | `(Vec a)` | `Alloc,Mut` | An empty `Vec` with `vecDefaultCap` capacity. |
 | `vecWithCapacity` | value | `(-> Int (Vec a))` | `Alloc,Mut` | An empty `Vec` that can hold at least `cap` elements without growing. |
-| `vecFree` | value | `(-> (Vec a) Int)` | `Unsafe` | Hand `v` back early. Its data block goes with it, and, when the vector owns its elements, so does one share of each. The caller must own the share being released and must not use the handle again: the compiler releases a `Vec` at the end of its scope, so a caller that simply stops using one needs nothing here. |
 | `vecOwnsRefs` | value | `(-> (Vec a) Bool)` |  | Whether this vector holds a share of every element - kind 1 in the module comment. It reads word 3 of the header, not the data block's shape word: see `vecBuild`. |
 | `vecLen` | value | `(-> (Vec a) Int)` |  | How many elements the vector holds. |
 | `vecCap` | value | `(-> (Vec a) Int)` |  | How many elements the vector can hold before it grows. |

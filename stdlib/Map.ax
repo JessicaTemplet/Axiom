@@ -326,10 +326,10 @@
   ; `(cast Map m)` at the return below is a cast to a REFERENCE type in
   ; return position, which codegen retains - so the share this function
   ; hands its caller is already taken. Retaining `m` here as well leaves
-  ; the header permanently at 2 and makes `mapFree` a no-op. MEASURED,
+  ; the header permanently at 2 and makes a release a no-op. MEASURED,
   ; with a refcount probe reading the header word at offset -16, over
   ; 0/10/110 inserts: both retains gives 2/2/2 and the block is never
-  ; filed; this one alone gives 1/1/1 and `mapFree` files it. The
+  ; filed; this one alone gives 1/1/1 and a release files it. The
   ; container-reclaim fixture separates the two at 83.1 MiB against
   ; 1.30 MiB max RSS.
   (let (
@@ -357,21 +357,6 @@
       (memSetWord m 6 0)
       (cast Map m)
     }))
-
-;; Hand `m` back early: the three arrays go with it, and on a table that
-;; owns its values so does one share of every value still in it. Answers
-;; 0, as `Vec.vecFree` does and for the same reason. The caller must own
-;; the released share and must not use the handle again; a caller that
-;; simply stops using a map needs nothing here, because the compiler
-;; releases it at the end of its scope.
-(pub :: mapFree (-> Map Int))
-;@axiom:effect(unsafe)
-(pub fn (mapFree m)
-  {
-    (__release
-      (cast Int m))
-    0
-  })
 
 ; ------------------------------------------------------------------
 ; Accessors
@@ -721,7 +706,7 @@
 ; every RETURN. A mutator declared `(-> Map ... Map)` therefore emits an
 ; unpaired `axiom_retain(%m)` on each call. Measured 2026-09-03 with a
 ; refcount probe on the header word at offset -16: the count ran 1 -> 3
-; -> 6 over 110 inserts, `mapFree` could then never reach zero, and
+; -> 6 over 110 inserts, a release could then never reach zero, and
 ; `scripts/check-container-reclaim.sh`'s fixture went from 1.30 MiB to
 ; 83.1 MiB of max RSS - while 080, 200 and 473 all still matched their
 ; goldens. Nothing in the tree chained on the result anyway: there were

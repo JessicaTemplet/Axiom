@@ -53,7 +53,7 @@ integrator would still need.
 | A field passed beside its struct, or a result typed by a type variable, keeps a share for the call | Not started | `MM-LIFE-2m` |
 | An element taken out with `vecPop` is released: a trusted function declares `result(owned)` and the caller hands the share back | Done | `MM-LIFE-2n`, `tests/stdlib/846-vec-pop-release.ax` |
 | A vector passed straight to `vecGet` is not leaked | Not started | `MM-LIFE-2m` |
-| `vecFree` and `mapFree` leave safe code, so an early drop can't free a block still in use | Not started | |
+| `vecFree` and `mapFree` leave safe code, so an early drop can't free a block still in use | Done | `tests/stdlib/406-array-form-large-block.ax`, `tests/stdlib/489-map-free.ax` |
 | CI builds the compiler with a poisoned allocator and checks it still reaches its fixpoint | Not started | |
 | No cast, `Int` container or raw store lets a heap value become an untracked word in safe code | Not started | `MM-VAL-24` |
 | Raw-address functions leave the public library, so safe code can't forge an address | Not started | |

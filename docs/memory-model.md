@@ -697,7 +697,7 @@ needs no tag. `vecPush`, `concat` and `mapInsert` are trusted.
 a program is one `grep`.
 
 Functions that take a raw address or handle are trusted too, such as
-`memGetWord`, `vecGetStr`, `vecFree` and `sysRandomBytes`. That is the
+`memGetWord`, `vecGetStr` and `sysRandomBytes`. That is the
 trade-off: safe code can still crash by passing one of them a bad
 address or handle, because an `Int` carries no proof of what it points
 at. State a condition the arguments can show as a `;@axiom:pre(...)`
@@ -3112,10 +3112,10 @@ reclaiming at zero), or, where the event says so, neither:
    `MM-ALLOC-9a`'s sixteen bytes per loop entry.
 
 A callee that ends a parameter's share *consumes* it, and neither event
-1 nor event 3 applies to that handoff. `Map.mapFree`'s `(__release
-(cast Int m))` ends the caller's share, so a `let`-bound map passed to
-it takes no scope-end release, and an owned temporary handed to it is
-not released after the call. The compiler records this in
+1 nor event 3 applies to that handoff. A `(__release (cast Int x))` on a
+parameter ends the caller's share, so a `let`-bound container passed to
+such a callee takes no scope-end release, and an owned temporary handed
+to it is not released after the call. The compiler records this in
 `FSig.consume` (`fnConsumeMask` in `self_host/codegen.ax`), computed in
 the flow fixpoint beside `stash`. Every caller-side release decision
 reads it. The return path never does, because a consumed parameter
@@ -4862,8 +4862,9 @@ These leak, which is the safe direction:
 - a container that holds itself (`MM-LIFE-3`);
 - an `Intern`, whose handle is an `Int`, until `internFree`.
 
-`vecFree` and `mapFree` still end a container early. As after any
-release, using the handle afterwards is a use after free.
+No public function ends a container early: a container is released
+when its last reference goes, and using a handle after that release
+is a use after free.
 
 **MM-LIFE-2n (H). A trusted function can hand its type-variable result
 over.** A call whose declared result is a type variable answers a value
