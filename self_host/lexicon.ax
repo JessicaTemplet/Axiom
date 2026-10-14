@@ -50,7 +50,7 @@
 ;; the word is not in the lexicon.
 (pub :: lexKind (-> String String))
 (pub fn (lexKind w)
-  (if (lexIn w "fn lambda let set if match while for data struct type subtype effect handle region parallel macro emacro import pub extern syntax/for alloc begin cond consume define union foreign trait impl")
+  (if (lexIn w "fn lambda let set if match while for data struct type subtype effect handle region parallel macro emacro import pub extern syntax/for alloc begin cond consume define union foreign trait impl try")
     "keyword"
     (if (lexIn w "mut in by is range :: -> .. ? _ cast sizeof alignof asm syntax/join syntax/binders syntax/constructors syntax/arity syntax/fields decl")
       "form"
@@ -125,6 +125,8 @@
       "(begin a b c)         ; removed: write { a b c }"
       (if (strEq w "cond")
         "(cond (t1 b1) (t2 b2) else)   ; removed: write (if t1 b1 t2 b2 else)"
+        (if (strEq w "try")
+          "(try x e body)        ; removed: write (let ((x e?)) body)"
         (if (strEq w "consume")
           "(consume x)           ; removed"
           (if (strEq w "define")
@@ -135,7 +137,7 @@
                 "(foreign ...)         ; removed: write (extern ...)"
                 (if (|| (strEq w "trait") (strEq w "impl"))
                   "(trait Name ...)  (impl Name for Type ...)   ; removed"
-                  (lexFormWords w))))))))))
+                  (lexFormWords w)))))))))))
 
 (:: lexFormWords (-> String String))
 (fn (lexFormWords w)
@@ -302,6 +304,8 @@
       "Removed. Sequence expressions with a brace block, `{ a b c }`, which answers its last expression. The compiler refuses the word with `AX2004`."
       (if (strEq w "cond")
         "Removed. Write the chain with `if`: `(if t1 b1 t2 b2 else)` nests as `(if t1 b1 (if t2 b2 else))`. The compiler refuses the word with `AX2004`."
+        (if (strEq w "try")
+          "Removed. `(try x e body)` bound `x` to the `Ok` payload of `e` and answered an `Err` unchanged; the postfix `?` does that in place, `(let ((x e?)) body)`. The compiler refuses the word with `AX2004`."
         (if (strEq w "consume")
           "Removed. It was a parse-time marker that enforced nothing. Ownership follows the memory model's rules without it; the compiler refuses the word with `AX2004`."
           (if (strEq w "define")
@@ -312,7 +316,7 @@
                 "Removed. Bind native code with `extern`, which names the crate and checks each item's type. The compiler refuses the word with `AX2004`."
                 (if (lexIn w "trait impl")
                   "Removed. Traits and impls are not part of the language; write the function you want, or derive one with a macro such as `deriveEq`. The compiler refuses the word with `AX2004`."
-                  (lexDocForm w))))))))))
+                  (lexDocForm w)))))))))))
 
 (:: lexDocForm (-> String String))
 (fn (lexDocForm w)
@@ -495,7 +499,7 @@
                                         "calling-rust"
                                         (if (strEq w "asm")
                                           "inline-assembly"
-                                          (if (lexIn w "alloc begin cond consume define union foreign trait impl")
+                                          (if (lexIn w "alloc begin cond consume define union foreign trait impl try")
                                             "removed-features"
                                             (if (lexIn w "cast sizeof alignof")
                                               "types"
@@ -669,6 +673,7 @@
       (vecPush v "foreign")
       (vecPush v "trait")
       (vecPush v "impl")
+      (vecPush v "try")
       (vecPush v "mut")
       (vecPush v "in")
       (vecPush v "by")

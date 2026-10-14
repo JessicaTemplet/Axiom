@@ -2,7 +2,7 @@
 
 Choose a module by what you want to do. These recipes use public APIs;
 the [generated API](stdlib-api.md) lists every signature and effect.
-Import `Err` when working with `Result`, and use `try` to propagate errors.
+Import `Err` when working with `Result`, and use `?` to propagate errors.
 
 | Task | Modules |
 |---|---|
@@ -79,13 +79,16 @@ processes, the environment, the clock and signals.
 (:: main (Result Int Error))
 ;@axiom:effect(io)
 (fn (main)
-  (try _ (writeFile "note.txt" "hello\n")
-    (try f (openPath "note.txt" oRdonly)
-      (try text (readAll f)
-        {
-          (writeStr stdout text)
-          (try _ (removeFile "note.txt") (Ok 0))
-        }))))
+  {
+    (writeFile "note.txt" "hello\n")?
+    (let ((f (openPath "note.txt" oRdonly)?)
+          (text (readAll f)?))
+      {
+        (writeStr stdout text)
+        (removeFile "note.txt")?
+        (Ok 0)
+      })
+  })
 ```
 
 ```text
@@ -128,8 +131,8 @@ API: [IO](stdlib-api.md#io), [Path](stdlib-api.md#path),
 
 ## Err and Fallible
 
-`Result a Error` is `Ok a` or `Err Error`. `(try x operation body)`
-binds a successful value and evaluates `body`, or returns the failure.
+`Result a Error` is `Ok a` or `Err Error`. `operation?` answers the
+successful value, or returns the failure from the function you are in.
 Use `withContext` to add context and `errorText` to render it.
 
 `mapOk`, `mapErr` and `andThen` compose results. `unwrapOr` supplies a

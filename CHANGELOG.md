@@ -16,6 +16,14 @@ its changelog too.
 
 ## Unreleased
 
+- `try` is removed; `?` is how an error propagates. Every `try` in the
+  standard library, the tests and the examples is now a `?`: a chain of
+  them is one `let` with a binding per step, and the 46 whose value an
+  expression around them still used are written as the match the macro
+  expanded to. The word stays reserved, so old source gets `AX2004`
+  with the rewrite. **BREAKING**: `compat/BREAKING` names it. Tested by
+  `tests/diagnostics/1303-try-removed.axbad`.
+
 - Two `?` defects fixed. `(if ...)?` and `{ ... }?` crashed the parser,
   which read the operand's span to start the `?`'s and an `if` or a
   block has none; the `?` now starts its own span there. And the

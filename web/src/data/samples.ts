@@ -434,11 +434,11 @@ compilation failed due to 1 previous error`,
     file: "settings.ax",
     tab: "Errors",
     title: "Three steps, one error path",
-    lede: "Failure is a value. `Result` carries it, `try` returns early on it, and `withContext` records which step failed.",
+    lede: "Failure is a value. `Result` carries it, `?` hands it back, and `withContext` records which step failed.",
     points: [
       { at: "(withContext (okOr (strParseInt text) bad) (concat \"reading \" name))))", text: "`okOr` turns a missing number into an error with a message." },
       { at: "(withContext (mulChecked chunk parts) \"sizing the upload\"))", text: "`mulChecked` fails where `*` would wrap around." },
-      { at: "(match (try size (number \"chunk\" chunk)", text: "`try` binds each success and stops at the first failure." },
+      { at: "(let ((size (number \"chunk\" chunk)?)", text: "`?` binds each success and stops at the first failure." },
     ],
     docs: { label: "The error model", href: `${LIB}docs/error-model.md` },
     output: `4096 x 256 = 1048576 bytes
@@ -458,10 +458,16 @@ product is not representable while sizing the upload`,
 (fn (upload chunk parts)
   (withContext (mulChecked chunk parts) "sizing the upload"))
 
+(:: sized (-> String String (Result Int Error)))
+(fn (sized chunk parts)
+  (let ((size (number "chunk" chunk)?)
+        (n (number "parts" parts)?))
+    (upload size n)))
+
 (:: report (-> String String Int))
 ;@axiom:effect(io)
 (fn (report chunk parts)
-  (match (try size (number "chunk" chunk) (try n (number "parts" parts) (upload size n)))
+  (match (sized chunk parts)
     ((Ok total) (println "{chunk} x {parts} = {total} bytes"))
     ((Err e) (println (errorText e)))))
 
@@ -905,7 +911,7 @@ ok   testOlder
     title: 'Read TOML, check a field, write JSON',
     lede: '`Cereal` decodes JSON, TOML and YAML into one typed value. A codec reads each field, and a missing or mistyped one is an error that names it.',
     points: [
-      { at: '(cerealDecode CerealToml toml)', text: 'Decoding returns a Result, and try hands an error straight back.' },
+      { at: '(cerealDecode CerealToml toml)', text: 'Decoding returns a Result, and `?` hands an error straight back.' },
       { at: '(cerealField cerealIntCodec config "replicas")', text: 'A missing or non-integer field is an Error naming replicas.' },
       { at: '(cerealEncode CerealJson config)))))', text: 'The same value writes out as JSON, TOML or YAML.' },
     ],
@@ -917,15 +923,11 @@ ok   testOlder
 
 (:: toJson (-> String (Result String Error)))
 (fn (toJson toml)
-  (try
-    config
-    (cerealDecode CerealToml toml)
-    (try
-      replicas
-      (cerealField cerealIntCodec config "replicas")
-      (if (< replicas 1)
-        (Err (mkError 22 "replicas must be at least 1"))
-        (cerealEncode CerealJson config)))))
+  (let ((config (cerealDecode CerealToml toml)?)
+        (replicas (cerealField cerealIntCodec config "replicas")?))
+    (if (< replicas 1)
+      (Err (mkError 22 "replicas must be at least 1"))
+      (cerealEncode CerealJson config))))
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -1007,8 +1009,8 @@ ok   testOlder
     title: 'Normalise a timestamp, then add a duration',
     lede: '`Chrono` validates calendar values and returns a Result for parsing and arithmetic. An offset-bearing timestamp can be normalised to UTC; the returned date-time holds no zone field.',
     points: [
-      { at: '(try start (datetimeParseUtc "2024-02-29T23:30:00+02:00")', text: 'The +02:00 offset is applied before the naive UTC date-time is returned.' },
-      { at: '(try delay (durationParse "PT1H30M")', text: 'try binds each success and propagates an error at either step.' },
+      { at: '(let ((start (datetimeParseUtc "2024-02-29T23:30:00+02:00")?)', text: 'The +02:00 offset is applied before the naive UTC date-time is returned.' },
+      { at: '(delay (durationParse "PT1H30M")?))', text: '`?` binds each success and propagates an error at either step.' },
       { at: '(datetimeAdd start delay))))', text: 'Duration arithmetic refuses results outside the supported range.' },
     ],
     docs: { label: 'Dates and times', href: `${LIB}docs/chrono.md` },
@@ -1019,7 +1021,9 @@ ok   testOlder
 
 (:: arrival (Result NaiveDateTime Error))
 (fn (arrival)
-  (try start (datetimeParseUtc "2024-02-29T23:30:00+02:00") (try delay (durationParse "PT1H30M") (datetimeAdd start delay))))
+  (let ((start (datetimeParseUtc "2024-02-29T23:30:00+02:00")?)
+        (delay (durationParse "PT1H30M")?))
+    (datetimeAdd start delay)))
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -1081,7 +1085,7 @@ job 3: 9`,
     title: 'Authenticate an embedded asset',
     lede: '`Crypto.Obfuscate` seals bytes with a fresh nonce and a context-bound key. Use the packing tool before compilation, and optional --obfuscate for literal masking and internal symbols. Running-process inspection can still recover embedded data.',
     points: [
-      { at: '(try envelope (obfuscationSeal key "demo/message/v1" "asset opened")', text: 'A context identifies the asset purpose and is authenticated with its bytes.' },
+      { at: '(let ((envelope (obfuscationSeal key "demo/message/v1" "asset opened")?))', text: 'A context identifies the asset purpose and is authenticated with its bytes.' },
       { at: '(obfuscationOpen key "demo/message/v1" envelope)))', text: 'Open verifies the tag before returning plaintext.' },
       { at: '(obfuscationKeyWipe key)', text: 'Erase the key on both success and error before examining the Result.' },
     ],
@@ -1095,7 +1099,8 @@ job 3: 9`,
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (roundTrip key)
-  (try envelope (obfuscationSeal key "demo/message/v1" "asset opened") (obfuscationOpen key "demo/message/v1" envelope)))
+  (let ((envelope (obfuscationSeal key "demo/message/v1" "asset opened")?))
+    (obfuscationOpen key "demo/message/v1" envelope)))
 
 (:: main Int)
 ;@axiom:effect(io)

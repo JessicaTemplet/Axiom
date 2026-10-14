@@ -1228,7 +1228,7 @@
   (if (== (peekKind p) kwIf)
     {
       (advance p)
-      (try _ (expect p kwNot "NOT") (try _ (expect p kwExists "EXISTS") (Ok true)))
+      (let ((_ (expect p kwNot "NOT")?) (_ (expect p kwExists "EXISTS")?)) (Ok true))
     }
     (Ok false)))
 
@@ -1238,7 +1238,7 @@
   (if (== (peekKind p) kwIf)
     {
       (advance p)
-      (try _ (expect p kwExists "EXISTS") (Ok true))
+      (let ((_ (expect p kwExists "EXISTS")?)) (Ok true))
     }
     (Ok false)))
 
@@ -1249,24 +1249,24 @@
 ; ------------------------------------------------------------------
 (:: parseExpr (-> Ps (Result Expr Error)))
 (fn (parseExpr p)
-  (try lhs (parseAnd p) (parseOrRest p lhs)))
+  (let ((lhs (parseAnd p)?)) (parseOrRest p lhs)))
 
 (:: parseOrRest (-> Ps Expr (Result Expr Error)))
 (fn (parseOrRest p lhs)
   (if (== (peekKind p) kwOr)
     (let ((t (advance p)))
-      (try rhs (parseAnd p) (parseOrRest p (EBin opOr lhs rhs t.start))))
+      (let ((rhs (parseAnd p)?)) (parseOrRest p (EBin opOr lhs rhs t.start))))
     (Ok lhs)))
 
 (:: parseAnd (-> Ps (Result Expr Error)))
 (fn (parseAnd p)
-  (try lhs (parseNot p) (parseAndRest p lhs)))
+  (let ((lhs (parseNot p)?)) (parseAndRest p lhs)))
 
 (:: parseAndRest (-> Ps Expr (Result Expr Error)))
 (fn (parseAndRest p lhs)
   (if (== (peekKind p) kwAnd)
     (let ((t (advance p)))
-      (try rhs (parseNot p) (parseAndRest p (EBin opAnd lhs rhs t.start))))
+      (let ((rhs (parseNot p)?)) (parseAndRest p (EBin opAnd lhs rhs t.start))))
     (Ok lhs)))
 
 ; Any number of NOTs, counted in a loop rather than by recursion so a
@@ -1280,7 +1280,7 @@
           (advance p)
           (set nots (+ nots 1))
         })
-      (try e (parseEquality p) (Ok (wrapNots e nots)))
+      (let ((e (parseEquality p)?)) (Ok (wrapNots e nots)))
     }))
 
 (:: wrapNots (-> Expr Int Expr))
@@ -1291,16 +1291,14 @@
 
 (:: parseEquality (-> Ps (Result Expr Error)))
 (fn (parseEquality p)
-  (try lhs (parseRelation p) (parseEqualityRest p lhs)))
+  (let ((lhs (parseRelation p)?)) (parseEqualityRest p lhs)))
 
 (:: parseEqualityRest (-> Ps Expr (Result Expr Error)))
 (fn (parseEqualityRest p lhs)
   (let ((k (peekKind p)))
     (if (|| (== k tkEq) (== k tkNe))
       (let ((t (advance p)))
-        (try
-          rhs
-          (parseRelation p)
+        (let ((rhs (parseRelation p)?))
           (parseEqualityRest
             p
             (EBin
@@ -1321,7 +1319,7 @@
                   0
                 }
                 0)
-              (try _ (expect p kwNull "NULL") (parseEqualityRest p (EIsNull lhs negated)))
+              (let ((_ (expect p kwNull "NULL")?)) (parseEqualityRest p (EIsNull lhs negated)))
             })
         }
         (|| (atTestWord p) (&& (== k kwNot) (|| (atWord2 p "LIKE") (|| (atWord2 p "IN") (atWord2 p "BETWEEN")))))
@@ -1337,7 +1335,7 @@
               (word (if (atWord p "LIKE") 1 (atWord p "IN") 2 3))
               (t (advance p))
             )
-              (try e (parseTest p word lhs negated t.start) (parseEqualityRest p e)))
+              (let ((e (parseTest p word lhs negated t.start)?)) (parseEqualityRest p e)))
           })
         (Ok lhs)))))
 
@@ -1347,32 +1345,24 @@
 (:: parseTest (-> Ps Int Expr Bool Int (Result Expr Error)))
 (fn (parseTest p word lhs negated at)
   (if (== word 1)
-    (try pat (parseRelation p) (Ok (ELike lhs pat negated at)))
+    (let ((pat (parseRelation p)?)) (Ok (ELike lhs pat negated at)))
     (== word 2)
-    (try
-      _
-      (expect p tkLParen "\"(\"")
+    (let ((_ (expect p tkLParen "\"(\"")?))
       (if (== (peekKind p) tkRParen)
         (failHere p "IN needs at least one value")
-        (try items (parseExprListRest p vecNew) (Ok (EIn lhs items negated at)))))
-    (try
-      lo
-      (parseRelation p)
-      (try
-        _
-        (expect p kwAnd "AND")
-        (try
-          hi
-          (parseRelation p)
-          (let ((both (EBin opAnd (EBin opGe lhs lo at) (EBin opLe lhs hi at) at)))
-            (Ok
-              (if negated
-                (ENot both)
-                both))))))))
+        (let ((items (parseExprListRest p vecNew)?)) (Ok (EIn lhs items negated at)))))
+    (let ((lo (parseRelation p)?)
+          (_ (expect p kwAnd "AND")?)
+          (hi (parseRelation p)?))
+      (let ((both (EBin opAnd (EBin opGe lhs lo at) (EBin opLe lhs hi at) at)))
+        (Ok
+          (if negated
+            (ENot both)
+            both))))))
 
 (:: parseRelation (-> Ps (Result Expr Error)))
 (fn (parseRelation p)
-  (try lhs (parseAdditive p) (parseRelationRest p lhs)))
+  (let ((lhs (parseAdditive p)?)) (parseRelationRest p lhs)))
 
 (:: relationOp (-> Int Int))
 (fn (relationOp k)
@@ -1392,20 +1382,18 @@
     (if (== op 0)
       (Ok lhs)
       (let ((t (advance p)))
-        (try rhs (parseAdditive p) (parseRelationRest p (EBin op lhs rhs t.start)))))))
+        (let ((rhs (parseAdditive p)?)) (parseRelationRest p (EBin op lhs rhs t.start)))))))
 
 (:: parseAdditive (-> Ps (Result Expr Error)))
 (fn (parseAdditive p)
-  (try lhs (parseMultiplicative p) (parseAdditiveRest p lhs)))
+  (let ((lhs (parseMultiplicative p)?)) (parseAdditiveRest p lhs)))
 
 (:: parseAdditiveRest (-> Ps Expr (Result Expr Error)))
 (fn (parseAdditiveRest p lhs)
   (let ((k (peekKind p)))
     (if (|| (== k tkPlus) (|| (== k tkMinus) (== k tkConcat)))
       (let ((t (advance p)))
-        (try
-          rhs
-          (parseMultiplicative p)
+        (let ((rhs (parseMultiplicative p)?))
           (parseAdditiveRest
             p
             (EBin
@@ -1431,7 +1419,7 @@
 
 (:: parseMultiplicative (-> Ps (Result Expr Error)))
 (fn (parseMultiplicative p)
-  (try lhs (parseUnary p) (parseMultiplicativeRest p lhs)))
+  (let ((lhs (parseUnary p)?)) (parseMultiplicativeRest p lhs)))
 
 (:: parseMultiplicativeRest (-> Ps Expr (Result Expr Error)))
 (fn (parseMultiplicativeRest p lhs)
@@ -1439,7 +1427,7 @@
     (if (== op 0)
       (Ok lhs)
       (let ((t (advance p)))
-        (try rhs (parseUnary p) (parseMultiplicativeRest p (EBin op lhs rhs t.start)))))))
+        (let ((rhs (parseUnary p)?)) (parseMultiplicativeRest p (EBin op lhs rhs t.start)))))))
 
 ; Any number of unary minuses, in a loop as NOT is. The literal
 ; 9223372036854775808 is an integer only directly after one.
@@ -1456,7 +1444,7 @@
           (vecPop minuses)
           (Ok (wrapNegs (ELit (VInt intMin)) minuses))
         }
-        (try e (parsePrimary p) (Ok (wrapNegs e minuses))))
+        (let ((e (parsePrimary p)?)) (Ok (wrapNegs e minuses))))
     }))
 
 ; `e` under a unary minus for each offset in `at`, the last innermost.
@@ -1522,7 +1510,7 @@
                   (advance p)
                   (Ok (ELink t.text "*" t.start))
                 }
-                (try f (parseName p "a column of the linked table") (Ok (ELink t.text f t.start))))
+                (let ((f (parseName p "a column of the linked table")?)) (Ok (ELink t.text f t.start))))
             }
             (Ok (EName t.text t.start))))
       }
@@ -1534,16 +1522,12 @@
         {
           (advance p)
           (set p.depth (+ p.depth 1))
-          (try
-            e
-            (parseExpr p)
-            (try
-              _
-              (expect p tkRParen "\")\"")
-              {
-                (set p.depth (- p.depth 1))
-                (Ok e)
-              }))
+          (let ((e (parseExpr p)?)
+                (_ (expect p tkRParen "\")\"")?))
+            {
+              (set p.depth (- p.depth 1))
+              (Ok e)
+            })
         })
       (expected p "an expression"))))
 
@@ -1608,16 +1592,14 @@
       (if (&& (== agg aggCount) (== (peekKind p) tkStar))
         {
           (advance p)
-          (try _ (expect p tkRParen "\")\"") (Ok (EAgg aggCount None at)))
+          (let ((_ (expect p tkRParen "\")\"")?)) (Ok (EAgg aggCount None at)))
         }
-        (try
-          args
-          (if (== (peekKind p) tkRParen)
-            {
-              (advance p)
-              (Ok vecNew)
-            }
-            (parseExprListRest p vecNew))
+        (let ((args (if (== (peekKind p) tkRParen)
+                      {
+                        (advance p)
+                        (Ok vecNew)
+                      }
+                      (parseExprListRest p vecNew))?))
           (if (&& (> agg 0) (== (vecLen args) 1))
             (Ok (EAgg agg (Some (vecGet args 0)) at))
             (if (|| (== agg aggCount) (|| (== agg aggSum) (== agg aggAvg)))
@@ -1693,13 +1675,11 @@
 ; `name (, name)*` inside parentheses.
 (:: parseNameList (-> Ps String (Result (Vec String) Error)))
 (fn (parseNameList p what)
-  (try _ (expect p tkLParen "\"(\"") (parseNameListRest p what vecNew)))
+  (let ((_ (expect p tkLParen "\"(\"")?)) (parseNameListRest p what vecNew)))
 
 (:: parseNameListRest (-> Ps String (Vec String) (Result (Vec String) Error)))
 (fn (parseNameListRest p what acc)
-  (try
-    n
-    (parseName p what)
+  (let ((n (parseName p what)?))
     {
       (vecPush acc n)
       (if (== (peekKind p) tkComma)
@@ -1707,15 +1687,13 @@
           (advance p)
           (parseNameListRest p what acc)
         }
-        (try _ (expect p tkRParen "\",\" or \")\"") (Ok acc)))
+        (let ((_ (expect p tkRParen "\",\" or \")\"")?)) (Ok acc)))
     }))
 
 ; `expr (, expr)*` up to the closing parenthesis, which it consumes.
 (:: parseExprListRest (-> Ps (Vec Expr) (Result (Vec Expr) Error)))
 (fn (parseExprListRest p acc)
-  (try
-    e
-    (parseExpr p)
+  (let ((e (parseExpr p)?))
     {
       (vecPush acc e)
       (if (== (peekKind p) tkComma)
@@ -1723,18 +1701,16 @@
           (advance p)
           (parseExprListRest p acc)
         }
-        (try _ (expect p tkRParen "\",\" or \")\"") (Ok acc)))
+        (let ((_ (expect p tkRParen "\",\" or \")\"")?)) (Ok acc)))
     }))
 
 (:: parseCreateTable (-> Ps (Result Stmt Error)))
 (fn (parseCreateTable p)
-  (try ine (parseIfNotExists p) (try name (parseName p "a table name") (try _ (expect p tkLParen "\"(\"") (try cols (parseColumnDefs p vecNew) (Ok (SCreateTable ine name cols)))))))
+  (let ((ine (parseIfNotExists p)?) (name (parseName p "a table name")?) (_ (expect p tkLParen "\"(\"")?) (cols (parseColumnDefs p vecNew)?)) (Ok (SCreateTable ine name cols))))
 
 (:: parseColumnDefs (-> Ps (Vec ColumnDef) (Result (Vec ColumnDef) Error)))
 (fn (parseColumnDefs p acc)
-  (try
-    c
-    (parseColumnDef p)
+  (let ((c (parseColumnDef p)?))
     {
       (vecPush acc c)
       (if (== (peekKind p) tkComma)
@@ -1742,7 +1718,7 @@
           (advance p)
           (parseColumnDefs p acc)
         }
-        (try _ (expect p tkRParen "\",\" or \")\"") (Ok acc)))
+        (let ((_ (expect p tkRParen "\",\" or \")\"")?)) (Ok acc)))
     }))
 
 ; `name TYPE constraint*`: the type is INTEGER, REAL, TEXT, BLOB or
@@ -1752,9 +1728,7 @@
 (:: parseColumnDef (-> Ps (Result ColumnDef Error)))
 (fn (parseColumnDef p)
   (let ((first (peek p)))
-    (try
-      name
-      (parseName p "a column name")
+    (let ((name (parseName p "a column name")?))
       (let ((ty
         (if (atWord p "INTEGER")
           typeInteger
@@ -1773,35 +1747,31 @@
             {
               (advance p)
               (let ((target (peek p)))
-              (try
-                link
-                (if isLink
-                  (parseName p "the table the column links to")
-                  (Ok ""))
-                (try
-                  c
-                  (parseConstraints p (ColumnDef
-                    name
-                    ty
-                    false
-                    false
-                    link
-                    None
-                    None
-                    ""
-                    -1))
-                  (Ok (ColumnDef
-                    c.name
-                    c.ctype
-                    c.notNull
-                    c.primaryKey
-                    c.link
-                    c.dflt
-                    c.check
-                    (strSlice p.src first.start (- (prevEnd p) first.start))
-                    (if isLink
-                      (- target.start first.start)
-                      -1))))))
+              (let ((link (if isLink
+                            (parseName p "the table the column links to")
+                            (Ok ""))?)
+                    (c (parseConstraints p (ColumnDef
+                         name
+                         ty
+                         false
+                         false
+                         link
+                         None
+                         None
+                         ""
+                         -1))?))
+                (Ok (ColumnDef
+                  c.name
+                  c.ctype
+                  c.notNull
+                  c.primaryKey
+                  c.link
+                  c.dflt
+                  c.check
+                  (strSlice p.src first.start (- (prevEnd p) first.start))
+                  (if isLink
+                    (- target.start first.start)
+                    -1)))))
             }))))))
 
 (:: parseConstraints (-> Ps ColumnDef (Result ColumnDef Error)))
@@ -1810,161 +1780,149 @@
     (if (== k kwNot)
       {
         (advance p)
-        (try _ (expect p kwNull "NULL") (parseConstraints p (ColumnDef
-          c.name
-          c.ctype
-          true
-          c.primaryKey
-          c.link
-          c.dflt
-          c.check
-          ""
-          -1)))
+        (let ((_ (expect p kwNull "NULL")?))
+          (parseConstraints p (ColumnDef
+c.name
+c.ctype
+true
+c.primaryKey
+c.link
+c.dflt
+c.check
+""
+-1)))
       }
       (== k kwPrimary)
       {
         (advance p)
-        (try _ (expectWord p "KEY") (parseConstraints p (ColumnDef
-          c.name
-          c.ctype
-          c.notNull
-          true
-          c.link
-          c.dflt
-          c.check
-          ""
-          -1)))
+        (let ((_ (expectWord p "KEY")?))
+          (parseConstraints p (ColumnDef
+c.name
+c.ctype
+c.notNull
+true
+c.link
+c.dflt
+c.check
+""
+-1)))
       }
       (atWord p "DEFAULT")
       {
         (advance p)
-        (try e (parseUnary p) (parseConstraints p (ColumnDef
-          c.name
-          c.ctype
-          c.notNull
-          c.primaryKey
-          c.link
-          (Some e)
-          c.check
-          ""
-          -1)))
+        (let ((e (parseUnary p)?))
+          (parseConstraints p (ColumnDef
+c.name
+c.ctype
+c.notNull
+c.primaryKey
+c.link
+(Some e)
+c.check
+""
+-1)))
       }
       (atWord p "CHECK")
       {
         (advance p)
-        (try
-          _
-          (expect p tkLParen "\"(\"")
-          (try
-            e
-            (parseExpr p)
-            (try _ (expect p tkRParen "\")\"") (parseConstraints p (ColumnDef
-              c.name
-              c.ctype
-              c.notNull
-              c.primaryKey
-              c.link
-              c.dflt
-              (Some e)
-              ""
-              -1)))))
+        (let ((_ (expect p tkLParen "\"(\"")?)
+              (e (parseExpr p)?)
+              (_ (expect p tkRParen "\")\"")?))
+          (parseConstraints p (ColumnDef
+c.name
+c.ctype
+c.notNull
+c.primaryKey
+c.link
+c.dflt
+(Some e)
+""
+-1)))
       }
       (Ok c))))
 
 (:: parseDropTable (-> Ps (Result Stmt Error)))
 (fn (parseDropTable p)
-  (try ie (parseIfExists p) (try name (parseName p "a table name") (Ok (SDropTable ie name)))))
+  (let ((ie (parseIfExists p)?) (name (parseName p "a table name")?)) (Ok (SDropTable ie name))))
 
 (:: parseCreateIndex (-> Ps Bool (Result Stmt Error)))
 (fn (parseCreateIndex p unique)
-  (try _ (expect p kwIndex "INDEX") (try ine (parseIfNotExists p) (try name (parseName p "an index name") (try _ (expect p kwOn "ON") (try table (parseName p "a table name") (try cols (parseNameList p "a column name") (Ok (SCreateIndex
-    unique
-    ine
-    name
-    table
-    cols)))))))))
+  (let ((_ (expect p kwIndex "INDEX")?)
+        (ine (parseIfNotExists p)?)
+        (name (parseName p "an index name")?)
+        (_ (expect p kwOn "ON")?)
+        (table (parseName p "a table name")?)
+        (cols (parseNameList p "a column name")?))
+    (Ok (SCreateIndex
+unique
+ine
+name
+table
+cols))))
 
 (:: parseDropIndex (-> Ps (Result Stmt Error)))
 (fn (parseDropIndex p)
-  (try ie (parseIfExists p) (try name (parseName p "an index name") (Ok (SDropIndex ie name)))))
+  (let ((ie (parseIfExists p)?) (name (parseName p "an index name")?)) (Ok (SDropIndex ie name))))
 
 ; INSERT and UPSERT share one shape.
 (:: parseInsert (-> Ps Bool (Result Stmt Error)))
 (fn (parseInsert p upsert)
-  (try
-    _
-    (expect p kwInto "INTO")
-    (try
-      table
-      (parseName p "a table name")
-      (try
-        cols
-        (if (== (peekKind p) tkLParen)
-          (parseNameList p "a column name")
-          (Ok vecNew))
-        (try
-          _
-          (expect p kwValues "VALUES")
-          (try
-            rows
-            (parseRows p vecNew -1)
-            (Ok
-              (if upsert
-                (SUpsert table cols rows)
-                (SInsert table cols rows)))))))))
+  (let ((_ (expect p kwInto "INTO")?)
+        (table (parseName p "a table name")?)
+        (cols (if (== (peekKind p) tkLParen)
+                (parseNameList p "a column name")
+                (Ok vecNew))?)
+        (_ (expect p kwValues "VALUES")?)
+        (rows (parseRows p vecNew -1)?))
+    (Ok
+      (if upsert
+        (SUpsert table cols rows)
+        (SInsert table cols rows)))))
 
 ; `ALTER TABLE t ADD [COLUMN] column` or `ALTER TABLE t RENAME TO name`.
 (:: parseAlter (-> Ps (Result Stmt Error)))
 (fn (parseAlter p)
-  (try
-    _
-    (expect p kwTable "TABLE")
-    (try
-      table
-      (parseName p "a table name")
-      (if (atWord p "ADD")
-        {
-          (advance p)
-          (if (atWord p "COLUMN")
-            {
-              (advance p)
-              0
-            }
-            0)
-          (try c (parseColumnDef p) (Ok (SAlterAdd table c)))
-        }
-        (if (atWord p "RENAME")
+  (let ((_ (expect p kwTable "TABLE")?)
+        (table (parseName p "a table name")?))
+    (if (atWord p "ADD")
+      {
+        (advance p)
+        (if (atWord p "COLUMN")
           {
             (advance p)
-            (try _ (expectWord p "TO") (try name (parseName p "the table's new name") (Ok (SAlterRename table name))))
+            0
           }
-          (expected p "ADD COLUMN or RENAME TO"))))))
+          0)
+        (let ((c (parseColumnDef p)?)) (Ok (SAlterAdd table c)))
+      }
+      (if (atWord p "RENAME")
+        {
+          (advance p)
+          (let ((_ (expectWord p "TO")?) (name (parseName p "the table's new name")?)) (Ok (SAlterRename table name)))
+        }
+        (expected p "ADD COLUMN or RENAME TO")))))
 
 ; `(expr, ...) (, (expr, ...))*`, every row as long as the first.
 (:: parseRows (-> Ps (Vec (Vec Expr)) Int (Result (Vec (Vec Expr)) Error)))
 (fn (parseRows p acc width)
   (let ((open (peek p)))
-    (try
-      _
-      (expect p tkLParen "\"(\"")
-      (try
-        row
-        (parseExprListRest p vecNew)
-        (if (&& (>= width 0) (!= (vecLen row) width))
-          (synErrAt p.src open.start "every row of VALUES needs the same number of values")
-          {
-            (vecPush acc row)
-            (if (== (peekKind p) tkComma)
-              {
-                (advance p)
-                (parseRows p acc (vecLen row))
-              }
-              (Ok acc))
-          })))))
+    (let ((_ (expect p tkLParen "\"(\"")?)
+          (row (parseExprListRest p vecNew)?))
+      (if (&& (>= width 0) (!= (vecLen row) width))
+        (synErrAt p.src open.start "every row of VALUES needs the same number of values")
+        {
+          (vecPush acc row)
+          (if (== (peekKind p) tkComma)
+            {
+              (advance p)
+              (parseRows p acc (vecLen row))
+            }
+            (Ok acc))
+        }))))
 
 (:: parseUpdate (-> Ps (Result Stmt Error)))
 (fn (parseUpdate p)
-  (try table (parseName p "a table name") (try _ (expect p kwSet "SET") (try a (parseAssignments p (Assign vecNew vecNew)) (try w (parseOptWhere p) (Ok (SUpdate table a.cols a.exprs w)))))))
+  (let ((table (parseName p "a table name")?) (_ (expect p kwSet "SET")?) (a (parseAssignments p (Assign vecNew vecNew))?) (w (parseOptWhere p)?)) (Ok (SUpdate table a.cols a.exprs w))))
 
 ; The assignments of an UPDATE, in two parallel vectors.
 (struct Assign
@@ -1974,25 +1932,19 @@
 ; `name = expr (, name = expr)*`.
 (:: parseAssignments (-> Ps Assign (Result Assign Error)))
 (fn (parseAssignments p acc)
-  (try
-    col
-    (parseName p "a column name")
-    (try
-      _
-      (expect p tkEq "\"=\"")
-      (try
-        e
-        (parseExpr p)
+  (let ((col (parseName p "a column name")?)
+        (_ (expect p tkEq "\"=\"")?)
+        (e (parseExpr p)?))
+    {
+      (vecPush acc.cols col)
+      (vecPush acc.exprs e)
+      (if (== (peekKind p) tkComma)
         {
-          (vecPush acc.cols col)
-          (vecPush acc.exprs e)
-          (if (== (peekKind p) tkComma)
-            {
-              (advance p)
-              (parseAssignments p acc)
-            }
-            (Ok acc))
-        }))))
+          (advance p)
+          (parseAssignments p acc)
+        }
+        (Ok acc))
+    }))
 
 ; `WHERE expr`, or nothing.
 (:: parseOptWhere (-> Ps (Result (Option Expr) Error)))
@@ -2000,13 +1952,13 @@
   (if (== (peekKind p) kwWhere)
     {
       (advance p)
-      (try e (parseExpr p) (Ok (Some e)))
+      (let ((e (parseExpr p)?)) (Ok (Some e)))
     }
     (Ok None)))
 
 (:: parseDelete (-> Ps (Result Stmt Error)))
 (fn (parseDelete p)
-  (try _ (expect p kwFrom "FROM") (try table (parseName p "a table name") (try w (parseOptWhere p) (Ok (SDelete table w))))))
+  (let ((_ (expect p kwFrom "FROM")?) (table (parseName p "a table name")?) (w (parseOptWhere p)?)) (Ok (SDelete table w))))
 
 ; `SELECT * | item, ... [FROM t] [WHERE e] [ORDER BY term, ...]
 ; [LIMIT e [OFFSET e]]`.
@@ -2020,88 +1972,70 @@
           0
         }
         0)
-      (try
-        items
-        (if star
-          (if (== (peekKind p) tkComma)
-            {
-              (advance p)
-              (parseSelectItems p vecNew)
-            }
-            (Ok vecNew))
-          (parseSelectItems p vecNew))
-        (try
-          from
-          (if (== (peekKind p) kwFrom)
-            {
-              (advance p)
-              (parseName p "a table name")
-            }
-            (if star
-              (expected p "FROM, because `*` needs a table")
-              (Ok "")))
-          (try
-            w
-            (parseOptWhere p)
-            (try
-              group
-              (if (atWord p "GROUP")
-                {
-                  (advance p)
-                  (try _ (expect p kwBy "BY") (parseGroupTerms p vecNew))
-                }
-                (Ok vecNew))
-              (try
-                having
-                (if (atWord p "HAVING")
-                  (if (== (vecLen group) 0)
-                    (failHere p "HAVING needs a GROUP BY")
+      (let ((items (if star
+                     (if (== (peekKind p) tkComma)
+                       {
+                         (advance p)
+                         (parseSelectItems p vecNew)
+                       }
+                       (Ok vecNew))
+                     (parseSelectItems p vecNew))?)
+            (from (if (== (peekKind p) kwFrom)
                     {
                       (advance p)
-                      (try e (parseExpr p) (Ok (Some e)))
-                    })
-                  (Ok None))
-                (try
-                  order
-                  (if (== (peekKind p) kwOrder)
-                    {
-                      (advance p)
-                      (try _ (expect p kwBy "BY") (parseOrderTerms p vecNew))
+                      (parseName p "a table name")
                     }
-                    (Ok vecNew))
-                  (try
-                    lim
-                    (if (== (peekKind p) kwLimit)
-                      {
-                        (advance p)
-                        (try e (parseExpr p) (Ok (Some e)))
-                      }
-                      (Ok None))
-                    (try
-                      off
-                      (if (&& (isSome lim) (== (peekKind p) kwOffset))
+                    (if star
+                      (expected p "FROM, because `*` needs a table")
+                      (Ok "")))?)
+            (w (parseOptWhere p)?)
+            (group (if (atWord p "GROUP")
+                     {
+                       (advance p)
+                       (match (expect p kwBy "BY") ((Err er) (Err er)) ((Ok _) (parseGroupTerms p vecNew)))
+                     }
+                     (Ok vecNew))?)
+            (having (if (atWord p "HAVING")
+                      (if (== (vecLen group) 0)
+                        (failHere p "HAVING needs a GROUP BY")
                         {
                           (advance p)
-                          (try e (parseExpr p) (Ok (Some e)))
-                        }
-                        (Ok None))
-                      (Ok (SSelect (Select
-                        star
-                        items
-                        from
-                        w
-                        group
-                        having
-                        order
-                        lim
-                        off)))))))))))
+                          (match (parseExpr p) ((Err er) (Err er)) ((Ok e) (Ok (Some e))))
+                        })
+                      (Ok None))?)
+            (order (if (== (peekKind p) kwOrder)
+                     {
+                       (advance p)
+                       (match (expect p kwBy "BY") ((Err er) (Err er)) ((Ok _) (parseOrderTerms p vecNew)))
+                     }
+                     (Ok vecNew))?)
+            (lim (if (== (peekKind p) kwLimit)
+                   {
+                     (advance p)
+                     (match (parseExpr p) ((Err er) (Err er)) ((Ok e) (Ok (Some e))))
+                   }
+                   (Ok None))?)
+            (off (if (&& (isSome lim) (== (peekKind p) kwOffset))
+                   {
+                     (advance p)
+                     (match (parseExpr p) ((Err er) (Err er)) ((Ok e) (Ok (Some e))))
+                   }
+                   (Ok None))?))
+        (Ok (SSelect (Select
+          star
+          items
+          from
+          w
+          group
+          having
+          order
+          lim
+          off))))
     }))
 
 (:: parseGroupTerms (-> Ps (Vec Expr) (Result (Vec Expr) Error)))
 (fn (parseGroupTerms p acc)
-  (try
-    e
-    (parseExpr p)
+  (let ((e (parseExpr p)?))
     {
       (vecPush acc e)
       (if (== (peekKind p) tkComma)
@@ -2118,18 +2052,14 @@
     (t (peek p))
     (start t.start)
   )
-    (try
-      e
-      (parseExpr p)
+    (let ((e (parseExpr p)?))
       (let ((text (strSlice p.src start (- (prevEnd p) start))))
-        (try
-          alias
-          (if (== (peekKind p) kwAs)
-            {
-              (advance p)
-              (parseName p "a column alias")
-            }
-            (Ok ""))
+        (let ((alias (if (== (peekKind p) kwAs)
+                       {
+                         (advance p)
+                         (parseName p "a column alias")
+                       }
+                       (Ok ""))?))
           {
             (vecPush acc (SelectItem e alias text))
             (if (== (peekKind p) tkComma)
@@ -2142,9 +2072,7 @@
 
 (:: parseOrderTerms (-> Ps (Vec OrderTerm) (Result (Vec OrderTerm) Error)))
 (fn (parseOrderTerms p acc)
-  (try
-    e
-    (parseExpr p)
+  (let ((e (parseExpr p)?))
     (let ((desc (atWord p "DESC")))
       {
         (if (|| desc (atWord p "ASC"))
@@ -2287,15 +2215,16 @@
 ; A parser over the tokens of `src`, or the lexer's refusal.
 (:: newParser (-> String (Result Ps Error)))
 (fn (newParser src)
-  (try toks (lex src) (Ok (Ps
-    src
-    toks
-    0
-    0
-    0
-    vecNew
-    false
-    false))))
+  (let ((toks (lex src)?))
+    (Ok (Ps
+src
+toks
+0
+0
+0
+vecNew
+false
+false))))
 
 ; Refuse a statement, from the cursor to its `;` or the end, that holds
 ; more than `axqlMaxOperators` operators or nests parentheses deeper
@@ -2356,18 +2285,14 @@
       (set p.sawPositional false)
       (set p.sawNamed false)
       (vecClear p.names)
-      (try
-        _
-        (checkBudgets p)
-        (try
-          s
-          (parseStatement p)
-          (let ((names vecNew))
-            {
-              (for n in p.names
-                (vecPush names n))
-              (Ok (Parsed s p.maxParam names (strSlice p.src first.start (- (prevEnd p) first.start))))
-            })))
+      (let ((_ (checkBudgets p)?)
+            (s (parseStatement p)?))
+        (let ((names vecNew))
+          {
+            (for n in p.names
+              (vecPush names n))
+            (Ok (Parsed s p.maxParam names (strSlice p.src first.start (- (prevEnd p) first.start))))
+          }))
     }))
 
 ; ------------------------------------------------------------------
@@ -2377,14 +2302,10 @@
 ;; nothing else but whitespace and comments.
 (pub :: axqlParse (-> String (Result Parsed Error)))
 (pub fn (axqlParse src)
-  (try
-    p
-    (newParser src)
+  (let ((p (newParser src)?))
     (if (== (peekKind p) tkEof)
       (expected p "a statement")
-      (try
-        parsed
-        (parseOne p)
+      (let ((parsed (parseOne p)?))
         (if (== (peekKind p) tkSemi)
           {
             (advance p)
@@ -2400,7 +2321,7 @@
 ;; skipped, so a script may end with `;`.
 (pub :: axqlParseScript (-> String (Result (Vec Parsed) Error)))
 (pub fn (axqlParseScript src)
-  (try p (newParser src) (parseScriptRest p vecNew)))
+  (let ((p (newParser src)?)) (parseScriptRest p vecNew)))
 
 (:: parseScriptRest (-> Ps (Vec Parsed) (Result (Vec Parsed) Error)))
 (fn (parseScriptRest p acc)
@@ -2411,9 +2332,7 @@
         (advance p)
         (parseScriptRest p acc)
       }
-      (try
-        parsed
-        (parseOne p)
+      (let ((parsed (parseOne p)?))
         {
           (vecPush acc parsed)
           (if (== (peekKind p) tkSemi)

@@ -130,9 +130,9 @@
 ;@axiom:effect(io)
 (fn (undoOne pager u)
   (match u
-    ((UPut root key old) (try _ (btreePut pager root key old) (Ok 0)))
-    ((UDel root key) (try _ (btreeDelete pager root key) (Ok 0)))
-    ((UDrop root) (try _ (btreeDrop pager root) (Ok 0)))
+    ((UPut root key old) (let ((_ (btreePut pager root key old)?)) (Ok 0)))
+    ((UDel root key) (let ((_ (btreeDelete pager root key)?)) (Ok 0)))
+    ((UDrop root) (let ((_ (btreeDrop pager root)?)) (Ok 0)))
     ((UFatal) (axqErr axqMisuse "a dropped table or index can't be restored" "axqlUndo"))))
 
 (:: logUndo (-> Exec Undo Int))
@@ -149,9 +149,7 @@
 (:: putNew (-> Exec Int String String (Result Bool Error)))
 ;@axiom:effect(io)
 (fn (putNew ex root key value)
-  (try
-    fresh
-    (btreeInsertNew ex.pager root key value)
+  (let ((fresh (btreeInsertNew ex.pager root key value)?))
     {
       (if fresh
         (logUndo ex (UDel root key))
@@ -163,9 +161,7 @@
 (:: putOver (-> Exec Int String String String (Result Int Error)))
 ;@axiom:effect(io)
 (fn (putOver ex root key value old)
-  (try
-    _
-    (btreePut ex.pager root key value)
+  (let ((_ (btreePut ex.pager root key value)?))
     {
       (logUndo ex (UPut root key old))
       (Ok 0)
@@ -175,9 +171,7 @@
 (:: deleteKey (-> Exec Int String String (Result Int Error)))
 ;@axiom:effect(io)
 (fn (deleteKey ex root key old)
-  (try
-    _
-    (btreeDelete ex.pager root key)
+  (let ((_ (btreeDelete ex.pager root key)?))
     {
       (logUndo ex (UPut root key old))
       (Ok 0)
@@ -186,9 +180,7 @@
 (:: createTree (-> Exec Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (createTree ex kind)
-  (try
-    root
-    (btreeCreate ex.pager kind)
+  (let ((root (btreeCreate ex.pager kind)?))
     {
       (logUndo ex (UDrop root))
       (Ok root)
@@ -221,30 +213,30 @@
     ((EName n at) (bindName ex t n at))
     ((ENeg x at)
       (let ((rx (bind ex t x)))
-        (try bx rx (Ok (ENeg bx at))))
+        (let ((bx rx?)) (Ok (ENeg bx at))))
     )
     ((ENot x)
       (let ((rx (bind ex t x)))
-        (try bx rx (Ok (ENot bx))))
+        (let ((bx rx?)) (Ok (ENot bx))))
     )
     ((EIsNull x neg)
       (let ((rx (bind ex t x)))
-        (try bx rx (Ok (EIsNull bx neg))))
+        (let ((bx rx?)) (Ok (EIsNull bx neg))))
     )
     ((EBin op l r at)
       (let (
         (rl (bind ex t l))
         (rr (bind ex t r))
       )
-        (try bl rl (try br rr (Ok (EBin op bl br at)))))
+        (let ((bl rl?) (br rr?)) (Ok (EBin op bl br at))))
     )
-    ((EFun name args at) (try bs (bindAll ex t args) (Ok (EFun name bs at))))
+    ((EFun name args at) (let ((bs (bindAll ex t args)?)) (Ok (EFun name bs at))))
     ((EAgg k arg at)
       (match arg
         ((None) (Ok e))
         ((Some x)
           (let ((rx (bind ex t x)))
-            (try bx rx (Ok (EAgg k (Some bx) at))))
+            (let ((bx rx?)) (Ok (EAgg k (Some bx) at))))
         ))
     )
     ((ELike x pat negated at)
@@ -252,11 +244,11 @@
         (rx (bind ex t x))
         (rp (bind ex t pat))
       )
-        (try bx rx (try bp rp (Ok (ELike bx bp negated at)))))
+        (let ((bx rx?) (bp rp?)) (Ok (ELike bx bp negated at))))
     )
     ((EIn x items negated at)
       (let ((rx (bind ex t x)))
-        (try bx rx (try bs (bindAll ex t items) (Ok (EIn bx bs negated at)))))
+        (let ((bx rx?) (bs (bindAll ex t items)?)) (Ok (EIn bx bs negated at))))
     )
     ((ELink l c at) (bindLink ex t l c at))
     (_ (Ok e))))
@@ -424,12 +416,10 @@
   (match v
     ((VInt n)
       (let ((tgt ld.target))
-        (try
-          got
-          (btreeGet ex.pager tgt.root (keyRowid n))
+        (let ((got (btreeGet ex.pager tgt.root (keyRowid n))?))
           (match got
             ((None) (Ok None))
-            ((Some rec) (try vals (axqlRowValues tgt rec n) (Ok (Some vals))))))))
+            ((Some rec) (let ((vals (axqlRowValues tgt rec n)?)) (Ok (Some vals))))))))
     (_ (Ok None))))
 
 ; `r` widened with the rows its links point at, for the links `used`
@@ -507,7 +497,7 @@
 ; Bind, type-check and fold, aggregates and all.
 (:: prepareAggExpr (-> Exec (Option TableDef) Expr (Result Expr Error)))
 (fn (prepareAggExpr ex t e)
-  (try b (bind ex t e) (try _ (axqlTypeOf ex.src b (colTypesOf t) ex.params) (axqlFold b ex.params))))
+  (let ((b (bind ex t e)?) (_ (axqlTypeOf ex.src b (colTypesOf t) ex.params)?)) (axqlFold b ex.params)))
 
 (:: colTypesOf (-> (Option TableDef) (Vec Int)))
 (fn (colTypesOf t)
@@ -524,15 +514,11 @@
     ((Some e)
       (if (axqlHasAgg e)
         (aggMisplaced ex e "WHERE picks rows before they are grouped, and HAVING picks groups")
-        (try
-          b
-          (bind ex t e)
-          (try
-            ty
-            (typeOfBound ex t b)
-            (if (|| (== ty typeText) (== ty typeBlob))
-              (axqErr axqType (truthHint ex e "WHERE" ty) "axqlPlan")
-              (try f (axqlFold b ex.params) (Ok (axqlConjuncts f)))))))
+        (let ((b (bind ex t e)?)
+              (ty (typeOfBound ex t b)?))
+          (if (|| (== ty typeText) (== ty typeBlob))
+            (axqErr axqType (truthHint ex e "WHERE" ty) "axqlPlan")
+            (let ((f (axqlFold b ex.params)?)) (Ok (axqlConjuncts f))))))
     )))
 
 ; The refusal of a TEXT or BLOB where a truth value belongs.
@@ -839,9 +825,7 @@
       (set kr.empty true)
       (Ok 0)
     }
-    (try
-      p
-      (keyEncodeValue ct.value)
+    (let ((p (keyEncodeValue ct.value)?))
       (let ((op ct.op))
         {
           (if (== op opEq)
@@ -885,9 +869,7 @@
 ; starts.
 (:: afterNulls (Result String Error))
 (fn (afterNulls)
-  (try
-    k
-    (keyEncodeValue VNull)
+  (let ((k (keyEncodeValue VNull)?))
     (match (keyPrefixEnd k)
       ((Some e) (Ok e))
       ((None) (axqErr axqCorrupt "the NULL key has no end" "axqlPlan")))))
@@ -896,15 +878,11 @@
 ; an equality on a UNIQUE index, then any equality, then any range.
 (:: chooseIndex (-> TableDef (Vec ColTerm) (Result (Option Access) Error)))
 (fn (chooseIndex t cts)
-  (try
-    eqU
-    (indexAccess t cts true true)
+  (let ((eqU (indexAccess t cts true true)?))
     (match eqU
       ((Some a) (Ok (Some a)))
       ((None)
-        (try
-          eqAny
-          (indexAccess t cts true false)
+        (let ((eqAny (indexAccess t cts true false)?))
           (match eqAny
             ((Some a) (Ok (Some a)))
             ((None) (indexAccess t cts false false))))
@@ -987,11 +965,9 @@
           ((None)
             (if kr.empty
               (Ok ANone)
-              (try
-                lo
-                (match kr.lo
-                  ((Some k) (Ok k))
-                  ((None) (afterNulls)))
+              (let ((lo (match kr.lo
+                          ((Some k) (Ok k))
+                          ((None) (afterNulls)))?))
                 (Ok (AIndex ix (Some lo) kr.hi))))
           ))
       })))
@@ -1041,9 +1017,7 @@
                   ((None) ANone)))
             )
             ((None)
-              (try
-                ixEq
-                (indexAccess t cts true false)
+              (let ((ixEq (indexAccess t cts true false)?))
                 (match ixEq
                   ((Some a) (Ok (preferUnique t cts a)))
                   ((None)
@@ -1055,9 +1029,7 @@
                           (Ok ANone)
                           (if (|| (isSome rg.lo) (isSome rg.hi))
                             (Ok (ARowidRange rg.lo rg.hi true))
-                            (try
-                              ixRange
-                              (indexAccess t cts false false)
+                            (let ((ixRange (indexAccess t cts false false)?))
                               (match ixRange
                                 ((Some a) (Ok a))
                                 ((None) (Ok (orderAccess t order)))))))
@@ -1215,12 +1187,10 @@
   (match a
     ((ANone) (Ok 0))
     ((ARowid n)
-      (try
-        got
-        (btreeGet ex.pager t.root (keyRowid n))
+      (let ((got (btreeGet ex.pager t.root (keyRowid n))?))
         (match got
           ((None) (Ok 0))
-          ((Some rec) (try vals (axqlRowValues t rec n) (try _ (f (RowRef n vals)) (Ok 1))))))
+          ((Some rec) (let ((vals (axqlRowValues t rec n)?) (_ (f (RowRef n vals))?)) (Ok 1)))))
     )
     ((AFull fwd) (scanTable
       ex
@@ -1262,15 +1232,11 @@
         hi
         true
         (lambda (k v)
-          (try
-            rowid
-            (keyIndexRowid k)
-            (try
-              got
-              (btreeGet ex.pager t.root (keyRowid rowid))
-              (match got
-                ((None) (axqErr axqCorrupt (concat "an index entry names a missing row of " t.name) "axqlScan"))
-                ((Some rec) (try vals (axqlRowValues t rec rowid) (f (RowRef rowid vals)))))))
+          (let ((rowid (keyIndexRowid k)?)
+                (got (btreeGet ex.pager t.root (keyRowid rowid))?))
+            (match got
+              ((None) (axqErr axqCorrupt (concat "an index entry names a missing row of " t.name) "axqlScan"))
+              ((Some rec) (let ((vals (axqlRowValues t rec rowid)?)) (f (RowRef rowid vals))))))
         ))
     )))
 
@@ -1283,7 +1249,7 @@
     lo
     hi
     fwd
-    (lambda (k v) (try rowid (keyRowidOf k) (try vals (axqlRowValues t v rowid) (f (RowRef rowid vals)))))))
+    (lambda (k v) (let ((rowid (keyRowidOf k)?) (vals (axqlRowValues t v rowid)?)) (f (RowRef rowid vals))))))
 
 ; ------------------------------------------------------------------
 ; SELECT.
@@ -1322,53 +1288,42 @@
 ;; Bind, check, fold and plan a SELECT. Needs a lock.
 (pub :: axqlPlanSelect (-> Exec Schema Select (Result SelectPlan Error)))
 (pub fn (axqlPlanSelect ex schema sel)
-  (try
-    t
-    (if (strIsEmpty sel.from)
-      (Ok None)
-      (try td (axqlTableDef schema sel.from) (Ok (Some td))))
+  (let ((t (if (strIsEmpty sel.from)
+             (Ok None)
+             (match (axqlTableDef schema sel.from) ((Err er) (Err er)) ((Ok td) (Ok (Some td)))))?))
     (if (selectIsGrouped sel)
       (planGrouped ex t sel)
-      (try
-        outs
-        (selectOutputs ex t sel false)
-        (try
-          terms
-          (prepareWhere ex t sel.where)
-          (try
+      (let ((outs (selectOutputs ex t sel false)?)
+            (terms (prepareWhere ex t sel.where)?)
+            (order (orderTerms ex t sel outs)?)
+            (limit (limitValue ex sel.limit "LIMIT" -1)?)
+            (offset (limitValue ex sel.offset "OFFSET" 0)?))
+        (match t
+          ((None) (Ok (SelectPlan
+            t
+            outs.names
+            outs.exprs
+            terms
+            (ARowid 0)
             order
-            (orderTerms ex t sel outs)
-            (try
-              limit
-              (limitValue ex sel.limit "LIMIT" -1)
-              (try
-                offset
-                (limitValue ex sel.offset "OFFSET" 0)
-                (match t
-                  ((None) (Ok (SelectPlan
-                    t
-                    outs.names
-                    outs.exprs
-                    terms
-                    (ARowid 0)
-                    order
-                    false
-                    limit
-                    offset
-                    vecNew
-                    None)))
-                  ((Some td) (try a (planAccess td terms order) (Ok (SelectPlan
-                    t
-                    outs.names
-                    outs.exprs
-                    terms
-                    a
-                    order
-                    (! (accessSatisfies td a order))
-                    limit
-                    offset
-                    (linksRead td (planExprs outs.exprs terms order))
-                    None)))))))))))))
+            false
+            limit
+            offset
+            vecNew
+            None)))
+          ((Some td) (let ((a (planAccess td terms order)?))
+                       (Ok (SelectPlan
+t
+outs.names
+outs.exprs
+terms
+a
+order
+(! (accessSatisfies td a order))
+limit
+offset
+(linksRead td (planExprs outs.exprs terms order))
+None)))))))))
 
 ; Every expression a plain SELECT evaluates.
 (:: planExprs (-> (Vec Expr) (Vec Expr) (Vec OrderTerm) (Vec Expr)))
@@ -1446,11 +1401,9 @@
 
 (:: addPrepared (-> Exec (Option TableDef) SelectItem Bool (Vec String) (Vec Expr) (Result Int Error)))
 (fn (addPrepared ex t item allowAgg names exprs)
-  (try
-    e
-    (if allowAgg
-      (prepareAggExpr ex t item.expr)
-      (prepareExpr ex t item.expr))
+  (let ((e (if allowAgg
+             (prepareAggExpr ex t item.expr)
+             (prepareExpr ex t item.expr))?))
     {
       (vecPush names (itemName item))
       (vecPush exprs e)
@@ -1669,34 +1622,34 @@
     )
     ((ENeg x at)
       (let ((rx (liftAggs ex x aggs base)))
-        (try lx rx (Ok (ENeg lx at))))
+        (let ((lx rx?)) (Ok (ENeg lx at))))
     )
     ((ENot x)
       (let ((rx (liftAggs ex x aggs base)))
-        (try lx rx (Ok (ENot lx))))
+        (let ((lx rx?)) (Ok (ENot lx))))
     )
     ((EIsNull x n)
       (let ((rx (liftAggs ex x aggs base)))
-        (try lx rx (Ok (EIsNull lx n))))
+        (let ((lx rx?)) (Ok (EIsNull lx n))))
     )
     ((EBin op l r at)
       (let (
         (rl (liftAggs ex l aggs base))
         (rr (liftAggs ex r aggs base))
       )
-        (try ll rl (try lr rr (Ok (EBin op ll lr at)))))
+        (let ((ll rl?) (lr rr?)) (Ok (EBin op ll lr at))))
     )
-    ((EFun name args at) (try ls (liftEach ex args aggs base) (Ok (EFun name ls at))))
+    ((EFun name args at) (let ((ls (liftEach ex args aggs base)?)) (Ok (EFun name ls at))))
     ((ELike x pat n at)
       (let (
         (rx (liftAggs ex x aggs base))
         (rp (liftAggs ex pat aggs base))
       )
-        (try lx rx (try lp rp (Ok (ELike lx lp n at)))))
+        (let ((lx rx?) (lp rp?)) (Ok (ELike lx lp n at))))
     )
     ((EIn x items n at)
       (let ((rx (liftAggs ex x aggs base)))
-        (try lx rx (try ls (liftEach ex items aggs base) (Ok (EIn lx ls n at)))))
+        (let ((lx rx?) (ls (liftEach ex items aggs base)?)) (Ok (EIn lx ls n at))))
     )
     (_ (Ok e))))
 
@@ -1806,15 +1759,11 @@
 ; HAVING: a truth value per group.
 (:: groupHaving (-> Exec (Option TableDef) (Vec Expr) (Vec Expr) Expr (Result Expr Error)))
 (fn (groupHaving ex t keys aggs h)
-  (try
-    b
-    (bind ex t h)
-    (try
-      ty
-      (typeOfBound ex t b)
-      (if (|| (== ty typeText) (== ty typeBlob))
-        (axqErr axqType (truthHint ex h "HAVING" ty) "axqlPlan")
-        (try f (axqlFold b ex.params) (liftGrouped ex t keys aggs f))))))
+  (let ((b (bind ex t h)?)
+        (ty (typeOfBound ex t b)?))
+    (if (|| (== ty typeText) (== ty typeBlob))
+      (axqErr axqType (truthHint ex h "HAVING" ty) "axqlPlan")
+      (let ((f (axqlFold b ex.params)?)) (liftGrouped ex t keys aggs f)))))
 
 ; ORDER BY of a grouped SELECT: a position or an alias names a result
 ; column, and anything else is worked out per group.
@@ -1836,9 +1785,9 @@
             ((EName n _)
               (match (aliasIndex sel n)
                 ((Some i) (Ok (vecGet lifted i)))
-                ((None) (try b (prepareAggExpr ex t term.expr) (liftGrouped ex t keys aggs b))))
+                ((None) (match (prepareAggExpr ex t term.expr) ((Err er) (Err er)) ((Ok b) (liftGrouped ex t keys aggs b)))))
             )
-            (_ (try b (prepareAggExpr ex t term.expr) (liftGrouped ex t keys aggs b))))))
+            (_ (match (prepareAggExpr ex t term.expr) ((Err er) (Err er)) ((Ok b) (liftGrouped ex t keys aggs b)))))))
             (match r
               ((Ok e)
                 {
@@ -1882,58 +1831,43 @@
 (:: planGrouped (-> Exec (Option TableDef) Select (Result SelectPlan Error)))
 (fn (planGrouped ex t sel)
   (let ((aggs vecNew))
-    (try
-      keys
-      (groupKeys ex t sel.groupBy)
-      (try
-        outs
-        (selectOutputs ex t sel true)
-        (try
-          lifted
-          (liftGroupedAll ex t keys aggs outs.exprs)
-          (try
-            having
-            (match sel.having
-              ((None) (Ok None))
-              ((Some h) (try lh (groupHaving ex t keys aggs h) (Ok (Some lh)))))
-            (try
-              order
-              (groupOrder ex t sel lifted keys aggs)
-              (try
-                terms
-                (prepareWhere ex t sel.where)
-                (try
-                  limit
-                  (limitValue ex sel.limit "LIMIT" -1)
-                  (try
-                    offset
-                    (limitValue ex sel.offset "OFFSET" 0)
-                    (let ((gp (GroupPlan keys aggs lifted having order)))
-                      (match t
-                        ((None) (Ok (SelectPlan
-                          t
-                          outs.names
-                          vecNew
-                          terms
-                          (ARowid 0)
-                          vecNew
-                          false
-                          limit
-                          offset
-                          vecNew
-                          (Some gp))))
-                        ((Some td) (try a (planAccess td terms vecNew) (Ok (SelectPlan
-                          t
-                          outs.names
-                          vecNew
-                          terms
-                          a
-                          vecNew
-                          false
-                          limit
-                          offset
-                          (linksRead td (groupExprs gp terms))
-                          (Some gp)))))))))))))))))
+    (let ((keys (groupKeys ex t sel.groupBy)?)
+          (outs (selectOutputs ex t sel true)?)
+          (lifted (liftGroupedAll ex t keys aggs outs.exprs)?)
+          (having (match sel.having
+                    ((None) (Ok None))
+                    ((Some h) (match (groupHaving ex t keys aggs h) ((Err er) (Err er)) ((Ok lh) (Ok (Some lh))))))?)
+          (order (groupOrder ex t sel lifted keys aggs)?)
+          (terms (prepareWhere ex t sel.where)?)
+          (limit (limitValue ex sel.limit "LIMIT" -1)?)
+          (offset (limitValue ex sel.offset "OFFSET" 0)?))
+      (let ((gp (GroupPlan keys aggs lifted having order)))
+        (match t
+          ((None) (Ok (SelectPlan
+            t
+            outs.names
+            vecNew
+            terms
+            (ARowid 0)
+            vecNew
+            false
+            limit
+            offset
+            vecNew
+            (Some gp))))
+          ((Some td) (let ((a (planAccess td terms vecNew)?))
+                       (Ok (SelectPlan
+t
+outs.names
+vecNew
+terms
+a
+vecNew
+false
+limit
+offset
+(linksRead td (groupExprs gp terms))
+(Some gp))))))))))
 
 ; A LIMIT or OFFSET count: a constant non-negative INTEGER. `absent`
 ; when the clause isn't there.
@@ -1942,9 +1876,7 @@
   (match e
     ((None) (Ok absent))
     ((Some x)
-      (try
-        v
-        (prepareExpr ex None x)
+      (let ((v (prepareExpr ex None x)?))
         (match v
           ((ELit (VInt n))
             (if (< n 0)
@@ -1974,35 +1906,33 @@
   (let ((st (SelState 0 0 vecNew)))
     (match plan.table
       ((None)
-        (try
-          keep
-          (axqlKeep plan.terms vecNew 0 ex.params)
+        (let ((keep (axqlKeep plan.terms vecNew 0 ex.params)?))
           (if keep
             (if plan.sorted
               (Ok 0)
-              (try _ (emitRow
-                ex
-                plan
-                st
-                (RowRef 0 vecNew)
-                onRow) (Ok st.returned)))
+              (let ((_ (emitRow
+                  ex
+                  plan
+                  st
+                  (RowRef 0 vecNew)
+                  onRow)?))
+                (Ok st.returned)))
             (Ok 0)))
       )
       ((Some td)
         (if (== plan.limit 0)
           (Ok 0)
-          (try
-            _
-            (scanRows
-              ex
-              td
-              plan.access
-              (lambda (r) (try xr (widenRow ex td plan.fetch r) (visitRow
-                ex
-                plan
-                st
-                onRow
-                xr))))
+          (let ((_ (scanRows
+                     ex
+                     td
+                     plan.access
+                     (lambda (r) (let ((xr (widenRow ex td plan.fetch r)?))
+                                   (visitRow
+       ex
+       plan
+       st
+       onRow
+       xr))))?))
             (if plan.sorted
               (emitSorted ex plan st onRow)
               (Ok st.returned))))
@@ -2020,15 +1950,11 @@
 ; One row a SELECT's scan meets: dropped, kept to sort, or handed on.
 (:: visitRow (-> Exec SelectPlan SelState (-> (Vec Value) (Result Bool Error)) RowRef (Result Bool Error)))
 (fn (visitRow ex plan st onRow r)
-  (try
-    keep
-    (axqlKeep plan.terms r.values r.rowid ex.params)
+  (let ((keep (axqlKeep plan.terms r.values r.rowid ex.params)?))
     (if (! keep)
       (Ok true)
       (if plan.sorted
-        (try
-          ks
-          (sortKeys ex plan r)
+        (let ((ks (sortKeys ex plan r)?))
           {
             (vecPush st.kept (Keyed ks r.rowid r.values))
             (Ok true)
@@ -2078,16 +2004,12 @@
       (set st.skipped (+ st.skipped 1))
       (Ok true)
     }
-    (try
-      outs
-      (evalOutputs ex plan r)
-      (try
-        more
-        (onRow outs)
-        {
-          (set st.returned (+ st.returned 1))
-          (Ok (&& more (|| (< plan.limit 0) (< st.returned plan.limit))))
-        }))))
+    (let ((outs (evalOutputs ex plan r)?)
+          (more (onRow outs)?))
+      {
+        (set st.returned (+ st.returned 1))
+        (Ok (&& more (|| (< plan.limit 0) (< st.returned plan.limit))))
+      })))
 
 (:: evalOutputs (-> Exec SelectPlan RowRef (Result (Vec Value) Error)))
 (fn (evalOutputs ex plan r)
@@ -2293,39 +2215,35 @@
 ; The group row `r` belongs to, made when it is the first.
 (:: findGroup (-> Exec GroupPlan Groups RowRef (Result Group Error)))
 (fn (findGroup ex gp gs r)
-  (try
-    kv
-    (axqlEvalAll gp.keys r.values r.rowid ex.params)
-    (try
-      key
-      (keyEncode kv)
-      (let (
-        (h (hashBytes key))
-        (head (mapGet gs.index h -1))
-        (mut i (mapGet gs.index h -1))
-        (mut found -1)
-      )
-        {
-          (while (&& (< found 0) (>= i 0))
-            (let ((g (vecGet gs.all i)))
-              (if (strEq g.key key)
-                (set found i)
-                (set i g.next))))
-          (if (>= found 0)
-            (Ok (vecGet gs.all found))
-            (let ((g (Group
-              key
-              kv
-              head
-              r.rowid
-              r.values
-              (newAccs (vecLen gp.aggs)))))
-              {
-                (mapInsert gs.index h (vecLen gs.all))
-                (vecPush gs.all g)
-                (Ok g)
-              }))
-        }))))
+  (let ((kv (axqlEvalAll gp.keys r.values r.rowid ex.params)?)
+        (key (keyEncode kv)?))
+    (let (
+      (h (hashBytes key))
+      (head (mapGet gs.index h -1))
+      (mut i (mapGet gs.index h -1))
+      (mut found -1)
+    )
+      {
+        (while (&& (< found 0) (>= i 0))
+          (let ((g (vecGet gs.all i)))
+            (if (strEq g.key key)
+              (set found i)
+              (set i g.next))))
+        (if (>= found 0)
+          (Ok (vecGet gs.all found))
+          (let ((g (Group
+            key
+            kv
+            head
+            r.rowid
+            r.values
+            (newAccs (vecLen gp.aggs)))))
+            {
+              (mapInsert gs.index h (vecLen gs.all))
+              (vecPush gs.all g)
+              (Ok g)
+            }))
+      })))
 
 ; Add value `v` to an aggregate's state. NULL is skipped.
 (:: addToAcc (-> Int Acc Value (Result Int Error)))
@@ -2344,9 +2262,7 @@
               }
             )
             (_
-              (try
-                c
-                (axqlCompare v acc.best)
+              (let ((c (axqlCompare v acc.best)?))
                 {
                   (if (if (== kind aggMax)
                     (> c 0)
@@ -2468,7 +2384,7 @@
 
 (:: groupRow (-> Exec GroupPlan Groups RowRef (Result Bool Error)))
 (fn (groupRow ex gp gs r)
-  (try g (findGroup ex gp gs r) (try _ (accumulate ex gp g r) (Ok true))))
+  (let ((g (findGroup ex gp gs r)?) (_ (accumulate ex gp g r)?)) (Ok true)))
 
 ; The statement's parameters, then group `g`'s aggregate values.
 (:: groupParams (-> Exec GroupPlan Group (Vec Value)))
@@ -2491,21 +2407,17 @@
 (:: groupOutput (-> Exec GroupPlan Group Int (Result (Option Keyed) Error)))
 (fn (groupOutput ex gp g pos)
   (let ((ps (groupParams ex gp g)))
-    (try
-      keep
-      (match gp.having
-        ((None) (Ok true))
-        ((Some h) (try v (axqlEval h g.values g.rowid ps) (try tv (axqlTruth v) (Ok (== tv tvTrue))))))
+    (let ((keep (match gp.having
+                  ((None) (Ok true))
+                  ((Some h) (match (axqlEval h g.values g.rowid ps) ((Err er1) (Err er1)) ((Ok v) (match (axqlTruth v) ((Err er) (Err er)) ((Ok tv) (Ok (== tv tvTrue))))))))?))
       (if (! keep)
         (Ok None)
-        (try
-          outs
-          (axqlEvalAll gp.outputs g.values g.rowid ps)
+        (let ((outs (axqlEvalAll gp.outputs g.values g.rowid ps)?))
           (let ((oes vecNew))
             {
               (for o in gp.order
                 (vecPush oes o.expr))
-              (try ks (axqlEvalAll oes g.values g.rowid ps) (Ok (Some (Keyed ks pos outs))))
+              (let ((ks (axqlEvalAll oes g.values g.rowid ps)?)) (Ok (Some (Keyed ks pos outs))))
             }))))))
 
 ; Hand the result rows on, after OFFSET and within LIMIT.
@@ -2612,31 +2524,25 @@
 ;@axiom:effect(io)
 (fn (runGrouped ex plan gp onRow)
   (let ((gs (Groups vecNew mapNew)))
-    (try
-      _
-      (match plan.table
-        ((None)
-          (try
-            keep
-            (axqlKeep plan.terms vecNew 0 ex.params)
-            (if keep
-              (try _ (groupRow ex gp gs (RowRef 0 vecNew)) (Ok 1))
-              (Ok 0)))
-        )
-        ((Some td) (scanRows
-          ex
-          td
-          plan.access
-          (lambda (r)
-            (try
-              xr
-              (widenRow ex td plan.fetch r)
-              (try
-                keep
-                (axqlKeep plan.terms xr.values xr.rowid ex.params)
-                (if keep
-                  (groupRow ex gp gs xr)
-                  (Ok true))))))))
+    (let ((_ (match plan.table
+               ((None)
+                 (match (axqlKeep plan.terms vecNew 0 ex.params)
+                   ((Err er1) (Err er1))
+                   ((Ok keep)
+                     (if keep
+                       (match (groupRow ex gp gs (RowRef 0 vecNew)) ((Err er) (Err er)) ((Ok _) (Ok 1)))
+                       (Ok 0))))
+               )
+               ((Some td) (scanRows
+                 ex
+                 td
+                 plan.access
+                 (lambda (r)
+                   (let ((xr (widenRow ex td plan.fetch r)?)
+                         (keep (axqlKeep plan.terms xr.values xr.rowid ex.params)?))
+                     (if keep
+                       (groupRow ex gp gs xr)
+                       (Ok true)))))))?))
       (finishGroups ex plan gp gs onRow))))
 
 ; ------------------------------------------------------------------
@@ -2661,20 +2567,14 @@
     (axqErr axqSchema (concat (concat "the DEFAULT of " c.name) " must be a value, not something that names a column or takes a parameter") "axqlCreateTable")
     (if (axqlHasAgg e)
       (aggMisplaced ex e "a DEFAULT is one value")
-      (try
-        b
-        (bind ex None e)
-        (try
-          vt
-          (typeOfBound ex None b)
-          (if (! (typeFits c.ctype vt))
-            (axqErr axqType (concat (concat (concat (concat c.name " is ") (typeName c.ctype)) ", but its DEFAULT is ") (typeName vt)) "axqlCreateTable")
-            (try
-              f
-              (axqlFold b vecNew)
-              (match f
-                ((ELit v) (Ok (coerce c.ctype v)))
-                (_ (axqErr axqSchema (concat "the DEFAULT of " (concat c.name " isn't a value")) "axqlCreateTable"))))))))))
+      (let ((b (bind ex None e)?)
+            (vt (typeOfBound ex None b)?))
+        (if (! (typeFits c.ctype vt))
+          (axqErr axqType (concat (concat (concat (concat c.name " is ") (typeName c.ctype)) ", but its DEFAULT is ") (typeName vt)) "axqlCreateTable")
+          (let ((f (axqlFold b vecNew)?))
+            (match f
+              ((ELit v) (Ok (coerce c.ctype v)))
+              (_ (axqErr axqSchema (concat "the DEFAULT of " (concat c.name " isn't a value")) "axqlCreateTable")))))))))
 
 ; Column `c`'s CHECK bound against table `t`: a truth value over the
 ; row's own columns.
@@ -2684,15 +2584,11 @@
     (axqErr axqSchema (concat (concat "the CHECK of " c.name) " can't take a parameter or follow a link") "axqlCreateTable")
     (if (axqlHasAgg e)
       (aggMisplaced ex e "a CHECK looks at one row")
-      (try
-        b
-        (bind ex (Some t) e)
-        (try
-          ty
-          (typeOfBound ex (Some t) b)
-          (if (|| (== ty typeText) (== ty typeBlob))
-            (axqErr axqType (concat (concat (concat "the CHECK of " c.name) " needs a truth value, not ") (typeName ty)) "axqlCreateTable")
-            (axqlFold b vecNew)))))))
+      (let ((b (bind ex (Some t) e)?)
+            (ty (typeOfBound ex (Some t) b)?))
+        (if (|| (== ty typeText) (== ty typeBlob))
+          (axqErr axqType (concat (concat (concat "the CHECK of " c.name) " needs a truth value, not ") (typeName ty)) "axqlCreateTable")
+          (axqlFold b vecNew))))))
 
 (:: prepareRules (-> Exec TableDef (Result Rules Error)))
 (fn (prepareRules ex t)
@@ -2821,33 +2717,25 @@
 (:: checkRow (-> Exec TableDef Rules (Vec Value) Int Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (checkRow ex t rules values rowid self)
-  (try
-    _
-    (checkNotNull t values)
-    (try
-      _
-      (checkRules ex t rules values rowid)
-      (try
-        taken
-        (if (== rowid self)
-          (Ok false)
-          (try got (btreeGet ex.pager t.root (keyRowid rowid)) (Ok (isSome got))))
-        (if taken
-          (axqErr axqConstraint (concat (concat (concat "a row with rowid " (fmtInt rowid)) (concat " already exists in " t.name)) "; UPSERT updates a row that is there") "axqlWrite")
-          (try
-            _
-            (checkUnique
-              ex
-              t
-              values
-              rowid
-              self)
-            {
-              (if (> (vecLen t.links) 0)
-                (vecPush ex.written (RowRef rowid values))
-                ex.written)
-              (Ok 0)
-            }))))))
+  (let ((_ (checkNotNull t values)?)
+        (_ (checkRules ex t rules values rowid)?)
+        (taken (if (== rowid self)
+                 (Ok false)
+                 (match (btreeGet ex.pager t.root (keyRowid rowid)) ((Err er) (Err er)) ((Ok got) (Ok (isSome got)))))?))
+    (if taken
+      (axqErr axqConstraint (concat (concat (concat "a row with rowid " (fmtInt rowid)) (concat " already exists in " t.name)) "; UPSERT updates a row that is there") "axqlWrite")
+      (let ((_ (checkUnique
+                 ex
+                 t
+                 values
+                 rowid
+                 self)?))
+        {
+          (if (> (vecLen t.links) 0)
+            (vecPush ex.written (RowRef rowid values))
+            ex.written)
+          (Ok 0)
+        }))))
 
 ; Check the links of every row the statement wrote, once all of them
 ; are written, so rows of one statement may link to each other.
@@ -2949,19 +2837,15 @@
 (:: uniqueHolder (-> Exec IndexDef (Vec Value) (Result Int Error)))
 ;@axiom:effect(io)
 (fn (uniqueHolder ex ix values)
-  (try
-    prefix
-    (axqlIndexPrefix ix values)
+  (let ((prefix (axqlIndexPrefix ix values)?))
     (let ((found (Holder -1)))
-      (try
-        _
-        (btreeScan
-          ex.pager
-          ix.root
-          (Some prefix)
-          (keyPrefixEnd prefix)
-          true
-          (lambda (k v) (holderFound found k)))
+      (let ((_ (btreeScan
+                 ex.pager
+                 ix.root
+                 (Some prefix)
+                 (keyPrefixEnd prefix)
+                 true
+                 (lambda (k v) (holderFound found k)))?))
         (Ok found.rowid)))))
 
 (struct Holder
@@ -2969,9 +2853,7 @@
 
 (:: holderFound (-> Holder String (Result Bool Error)))
 (fn (holderFound h k)
-  (try
-    r
-    (keyIndexRowid k)
+  (let ((r (keyIndexRowid k)?))
     {
       (set h.rowid r)
       (Ok false)
@@ -2981,15 +2863,11 @@
 (:: writeRow (-> Exec TableDef (Vec Value) Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (writeRow ex t values rowid)
-  (try
-    rec
-    (axqlRowRecord t values)
-    (try
-      fresh
-      (putNew ex t.root (keyRowid rowid) rec)
-      (if (! fresh)
-        (axqErr axqConstraint (concat (concat "a row with rowid " (fmtInt rowid)) (concat " already exists in " t.name)) "axqlWrite")
-        (writeIndexEntries ex t values rowid)))))
+  (let ((rec (axqlRowRecord t values)?)
+        (fresh (putNew ex t.root (keyRowid rowid) rec)?))
+    (if (! fresh)
+      (axqErr axqConstraint (concat (concat "a row with rowid " (fmtInt rowid)) (concat " already exists in " t.name)) "axqlWrite")
+      (writeIndexEntries ex t values rowid))))
 
 (:: writeIndexEntries (-> Exec TableDef (Vec Value) Int (Result Int Error)))
 ;@axiom:effect(io)
@@ -3020,20 +2898,18 @@
 (:: writeIndexEntry (-> Exec IndexDef (Vec Value) Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (writeIndexEntry ex ix values rowid)
-  (try
-    prefix
-    (axqlIndexPrefix ix values)
+  (let ((prefix (axqlIndexPrefix ix values)?))
     (let ((key (keyWithRowid prefix rowid)))
       (if (> (strLen key) btreeMaxKey)
         (axqErr axqTooBig (concat (concat (concat "the index " ix.name) (concat " can't hold this row: its entry would be " (fmtInt (strLen key)))) (concat " bytes, and an index entry holds at most " (fmtInt btreeMaxKey))) "axqlWrite")
-        (try _ (putNew ex ix.root key "") (Ok 0))))))
+        (let ((_ (putNew ex ix.root key "")?)) (Ok 0))))))
 
 ; Remove row `rowid` of `t`, whose values and record are given, with
 ; its index entries.
 (:: removeRow (-> Exec TableDef (Vec Value) Int String (Result Int Error)))
 ;@axiom:effect(io)
 (fn (removeRow ex t values rowid rec)
-  (try _ (removeIndexEntries ex t values rowid) (deleteKey ex t.root (keyRowid rowid) rec)))
+  (let ((_ (removeIndexEntries ex t values rowid)?)) (deleteKey ex t.root (keyRowid rowid) rec)))
 
 (:: removeIndexEntries (-> Exec TableDef (Vec Value) Int (Result Int Error)))
 ;@axiom:effect(io)
@@ -3064,22 +2940,18 @@
 (:: removeIndexEntry (-> Exec IndexDef (Vec Value) Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (removeIndexEntry ex ix values rowid)
-  (try prefix (axqlIndexPrefix ix values) (deleteKey ex ix.root (keyWithRowid prefix rowid) "")))
+  (let ((prefix (axqlIndexPrefix ix values)?)) (deleteKey ex ix.root (keyWithRowid prefix rowid) "")))
 
 ; The rowid a new row gets when it names none: one more than the
 ; largest, or 1 in an empty table.
 (:: nextRowid (-> Exec TableDef (Result Int Error)))
 ;@axiom:effect(io)
 (fn (nextRowid ex t)
-  (try
-    last
-    (btreeLastKey ex.pager t.root)
+  (let ((last (btreeLastKey ex.pager t.root)?))
     (match last
       ((None) (Ok 1))
       ((Some k)
-        (try
-          r
-          (keyRowidOf k)
+        (let ((r (keyRowidOf k)?))
           (if (== r intMax)
             (axqErr axqTooBig (concat "every rowid of " (concat t.name " up to 9223372036854775807 is taken")) "axqlWrite")
             (Ok (+ r 1))))
@@ -3146,22 +3018,18 @@
 (:: runInsert (-> Exec Schema String (Vec String) (Vec (Vec Expr)) (Result Int Error)))
 ;@axiom:effect(io)
 (fn (runInsert ex schema table names rows)
-  (try
-    t
-    (axqlTableDef schema table)
-    (try
-      targets
-      (insertTargets ex t names)
-      (try
-        rules
-        (prepareRules ex t)
-        (try prepared (prepareRows ex t targets rows) (try _ (insertRows
-          ex
-          t
-          rules
-          targets
-          prepared
-          0) (checkWritten ex t)))))))
+  (let ((t (axqlTableDef schema table)?)
+        (targets (insertTargets ex t names)?)
+        (rules (prepareRules ex t)?)
+        (prepared (prepareRows ex t targets rows)?)
+        (_ (insertRows
+ex
+t
+rules
+targets
+prepared
+0)?))
+    (checkWritten ex t)))
 
 ; Every row's values folded, in the order the column list names, each
 ; checked against its column's type. A row of the wrong width is
@@ -3235,25 +3103,19 @@
 
 (:: prepareOneValue (-> Exec TableDef Int Expr (Result Value Error)))
 (fn (prepareOneValue ex t target e)
-  (try
-    b
-    (bind ex None e)
-    (try
-      vt
-      (typeOfBound ex None b)
-      (let ((ct 
-        (if (< target 0)
-          typeInteger
-          (let ((c (vecGet t.cols target)))
-            c.ctype))))
-        (if (! (typeFits ct vt))
-          (axqErr axqType (concat (concat (concat (concat "column " (targetName t target)) (concat " is " (typeName ct))) (concat ", not " (typeName vt))) (convertHint ct vt)) "axqlInsert")
-          (try
-            f
-            (axqlFold b ex.params)
-            (match f
-              ((ELit v) (Ok (coerce ct v)))
-              (_ (axqErr axqSchema "VALUES can't name a column" "axqlInsert")))))))))
+  (let ((b (bind ex None e)?)
+        (vt (typeOfBound ex None b)?))
+    (let ((ct 
+      (if (< target 0)
+        typeInteger
+        (let ((c (vecGet t.cols target)))
+          c.ctype))))
+      (if (! (typeFits ct vt))
+        (axqErr axqType (concat (concat (concat (concat "column " (targetName t target)) (concat " is " (typeName ct))) (concat ", not " (typeName vt))) (convertHint ct vt)) "axqlInsert")
+        (let ((f (axqlFold b ex.params)?))
+          (match f
+            ((ELit v) (Ok (coerce ct v)))
+            (_ (axqErr axqSchema "VALUES can't name a column" "axqlInsert"))))))))
 
 ; A hint naming the function that converts a value of type `vt` to
 ; type `ct`, when there is one.
@@ -3289,13 +3151,14 @@
 (fn (insertRows ex t rules targets rows i)
   (if (>= i (vecLen rows))
     (Ok ex.changes)
-    (try _ (insertOne ex t rules targets (vecGet rows i)) (insertRows
-      ex
-      t
-      rules
-      targets
-      rows
-      (+ i 1)))))
+    (let ((_ (insertOne ex t rules targets (vecGet rows i))?))
+      (insertRows
+ex
+t
+rules
+targets
+rows
+(+ i 1)))))
 
 (:: insertOne (-> Exec TableDef Rules (Vec Int) (Vec Value) (Result Int Error)))
 ;@axiom:effect(io)
@@ -3322,33 +3185,27 @@
               }
               0)
           }))
-      (try
-        rowid
-        (match explicit
-          ((VInt n) (Ok n))
-          (_ (nextRowid ex t)))
+      (let ((rowid (match explicit
+                     ((VInt n) (Ok n))
+                     (_ (nextRowid ex t)))?))
         {
           (if (>= t.pk 0)
             (vecSet values t.pk (VInt rowid))
             values)
-          (try
-            _
-            (checkRow
-              ex
-              t
-              rules
-              values
-              rowid
-              -1)
-            (try
-              _
-              (writeRow ex t values rowid)
-              {
-                (set ex.changes (+ ex.changes 1))
-                (set ex.lastRowid rowid)
-                (set ex.inserted true)
-                (Ok 0)
-              }))
+          (let ((_ (checkRow
+                     ex
+                     t
+                     rules
+                     values
+                     rowid
+                     -1)?)
+                (_ (writeRow ex t values rowid)?))
+            {
+              (set ex.changes (+ ex.changes 1))
+              (set ex.lastRowid rowid)
+              (set ex.inserted true)
+              (Ok 0)
+            })
         })
     }))
 
@@ -3384,15 +3241,11 @@
   (match (givenRowid t targets given)
     ((None) (insertOne ex t rules targets given))
     ((Some n)
-      (try
-        got
-        (btreeGet ex.pager t.root (keyRowid n))
+      (let ((got (btreeGet ex.pager t.root (keyRowid n))?))
         (match got
           ((None) (insertOne ex t rules targets given))
           ((Some rec)
-            (try
-              old
-              (axqlRowValues t rec n)
+            (let ((old (axqlRowValues t rec n)?))
               (let ((values vecNew))
                 {
                   (for v in old
@@ -3401,38 +3254,28 @@
                     (if (>= target 0)
                       (vecSet values target (vecGet given i))
                       values))
-                  (try
-                    _
-                    (checkRow
-                      ex
-                      t
-                      rules
-                      values
-                      n
-                      n)
-                    (try
-                      newRec
-                      (axqlRowRecord t values)
-                      (try
-                        _
-                        (removeIndexEntries ex t old n)
-                        (try
-                          _
-                          (putOver
-                            ex
-                            t.root
-                            (keyRowid n)
-                            newRec
-                            rec)
-                          (try
-                            _
-                            (writeIndexEntries ex t values n)
-                            {
-                              (set ex.changes (+ ex.changes 1))
-                              (set ex.lastRowid n)
-                              (set ex.inserted true)
-                              (Ok 0)
-                            })))))
+                  (let ((_ (checkRow
+                             ex
+                             t
+                             rules
+                             values
+                             n
+                             n)?)
+                        (newRec (axqlRowRecord t values)?)
+                        (_ (removeIndexEntries ex t old n)?)
+                        (_ (putOver
+                             ex
+                             t.root
+                             (keyRowid n)
+                             newRec
+                             rec)?)
+                        (_ (writeIndexEntries ex t values n)?))
+                    {
+                      (set ex.changes (+ ex.changes 1))
+                      (set ex.lastRowid n)
+                      (set ex.inserted true)
+                      (Ok 0)
+                    })
                 }))
           ))))))
 
@@ -3441,33 +3284,30 @@
 (fn (upsertRows ex t rules targets rows i)
   (if (>= i (vecLen rows))
     (Ok ex.changes)
-    (try _ (upsertOne ex t rules targets (vecGet rows i)) (upsertRows
-      ex
-      t
-      rules
-      targets
-      rows
-      (+ i 1)))))
+    (let ((_ (upsertOne ex t rules targets (vecGet rows i))?))
+      (upsertRows
+ex
+t
+rules
+targets
+rows
+(+ i 1)))))
 
 (:: runUpsert (-> Exec Schema String (Vec String) (Vec (Vec Expr)) (Result Int Error)))
 ;@axiom:effect(io)
 (fn (runUpsert ex schema table names rows)
-  (try
-    t
-    (axqlTableDef schema table)
-    (try
-      targets
-      (insertTargets ex t names)
-      (try
-        rules
-        (prepareRules ex t)
-        (try prepared (prepareRows ex t targets rows) (try _ (upsertRows
-          ex
-          t
-          rules
-          targets
-          prepared
-          0) (checkWritten ex t)))))))
+  (let ((t (axqlTableDef schema table)?)
+        (targets (insertTargets ex t names)?)
+        (rules (prepareRules ex t)?)
+        (prepared (prepareRows ex t targets rows)?)
+        (_ (upsertRows
+ex
+t
+rules
+targets
+prepared
+0)?))
+    (checkWritten ex t)))
 
 ; ------------------------------------------------------------------
 ; UPDATE and DELETE.
@@ -3479,31 +3319,23 @@
 (:: collectMatches (-> Exec TableDef (Option Expr) (Result (Vec RowRef) Error)))
 ;@axiom:effect(io)
 (fn (collectMatches ex t w)
-  (try
-    terms
-    (prepareWhere ex (Some t) w)
-    (try
-      a
-      (planAccess t terms vecNew)
-      (let (
-        (m (Matches vecNew))
-        (used (linksRead t terms))
-      )
-        (try
-          _
-          (scanRows
-            ex
-            t
-            a
-            (lambda (r) (try xr (widenRow ex t used r) (matchRow ex terms m r xr))))
-          (Ok m.rows))))))
+  (let ((terms (prepareWhere ex (Some t) w)?)
+        (a (planAccess t terms vecNew)?))
+    (let (
+      (m (Matches vecNew))
+      (used (linksRead t terms))
+    )
+      (let ((_ (scanRows
+                 ex
+                 t
+                 a
+                 (lambda (r) (let ((xr (widenRow ex t used r)?)) (matchRow ex terms m r xr))))?))
+        (Ok m.rows)))))
 
 ; Keep `r` when WHERE holds for it, read as `xr`, its widened row.
 (:: matchRow (-> Exec (Vec Expr) Matches RowRef RowRef (Result Bool Error)))
 (fn (matchRow ex terms m r xr)
-  (try
-    keep
-    (axqlKeep terms xr.values xr.rowid ex.params)
+  (let ((keep (axqlKeep terms xr.values xr.rowid ex.params)?))
     {
       (if keep
         (vecPush m.rows r)
@@ -3514,7 +3346,7 @@
 (:: runDelete (-> Exec Schema String (Option Expr) (Result Int Error)))
 ;@axiom:effect(io)
 (fn (runDelete ex schema table w)
-  (try t (axqlTableDef schema table) (try rows (collectMatches ex t w) (deleteRows ex t rows 0))))
+  (let ((t (axqlTableDef schema table)?) (rows (collectMatches ex t w)?)) (deleteRows ex t rows 0)))
 
 (:: deleteRows (-> Exec TableDef (Vec RowRef) Int (Result Int Error)))
 ;@axiom:effect(io)
@@ -3522,21 +3354,17 @@
   (if (>= i (vecLen rows))
     (Ok ex.changes)
     (let ((r (vecGet rows i)))
-      (try
-        rec
-        (axqlRowRecord t r.values)
-        (try
-          _
-          (removeRow
-            ex
-            t
-            r.values
-            r.rowid
-            rec)
-          {
-            (set ex.changes (+ ex.changes 1))
-            (deleteRows ex t rows (+ i 1))
-          })))))
+      (let ((rec (axqlRowRecord t r.values)?)
+            (_ (removeRow
+                 ex
+                 t
+                 r.values
+                 r.rowid
+                 rec)?))
+        {
+          (set ex.changes (+ ex.changes 1))
+          (deleteRows ex t rows (+ i 1))
+        }))))
 
 ; The SET list bound: each target column and its folded expression.
 (struct Sets
@@ -3619,14 +3447,10 @@
 
 (:: prepareOneSet (-> Exec TableDef Int Expr (Result Expr Error)))
 (fn (prepareOneSet ex t target e)
-  (try
-    b
-    (bind ex (Some t) e)
+  (let ((b (bind ex (Some t) e)?))
     (if (readsLink t b)
       (axqErr axqSchema (atPos ex (exprPosOf e) "SET can't read through a link; read the linked value with a SELECT first") "axqlUpdate")
-    (try
-      vt
-      (typeOfBound ex (Some t) b)
+    (let ((vt (typeOfBound ex (Some t) b)?))
       (let ((ct 
         (if (< target 0)
           typeInteger
@@ -3639,78 +3463,70 @@
 (:: runUpdate (-> Exec Schema String (Vec String) (Vec Expr) (Option Expr) (Result Int Error)))
 ;@axiom:effect(io)
 (fn (runUpdate ex schema table names exprs w)
-  (try t (axqlTableDef schema table) (try sets (prepareSets ex t names exprs) (try rules (prepareRules ex t) (try rows (collectMatches ex t w) (try _ (updateRows
-    ex
-    t
-    rules
-    sets
-    rows
-    0) (checkWritten ex t)))))))
+  (let ((t (axqlTableDef schema table)?)
+        (sets (prepareSets ex t names exprs)?)
+        (rules (prepareRules ex t)?)
+        (rows (collectMatches ex t w)?)
+        (_ (updateRows
+ex
+t
+rules
+sets
+rows
+0)?))
+    (checkWritten ex t)))
 
 (:: updateRows (-> Exec TableDef Rules Sets (Vec RowRef) Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (updateRows ex t rules sets rows i)
   (if (>= i (vecLen rows))
     (Ok ex.changes)
-    (try _ (updateOne ex t rules sets (vecGet rows i)) (updateRows
-      ex
-      t
-      rules
-      sets
-      rows
-      (+ i 1)))))
+    (let ((_ (updateOne ex t rules sets (vecGet rows i))?))
+      (updateRows
+ex
+t
+rules
+sets
+rows
+(+ i 1)))))
 
 ; Rewrite one row: evaluate every SET expression over the old values,
 ; check the new row, then move or overwrite it and its index entries.
 (:: updateOne (-> Exec TableDef Rules Sets RowRef (Result Int Error)))
 ;@axiom:effect(io)
 (fn (updateOne ex t rules sets r)
-  (try
-    nr
-    (newRow ex t sets r)
-    (try
-      _
-      (checkRow
-        ex
-        t
-        rules
-        nr.values
-        nr.rowid
-        r.rowid)
-      (try
-        oldRec
-        (axqlRowRecord t r.values)
-        (try
-          newRec
-          (axqlRowRecord t nr.values)
-          (try
-            _
-            (removeIndexEntries ex t r.values r.rowid)
-            (try
-              _
-              (if (== nr.rowid r.rowid)
-                (putOver
-                  ex
-                  t.root
-                  (keyRowid r.rowid)
-                  newRec
-                  oldRec)
-                (try
-                  _
-                  (deleteKey ex t.root (keyRowid r.rowid) oldRec)
-                  (try
-                    fresh
-                    (putNew ex t.root (keyRowid nr.rowid) newRec)
-                    (if fresh
-                      (Ok 0)
-                      (axqErr axqConstraint (concat (concat "a row with rowid " (fmtInt nr.rowid)) (concat " already exists in " t.name)) "axqlUpdate")))))
-              (try
-                _
-                (writeIndexEntries ex t nr.values nr.rowid)
-                {
-                  (set ex.changes (+ ex.changes 1))
-                  (Ok 0)
-                }))))))))
+  (let ((nr (newRow ex t sets r)?)
+        (_ (checkRow
+             ex
+             t
+             rules
+             nr.values
+             nr.rowid
+             r.rowid)?)
+        (oldRec (axqlRowRecord t r.values)?)
+        (newRec (axqlRowRecord t nr.values)?)
+        (_ (removeIndexEntries ex t r.values r.rowid)?)
+        (_ (if (== nr.rowid r.rowid)
+             (putOver
+               ex
+               t.root
+               (keyRowid r.rowid)
+               newRec
+               oldRec)
+             (match (deleteKey ex t.root (keyRowid r.rowid) oldRec)
+               ((Err er1) (Err er1))
+               ((Ok _)
+                 (match (putNew ex t.root (keyRowid nr.rowid) newRec)
+                   ((Err er) (Err er))
+                   ((Ok fresh)
+                     (if fresh
+                       (Ok 0)
+                       (axqErr axqConstraint (concat (concat "a row with rowid " (fmtInt nr.rowid)) (concat " already exists in " t.name)) "axqlUpdate")))))))?)
+        (_ (writeIndexEntries ex t nr.values nr.rowid)?))
+    {
+      (set ex.changes (+ ex.changes 1))
+      (Ok 0)
+    }))
 
 ; A rewritten row: its values and the rowid it will live under.
 (struct NewRow
@@ -3790,30 +3606,29 @@
 (:: addEntry (-> Exec String String String Int String (Result Int Error)))
 ;@axiom:effect(io)
 (fn (addEntry ex kind name table root text)
-  (try
-    last
-    (btreeLastKey ex.pager btreeSchemaRoot)
-    (try
-      rowid
-      (match last
-        ((None) (Ok 1))
-        ((Some k) (try r (keyRowidOf k) (Ok (+ r 1)))))
-      (try rec (axqlEntryRecord
-        kind
-        name
-        table
-        root
-        text) (try _ (putNew ex btreeSchemaRoot (keyRowid rowid) rec) (Ok rowid))))))
+  (let ((last (btreeLastKey ex.pager btreeSchemaRoot)?)
+        (rowid (match last
+                 ((None) (Ok 1))
+                 ((Some k) (match (keyRowidOf k) ((Err er) (Err er)) ((Ok r) (Ok (+ r 1))))))?)
+        (rec (axqlEntryRecord
+      kind
+      name
+      table
+      root
+      text)?)
+        (_ (putNew ex btreeSchemaRoot (keyRowid rowid) rec)?))
+    (Ok rowid)))
 
 (:: removeEntry (-> Exec SchemaEntry (Result Int Error)))
 ;@axiom:effect(io)
 (fn (removeEntry ex e)
-  (try rec (axqlEntryRecord
-    e.kind
-    e.name
-    e.table
-    e.root
-    e.text) (deleteKey ex btreeSchemaRoot (keyRowid e.rowid) rec)))
+  (let ((rec (axqlEntryRecord
+      e.kind
+      e.name
+      e.table
+      e.root
+      e.text)?))
+    (deleteKey ex btreeSchemaRoot (keyRowid e.rowid) rec)))
 
 ; Refuse a column's LINK, DEFAULT or CHECK that can't work: a link to a
 ; table that doesn't exist or from a PRIMARY KEY, or a DEFAULT or CHECK
@@ -3829,42 +3644,42 @@
         (if (isSome failure)
           0
           (let ((r
-            (try
-              _
-              (if (strIsEmpty c.link)
-                (Ok 0)
-                (if c.primaryKey
-                  (axqErr axqSchema (concat c.name " can't be both a LINK and the PRIMARY KEY") "axqlCreateTable")
-                  (if (axqlNameEq c.link table)
-                    (Ok 0)
-                    (match (axqlFindEntry schema c.link)
-                      ((Some e)
-                        (if (strEq e.kind kindTable)
-                          (Ok 0)
-                          (axqErr axqSchema (concat (concat (concat c.name " links to ") c.link) ", which is an index, not a table") "axqlCreateTable"))
-                      )
-                      ((None) (axqErr axqSchema (concat (concat (concat (concat c.name " links to ") c.link) ", which doesn't exist") (axqlHint c.link (axqlTableNames schema) "tables")) "axqlCreateTable"))))))
-              (try
-                _
-                (match c.dflt
-                  ((None) (Ok 0))
-                  ((Some e)
-                    (if c.primaryKey
-                      (axqErr axqSchema (concat c.name " is the PRIMARY KEY, which takes the next rowid, so it can't have a DEFAULT") "axqlCreateTable")
-                      (try
-                        v
-                        (defaultValue ex c e)
-                        (match v
-                          ((VNull)
-                            (if c.notNull
-                              (axqErr axqSchema (concat c.name " is NOT NULL, so its DEFAULT can't be NULL") "axqlCreateTable")
-                              (Ok 0))
-                          )
-                          (_ (Ok 0)))))
-                  ))
-                (match c.check
-                  ((None) (Ok 0))
-                  ((Some e) (try _ (bindCheck ex self c e) (Ok 0))))))))
+            (match (if (strIsEmpty c.link)
+                     (Ok 0)
+                     (if c.primaryKey
+                       (axqErr axqSchema (concat c.name " can't be both a LINK and the PRIMARY KEY") "axqlCreateTable")
+                       (if (axqlNameEq c.link table)
+                         (Ok 0)
+                         (match (axqlFindEntry schema c.link)
+                           ((Some e)
+                             (if (strEq e.kind kindTable)
+                               (Ok 0)
+                               (axqErr axqSchema (concat (concat (concat c.name " links to ") c.link) ", which is an index, not a table") "axqlCreateTable"))
+                           )
+                           ((None) (axqErr axqSchema (concat (concat (concat (concat c.name " links to ") c.link) ", which doesn't exist") (axqlHint c.link (axqlTableNames schema) "tables")) "axqlCreateTable"))))))
+              ((Err er2) (Err er2))
+              ((Ok _)
+                (match (match c.dflt
+                         ((None) (Ok 0))
+                         ((Some e)
+                           (if c.primaryKey
+                             (axqErr axqSchema (concat c.name " is the PRIMARY KEY, which takes the next rowid, so it can't have a DEFAULT") "axqlCreateTable")
+                             (match (defaultValue ex c e)
+                               ((Err er) (Err er))
+                               ((Ok v)
+                                 (match v
+                                   ((VNull)
+                                     (if c.notNull
+                                       (axqErr axqSchema (concat c.name " is NOT NULL, so its DEFAULT can't be NULL") "axqlCreateTable")
+                                       (Ok 0))
+                                   )
+                                   (_ (Ok 0))))))
+                         ))
+                  ((Err er1) (Err er1))
+                  ((Ok _)
+                    (match c.check
+                      ((None) (Ok 0))
+                      ((Some e) (match (bindCheck ex self c e) ((Err er) (Err er)) ((Ok _) (Ok 0)))))))))))
             (match r
               ((Ok _) 0)
               ((Err err)
@@ -3942,13 +3757,18 @@
         (Ok 0)
         (axqErr axqSchema (alreadyNamed e) "axqlCreateTable"))
     )
-    ((None) (try _ (checkColumns name cols) (try _ (checkConstraints ex schema name cols) (try root (createTree ex btreeTable) (try _ (addEntry
-      ex
-      kindTable
-      name
-      name
-      root
-      text) (try _ (pagerBumpSchemaVersion ex.pager) (Ok 0)))))))))
+    ((None) (let ((_ (checkColumns name cols)?)
+                  (_ (checkConstraints ex schema name cols)?)
+                  (root (createTree ex btreeTable)?)
+                  (_ (addEntry
+ex
+kindTable
+name
+name
+root
+text)?)
+                  (_ (pagerBumpSchemaVersion ex.pager)?))
+              (Ok 0)))))
 
 ; An empty vector of schema entries, its element type fixed where it
 ; is made.
@@ -3968,9 +3788,7 @@
     ((Some e)
       (if (! (strEq e.kind kindTable))
         (axqErr axqSchema (concat (concat "no such table: " name) " (it names an index; use DROP INDEX)") "axqlDropTable")
-        (try
-          links
-          (axqlLinksTo schema e.name)
+        (let ((links (axqlLinksTo schema e.name)?))
           (if (> (vecLen links) 0)
             (axqErr axqSchema (concat (concat (concat (concat "can't drop " e.name) ": ") (vecGet links 0)) (concat " links to it; drop " (concat (linkOwner (vecGet links 0)) " first"))) "axqlDropTable")
         (let (
@@ -4007,7 +3825,7 @@
                 0))
             (match failure
               ((Some err) (Err err))
-              ((None) (try _ (pagerBumpSchemaVersion ex.pager) (Ok 0))))
+              ((None) (let ((_ (pagerBumpSchemaVersion ex.pager)?)) (Ok 0))))
           }))))
     )))
 
@@ -4054,32 +3872,26 @@
         (axqErr axqSchema (alreadyNamed e) "axqlCreateIndex"))
     )
     ((None)
-      (try
-        t
-        (axqlTableDef schema table)
-        (try
-          nums
-          (indexColumns t cols)
-          (try
-            root
-            (createTree ex btreeIndex)
-            (let ((ix (IndexDef name root unique nums)))
-              (try
-                _
-                (scanTable
-                  ex
-                  t
-                  None
-                  None
-                  true
-                  (lambda (r) (indexOneRow ex t ix r)))
-                (try _ (addEntry
-                  ex
-                  kindIndex
-                  name
-                  t.name
-                  root
-                  text) (try _ (pagerBumpSchemaVersion ex.pager) (Ok 0))))))))
+      (let ((t (axqlTableDef schema table)?)
+            (nums (indexColumns t cols)?)
+            (root (createTree ex btreeIndex)?))
+        (let ((ix (IndexDef name root unique nums)))
+          (let ((_ (scanTable
+                     ex
+                     t
+                     None
+                     None
+                     true
+                     (lambda (r) (indexOneRow ex t ix r)))?)
+                (_ (addEntry
+              ex
+              kindIndex
+              name
+              t.name
+              root
+              text)?)
+                (_ (pagerBumpSchemaVersion ex.pager)?))
+            (Ok 0))))
     )))
 
 ; Add one existing row to a new index, refusing a duplicate in a UNIQUE
@@ -4087,14 +3899,12 @@
 (:: indexOneRow (-> Exec TableDef IndexDef RowRef (Result Bool Error)))
 ;@axiom:effect(io)
 (fn (indexOneRow ex t ix r)
-  (try
-    holder
-    (if (&& ix.unique (! (axqlIndexHasNull ix r.values)))
-      (uniqueHolder ex ix r.values)
-      (Ok -1))
+  (let ((holder (if (&& ix.unique (! (axqlIndexHasNull ix r.values)))
+                  (uniqueHolder ex ix r.values)
+                  (Ok -1))?))
     (if (>= holder 0)
       (axqErr axqConstraint (concat (concat "can't create the UNIQUE index " ix.name) (concat ": " (concat t.name " holds duplicate values"))) "axqlCreateIndex")
-      (try _ (writeIndexEntry ex ix r.values r.rowid) (Ok true)))))
+      (let ((_ (writeIndexEntry ex ix r.values r.rowid)?)) (Ok true)))))
 
 (:: runDropIndex (-> Exec Schema Bool String (Result Int Error)))
 ;@axiom:effect(io)
@@ -4108,7 +3918,7 @@
     ((Some e)
       (if (! (strEq e.kind kindIndex))
         (axqErr axqSchema (concat (concat "no such index: " name) " (it names a table; use DROP TABLE)") "axqlDropIndex")
-        (try _ (removeEntry ex e) (try _ (dropTree ex e.root) (try _ (pagerBumpSchemaVersion ex.pager) (Ok 0)))))
+        (let ((_ (removeEntry ex e)?) (_ (dropTree ex e.root)?) (_ (pagerBumpSchemaVersion ex.pager)?)) (Ok 0)))
     )))
 
 ; ------------------------------------------------------------------
@@ -4205,12 +4015,14 @@
 (:: replaceEntry (-> Exec SchemaEntry String String String (Result Int Error)))
 ;@axiom:effect(io)
 (fn (replaceEntry ex e name table text)
-  (try oldRec (axqlEntryRecord e.kind e.name e.table e.root e.text) (try newRec (axqlEntryRecord e.kind name table e.root text) (putOver
-    ex
-    btreeSchemaRoot
-    (keyRowid e.rowid)
-    newRec
-    oldRec))))
+  (let ((oldRec (axqlEntryRecord e.kind e.name e.table e.root e.text)?)
+        (newRec (axqlEntryRecord e.kind name table e.root text)?))
+    (putOver
+ex
+btreeSchemaRoot
+(keyRowid e.rowid)
+newRec
+oldRec)))
 
 ; The links of a table that gains column `c` as its column `n`.
 (:: linksWith (-> Schema TableDef (Vec ColumnDef) ColumnDef Int (Result (Vec LinkDef) Error)))
@@ -4226,9 +4038,7 @@
             (vecPush out (LinkDef n (TableDef t.name t.root cols t.pk vecNew vecNew)))
             (Ok out)
           }
-          (try
-            tgt
-            (axqlBareTableDef schema c.link)
+          (let ((tgt (axqlBareTableDef schema c.link)?))
             {
               (vecPush out (LinkDef n tgt))
               (Ok out)
@@ -4253,18 +4063,24 @@
               (for v in r.values
                 (vecPush values v))
               (vecPush values dv)
-              (match (try
-                _
-                (checkRules ex t2 rules values r.rowid)
-                (try
-                  _
-                  (checkLinks ex t2 values r.rowid)
-                  (try oldRec (axqlRowRecord t r.values) (try newRec (axqlRowRecord t2 values) (putOver
-                    ex
-                    t.root
-                    (keyRowid r.rowid)
-                    newRec
-                    oldRec)))))
+              (match (match (checkRules ex t2 rules values r.rowid)
+                       ((Err er3) (Err er3))
+                       ((Ok _)
+                         (match (checkLinks ex t2 values r.rowid)
+                           ((Err er2) (Err er2))
+                           ((Ok _)
+                             (match (axqlRowRecord t r.values)
+                               ((Err er1) (Err er1))
+                               ((Ok oldRec)
+                                 (match (axqlRowRecord t2 values)
+                                   ((Err er) (Err er))
+                                   ((Ok newRec)
+                                     (putOver
+           ex
+           t.root
+           (keyRowid r.rowid)
+           newRec
+           oldRec)))))))))
                 ((Ok _) 0)
                 ((Err err)
                   {
@@ -4282,9 +4098,7 @@
 (:: runAlterAdd (-> Exec Schema String ColumnDef (Result Int Error)))
 ;@axiom:effect(io)
 (fn (runAlterAdd ex schema table c)
-  (try
-    t
-    (axqlTableDef schema table)
+  (let ((t (axqlTableDef schema table)?))
     (if (>= (axqlColumnIndex t.cols c.name) 0)
       (axqErr axqSchema (concat (concat t.name " already has a column named ") c.name) "axqlAlterTable")
       (if c.primaryKey
@@ -4296,38 +4110,24 @@
               (for x in t.cols
                 (vecPush cols x))
               (vecPush cols c)
-              (try
-                _
-                (checkColumns t.name cols)
-                (try
-                  _
-                  (checkConstraints ex schema t.name cols)
-                  (try
-                    links
-                    (linksWith schema t cols c (vecLen t.cols))
-                    (let ((t2 (TableDef t.name t.root cols t.pk t.indexes links)))
-                      (try
-                        rules
-                        (prepareRules ex t2)
-                        (try
-                          rows
-                          (collectMatches ex t None)
-                          (try
-                            _
-                            (widenRows ex t t2 rules rows)
-                            (match (axqlFindEntry schema t.name)
-                              ((Some e)
-                                (try _ (replaceEntry ex e e.name e.table (tableText t.name (columnTexts cols))) (try _ (pagerBumpSchemaVersion ex.pager) (Ok 0)))
-                              )
-                              ((None) (axqErr axqCorrupt "the table left the schema while it was altered" "axqlAlterTable"))))))))))
+              (let ((_ (checkColumns t.name cols)?)
+                    (_ (checkConstraints ex schema t.name cols)?)
+                    (links (linksWith schema t cols c (vecLen t.cols))?))
+                (let ((t2 (TableDef t.name t.root cols t.pk t.indexes links)))
+                  (let ((rules (prepareRules ex t2)?)
+                        (rows (collectMatches ex t None)?)
+                        (_ (widenRows ex t t2 rules rows)?))
+                    (match (axqlFindEntry schema t.name)
+                      ((Some e)
+                        (let ((_ (replaceEntry ex e e.name e.table (tableText t.name (columnTexts cols)))?) (_ (pagerBumpSchemaVersion ex.pager)?)) (Ok 0))
+                      )
+                      ((None) (axqErr axqCorrupt "the table left the schema while it was altered" "axqlAlterTable"))))))
             }))))))
 
 ; An index's CREATE INDEX text, on table `table`.
 (:: indexTextOn (-> SchemaEntry String (Result String Error)))
 (fn (indexTextOn x table)
-  (try
-    p
-    (axqlParse x.text)
+  (let ((p (axqlParse x.text)?))
     (match p.stmt
       ((SCreateIndex unique _ name _ cols)
         (let ((mut out (concat (concat (concat (if unique "CREATE UNIQUE INDEX " "CREATE INDEX ") (quoteName name)) " ON ") (concat (quoteName table) " ("))))
@@ -4356,26 +4156,26 @@
         (if (isSome failure)
           0
           (match (if (== x.rowid e.rowid)
-            (try cols (axqlTableColumns x.text) (replaceEntry ex x new new (tableText new (relinkedTexts cols e.name new))))
+            (match (axqlTableColumns x.text) ((Err er) (Err er)) ((Ok cols) (replaceEntry ex x new new (tableText new (relinkedTexts cols e.name new)))))
             (if (&& (strEq x.kind kindIndex) (axqlNameEq x.table e.name))
-              (try text (indexTextOn x new) (replaceEntry ex x x.name new text))
+              (match (indexTextOn x new) ((Err er) (Err er)) ((Ok text) (replaceEntry ex x x.name new text)))
               (if (strEq x.kind kindTable)
-                (try
-                  cols
-                  (axqlTableColumns x.text)
-                  (let ((mut linked false))
-                    {
-                      (for c in cols
-                        (if (&& (! (strIsEmpty c.link)) (axqlNameEq c.link e.name))
-                          {
-                            (set linked true)
-                            0
-                          }
-                          0))
-                      (if linked
-                        (replaceEntry ex x x.name x.table (tableText x.name (relinkedTexts cols e.name new)))
-                        (Ok 0))
-                    }))
+                (match (axqlTableColumns x.text)
+                  ((Err er) (Err er))
+                  ((Ok cols)
+                    (let ((mut linked false))
+                      {
+                        (for c in cols
+                          (if (&& (! (strIsEmpty c.link)) (axqlNameEq c.link e.name))
+                            {
+                              (set linked true)
+                              0
+                            }
+                            0))
+                        (if linked
+                          (replaceEntry ex x x.name x.table (tableText x.name (relinkedTexts cols e.name new)))
+                          (Ok 0))
+                      })))
                 (Ok 0))))
             ((Ok _) 0)
             ((Err err)
@@ -4386,7 +4186,7 @@
             ))))
       (match failure
         ((Some err) (Err err))
-        ((None) (try _ (pagerBumpSchemaVersion ex.pager) (Ok 0))))
+        ((None) (let ((_ (pagerBumpSchemaVersion ex.pager)?)) (Ok 0))))
     }))
 
 ; ALTER TABLE t RENAME TO new.
@@ -4415,9 +4215,7 @@
 (pub :: axqlRunWrite (-> Exec Stmt String (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (axqlRunWrite ex stmt text)
-  (try
-    schema
-    (axqlLoadSchema ex.pager)
+  (let ((schema (axqlLoadSchema ex.pager)?))
     (match stmt
       ((SInsert table cols rows) (runInsert
         ex
@@ -4468,19 +4266,16 @@
 (pub fn (axqlCheckNames ex schema stmt)
   (match stmt
     ((SSelect sel)
-      (try
-        t
-        (if (strIsEmpty sel.from)
-          (Ok None)
-          (try td (axqlTableDef schema sel.from) (Ok (Some td))))
-        (try _ (checkAllNames ex t (selectExprs sel)) (Ok 0)))
+      (let ((t (if (strIsEmpty sel.from)
+                 (Ok None)
+                 (match (axqlTableDef schema sel.from) ((Err er) (Err er)) ((Ok td) (Ok (Some td)))))?)
+            (_ (checkAllNames ex t (selectExprs sel))?))
+        (Ok 0))
     )
-    ((SInsert table cols rows) (try t (axqlTableDef schema table) (try _ (insertTargets ex t cols) (Ok 0))))
-    ((SUpsert table cols rows) (try t (axqlTableDef schema table) (try _ (insertTargets ex t cols) (Ok 0))))
+    ((SInsert table cols rows) (let ((t (axqlTableDef schema table)?) (_ (insertTargets ex t cols)?)) (Ok 0)))
+    ((SUpsert table cols rows) (let ((t (axqlTableDef schema table)?) (_ (insertTargets ex t cols)?)) (Ok 0)))
     ((SUpdate table cols exprs w)
-      (try
-        t
-        (axqlTableDef schema table)
+      (let ((t (axqlTableDef schema table)?))
         (let ((all vecNew))
           {
             (for e in exprs
@@ -4488,15 +4283,13 @@
             (match w
               ((Some e) (vecPush all e))
               ((None) all))
-            (try _ (checkAllNames ex (Some t) all) (Ok 0))
+            (let ((_ (checkAllNames ex (Some t) all)?)) (Ok 0))
           }))
     )
     ((SDelete table w)
-      (try
-        t
-        (axqlTableDef schema table)
+      (let ((t (axqlTableDef schema table)?))
         (match w
-          ((Some e) (try _ (bind ex (Some t) e) (Ok 0)))
+          ((Some e) (let ((_ (bind ex (Some t) e)?)) (Ok 0)))
           ((None) (Ok 0))))
     )
     (_ (Ok 0))))

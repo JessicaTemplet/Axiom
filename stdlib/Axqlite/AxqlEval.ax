@@ -215,9 +215,7 @@
 (pub fn (axqlComparison op a b)
   (if (|| (isNull a) (isNull b))
     (Ok VNull)
-    (try
-      c
-      (axqlCompare a b)
+    (let ((c (axqlCompare a b)?))
       (Ok
         (VInt
           (if (if (== op opEq)
@@ -549,9 +547,7 @@
 ; The INTEGER nearest `x`, halves away from zero.
 (:: roundReal (-> Float (Result Value Error)))
 (fn (roundReal x)
-  (try
-    t
-    (realToInt x "round")
+  (let ((t (realToInt x "round")?))
     (let ((frac (- x (__intToFloat t))))
       (if (>= frac 0.5)
         (if (== t 9223372036854775807)
@@ -607,7 +603,7 @@
 (fn (asIntOf v)
   (match v
     ((VInt _) (Ok v))
-    ((VReal x) (try n (realToInt x "asInt") (Ok (VInt n))))
+    ((VReal x) (let ((n (realToInt x "asInt")?)) (Ok (VInt n))))
     ((VText s)
       (match (strParseInt (strTrim s))
         ((Some n) (Ok (VInt n)))
@@ -710,9 +706,7 @@
       (strEq name "nullif")
       (if (|| (isNull a) (isNull (vecGet vs 1)))
         (Ok a)
-        (try
-          c
-          (axqlCompare a (vecGet vs 1))
+        (let ((c (axqlCompare a (vecGet vs 1))?))
           (Ok
             (if (== c 0)
               VNull
@@ -792,27 +786,21 @@
     ((EName n _) (axqErr axqSchema (concat "no such column: " n) "axqlEval"))
     ((ENeg x _)
       (let ((rx (axqlEval x row rowid params)))
-        (try v rx (axqlNegate v)))
+        (let ((v rx?)) (axqlNegate v)))
     )
     ((ENot x)
       (let ((rx (axqlEval x row rowid params)))
-        (try
-          v
-          rx
-          (try
-            t
-            (axqlTruth v)
-            (Ok
-              (truthValue
-                (if (== t tvNull)
-                  tvNull
-                  (- 1 t)))))))
+        (let ((v rx?)
+              (t (axqlTruth v)?))
+          (Ok
+            (truthValue
+              (if (== t tvNull)
+                tvNull
+                (- 1 t))))))
     )
     ((EIsNull x negated)
       (let ((rx (axqlEval x row rowid params)))
-        (try
-          v
-          rx
+        (let ((v rx?))
           (Ok
             (VInt
               (if (isNull v)
@@ -844,51 +832,39 @@
           (ra (axqlEval l row rowid params))
           (rb (axqlEval r row rowid params))
         )
-          (try
-            a
-            ra
-            (try
-              b
-              rb
-              (if (opIsComparison op)
-                (axqlComparison op a b)
-                (== op opConcat)
-                (concatValues a b)
-                (axqlArith op a b))))))
+          (let ((a ra?)
+                (b rb?))
+            (if (opIsComparison op)
+              (axqlComparison op a b)
+              (== op opConcat)
+              (concatValues a b)
+              (axqlArith op a b)))))
     )
-    ((EFun name args _) (try vs (axqlEvalAll args row rowid params) (axqlApply name vs)))
+    ((EFun name args _) (let ((vs (axqlEvalAll args row rowid params)?)) (axqlApply name vs)))
     ((ELike x pat negated _)
       (let (
         (rx (axqlEval x row rowid params))
         (rp (axqlEval pat row rowid params))
       )
-        (try
-          v
-          rx
-          (try
-            pv
-            rp
-            (if (|| (isNull v) (isNull pv))
-              (Ok VNull)
-              (let ((hit (axqlLike (valueBytes v) (valueBytes pv))))
-                (Ok
-                  (VInt
-                    (if (if negated
-                      (! hit)
-                      hit)
-                      1
-                      0))))))))
+        (let ((v rx?)
+              (pv rp?))
+          (if (|| (isNull v) (isNull pv))
+            (Ok VNull)
+            (let ((hit (axqlLike (valueBytes v) (valueBytes pv))))
+              (Ok
+                (VInt
+                  (if (if negated
+                    (! hit)
+                    hit)
+                    1
+                    0)))))))
     )
     ((EIn x items negated _)
       (let ((rx (axqlEval x row rowid params)))
-        (try
-          v
-          rx
+        (let ((v rx?))
           (if (isNull v)
             (Ok VNull)
-            (try
-              t
-              (inList v items row rowid params)
+            (let ((t (inList v items row rowid params)?))
               (Ok
                 (truthValue
                   (if (|| (! negated) (== t tvNull))
@@ -932,9 +908,7 @@
 ; NULL when an item is NULL, else FALSE.
 (:: inList (-> Value (Vec Expr) (Vec Value) Int (Vec Value) (Result Int Error)))
 (fn (inList v items row rowid params)
-  (try
-    vs
-    (axqlEvalAll items row rowid params)
+  (let ((vs (axqlEvalAll items row rowid params)?))
     (let (
       (mut found tvFalse)
       (mut failure None)
@@ -971,7 +945,7 @@
 ; The truth of `e` over a row: TRUE, FALSE, NULL, or the failure.
 (:: evalTruth (-> Expr (Vec Value) Int (Vec Value) (Result Int Error)))
 (fn (evalTruth e row rowid params)
-  (try v (axqlEval e row rowid params) (axqlTruth v)))
+  (let ((v (axqlEval e row rowid params)?)) (axqlTruth v)))
 
 ; AND (`dominant` FALSE) or OR (`dominant` TRUE): the dominant value
 ; from either side decides, whatever the other side does; otherwise a
@@ -1097,62 +1071,52 @@
     ((EName n _) (axqErr axqSchema (concat "no such column: " n) "axqlTypeOf"))
     ((ENeg x at)
       (let ((rx (axqlTypeOf src x colTypes params)))
-        (try
-          t
-          rx
+        (let ((t rx?))
           (if (|| (== t typeNull) (isNumericType t))
             (Ok t)
             (typeErrAt src at (concat "can't negate " (typeName t))))))
     )
     ((ENot x)
       (let ((rx (axqlTypeOf src x colTypes params)))
-        (try
-          t
-          rx
+        (let ((t rx?))
           (if (|| (== t typeNull) (isNumericType t))
             (Ok typeInteger)
             (typeErrAt src (exprPos x) (concat "NOT needs a number, not " (typeName t))))))
     )
     ((EIsNull x _)
       (let ((rx (axqlTypeOf src x colTypes params)))
-        (try _ rx (Ok typeInteger)))
+        (let ((_ rx?)) (Ok typeInteger)))
     )
     ((EBin op l r at)
       (let (
         (ra (axqlTypeOf src l colTypes params))
         (rb (axqlTypeOf src r colTypes params))
       )
-        (try a ra (try b rb (binType
-          src
-          op
-          a
-          b
-          at))))
+        (let ((a ra?)
+              (b rb?))
+          (binType
+src
+op
+a
+b
+at)))
     )
-    ((EFun name args at) (try ts (typesOf src args colTypes params) (funType src name ts at)))
+    ((EFun name args at) (let ((ts (typesOf src args colTypes params)?)) (funType src name ts at)))
     ((ELike x pat _ at)
       (let (
         (rx (axqlTypeOf src x colTypes params))
         (rp (axqlTypeOf src pat colTypes params))
       )
-        (try
-          a
-          rx
-          (try
-            b
-            rp
-            (if (&& (|| (== a typeNull) (== a typeText)) (|| (== b typeNull) (== b typeText)))
-              (Ok typeInteger)
-              (typeErrAt src at (concat "LIKE matches TEXT against a TEXT pattern, not " (pairText a b)))))))
+        (let ((a rx?)
+              (b rp?))
+          (if (&& (|| (== a typeNull) (== a typeText)) (|| (== b typeNull) (== b typeText)))
+            (Ok typeInteger)
+            (typeErrAt src at (concat "LIKE matches TEXT against a TEXT pattern, not " (pairText a b))))))
     )
     ((EIn x items _ at)
       (let ((rx (axqlTypeOf src x colTypes params)))
-        (try
-          a
-          rx
-          (try
-            ts
-            (typesOf src items colTypes params)
+        (let ((a rx?)
+              (ts (typesOf src items colTypes params)?))
           (let ((mut bad -1))
             {
               (for t in ts
@@ -1162,26 +1126,24 @@
               (if (< bad 0)
                 (Ok typeInteger)
                 (typeErrAt src at (concat "IN can't compare " (concat (typeName a) (concat " with " (typeName bad))))))
-            }))))
+            })))
     )
     ((EAgg k arg at)
       (match arg
         ((None) (Ok typeInteger))
         ((Some x)
           (let ((rt (axqlTypeOf src x colTypes params)))
-            (try
-            t
-            rt
-            (if (== k aggCount)
-              (Ok typeInteger)
-              (|| (== k aggMin) (== k aggMax))
-              (Ok t)
-              (if (|| (== t typeNull) (isNumericType t))
-                (Ok
-                  (if (== k aggAvg)
-                    typeReal
-                    t))
-                (typeErrAt src at (concat (concat (aggName k) " needs numbers, not ") (typeName t)))))))
+            (let ((t rt?))
+              (if (== k aggCount)
+                (Ok typeInteger)
+                (|| (== k aggMin) (== k aggMax))
+                (Ok t)
+                (if (|| (== t typeNull) (isNumericType t))
+                  (Ok
+                    (if (== k aggAvg)
+                      typeReal
+                      t))
+                  (typeErrAt src at (concat (concat (aggName k) " needs numbers, not ") (typeName t)))))))
         ))
     )
     ((ELink l c at) (axqErr axqSchema (concat (concat "the link path " l) (concat "." (concat c " wasn't resolved"))) "axqlTypeOf"))))
@@ -1450,7 +1412,7 @@
 (pub :: axqlFold (-> Expr (Vec Value) (Result Expr Error)))
 (pub fn (axqlFold e params)
   (if (axqlIsConstant e)
-    (try v (axqlEval e vecNew 0 params) (Ok (ELit v)))
+    (let ((v (axqlEval e vecNew 0 params)?)) (Ok (ELit v)))
     (foldInside e params)))
 
 ; Fold the constant parts of `e`, which names a column somewhere.
@@ -1461,21 +1423,21 @@
     ((ECol _) (Ok e))
     ((EName _ _) (Ok e))
     ((EParam i _) (Ok (ELit (vecGet params i))))
-    ((ENeg x at) (try fx (axqlFold x params) (Ok (ENeg fx at))))
-    ((ENot x) (try fx (axqlFold x params) (Ok (ENot fx))))
-    ((EIsNull x negated) (try fx (axqlFold x params) (Ok (EIsNull fx negated))))
+    ((ENeg x at) (let ((fx (axqlFold x params)?)) (Ok (ENeg fx at))))
+    ((ENot x) (let ((fx (axqlFold x params)?)) (Ok (ENot fx))))
+    ((EIsNull x negated) (let ((fx (axqlFold x params)?)) (Ok (EIsNull fx negated))))
     ((EBin op l r at)
       (let ((rl (axqlFold l params)))
-        (try fl rl (try fr (axqlFold r params) (Ok (EBin op fl fr at)))))
+        (let ((fl rl?) (fr (axqlFold r params)?)) (Ok (EBin op fl fr at))))
     )
-    ((EFun name args at) (try fs (foldAll args params) (Ok (EFun name fs at))))
+    ((EFun name args at) (let ((fs (foldAll args params)?)) (Ok (EFun name fs at))))
     ((EAgg k arg at)
       (match arg
         ((None) (Ok e))
-        ((Some x) (try fx (axqlFold x params) (Ok (EAgg k (Some fx) at)))))
+        ((Some x) (let ((fx (axqlFold x params)?)) (Ok (EAgg k (Some fx) at)))))
     )
-    ((ELike x pat negated at) (try fx (axqlFold x params) (try fp (axqlFold pat params) (Ok (ELike fx fp negated at)))))
-    ((EIn x items negated at) (try fx (axqlFold x params) (try fs (foldAll items params) (Ok (EIn fx fs negated at)))))
+    ((ELike x pat negated at) (let ((fx (axqlFold x params)?) (fp (axqlFold pat params)?)) (Ok (ELike fx fp negated at))))
+    ((EIn x items negated at) (let ((fx (axqlFold x params)?) (fs (foldAll items params)?)) (Ok (EIn fx fs negated at))))
     ((ELink _ _ _) (Ok e))))
 
 (:: foldAll (-> (Vec Expr) (Vec Value) (Result (Vec Expr) Error)))

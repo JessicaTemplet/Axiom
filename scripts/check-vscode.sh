@@ -127,7 +127,7 @@ derive_keywords() {
 
 # The heads the parser names only to refuse (AX2004), coloured as the
 # error they will be. The same list sits in sync-keywords.mjs.
-removed_expected="$(printf '%s\n' union foreign trait impl cond begin alloc consume define | LC_ALL=C sort)"
+removed_expected="$(printf '%s\n' union foreign trait impl cond begin alloc consume define try | LC_ALL=C sort)"
 
 # Print a rule's alternation, one word per line. The match is
 # `\G\s*(?:(pub)\s+)?(a|b|c)(?!...)`, and the group after `)?` is it.

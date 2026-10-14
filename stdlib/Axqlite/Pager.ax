@@ -4,10 +4,12 @@
 ;;!
 ;;!     (match (pagerOpen "app.db" true false 256)
 ;;!       ((Ok p)
-;;!         (try _ (pagerBeginWrite p)
-;;!           (try n (pagerAlloc p)          ; a fresh page number
-;;!             (try page (pagerWrite p n)   ; its bytes, journalled first
-;;!               { (pagerPutBe page 0 1 5) (pagerCommit p) }))))
+;;!         {
+;;!           (pagerBeginWrite p)?
+;;!           (let ((n (pagerAlloc p)?)          ; a fresh page number
+;;!                 (page (pagerWrite p n)?))    ; its bytes, journalled first
+;;!             { (pagerPutBe page 0 1 5) (pagerCommit p) })
+;;!         })
 ;;!       ((Err e) ...))
 ;
 ; This is the layer under `Axqlite.Btree`: it knows pages, not keys.
@@ -1394,9 +1396,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (spillDirty m)
-  (try
-    _
-    (syncJournalIfDirty m)
+  (let ((_ (syncJournalIfDirty m)?))
     (let (
       (keys (dirtyFrames m))
       (count (st m wPageCount))
@@ -1438,9 +1438,7 @@
     (if (< pgno 0)
       (Ok 0)
       (if (&& (fDirty m f) (< pgno (st m wPageCount)))
-        (try
-          _
-          (spillDirty m)
+        (let ((_ (spillDirty m)?))
           {
             (cacheForget m pgno)
             (Ok 0)
@@ -1568,35 +1566,35 @@
             (stAdd m (+ wStat0 4) 1)
             (txnFail
               m
-              (try
-                f
-                (frameFor m pgno pin)
-                (let ((a (fAddr m f)))
-                  (match (ioRead
-                    m
-                    (st m wDbFd)
-                    a
-                    4096
-                    (* pgno 4096))
-                    ((Err e)
-                      {
-                        (cacheForget m pgno)
-                        (Err e)
-                      }
-                    )
-                    ((Ok n)
-                      (if (< n 4096)
+              (match (frameFor m pgno pin)
+                ((Err er) (Err er))
+                ((Ok f)
+                  (let ((a (fAddr m f)))
+                    (match (ioRead
+                      m
+                      (st m wDbFd)
+                      a
+                      4096
+                      (* pgno 4096))
+                      ((Err e)
                         {
                           (cacheForget m pgno)
-                          (corrupt (pageMsg "page " pgno " is missing from the file") "pagerGet")
+                          (Err e)
                         }
-                        (if (!= (pagerGetBe a 4088 8) (pagerChecksum a 4088 pgno))
+                      )
+                      ((Ok n)
+                        (if (< n 4096)
                           {
                             (cacheForget m pgno)
-                            (corrupt (pageMsg "page " pgno " fails its checksum") "pagerGet")
+                            (corrupt (pageMsg "page " pgno " is missing from the file") "pagerGet")
                           }
-                          (Ok f)))
-                    )))))
+                          (if (!= (pagerGetBe a 4088 8) (pagerChecksum a 4088 pgno))
+                            {
+                              (cacheForget m pgno)
+                              (corrupt (pageMsg "page " pgno " fails its checksum") "pagerGet")
+                            }
+                            (Ok f)))
+                      ))))))
           })))))
 
 ; ------------------------------------------------------------------
@@ -1680,50 +1678,42 @@
 (:: journalStart (-> Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (journalStart m)
-  (try
-    fd
-    (journalOpen m true)
-    (try
-      _
-      (ioTruncate m fd 0)
-      (let (
-        (h (hdrBuf m))
-        (salt (makeSalt m))
-      )
-        {
-          (memSet h 0 512)
-          (memCopy h (strData jMagic) 15)
-          (pagerPutBe h 16 4 1)
-          (pagerPutBe h 20 4 4096)
-          (pagerPutBe h 24 4 (st m wOrigCount))
-          (pagerPutBe h 32 8 salt)
-          (pagerPutBe h 40 8 (pagerChecksum h 40 0))
-          (try
-            _
-            (ioWrite
-              m
-              fd
-              h
-              512
-              0)
-            {
-              (stSet m wSalt salt)
-              (stSet m wJStarted 1)
-              (stSet m wJRecords 0)
-              (stSet m wJDirty 1)
-              (Ok 0)
-            })
-        }))))
+  (let ((fd (journalOpen m true)?)
+        (_ (ioTruncate m fd 0)?))
+    (let (
+      (h (hdrBuf m))
+      (salt (makeSalt m))
+    )
+      {
+        (memSet h 0 512)
+        (memCopy h (strData jMagic) 15)
+        (pagerPutBe h 16 4 1)
+        (pagerPutBe h 20 4 4096)
+        (pagerPutBe h 24 4 (st m wOrigCount))
+        (pagerPutBe h 32 8 salt)
+        (pagerPutBe h 40 8 (pagerChecksum h 40 0))
+        (let ((_ (ioWrite
+                   m
+                   fd
+                   h
+                   512
+                   0)?))
+          {
+            (stSet m wSalt salt)
+            (stSet m wJStarted 1)
+            (stSet m wJRecords 0)
+            (stSet m wJDirty 1)
+            (Ok 0)
+          })
+      })))
 
 ; Append page `pgno`'s original bytes, at `a`, to the journal.
 (:: journalAppend (-> Int Int Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (journalAppend m pgno a)
-  (try
-    _
-    (if (== (st m wJStarted) 1)
-      (Ok 0)
-      (journalStart m))
+  (let ((_ (if (== (st m wJStarted) 1)
+             (Ok 0)
+             (journalStart m))?))
     (let (
       (b (recBuf m))
       (k (st m wJRecords))
@@ -1732,14 +1722,12 @@
         (pagerPutBe b 0 4 pgno)
         (memCopy (+ b 4) a 4096)
         (pagerPutBe b 4100 8 (pagerChecksum b 4100 (st m wSalt)))
-        (try
-          _
-          (ioWrite
-            m
-            (st m wJFd)
-            b
-            4108
-            (+ 512 (* k 4108)))
+        (let ((_ (ioWrite
+                   m
+                   (st m wJFd)
+                   b
+                   4108
+                   (+ 512 (* k 4108)))?))
           {
             (stSet m wJRecords (+ k 1))
             (stSet m wJDirty 1)
@@ -1772,29 +1760,26 @@
 (:: journalHot (-> Int (Result Bool Error)))
 ;@axiom:effect(io)
 (fn (journalHot m)
-  (try
-    fd
-    (journalOpen m false)
+  (let ((fd (journalOpen m false)?))
     (if (< fd 0)
       (Ok false)
       (let ((h (hdrBuf m)))
-        (try
-          n
-          (ioRead
-            m
-            fd
-            h
-            512
-            0)
+        (let ((n (ioRead
+                   m
+                   fd
+                   h
+                   512
+                   0)?))
           (if (|| (< n 512) (< (journalHeaderCount h) 0))
             (Ok false)
             (let ((b (recBuf m)))
-              (try k (ioRead
-                m
-                fd
-                b
-                4108
-                512) (Ok (&& (== k 4108) (recordValid b (pagerGetBe h 32 8))))))))))))
+              (let ((k (ioRead
+                  m
+                  fd
+                  b
+                  4108
+                  512)?))
+                (Ok (&& (== k 4108) (recordValid b (pagerGetBe h 32 8))))))))))))
 
 ; Zero the journal's header, and sync it when `sync`.
 (:: journalInvalidate (-> Int Bool (Result Int Error)))
@@ -1803,14 +1788,12 @@
   (let ((h (hdrBuf m)))
     {
       (memSet h 0 512)
-      (try
-        _
-        (ioWrite
-          m
-          (st m wJFd)
-          h
-          512
-          0)
+      (let ((_ (ioWrite
+                 m
+                 (st m wJFd)
+                 h
+                 512
+                 0)?))
         (if sync
           (ioSync m (st m wJFd))
           (Ok 0)))
@@ -1822,20 +1805,16 @@
 (:: recover (-> Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (recover m)
-  (try
-    fd
-    (journalOpen m false)
+  (let ((fd (journalOpen m false)?))
     (if (< fd 0)
       (Ok 0)
       (let ((h (hdrBuf m)))
-        (try
-          n
-          (ioRead
-            m
-            fd
-            h
-            512
-            0)
+        (let ((n (ioRead
+                   m
+                   fd
+                   h
+                   512
+                   0)?))
           (let ((orig 
             (if (< n 512)
               -1
@@ -1895,20 +1874,14 @@
                     ((None)
                       (if (== k 0)
                         (Ok 0)
-                        (try
-                          _
-                          (ioTruncate m (st m wDbFd) (* orig 4096))
-                          (try
-                            _
-                            (ioSync m (st m wDbFd))
-                            (try
-                              _
-                              (journalInvalidate m true)
-                              {
-                                (cacheDrop m)
-                                (stSet m wCachedCounter -1)
-                                (Ok k)
-                              }))))
+                        (let ((_ (ioTruncate m (st m wDbFd) (* orig 4096))?)
+                              (_ (ioSync m (st m wDbFd))?)
+                              (_ (journalInvalidate m true)?))
+                          {
+                            (cacheDrop m)
+                            (stSet m wCachedCounter -1)
+                            (Ok k)
+                          }))
                     ))
                 }))))))))
 
@@ -1943,14 +1916,12 @@
 ;@axiom:effect(unsafe)
 (fn (loadHeader m)
   (let ((a (pageBuf m)))
-    (try
-      n
-      (ioRead
-        m
-        (st m wDbFd)
-        a
-        4096
-        0)
+    (let ((n (ioRead
+               m
+               (st m wDbFd)
+               a
+               4096
+               0)?))
       (if (|| (< n 17) (|| (!= (memCmp a (strData dbMagic) 16) 0) (!= (__load8 a 16) 0)))
         (axqErr axqNotADatabase "the file isn't an AXQLite database" "pagerOpen")
         (if (< n 4096)
@@ -1969,36 +1940,34 @@
                   (corrupt "the header's page size or schema root is wrong" "pagerOpen")
                   (if (|| (< count 2) (|| (>= head count) (>= free count)))
                     (corrupt "the header's page count or free list is out of range" "pagerOpen")
-                    (try
-                      _
-                      (if (== counter (st m wCachedCounter))
-                        (Ok 0)
-                        (let ((probe (miscBuf m)))
-                          {
-                            (cacheDrop m)
-                            (try
-                              last
-                              (ioRead
-                                m
-                                (st m wDbFd)
-                                probe
-                                1
-                                (- (* count 4096) 1))
-                              (try
-                                past
-                                (ioRead
-                                  m
-                                  (st m wDbFd)
-                                  probe
-                                  1
-                                  (* count 4096))
-                                (if (|| (!= last 1) (!= past 0))
-                                  (corrupt "the file's length doesn't match its page count" "pagerOpen")
-                                  {
-                                    (stSet m wCachedCounter counter)
-                                    (Ok 0)
-                                  })))
-                          }))
+                    (let ((_ (if (== counter (st m wCachedCounter))
+                               (Ok 0)
+                               (let ((probe (miscBuf m)))
+                                 {
+                                   (cacheDrop m)
+                                   (match (ioRead
+                                            m
+                                            (st m wDbFd)
+                                            probe
+                                            1
+                                            (- (* count 4096) 1))
+                                     ((Err er1) (Err er1))
+                                     ((Ok last)
+                                       (match (ioRead
+                                                m
+                                                (st m wDbFd)
+                                                probe
+                                                1
+                                                (* count 4096))
+                                         ((Err er) (Err er))
+                                         ((Ok past)
+                                           (if (|| (!= last 1) (!= past 0))
+                                             (corrupt "the file's length doesn't match its page count" "pagerOpen")
+                                             {
+                                               (stSet m wCachedCounter counter)
+                                               (Ok 0)
+                                             })))))
+                                 }))?))
                       {
                         (stSet m wPageCount count)
                         (stSet m wFreeHead head)
@@ -2034,9 +2003,7 @@
 (:: recoverIfHot (-> Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (recoverIfHot m)
-  (try
-    hot
-    (journalHot m)
+  (let ((hot (journalHot m)?))
     (if hot
       (recover m)
       (Ok 0))))
@@ -2046,18 +2013,16 @@
 (:: lockShared (-> Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (lockShared m)
-  (try
-    _
-    (flockOp m (| dbLockShared dbLockNonBlocking))
+  (let ((_ (flockOp m (| dbLockShared dbLockNonBlocking))?))
     (let ((r 
-      (try
-        hot
-        (journalHot m)
-        (if (! hot)
-          (Ok 0)
-          (if (== (st m wReadOnly) 1)
-            (axqErr axqReadOnly "the database needs recovery from a hot journal, and this connection is read-only" "pagerBeginRead")
-            (try _ (flockOp m (| dbLockExclusive dbLockNonBlocking)) (try _ (recover m) (flockOp m (| dbLockShared dbLockNonBlocking)))))))))
+      (match (journalHot m)
+        ((Err er2) (Err er2))
+        ((Ok hot)
+          (if (! hot)
+            (Ok 0)
+            (if (== (st m wReadOnly) 1)
+              (axqErr axqReadOnly "the database needs recovery from a hot journal, and this connection is read-only" "pagerBeginRead")
+              (match (flockOp m (| dbLockExclusive dbLockNonBlocking)) ((Err er1) (Err er1)) ((Ok _) (match (recover m) ((Err er) (Err er)) ((Ok _) (flockOp m (| dbLockShared dbLockNonBlocking))))))))))))
       (match r
         ((Err e)
           {
@@ -2150,14 +2115,12 @@
 ;@axiom:effect(io)
 (fn (fileIsBlank m)
   (let ((a (pageBuf m)))
-    (try
-      n
-      (ioRead
-        m
-        (st m wDbFd)
-        a
-        4096
-        0)
+    (let ((n (ioRead
+               m
+               (st m wDbFd)
+               a
+               4096
+               0)?))
       (if (== n 0)
         (Ok true)
         (if (&& (allZero a n) (<= (fdSize (st m wDbFd)) 8192))
@@ -2177,45 +2140,39 @@
       (stSet m wOrigCount 0)
       (stSet m wCounter 0)
       (memSet a 0 4096)
-      (try
-        _
-        (journalStart m)
-        (try
-          _
-          (journalAppend m 0 a)
-          (try
-            _
-            (syncJournalIfDirty m)
+      (let ((_ (journalStart m)?)
+            (_ (journalAppend m 0 a)?)
+            (_ (syncJournalIfDirty m)?))
+        {
+          (__store8 a 0 1)
+          (pagerPutBe a 4 2 4088)
+          (pagerPutBe a 6 2 4076)
+          (pagerPutBe a 4088 8 (pagerChecksum a 4088 1))
+          (let ((_ (ioWrite
+                     m
+                     (st m wDbFd)
+                     a
+                     4096
+                     4096)?))
             {
-              (__store8 a 0 1)
-              (pagerPutBe a 4 2 4088)
-              (pagerPutBe a 6 2 4076)
-              (pagerPutBe a 4088 8 (pagerChecksum a 4088 1))
-              (try
-                _
-                (ioWrite
+              (stSet m wPageCount 2)
+              (stSet m wFreeHead 0)
+              (stSet m wFreeCount 0)
+              (stSet m wCounter 1)
+              (stSet m wSchemaVer 0)
+              (for i in 0..8
+                (stSet m (+ wMeta0 i) 0))
+              (storeHeader m a)
+              (let ((_ (ioWrite
                   m
                   (st m wDbFd)
                   a
                   4096
-                  4096)
-                {
-                  (stSet m wPageCount 2)
-                  (stSet m wFreeHead 0)
-                  (stSet m wFreeCount 0)
-                  (stSet m wCounter 1)
-                  (stSet m wSchemaVer 0)
-                  (for i in 0..8
-                    (stSet m (+ wMeta0 i) 0))
-                  (storeHeader m a)
-                  (try _ (ioWrite
-                    m
-                    (st m wDbFd)
-                    a
-                    4096
-                    0) (try _ (ioSync m (st m wDbFd)) (journalInvalidate m true)))
-                })
-            })))
+                  0)?)
+                    (_ (ioSync m (st m wDbFd))?))
+                (journalInvalidate m true))
+            })
+        })
     }))
 
 ; Under a shared lock: make a blank file a database (under the exclusive
@@ -2233,32 +2190,32 @@
     )
     ((Ok _)
       (let ((r 
-        (try
-          hot
-          (journalHot m)
-          (try
-            _
-            (if (! hot)
-              (Ok 0)
-              (if (== (st m wReadOnly) 1)
-                (axqErr axqReadOnly "the database needs recovery from a hot journal, and this connection is read-only" "pagerOpen")
-                (try _ (flockOp m (| dbLockExclusive dbLockNonBlocking)) (recover m))))
-            (try
-              blank
-              (fileIsBlank m)
-              (if (! blank)
-                (loadHeader m)
-                (if (== (st m wReadOnly) 1)
-                  (axqErr axqNotADatabase "the file is empty, and a read-only connection can't make it a database" "pagerOpen")
-                  (try
-                    _
-                    (flockOp m (| dbLockExclusive dbLockNonBlocking))
-                    (try
-                      still
-                      (fileIsBlank m)
-                      (if still
-                        (try _ (initialise m) (loadHeader m))
-                        (loadHeader m)))))))))))
+        (match (journalHot m)
+          ((Err er5) (Err er5))
+          ((Ok hot)
+            (match (if (! hot)
+                     (Ok 0)
+                     (if (== (st m wReadOnly) 1)
+                       (axqErr axqReadOnly "the database needs recovery from a hot journal, and this connection is read-only" "pagerOpen")
+                       (match (flockOp m (| dbLockExclusive dbLockNonBlocking)) ((Err er) (Err er)) ((Ok _) (recover m)))))
+              ((Err er4) (Err er4))
+              ((Ok _)
+                (match (fileIsBlank m)
+                  ((Err er3) (Err er3))
+                  ((Ok blank)
+                    (if (! blank)
+                      (loadHeader m)
+                      (if (== (st m wReadOnly) 1)
+                        (axqErr axqNotADatabase "the file is empty, and a read-only connection can't make it a database" "pagerOpen")
+                        (match (flockOp m (| dbLockExclusive dbLockNonBlocking))
+                          ((Err er2) (Err er2))
+                          ((Ok _)
+                            (match (fileIsBlank m)
+                              ((Err er1) (Err er1))
+                              ((Ok still)
+                                (if still
+                                  (match (initialise m) ((Err er) (Err er)) ((Ok _) (loadHeader m)))
+                                  (loadHeader m))))))))))))))))
         {
           (unlock m)
           r
@@ -2496,15 +2453,15 @@
             )
             ((Ok _)
               (let ((r 
-                (try
-                  _
-                  (recoverIfHot m)
-                  (try
-                    _
-                    (loadHeader m)
-                    (if (&& wasShared (!= (st m wCounter) seen))
-                      (axqErr axqBusy "another connection committed after this transaction read" "pagerBeginWrite")
-                      (startTxn m))))))
+                (match (recoverIfHot m)
+                  ((Err er1) (Err er1))
+                  ((Ok _)
+                    (match (loadHeader m)
+                      ((Err er) (Err er))
+                      ((Ok _)
+                        (if (&& wasShared (!= (st m wCounter) seen))
+                          (axqErr axqBusy "another connection committed after this transaction read" "pagerBeginWrite")
+                          (startTxn m))))))))
                 (match r
                   ((Ok _) (Ok 0))
                   ((Err e)
@@ -2579,7 +2536,7 @@
                 ))))
           (match failed
             ((Some e) (Err e))
-            ((None) (try _ (ioTruncate m (st m wDbFd) (* (st m wOrigCount) 4096)) (try _ (ioSync m (st m wDbFd)) (journalInvalidate m true)))))
+            ((None) (match (ioTruncate m (st m wDbFd) (* (st m wOrigCount) 4096)) ((Err er1) (Err er1)) ((Ok _) (match (ioSync m (st m wDbFd)) ((Err er) (Err er)) ((Ok _) (journalInvalidate m true)))))))
         })
       (if (== (st m wJStarted) 1)
         (let ((_ (journalInvalidate m false)))
@@ -2624,15 +2581,11 @@
 (:: commitWrites (-> Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (commitWrites m)
-  (try
-    a
-    (writablePage m 0 true)
+  (let ((a (writablePage m 0 true)?))
     {
       (stSet m wCounter (+ (st m wCounter) 1))
       (storeHeader m a)
-      (try
-        _
-        (syncJournalIfDirty m)
+      (let ((_ (syncJournalIfDirty m)?))
         (let (
           (keys (dirtyFrames m))
           (count (st m wPageCount))
@@ -2656,22 +2609,21 @@
             (match failed
               ((Some e) (Err e))
               ((None)
-                (try
-                  _
-                  (if (< (* count 4096) (st m wDbSize))
-                    {
-                      (stSet m wDbTouched 1)
-                      (match (ioTruncate m (st m wDbFd) (* count 4096))
-                        ((Ok _)
-                          {
-                            (stSet m wDbSize (* count 4096))
-                            (Ok 0)
-                          }
-                        )
-                        ((Err e) (Err e)))
-                    }
-                    (Ok 0))
-                  (try _ (ioSync m (st m wDbFd)) (journalInvalidate m true)))
+                (let ((_ (if (< (* count 4096) (st m wDbSize))
+                           {
+                             (stSet m wDbTouched 1)
+                             (match (ioTruncate m (st m wDbFd) (* count 4096))
+                               ((Ok _)
+                                 {
+                                   (stSet m wDbSize (* count 4096))
+                                   (Ok 0)
+                                 }
+                               )
+                               ((Err e) (Err e)))
+                           }
+                           (Ok 0))?)
+                      (_ (ioSync m (st m wDbFd))?))
+                  (journalInvalidate m true))
               ))
           }))
     }))
@@ -2721,20 +2673,16 @@
     (axqErr axqMisuse "a page can change only inside a write transaction" "pagerWrite")
     (if (== (st m wTxnError) 1)
       (axqErr axqIoFailed "an earlier failure in this transaction means it must be rolled back" "pagerWrite")
-      (try
-        f
-        (fetch m pgno pin)
+      (let ((f (fetch m pgno pin)?))
         (let ((a (fAddr m f)))
           (if (fDirty m f)
             {
               (stAdd m wWriteSeq 1)
               (Ok a)
             }
-            (try
-              _
-              (if (isJournalled m pgno)
-                (Ok 0)
-                (txnFail m (journalAppend m pgno a)))
+            (let ((_ (if (isJournalled m pgno)
+                       (Ok 0)
+                       (txnFail m (journalAppend m pgno a)))?))
               {
                 (fSetDirty m f 1)
                 (stSet m wAnyChange 1)
@@ -2760,7 +2708,7 @@
 ;@axiom:effect(unsafe)
 (pub fn (pagerGet p pgno)
   (let ((m (__handle_get pagerKind p.slot)))
-    (try f (fetch m pgno true) (Ok (fAddr m f)))))
+    (let ((f (fetch m pgno true)?)) (Ok (fAddr m f)))))
 
 ;; As `pagerGet`, without pinning: the address is good only until the
 ;; next pager call.
@@ -2769,7 +2717,7 @@
 ;@axiom:effect(unsafe)
 (pub fn (pagerGetTransient p pgno)
   (let ((m (__handle_get pagerKind p.slot)))
-    (try f (fetch m pgno false) (Ok (fAddr m f)))))
+    (let ((f (fetch m pgno false)?)) (Ok (fAddr m f)))))
 
 ;; The address of page `pgno`, which the caller may now change: its
 ;; original bytes are journalled first. Pinned until the next
@@ -2793,7 +2741,7 @@
 (:: headerChange (-> Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (headerChange m)
-  (try _ (writablePage m 0 false) (Ok 0)))
+  (let ((_ (writablePage m 0 false)?)) (Ok 0)))
 
 ;; A page for the caller to fill, zeroed: the head of the free list, or
 ;; a new page at the end of the file. Answers its number. Inside a write
@@ -2803,14 +2751,10 @@
 ;@axiom:effect(unsafe)
 (pub fn (pagerAlloc p)
   (let ((m (pm p)))
-    (try
-      _
-      (headerChange m)
+    (let ((_ (headerChange m)?))
       (let ((head (st m wFreeHead)))
         (if (!= head 0)
-          (try
-            a
-            (writablePage m head false)
+          (let ((a (writablePage m head false)?))
             (if (!= (__load8 a 0) 6)
               (txnFail m (corrupt (pageMsg "page " head " is on the free list but isn't free") "pagerAlloc"))
               (let ((next (pagerGetBe a 4 4)))
@@ -2829,11 +2773,9 @@
               {
                 (stSet m wPageCount (+ pgno 1))
                 (let ((f (cacheFind m pgno)))
-                  (try
-                    g
-                    (if (>= f 0)
-                      (Ok f)
-                      (frameFor m pgno false))
+                  (let ((g (if (>= f 0)
+                             (Ok f)
+                             (frameFor m pgno false))?))
                     {
                       (memSet (fAddr m g) 0 4096)
                       (fSetDirty m g 1)
@@ -2853,22 +2795,16 @@
   (let ((m (pm p)))
     (if (|| (< pgno 2) (>= pgno (st m wPageCount)))
       (txnFail m (corrupt (pageMsg "page " pgno " can't be freed") "pagerFree"))
-      (try
-        _
-        (headerChange m)
+      (let ((_ (headerChange m)?))
         (if (== pgno (- (st m wPageCount) 1))
           ; the last page: journal it if the file had it, then drop it
-          (try
-            _
-            (writablePage m pgno false)
+          (let ((_ (writablePage m pgno false)?))
             {
               (stSet m wPageCount pgno)
               (cacheForget m pgno)
               (Ok 0)
             })
-          (try
-            a
-            (writablePage m pgno false)
+          (let ((a (writablePage m pgno false)?))
             {
               (memSet a 0 4096)
               (__store64 (fMeta m (frameOf m a)) 4 0)
@@ -2907,21 +2843,21 @@
 (pub :: pagerPageCount (-> Pager (Result Int Error)))
 (pub fn (pagerPageCount p)
   (let ((m (pm p)))
-    (try _ (needLock m "pagerPageCount") (Ok (st m wPageCount)))))
+    (let ((_ (needLock m "pagerPageCount")?)) (Ok (st m wPageCount)))))
 
 ;; The change counter: one more after every commit that changed
 ;; anything. Needs a lock.
 (pub :: pagerChangeCounter (-> Pager (Result Int Error)))
 (pub fn (pagerChangeCounter p)
   (let ((m (pm p)))
-    (try _ (needLock m "pagerChangeCounter") (Ok (st m wCounter)))))
+    (let ((_ (needLock m "pagerChangeCounter")?)) (Ok (st m wCounter)))))
 
 ;; The schema version, which `pagerBumpSchemaVersion` raises. Needs a
 ;; lock.
 (pub :: pagerSchemaVersion (-> Pager (Result Int Error)))
 (pub fn (pagerSchemaVersion p)
   (let ((m (pm p)))
-    (try _ (needLock m "pagerSchemaVersion") (Ok (st m wSchemaVer)))))
+    (let ((_ (needLock m "pagerSchemaVersion")?)) (Ok (st m wSchemaVer)))))
 
 ;; Raise the schema version by one, answering the new version. Inside a
 ;; write transaction; it commits with it.
@@ -2929,9 +2865,7 @@
 ;@axiom:effect(io)
 (pub fn (pagerBumpSchemaVersion p)
   (let ((m (pm p)))
-    (try
-      _
-      (headerChange m)
+    (let ((_ (headerChange m)?))
       {
         (stSet m wSchemaVer (+ (st m wSchemaVer) 1))
         (Ok (st m wSchemaVer))
@@ -2944,7 +2878,7 @@
   (let ((m (pm p)))
     (if (|| (< slot 0) (> slot 7))
       (axqErr axqMisuse "a meta slot is 0 to 7" "pagerMeta")
-      (try _ (needLock m "pagerMeta") (Ok (st m (+ wMeta0 slot)))))))
+      (let ((_ (needLock m "pagerMeta")?)) (Ok (st m (+ wMeta0 slot)))))))
 
 ;; Set spare header word `slot` to `v`. Inside a write transaction.
 (pub :: pagerSetMeta (-> Pager Int Int (Result Int Error)))
@@ -2953,9 +2887,7 @@
   (let ((m (pm p)))
     (if (|| (< slot 0) (> slot 7))
       (axqErr axqMisuse "a meta slot is 0 to 7" "pagerSetMeta")
-      (try
-        _
-        (headerChange m)
+      (let ((_ (headerChange m)?))
         {
           (stSet m (+ wMeta0 slot) v)
           (Ok v)
@@ -2965,13 +2897,13 @@
 (pub :: pagerFreeListHead (-> Pager (Result Int Error)))
 (pub fn (pagerFreeListHead p)
   (let ((m (pm p)))
-    (try _ (needLock m "pagerFreeListHead") (Ok (st m wFreeHead)))))
+    (let ((_ (needLock m "pagerFreeListHead")?)) (Ok (st m wFreeHead)))))
 
 ;; How many pages the free list holds. Needs a lock.
 (pub :: pagerFreeListCount (-> Pager (Result Int Error)))
 (pub fn (pagerFreeListCount p)
   (let ((m (pm p)))
-    (try _ (needLock m "pagerFreeListCount") (Ok (st m wFreeCount)))))
+    (let ((_ (needLock m "pagerFreeListCount")?)) (Ok (st m wFreeCount)))))
 
 ;; Whether the page whose cached bytes start at `a` has had its
 ;; structure checked since it was read from the file. `Btree` checks a

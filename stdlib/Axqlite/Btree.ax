@@ -1,9 +1,13 @@
 ;;! Axqlite.Btree - the one B+tree AXQLite stores tables and indices in.
 ;;!
-;;!     (try _ (pagerBeginWrite p)
-;;!       (try root (btreeCreate p btreeTable)
-;;!         (try _ (btreePut p root (keyRowid 1) record)
-;;!           (pagerCommit p))))
+;;!     {
+;;!       (pagerBeginWrite p)?
+;;!       (let ((root (btreeCreate p btreeTable)?))
+;;!         {
+;;!           (btreePut p root (keyRowid 1) record)?
+;;!           (pagerCommit p)
+;;!         })
+;;!     }
 ;;!     (btreeGet p root (keyRowid 1))        ; (Ok (Some record))
 ;;!     (btreeScan p root None None true
 ;;!       (lambda (key value) (Ok true)))     ; every entry, in key order
@@ -545,16 +549,12 @@
 (:: node (-> Pager Int Bool (Result Int Error)))
 ;@axiom:effect(io)
 (fn (node p pgno write)
-  (try
-    a
-    (if write
-      (pagerWrite p pgno)
-      (pagerGet p pgno))
+  (let ((a (if write
+             (pagerWrite p pgno)
+             (pagerGet p pgno))?))
     (if (pagerChecked p a)
       (Ok a)
-      (try
-        _
-        (checkNode a pgno)
+      (let ((_ (checkNode a pgno)?))
         {
           (pagerSetChecked p a)
           (Ok a)
@@ -627,7 +627,7 @@
 (:: treeKind (-> Pager Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (treeKind p root)
-  (try a (node p root false) (Ok (kindOf (nType a)))))
+  (let ((a (node p root false)?)) (Ok (kindOf (nType a)))))
 
 ; ------------------------------------------------------------------
 ; Values and overflow chains.
@@ -773,12 +773,13 @@
       {
         (memCopy (strData out) (+ a (+ q (+ 6 klen))) local)
         (if (> vlen local)
-          (try _ (walkChain
-            p
-            (be32 a (+ q (+ 6 (+ klen local))))
-            (+ (strData out) local)
-            (- vlen local)
-            false) (Ok out))
+          (let ((_ (walkChain
+              p
+              (be32 a (+ q (+ 6 (+ klen local))))
+              (+ (strData out) local)
+              (- vlen local)
+              false)?))
+            (Ok out))
           (Ok out))
       })))
 
@@ -802,9 +803,7 @@
           (memCopy (+ c 6) (strData key) klen)
           (memCopy (+ c (+ 6 klen)) (strData value) local)
           (if (> vlen local)
-            (try
-              first
-              (writeChain p (+ (strData value) local) (- vlen local))
+            (let ((first (writeChain p (+ (strData value) local) (- vlen local))?))
               {
                 (put32 c (+ 6 (+ klen local)) first)
                 (Ok cell)
@@ -822,16 +821,14 @@
       (vlen (be32 a (+ q 2)))
     )
       (let ((local (localLen klen vlen)))
-        (try
-          _
-          (if (> vlen local)
-            (walkChain
-              p
-              (be32 a (+ q (+ 6 (+ klen local))))
-              0
-              (- vlen local)
-              true)
-            (Ok 0))
+        (let ((_ (if (> vlen local)
+                   (walkChain
+                     p
+                     (be32 a (+ q (+ 6 (+ klen local))))
+                     0
+                     (- vlen local)
+                     true)
+                   (Ok 0))?))
           {
             (removeCell a i)
             (Ok 0)
@@ -844,17 +841,13 @@
 (:: newNode (-> Pager Int (Vec String) Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (newNode p t cells right)
-  (try
-    pg
-    (pagerAlloc p)
-    (try
-      w
-      (pagerWrite p pg)
-      {
-        (writeNode w t cells right)
-        (pagerSetChecked p w)
-        (Ok pg)
-      })))
+  (let ((pg (pagerAlloc p)?)
+        (w (pagerWrite p pg)?))
+    {
+      (writeNode w t cells right)
+      (pagerSetChecked p w)
+      (Ok pg)
+    }))
 
 ; Whether the path followed the last child at every interior node: the
 ; leaf holds the tree's largest keys.
@@ -897,9 +890,7 @@
     (pg (vecGet pages level))
     (j (vecGet idxs level))
   )
-    (try
-      a
-      (node p pg true)
+    (let ((a (node p pg true)?))
       (let (
         (t (nType a))
         (right0 (nRight a))
@@ -927,19 +918,13 @@
                     (rightCells (sliceCells cells (+ s 1) m))
                   )
                     (if (== level 0)
-                      (try
-                        l
-                        (newNode p t left upChild)
-                        (try
-                          r2
-                          (newNode p t rightCells right)
-                          {
-                            (writeNode a t (vecPush vecNew (interiorCell l upKey)) r2)
-                            (Ok 0)
-                          }))
-                      (try
-                        r2
-                        (newNode p t rightCells right)
+                      (let ((l (newNode p t left upChild)?)
+                            (r2 (newNode p t rightCells right)?))
+                        {
+                          (writeNode a t (vecPush vecNew (interiorCell l upKey)) r2)
+                          (Ok 0)
+                        })
+                      (let ((r2 (newNode p t rightCells right)?))
                         {
                           (writeNode a t left upChild)
                           (insertInterior
@@ -965,11 +950,9 @@
     (leafPg (vecLast pages))
   )
     (let ((m (vecLen cells)))
-      (try
-        edge
-        (if (== i (- m 1))
-          (onRightEdge p pages idxs)
-          (Ok false))
+      (let ((edge (if (== i (- m 1))
+                    (onRightEdge p pages idxs)
+                    (Ok false))?))
         (let ((s 
           (if edge
             (- m 1)
@@ -980,19 +963,13 @@
             (sep (cellKey (vecGet cells s) true))
           )
             (if (== level 0)
-              (try
-                l
-                (newNode p t left 0)
-                (try
-                  r
-                  (newNode p t right 0)
-                  {
-                    (writeNode a (+ t 1) (vecPush vecNew (interiorCell l sep)) r)
-                    (Ok 0)
-                  }))
-              (try
-                r
-                (newNode p t right 0)
+              (let ((l (newNode p t left 0)?)
+                    (r (newNode p t right 0)?))
+                {
+                  (writeNode a (+ t 1) (vecPush vecNew (interiorCell l sep)) r)
+                  (Ok 0)
+                })
+              (let ((r (newNode p t right 0)?))
                 {
                   (writeNode a t left 0)
                   (insertInterior
@@ -1021,56 +998,42 @@
           (pages vecNew)
           (idxs vecNew)
         )
-          (try
-            kind
-            (treeKind p root)
-            (try
-              leaf
-              (descend
-                p
-                root
-                kind
-                0
-                (strData key)
-                (strLen key)
-                pages
-                idxs)
-              (try
-                a
-                (node p leaf false)
-                (let ((s (leafSearch a (strData key) (strLen key))))
-                  (let (
-                    (i (/ s 2))
-                    (found (== (% s 2) 1))
-                  )
-                    (if (&& found (! replace))
-                      (Ok false)
-                      (try
-                        cell
-                        (buildLeafCell p key value)
-                        (try
-                          w
-                          (node p leaf true)
-                          (try
-                            _
-                            (if found
-                              (removeLeafCell p w i)
-                              (Ok 0))
-                            (try
-                              _
-                              (if (>= (nFree w) (+ (strLen cell) 2))
-                                {
-                                  (insertCell w i cell)
-                                  (Ok 0)
-                                }
-                                (splitLeaf
-                                  p
-                                  pages
-                                  idxs
-                                  w
-                                  i
-                                  cell))
-                              (Ok (! found)))))))))))))))))
+          (let ((kind (treeKind p root)?)
+                (leaf (descend
+                        p
+                        root
+                        kind
+                        0
+                        (strData key)
+                        (strLen key)
+                        pages
+                        idxs)?)
+                (a (node p leaf false)?))
+            (let ((s (leafSearch a (strData key) (strLen key))))
+              (let (
+                (i (/ s 2))
+                (found (== (% s 2) 1))
+              )
+                (if (&& found (! replace))
+                  (Ok false)
+                  (let ((cell (buildLeafCell p key value)?)
+                        (w (node p leaf true)?)
+                        (_ (if found
+                             (removeLeafCell p w i)
+                             (Ok 0))?)
+                        (_ (if (>= (nFree w) (+ (strLen cell) 2))
+                             {
+                               (insertCell w i cell)
+                               (Ok 0)
+                             }
+                             (splitLeaf
+                               p
+                               pages
+                               idxs
+                               w
+                               i
+                               cell))?))
+                    (Ok (! found))))))))))))
 
 ; ------------------------------------------------------------------
 ; Deleting.
@@ -1084,9 +1047,7 @@
     (pg (vecGet pages level))
     (j (vecGet idxs level))
   )
-    (try
-      a
-      (node p pg true)
+    (let ((a (node p pg true)?))
       (let ((n (nCount a)))
         (if (&& (== j n) (== n 0))
           ; its only child is gone: the node is empty
@@ -1095,7 +1056,7 @@
               (writeNode a (- (nType a) 1) vecNew 0)
               (Ok 0)
             }
-            (try _ (pagerFree p pg) (removeChild p pages idxs (- level 1))))
+            (let ((_ (pagerFree p pg)?)) (removeChild p pages idxs (- level 1))))
           {
             (if (< j n)
               (removeCell a j)
@@ -1109,16 +1070,12 @@
               ; one child left: it takes this node's place
               (let ((only (nRight a)))
                 (if (== level 0)
-                  (try
-                    c
-                    (node p only false)
+                  (let ((c (node p only false)?))
                     {
                       (memCopy a c 4088)
                       (pagerFree p only)
                     })
-                  (try
-                    g
-                    (node p (vecGet pages (- level 1)) true)
+                  (let ((g (node p (vecGet pages (- level 1)) true)?))
                     {
                       (setChildAt g (vecGet idxs (- level 1)) only)
                       (pagerFree p pg)
@@ -1136,35 +1093,25 @@
       (pages vecNew)
       (idxs vecNew)
     )
-      (try
-        kind
-        (treeKind p root)
-        (try
-          leaf
-          (descend
-            p
-            root
-            kind
-            0
-            (strData key)
-            (strLen key)
-            pages
-            idxs)
-          (try
-            a
-            (node p leaf false)
-            (let ((s (leafSearch a (strData key) (strLen key))))
-              (if (== (% s 2) 0)
-                (Ok false)
-                (try
-                  w
-                  (node p leaf true)
-                  (try
-                    _
-                    (removeLeafCell p w (/ s 2))
-                    (if (|| (> (nCount w) 0) (== (vecLen pages) 1))
-                      (Ok true)
-                      (try _ (pagerFree p leaf) (try _ (removeChild p pages idxs (- (vecLen pages) 2)) (Ok true))))))))))))))
+      (let ((kind (treeKind p root)?)
+            (leaf (descend
+                    p
+                    root
+                    kind
+                    0
+                    (strData key)
+                    (strLen key)
+                    pages
+                    idxs)?)
+            (a (node p leaf false)?))
+        (let ((s (leafSearch a (strData key) (strLen key))))
+          (if (== (% s 2) 0)
+            (Ok false)
+            (let ((w (node p leaf true)?)
+                  (_ (removeLeafCell p w (/ s 2))?))
+              (if (|| (> (nCount w) 0) (== (vecLen pages) 1))
+                (Ok true)
+                (let ((_ (pagerFree p leaf)?) (_ (removeChild p pages idxs (- (vecLen pages) 2))?)) (Ok true))))))))))
 
 ; ------------------------------------------------------------------
 ; Scanning.
@@ -1268,9 +1215,7 @@
 ;@axiom:effect(io)
 (fn (scanTree p root lo hi forward wantValue f)
   (let ((_ (pagerOpBegin p)))
-    (try
-      kind
-      (treeKind p root)
+    (let ((kind (treeKind p root)?))
       (let (
         (pages vecNew)
         (idxs vecNew)
@@ -1469,9 +1414,7 @@
   (if (> depth maxDepth)
     (corrupt "a B-tree is deeper than 40 levels" "btreeCount")
     (let ((_ (pagerOpBegin p)))
-      (try
-        a
-        (node p pg false)
+      (let ((a (node p pg false)?))
         (if (!= (kindOf (nType a)) kind)
           (corrupt (pageMsg "page " pg " belongs to another kind of tree") "btreeCount")
           (if (isLeafType (nType a))
@@ -1513,9 +1456,7 @@
   (if (> depth maxDepth)
     (corrupt "a B-tree is deeper than 40 levels" "btreeDrop")
     (let ((_ (pagerOpBegin p)))
-      (try
-        a
-        (node p pg false)
+      (let ((a (node p pg false)?))
         (if (!= (kindOf (nType a)) kind)
           (corrupt (pageMsg "page " pg " belongs to another kind of tree") "btreeDrop")
           (let (
@@ -1592,9 +1533,7 @@
                 ((None)
                   (if keep
                     (let ((_ (pagerOpBegin p)))
-                      (try
-                        w
-                        (node p pg true)
+                      (let ((w (node p pg true)?))
                         {
                           (writeNode
                             w
@@ -1605,7 +1544,7 @@
                             0)
                           (Ok total)
                         }))
-                    (try _ (pagerFree p pg) (Ok total)))
+                    (let ((_ (pagerFree p pg)?)) (Ok total)))
                 ))
             }))))))
 
@@ -1640,12 +1579,13 @@
     (writeRefused p "btreeDrop")
     (if (< root 2)
       (axqErr axqMisuse "the schema table's root can't be dropped" "btreeDrop")
-      (try kind (treeKind p root) (freeTree
-        p
-        root
-        kind
-        false
-        0)))))
+      (let ((kind (treeKind p root)?))
+        (freeTree
+p
+root
+kind
+false
+0)))))
 
 ;; Delete every entry of the tree at `root`, keeping the root as an
 ;; empty leaf; answers how many there were. Inside a write transaction.
@@ -1654,12 +1594,13 @@
 (pub fn (btreeClear p root)
   (if (! (pagerInWrite p))
     (writeRefused p "btreeClear")
-    (try kind (treeKind p root) (freeTree
-      p
-      root
-      kind
-      true
-      0))))
+    (let ((kind (treeKind p root)?))
+      (freeTree
+p
+root
+kind
+true
+0))))
 
 ;; The value stored under `key`, fresh in the caller's arena, or `None`.
 (pub :: btreeGet (-> Pager Int String (Result (Option String) Error)))
@@ -1670,27 +1611,21 @@
     (pages vecNew)
     (idxs vecNew)
   )
-    (try
-      kind
-      (treeKind p root)
-      (try
-        leaf
-        (descend
-          p
-          root
-          kind
-          0
-          (strData key)
-          (strLen key)
-          pages
-          idxs)
-        (try
-          a
-          (node p leaf false)
-          (let ((s (leafSearch a (strData key) (strLen key))))
-            (if (== (% s 2) 0)
-              (Ok None)
-              (try v (readValue p a (cellOff a (/ s 2))) (Ok (Some v))))))))))
+    (let ((kind (treeKind p root)?)
+          (leaf (descend
+                  p
+                  root
+                  kind
+                  0
+                  (strData key)
+                  (strLen key)
+                  pages
+                  idxs)?)
+          (a (node p leaf false)?))
+      (let ((s (leafSearch a (strData key) (strLen key))))
+        (if (== (% s 2) 0)
+          (Ok None)
+          (let ((v (readValue p a (cellOff a (/ s 2)))?)) (Ok (Some v))))))))
 
 ;; Store `value` under `key`, replacing any value there. Answers true
 ;; when the key is new. Inside a write transaction.
@@ -1752,21 +1687,19 @@
 ;@axiom:effect(io)
 (pub fn (btreeFirstKey p root)
   (let ((box (KeyBox None)))
-    (try
-      _
-      (scanTree
-        p
-        root
-        None
-        None
-        true
-        false
-        (lambda (k v)
-          {
-            (set box.key (Some k))
-            (Ok false)
-          }
-        ))
+    (let ((_ (scanTree
+               p
+               root
+               None
+               None
+               true
+               false
+               (lambda (k v)
+                 {
+                   (set box.key (Some k))
+                   (Ok false)
+                 }
+               ))?))
       (Ok box.key))))
 
 ;; The largest key in the tree, or `None` when it is empty: a table's
@@ -1775,28 +1708,26 @@
 ;@axiom:effect(io)
 (pub fn (btreeLastKey p root)
   (let ((box (KeyBox None)))
-    (try
-      _
-      (scanTree
-        p
-        root
-        None
-        None
-        false
-        false
-        (lambda (k v)
-          {
-            (set box.key (Some k))
-            (Ok false)
-          }
-        ))
+    (let ((_ (scanTree
+               p
+               root
+               None
+               None
+               false
+               false
+               (lambda (k v)
+                 {
+                   (set box.key (Some k))
+                   (Ok false)
+                 }
+               ))?))
       (Ok box.key))))
 
 ;; How many entries the tree holds, counted leaf by leaf.
 (pub :: btreeCount (-> Pager Int (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (btreeCount p root)
-  (try kind (treeKind p root) (countTree p root kind 0)))
+  (let ((kind (treeKind p root)?)) (countTree p root kind 0)))
 
 ;; The tree's height: 1 when the root is a leaf.
 (pub :: btreeHeight (-> Pager Int (Result Int Error)))
@@ -1807,15 +1738,17 @@
     (pages vecNew)
     (idxs vecNew)
   )
-    (try kind (treeKind p root) (try _ (descend
-      p
-      root
-      kind
-      1
-      0
-      0
-      pages
-      idxs) (Ok (vecLen pages))))))
+    (let ((kind (treeKind p root)?)
+          (_ (descend
+p
+root
+kind
+1
+0
+0
+pages
+idxs)?))
+      (Ok (vecLen pages)))))
 
 ; ------------------------------------------------------------------
 ; The integrity check.
@@ -1888,133 +1821,127 @@
   (if (> depth maxDepth)
     (corrupt "a B-tree is deeper than 40 levels" "btreeCheck")
     (let ((_ (pagerOpBegin p)))
-      (try
-        _
-        (markPage ck pg "a tree")
-        (try
-          a
-          (pagerGet p pg)
-          (try
-            _
-            (checkNode a pg)
-            (let (
-              (t (nType a))
-              (leaf (isLeafType (nType a)))
-              (n (nCount a))
-              (keys vecNew)
-              (chains vecNew)
-              (mut failed None)
-            )
-              {
-                (for i in 0..n
-                  (let ((q (cellOff a i)))
-                    {
-                      (vecPush keys (keyAt a q leaf))
-                      (if leaf
-                        (let (
-                          (klen (be16 a q))
-                          (vlen (be32 a (+ q 2)))
-                        )
-                          (let ((local (localLen klen vlen)))
-                            (if (> vlen local)
-                              {
-                                (vecPush chains (be32 a (+ q (+ 6 (+ klen local)))))
-                                (vecPush chains (- vlen local))
-                                0
-                              }
-                              0)))
-                        0)
-                    }))
-                (let ((kids 
+      (let ((_ (markPage ck pg "a tree")?)
+            (a (pagerGet p pg)?)
+            (_ (checkNode a pg)?))
+        (let (
+          (t (nType a))
+          (leaf (isLeafType (nType a)))
+          (n (nCount a))
+          (keys vecNew)
+          (chains vecNew)
+          (mut failed None)
+        )
+          {
+            (for i in 0..n
+              (let ((q (cellOff a i)))
+                {
+                  (vecPush keys (keyAt a q leaf))
                   (if leaf
-                    vecNew
-                    (childrenOf a))))
-                  {
-                    (if (!= (kindOf t) kind)
-                      {
-                        (set failed (Some (corruptError (pageMsg "page " pg " belongs to another kind of tree"))))
-                        0
-                      }
-                      0)
-                    (if (&& (isNone failed) (&& (== n 0) (|| (! leaf) (! isRoot))))
-                      {
-                        (set failed (Some (corruptError (pageMsg "page " pg " is an empty node that should have been freed"))))
-                        0
-                      }
-                      0)
-                    ; keys ascend, and lie within the bounds
-                    (for i in 0..n
-                      (if (isSome failed)
-                        0
-                        (let ((k (vecGet keys i)))
-                          (if (||
-                            (&& (> i 0) (<= (strCmp k (vecGet keys (- i 1))) 0))
-                            (||
-                              (match lo
-                                ((Some l) (< (strCmp k l) 0))
-                                ((None) false))
-                              (match hi
-                                ((Some h) (>= (strCmp k h) 0))
-                                ((None) false))))
-                            {
-                              (set failed (Some (corruptError (pageMsg "page " pg " has keys out of order"))))
-                              0
-                            }
-                            0))))
-                    (for k in 0..(/ (vecLen chains) 2)
-                      (if (isSome failed)
-                        0
-                        (match (checkChain p ck (vecGet chains (* 2 k)) (vecGet chains (+ (* 2 k) 1)))
-                          ((Err e)
-                            {
-                              (set failed (Some e))
-                              0
-                            }
-                          )
-                          ((Ok _) 0))))
-                    (if (&& leaf (isNone failed))
-                      (if (< ck.leafDepth 0)
-                        {
-                          (set ck.leafDepth depth)
-                          0
-                        }
-                        (if (!= ck.leafDepth depth)
+                    (let (
+                      (klen (be16 a q))
+                      (vlen (be32 a (+ q 2)))
+                    )
+                      (let ((local (localLen klen vlen)))
+                        (if (> vlen local)
                           {
-                            (set failed (Some (corruptError "the tree's leaves are at different depths")))
+                            (vecPush chains (be32 a (+ q (+ 6 (+ klen local)))))
+                            (vecPush chains (- vlen local))
                             0
                           }
-                          0))
-                      0)
-                    (for j in 0..(vecLen kids)
-                      (if (isSome failed)
+                          0)))
+                    0)
+                }))
+            (let ((kids 
+              (if leaf
+                vecNew
+                (childrenOf a))))
+              {
+                (if (!= (kindOf t) kind)
+                  {
+                    (set failed (Some (corruptError (pageMsg "page " pg " belongs to another kind of tree"))))
+                    0
+                  }
+                  0)
+                (if (&& (isNone failed) (&& (== n 0) (|| (! leaf) (! isRoot))))
+                  {
+                    (set failed (Some (corruptError (pageMsg "page " pg " is an empty node that should have been freed"))))
+                    0
+                  }
+                  0)
+                ; keys ascend, and lie within the bounds
+                (for i in 0..n
+                  (if (isSome failed)
+                    0
+                    (let ((k (vecGet keys i)))
+                      (if (||
+                        (&& (> i 0) (<= (strCmp k (vecGet keys (- i 1))) 0))
+                        (||
+                          (match lo
+                            ((Some l) (< (strCmp k l) 0))
+                            ((None) false))
+                          (match hi
+                            ((Some h) (>= (strCmp k h) 0))
+                            ((None) false))))
+                        {
+                          (set failed (Some (corruptError (pageMsg "page " pg " has keys out of order"))))
+                          0
+                        }
+                        0))))
+                (for k in 0..(/ (vecLen chains) 2)
+                  (if (isSome failed)
+                    0
+                    (match (checkChain p ck (vecGet chains (* 2 k)) (vecGet chains (+ (* 2 k) 1)))
+                      ((Err e)
+                        {
+                          (set failed (Some e))
+                          0
+                        }
+                      )
+                      ((Ok _) 0))))
+                (if (&& leaf (isNone failed))
+                  (if (< ck.leafDepth 0)
+                    {
+                      (set ck.leafDepth depth)
+                      0
+                    }
+                    (if (!= ck.leafDepth depth)
+                      {
+                        (set failed (Some (corruptError "the tree's leaves are at different depths")))
                         0
-                        (let ((r 
-                          (checkTree
-                            p
-                            ck
-                            (vecGet kids j)
-                            kind
-                            (if (== j 0)
-                              lo
-                              (Some (vecGet keys (- j 1))))
-                            (if (< j n)
-                              (Some (vecGet keys j))
-                              hi)
-                            (+ depth 1)
-                            false)))
-                          (match r
-                            ((Err e)
-                              {
-                                (set failed (Some e))
-                                0
-                              }
-                            )
-                            ((Ok _) 0)))))
-                    (match failed
-                      ((Some e) (Err e))
-                      ((None) (Ok 0)))
-                  })
-              })))))))
+                      }
+                      0))
+                  0)
+                (for j in 0..(vecLen kids)
+                  (if (isSome failed)
+                    0
+                    (let ((r 
+                      (checkTree
+                        p
+                        ck
+                        (vecGet kids j)
+                        kind
+                        (if (== j 0)
+                          lo
+                          (Some (vecGet keys (- j 1))))
+                        (if (< j n)
+                          (Some (vecGet keys j))
+                          hi)
+                        (+ depth 1)
+                        false)))
+                      (match r
+                        ((Err e)
+                          {
+                            (set failed (Some e))
+                            0
+                          }
+                        )
+                        ((Ok _) 0)))))
+                (match failed
+                  ((Some e) (Err e))
+                  ((None) (Ok 0)))
+              })
+          })))))
 
 ;; Check the whole file, given the root of every tree in it (the schema
 ;; root included): every page is reached exactly once, from a tree, an
@@ -2028,9 +1955,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (btreeCheck p roots)
-  (try
-    count
-    (pagerPageCount p)
+  (let ((count (pagerPageCount p)?))
     (let ((seen (strAlloc count)))
       {
         (__store8 (strData seen) 0 1)
@@ -2060,61 +1985,57 @@
             (match failed
               ((Some e) (Err e))
               ((None)
-                (try
-                  head
-                  (pagerFreeListHead p)
-                  (try
-                    want
-                    (pagerFreeListCount p)
-                    (let (
-                      (ck (Check seen -1))
-                      (mut pg head)
-                      (mut k 0)
-                      (mut bad None)
-                    )
-                      {
-                        (while (&& (isNone bad) (&& (!= pg 0) (<= k want)))
-                          (match (andThen
-                            (markPage ck pg "the free list")
-                            (lambda (_) (pagerGetTransient p pg)))
-                            ((Err e)
+                (let ((head (pagerFreeListHead p)?)
+                      (want (pagerFreeListCount p)?))
+                  (let (
+                    (ck (Check seen -1))
+                    (mut pg head)
+                    (mut k 0)
+                    (mut bad None)
+                  )
+                    {
+                      (while (&& (isNone bad) (&& (!= pg 0) (<= k want)))
+                        (match (andThen
+                          (markPage ck pg "the free list")
+                          (lambda (_) (pagerGetTransient p pg)))
+                          ((Err e)
+                            {
+                              (set bad (Some e))
+                              0
+                            }
+                          )
+                          ((Ok a)
+                            (if (!= (__load8 a 0) 6)
                               {
-                                (set bad (Some e))
+                                (set bad (Some (corruptError (pageMsg "page " pg " is on the free list but isn't free"))))
                                 0
                               }
-                            )
-                            ((Ok a)
-                              (if (!= (__load8 a 0) 6)
-                                {
-                                  (set bad (Some (corruptError (pageMsg "page " pg " is on the free list but isn't free"))))
-                                  0
-                                }
-                                {
-                                  (set k (+ k 1))
-                                  (set pg (be32 a 4))
-                                  0
-                                })
-                            )))
-                        (match bad
-                          ((Some e) (Err e))
-                          ((None)
-                            (if (|| (!= pg 0) (!= k want))
-                              (corrupt "the free list's length isn't the header's count" "btreeCheck")
-                              (let ((mut lost -1))
-                                {
-                                  (for i in 0..count
-                                    (if (&& (< lost 0) (== (strByte seen i) 0))
-                                      {
-                                        (set lost i)
-                                        0
-                                      }
-                                      0))
-                                  (if (>= lost 0)
-                                    (corrupt (pageMsg "page " lost " is reached from nothing") "btreeCheck")
-                                    (Ok count))
-                                }))
-                          ))
-                      })))
+                              {
+                                (set k (+ k 1))
+                                (set pg (be32 a 4))
+                                0
+                              })
+                          )))
+                      (match bad
+                        ((Some e) (Err e))
+                        ((None)
+                          (if (|| (!= pg 0) (!= k want))
+                            (corrupt "the free list's length isn't the header's count" "btreeCheck")
+                            (let ((mut lost -1))
+                              {
+                                (for i in 0..count
+                                  (if (&& (< lost 0) (== (strByte seen i) 0))
+                                    {
+                                      (set lost i)
+                                      0
+                                    }
+                                    0))
+                                (if (>= lost 0)
+                                  (corrupt (pageMsg "page " lost " is reached from nothing") "btreeCheck")
+                                  (Ok count))
+                              }))
+                        ))
+                    }))
               ))
           })
       })))

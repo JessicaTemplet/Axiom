@@ -382,10 +382,14 @@ Axqlite.AxqlSchema - the tables and indices a database holds.
 
 Axqlite.Btree - the one B+tree AXQLite stores tables and indices in.
 
-    (try _ (pagerBeginWrite p)
-      (try root (btreeCreate p btreeTable)
-        (try _ (btreePut p root (keyRowid 1) record)
-          (pagerCommit p))))
+    {
+      (pagerBeginWrite p)?
+      (let ((root (btreeCreate p btreeTable)?))
+        {
+          (btreePut p root (keyRowid 1) record)?
+          (pagerCommit p)
+        })
+    }
     (btreeGet p root (keyRowid 1))        ; (Ok (Some record))
     (btreeScan p root None None true
       (lambda (key value) (Ok true)))     ; every entry, in key order
@@ -420,10 +424,12 @@ and recovery.
 
     (match (pagerOpen "app.db" true false 256)
       ((Ok p)
-        (try _ (pagerBeginWrite p)
-          (try n (pagerAlloc p)          ; a fresh page number
-            (try page (pagerWrite p n)   ; its bytes, journalled first
-              { (pagerPutBe page 0 1 5) (pagerCommit p) }))))
+        {
+          (pagerBeginWrite p)?
+          (let ((n (pagerAlloc p)?)          ; a fresh page number
+                (page (pagerWrite p n)?))    ; its bytes, journalled first
+            { (pagerPutBe page 0 1 5) (pagerCommit p) })
+        })
       ((Err e) ...))
 
 | Name | Kind | Type | Effects | Summary |
@@ -1387,14 +1393,14 @@ Crypto.X25519 - Diffie-Hellman key agreement over Curve25519
 
 ## `Err`
 
-`stdlib/Err.ax` — 38 public names
+`stdlib/Err.ax` — 37 public names
 
 Err — Axiom's failure type, its error record, and the propagation
 form that binds one.
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `Result` | data |  |  | Success or failure: `(Ok x)` carries the answer and `(Err e)` the error. Library functions answer it instead of a sentinel; take it apart with `match`, or unwrap it with `try` inside a function that answers a `Result` itself. |
+| `Result` | data |  |  | Success or failure: `(Ok x)` carries the answer and `(Err e)` the error. Library functions answer it instead of a sentinel; take it apart with `match`, or unwrap it with `?` inside a function that answers a `Result` itself. |
 | `Error` | struct |  |  | What a failing library call answers inside `Err`: a stable numeric `code` (the `err*` constants), a `message` for a person, and the `context` later callers add with `withContext`. |
 | `errDivideByZero` | value | `Int` |  | A zero divisor, from `divChecked` and `remChecked`. |
 | `errOverflow` | value | `Int` |  | A result the 64-bit integer cannot hold. |
@@ -1431,7 +1437,6 @@ form that binds one.
 | `remChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | The remainder of `a / b`, or `Err` with `errDivideByZero` for a zero divisor. |
 | `shlChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | A shift amount of 64 or more, and a negative one, trap (exit 84, MM-VAL-3b) - `(<< 1 100)` used to answer 68719476736 at `--opt 0` and 1 at `--opt 1`, and no masking is emitted either way. |
 | `shrChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | `a >> n`, or `Err` with `errShiftTooWide` when `n` is negative or 64 or more. |
-| `try` | macro |  |  | ERR-SUGAR-2: the propagation form. |
 
 ## `Fallible`
 

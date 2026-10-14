@@ -1848,7 +1848,7 @@ committed seed and requires a self-hosting fixpoint. See
 Traits and `impl` are replaced by capability records. Use `Vec` for
 sequences and `struct`/`data` for products and sums. Printing uses
 `format`, `println` and `eprintln`; strings join with `concat`.
-`try` replaces `try!`, `for` replaces `range`, and `restrict(no-trap)`
+`?` replaces `try`, `for` replaces `range`, and `restrict(no-trap)`
 replaces `restrict(no-untrapped)`.
 
 Foreign libraries use `extern`; the older `foreign` keyword is reserved.
@@ -1858,7 +1858,7 @@ records.
 ## Tips and patterns
 
 Keep I/O at a boundary, name intermediate values with `let`, and use
-`Option` for absence and `Result` for failure. Use `try` to keep result
+`Option` for absence and `Result` for failure. Use `?` to keep result
 handling flat. Prefer typed library operations to raw-memory calls.
 
 [Library recipes](stdlib.md) and [complete examples](../examples/README.md)

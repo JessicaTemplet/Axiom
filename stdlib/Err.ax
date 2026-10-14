@@ -27,7 +27,7 @@
 ; ------------------------------------------------------------------
 ;; Success or failure: `(Ok x)` carries the answer and `(Err e)` the
 ;; error. Library functions answer it instead of a sentinel; take it
-;; apart with `match`, or unwrap it with `try` inside a function that
+;; apart with `match`, or unwrap it with `?` inside a function that
 ;; answers a `Result` itself.
 (pub data Result (a e)
   (Ok a)
@@ -367,7 +367,7 @@
 ; DOES NOT GENERALISE AND THESE DO: every parser that adds a length it
 ; was told to an offset it computed has the same shape, and the fix is
 ; the same three lines each time. Written once here, they are a
-; `try` away instead.
+; `?` away instead.
 ;
 ; The tests are the standard sign tests rather than a wider type,
 ; because there is no wider type: `Int` is the only integer this
@@ -460,32 +460,3 @@
     (Err (mkError errShiftTooWide "shifted by 64 or more"))
     (Ok (>> a n))))
 
-; ------------------------------------------------------------------
-;; ERR-SUGAR-2: the propagation form.
-;
-; `(try x e body)` binds `x` to `e`'s success and answers its error
-; unchanged:
-;
-;   (try v (parse s) (use v))
-;     ->  (match (parse s)
-;           ((Err er) (Err er))
-;           ((Ok v) (use v)))
-;
-; The body lands in the ARM, which is exactly the shape ERR-PROP-3
-; requires: a self call there is in tail position and converts to a
-; loop, where the same call in the SCRUTINEE costs a frame per step and
-; dies at 262,144. So the form makes the stack-correct spelling the
-; default one and leaves the dangerous spelling to be written by hand.
-;
-; This could not be written until 2026-08-16. A macro parameter in a
-; binder position was gensymed like a template's own binder, so the
-; arm bound `x.N` while the caller's body still said `v` - AX3001, on
-; the macro whose whole job is to bind it. `x` is the caller's name
-; now (`expBinderParam`, self_host/expand.ax), and an argument that is
-; not a name is AX3035 rather than a silently wrong expansion.
-;
-; `er` is the template's own binder and is still renamed at every
-; expansion, so a caller whose body mentions `er` means their own.
-(pub macro (try x e body) (match e
-  ((Err er) (Err er))
-  ((Ok x) body)))

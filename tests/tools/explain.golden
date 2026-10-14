@@ -2,7 +2,6 @@
 # AX1001-AX5001 were materialized from the Rust compiler at commit 1041f11 on
 # 2026-08-08; AX3018 and above (macros, visibility, limits, traits, effects, the
   [93mAX3123[0m  a `?` with no tail to propagate to  (try-position)
-# FFI boundary, type soundness) postdate it and originate in self_host/explain.ax. The list COLOUR is RECONSTRUCTED, not captured. AX2004 was REWRITTEN on 2026-08-18 when the `extern` FFI landed: its captured text said generated code links no C library, which stopped being true for a program that binds a std Rust crate. AX3010 was REWRITTEN on 2026-08-25 when it was PROMOTED from a warning to an ERROR: its captured text described a mismatch an agent could correct at leisure, and it now refuses the build. On 2026-09-04 twenty more were EXPANDED - AX1002-AX1005, AX2001-AX2003, AX3001-AX3009, AX3011 and AX4001-AX4003, every one under sixty words against a median of 166 - each to what the code means, why the compiler fires it, a program that draws it (run through the tree's compiler with --diagnostic-format=ai before it was written in), the fix, and the neighbouring codes; AX1002's captured text had also said a string ends at the end of its line, and the lexer reads to the next quote or the end of the file. Those twenty-two are the codes in the AX1001-AX5001 range that are no longer the 2026-08-08 bytes. AX2004 was EXPANDED on 2026-09-20 for the `cond` removal: the `cond` paragraph (what the variadic `if` covers, the rewrite, the one deliberate join change) and `cond` joining the AX2001 neighbour list.
 ### explain --list
 [1;96mKnown Axiom diagnostic codes:[0m
   [93mAX1001[0m  unexpected character  (unexpected-char)
@@ -104,6 +103,10 @@
   [93mAX3096[0m  a type alias with type parameters  (parameterised-alias)
   [93mAX3110[0m  an effect claim nothing in the compiler can check  (axtag-never-checked)
   [93mAX3116[0m  a `result(...)` claim the compiler cannot read  (result-claim)
+  [93mAX3117[0m  llc rejected a line of an `asm` template  (inline-asm-rejected)
+  [93mAX3118[0m  an asm operand the template never names  (asm-operand-unused)
+  [93mAX3119[0m  asm options that contradict each other or the arm  (asm-options)
+  [93mAX3123[0m  a `?` with no tail to propagate to  (try-position)
   [93mAX4001[0m  no `main` function  (missing-main)
   [93mAX4002[0m  code generation failed  (codegen-failure)
   [93mAX4003[0m  external toolchain command failed  (toolchain-failure)
@@ -341,6 +344,12 @@ parameters. A bare name, `(fn answer 42)`, is `AX2001`.
 `fn` in expression position was a second spelling of `lambda`. An
 anonymous function is `(lambda (x) (+ x 1))`; `fn` declares a named
 function at the top level, and nested anywhere else it is refused.
+
+`try` was the macro that propagated a `Result`'s `Err`. The postfix `?`
+does it in place: `(try x e body)` is `(let ((x e?)) body)`, and a
+chain of them is one `let` with a binding per step. Where the `try`
+was not the last thing its function did, write the match it expanded
+to: `(match e ((Err er) (Err er)) ((Ok x) body))`.
 
 `struct` in expression position was a second spelling of a struct
 constructor call. Build a struct by calling its name with the fields
@@ -2870,13 +2879,21 @@ template and the template's operands:
 
 The architectures are `aarch64` and `x86_64`, with at most one arm
 each. The template is a string literal: `{name}` stands for an
-operand's register, `{name:w}` for a view of it, and `{{` and `}}`
-for literal braces. The operands are `(in name value)`, `(out name)`
-and `(inout name value)`, each with an optional register such as
-`(in a "x8" x)`, and `(clobber "x9")` for a register the
-instructions write. An arm answers at most one value. No operand or
-clobber may name the stack pointer, the frame pointer or AArch64's
-`x18`.
+operand, `{name:w}` for a view of its register, and `{{` and `}}` for
+literal braces. The operands are `(in name value)`, `(out name)`,
+`(lateout name)`, `(inout name value)` and `(inlateout name value)`,
+each with an optional register such as `(in a "x8" x)`, and
+`(const name n)` for an integer written into the template and
+`(sym name f)` for a function's symbol. An output may end `into slot`
+to be stored in a `mut` binding; the form answers one output at most.
+`(clobber "x9")` names a register the instructions write,
+`(clobber_abi "C")` every register a call may write, and
+`(options ...)` what the instructions promise.
+
+A template may not define a named label, because the optimiser may
+copy the block: use a numbered one, `1:`, reached as `1b` or `1f`. No
+operand or clobber may name the stack pointer, the frame pointer or
+AArch64's `x18`.
 
 The declaration holding an `asm` form says `;@axiom:effect(unsafe)`,
 because the compiler can't see what the instructions do.
@@ -3015,6 +3032,42 @@ or whose body performs an unsafe operation itself. A safe function's
 result ownership is inferred from its body and needs no claim.
 
 Write `result(owned)` beside `effect(unsafe)`, or drop the claim.
+
+### explain AX3117
+AX3117 - llc rejected a line of an `asm` template
+
+`check` doesn't assemble a template, so its instructions are first
+assembled when the program is built. When the assembler rejects one,
+or the register allocator finds no registers for the operands, the
+build fails at the template line that asked for it:
+
+    (asm (aarch64 "add {r}, {a}, #1\nfrobnicate {r}" (out r) (in a x)))
+
+The message is llc's, and the note shows the instruction as the
+assembler read it, with the operands in their registers. Fix the
+instruction for the arm's architecture. The build exits 1, as for
+any other error in the program.
+
+### explain AX3118
+AX3118 - an asm operand the template never names
+
+An `asm` form's operands are reached from the template by name:
+`{x}` in the template is the operand `x`. An operand the template
+never mentions does nothing - an input no instruction reads, or an
+output no instruction writes, which then answers whatever its
+register held. Name the operand in the template, or drop it from the
+operand list.
+
+### explain AX3119
+AX3119 - asm options that contradict each other or the arm
+
+An `asm` form's options are claims the compiler holds the block to.
+`pure` lets the optimiser drop a block whose outputs go unused, so a
+`pure` block needs an output and either `nomem` or `readonly`;
+`noreturn` takes no outputs; `att_syntax` and `intel_syntax` are
+x86_64's; and with `clobber_abi` each output names its register. The
+message names the option and what it needs; drop the option or give
+the block what it asks for.
 
 ### explain AX3123
 AX3123 - a `?` with no tail to propagate to
@@ -3512,6 +3565,10 @@ run `axiom explain --list` to see all known codes, or name a keyword, type, effe
   [93mAX3096[0m  a type alias with type parameters  (parameterised-alias)
   [93mAX3110[0m  an effect claim nothing in the compiler can check  (axtag-never-checked)
   [93mAX3116[0m  a `result(...)` claim the compiler cannot read  (result-claim)
+  [93mAX3117[0m  llc rejected a line of an `asm` template  (inline-asm-rejected)
+  [93mAX3118[0m  an asm operand the template never names  (asm-operand-unused)
+  [93mAX3119[0m  asm options that contradict each other or the arm  (asm-options)
+  [93mAX3123[0m  a `?` with no tail to propagate to  (try-position)
   [93mAX4001[0m  no `main` function  (missing-main)
   [93mAX4002[0m  code generation failed  (codegen-failure)
   [93mAX4003[0m  external toolchain command failed  (toolchain-failure)

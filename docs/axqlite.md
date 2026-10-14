@@ -353,9 +353,9 @@ answers `Ok`, and rolls back when it answers `Err`:
 (:: transfer (-> Connection (Result Int Error)))
 ;@axiom:effect(io)
 (fn (transfer db)
-  (try a (axqExec db "UPDATE accounts SET balance = balance - 50 WHERE id = 1")
-    (try b (axqExec db "UPDATE accounts SET balance = balance + 50 WHERE id = 2")
-      (axqErr axqConstraint "changed my mind" "transfer"))))
+  (let ((a (axqExec db "UPDATE accounts SET balance = balance - 50 WHERE id = 1")?)
+        (b (axqExec db "UPDATE accounts SET balance = balance + 50 WHERE id = 2")?))
+    (axqErr axqConstraint "changed my mind" "transfer")))
 
 (:: main Int)
 ;@axiom:effect(io)

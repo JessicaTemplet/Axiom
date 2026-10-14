@@ -688,7 +688,7 @@ module.exports = grammar({
     // the variadic `if` covers it, so an editor must paint `(cond …)`
     // as an error the way the compiler reports it, not as the
     // conditional the `cond_expression` rule used to say it was.
-    removed_keyword: _ => choice('union', 'trait', 'impl', 'cond'),
+    removed_keyword: _ => choice('union', 'trait', 'impl', 'cond', 'try'),
     _removed_foreign: _ => 'foreign',
 
     // -----------------------------------------------------------------
