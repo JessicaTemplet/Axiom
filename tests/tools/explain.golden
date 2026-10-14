@@ -1,6 +1,7 @@
 # axiom explain, every code and every spelling.
 # AX1001-AX5001 were materialized from the Rust compiler at commit 1041f11 on
 # 2026-08-08; AX3018 and above (macros, visibility, limits, traits, effects, the
+  [93mAX3123[0m  a `?` with no tail to propagate to  (try-position)
 # FFI boundary, type soundness) postdate it and originate in self_host/explain.ax. The list COLOUR is RECONSTRUCTED, not captured. AX2004 was REWRITTEN on 2026-08-18 when the `extern` FFI landed: its captured text said generated code links no C library, which stopped being true for a program that binds a std Rust crate. AX3010 was REWRITTEN on 2026-08-25 when it was PROMOTED from a warning to an ERROR: its captured text described a mismatch an agent could correct at leisure, and it now refuses the build. On 2026-09-04 twenty more were EXPANDED - AX1002-AX1005, AX2001-AX2003, AX3001-AX3009, AX3011 and AX4001-AX4003, every one under sixty words against a median of 166 - each to what the code means, why the compiler fires it, a program that draws it (run through the tree's compiler with --diagnostic-format=ai before it was written in), the fix, and the neighbouring codes; AX1002's captured text had also said a string ends at the end of its line, and the lexer reads to the next quote or the end of the file. Those twenty-two are the codes in the AX1001-AX5001 range that are no longer the 2026-08-08 bytes. AX2004 was EXPANDED on 2026-09-20 for the `cond` removal: the `cond` paragraph (what the variadic `if` covers, the rewrite, the one deliberate join change) and `cond` joining the AX2001 neighbour list.
 ### explain --list
 [1;96mKnown Axiom diagnostic codes:[0m
@@ -3014,6 +3015,33 @@ or whose body performs an unsafe operation itself. A safe function's
 result ownership is inferred from its body and needs no claim.
 
 Write `result(owned)` beside `effect(unsafe)`, or drop the claim.
+
+### explain AX3123
+AX3123 - a `?` with no tail to propagate to
+
+`e?` answers the `Ok` payload of the `Result` `e`; when `e` is an
+`Err`, the enclosing function or lambda answers that `Err` instead.
+Axiom has no early return, so the compiler makes the rest of the body
+the `Ok` arm of a `match` on `e`. That works for a `?` in the body's
+tail - a `let`'s body, a block's last expression, an `if` branch or a
+`match` arm that is itself in the tail - and for a `?` in anything
+evaluated on the way there, such as an argument or a `let`'s value.
+It does not work from inside a branch, a `let` body, a loop, a
+region or a handler whose value an expression around it still uses,
+because there is no rest-of-the-body to move into the arm:
+
+    (Ok (+ 1 (if ok (get n)? 0)))     ; refused: inside a branch
+
+    (let ((v (if ok (get n)? (Ok 0))))  ; refused: the same branch
+
+Bind the value first so the `?` sits on the way to the tail:
+
+    (let ((v (if ok (get n) (Ok 0))?))
+      (Ok (+ 1 v)))
+
+or take the `Result` apart with `match`. A loop has no tail of its
+own: write the loop as a recursive function that answers a `Result`,
+or collect the results and propagate after the loop.
 
 ### explain AX4001
 AX4001 - no `main` function

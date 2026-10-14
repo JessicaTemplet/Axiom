@@ -42,9 +42,56 @@ expressions in order and answer the last one.
 
 `main` may return `(Result Int Error)` instead. Import `Err`: `(Ok n)`
 exits with `n`; `(Err e)` prints `axiom: ` followed by `errorText e` and
-exits 70. Use `try` to propagate failures. See [error handling](stdlib.md#err-and-fallible).
+exits 70. Use `?` to propagate failures (below). See [error handling](stdlib.md#err-and-fallible).
 
 Tested by `tests/stdlib/490-main-result-ok.ax` and `tests/stdlib/491-main-result-err.ax`.
+
+### Propagate an error with `?`
+
+`e?` answers the `Ok` payload of the `Result` `e`. When `e` is an
+`Err`, the function you are in answers that `Err`, and nothing after
+the `?` runs:
+
+```scheme
+(import IO)
+(import Err)
+
+(:: halveTwice (-> Int (Result Int Error)))
+(fn (halveTwice n)
+  (let ((a (divChecked n 2)?)
+        (b (divChecked a 2)?))
+    (Ok b)))
+
+(:: main (Result Int Error))
+;@axiom:effect(io)
+(fn (main)
+  (let ((v (halveTwice 40)?))
+    {
+      (println "{v}")
+      (Ok 0)
+    }))
+```
+
+```text
+10
+```
+
+Use `?` in a function's tail or in anything evaluated on the way
+there: an argument, a `let`'s value, an `if` test, a `match`
+scrutinee or a block statement. Arguments before the `?` run first, as
+written. A `?` inside a lambda answers the lambda.
+
+Axiom has no early return, so the compiler moves the rest of your
+function into the `Ok` arm of a `match` on `e`. That's why a `?`
+inside a branch, a `let` body or a loop whose value something still
+uses is refused (`AX3123`): there is no rest of the function to move.
+Bind the value first, or take the `Result` apart with `match`.
+
+The operand must be a `Result`, and the error passes through as it
+is. Convert an `Option` with `okOr`, and change an error's type with
+`mapErr`, before the `?`.
+
+Tested by `tests/stdlib/847-try-operator.ax`.
 
 ## Syntax basics
 
@@ -293,6 +340,39 @@ form a chain, followed by the final default branch.
   0)
 ```
 
+Leave out the else when the branch is there for what it does. The `if`
+then answers `()`, the [unit value](#the-unit-type), and the branch's
+own value is dropped:
+
+```scheme
+(import IO)
+(import Vec)
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let ((seen vecNew))
+    {
+      (for n in 0..10
+        (if (== (% n 3) 0) (vecPush seen n)))
+      (if (> (vecLen seen) 3)
+        (println "more than three"))
+      (println (vecLen seen))
+      0
+    }))
+```
+
+```text
+more than three
+4
+```
+
+A `()` branch does the same for an `if` with an else, and a `()` arm
+for a `match`: the form answers `()` and the other branches' values
+are dropped. Reading that `()` where a value is wanted is a type error,
+`expected Int, found ()`. Tested by `tests/stdlib/890-unit-and-if.ax`
+and `tests/diagnostics/1302-unit-value-used.ax`.
+
 ### while loops
 
 `while` repeats its body while its `Bool` condition is true. There is
@@ -324,7 +404,40 @@ Tested by `tests/stdlib/466-for-loop.ax`.
 | `String` | byte string |
 | `Foreign` | externally owned pointer; ARC does not follow it |
 | `Handle` | counted owner with an external destructor |
-| `()` | empty tuple type, with no expression value |
+| `()` | the unit type, whose one value is `()` |
+
+### The unit type
+
+`()` is a type with one value, also written `()`. A function declared to
+answer `()` is a procedure: its body's value is dropped, so it ends
+where its work does.
+
+```scheme
+(import IO)
+
+(:: report (-> String Int ()))
+;@axiom:effect(io)
+(fn (report what n)
+  (println "{what}: {n}"))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (report "files" 3)
+    (report "errors" 0)
+    0
+  })
+```
+
+```text
+files: 3
+errors: 0
+```
+
+An `if` without an else answers `()` too (see [if](#if)). A dropped
+value is released as a statement's is, and a dropped `Result` is still
+`AX3046`.
 
 Compound types include `(Vec Int)`, `(-> Int String)` and `(* Int)`.
 Use `struct` for products and `data` for sums; list and non-empty tuple

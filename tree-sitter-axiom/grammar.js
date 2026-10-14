@@ -37,7 +37,7 @@
 
 // Characters the lexer treats as operator constituents.
 // Source: `isIdentStart`/`isIdentChar` in self_host/lexer.ax.
-const OPERATOR_CHAR = /[+\-*\/%^=<>!&|.?~@]/;
+const OPERATOR_CHAR = /[+\-*\/%^=<>!&|.~@]/;
 
 // Built-in type names, which the lexer tokenises as distinct keywords
 // rather than identifiers. They are listed so an editor can highlight
@@ -913,6 +913,7 @@ module.exports = grammar({
       $.list_literal,
       $.removed_form,
       $.field_expression,
+      $.try_expression,
       // Application is last so that every special form gets first refusal
       // on the token after `(`. A head that is not a keyword falls through
       // to here, which is what makes `(+ 1 2)` and `(f x)` the same shape.
@@ -1163,6 +1164,13 @@ module.exports = grammar({
       '(', repeat(field('operand', $._expression)), ')',
     ),
 
+    // `e?`: propagate the error of `e`. The `?` touches what it follows,
+    // as the compiler requires, and stacks: `(f x)??`.
+    try_expression: $ => prec.left(3, seq(
+      field('operand', $._expression),
+      token.immediate('?'),
+    )),
+
     // `p.x`, `a.b.c` and `(f x).y`: a field read off what the `.`
     // touches. The `.` and the name both touch, as the compiler's lexer
     // requires, which is what keeps `lo..hi` a range.
@@ -1240,7 +1248,7 @@ module.exports = grammar({
     // The name alternative starts on the lexer's full start set,
     // operators included, for the reason above.
     identifier: _ => token(choice(
-      /[A-Za-z_+*/%<>=!&|^~-][A-Za-z0-9_']*([+\-*\/%^=<>!&|?~@]+[A-Za-z0-9_']*)*/,
+      /[A-Za-z_+*/%<>=!&|^~-][A-Za-z0-9_']*([+\-*\/%^=<>!&|~@]+[A-Za-z0-9_']*)*/,
       new RegExp(OPERATOR_CHAR.source + '+'),
     )),
   },

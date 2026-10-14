@@ -16,6 +16,28 @@ its changelog too.
 
 ## Unreleased
 
+- A unit type with a value: `()` is both the type and its one value. An
+  `if` without an else answers `()`, so `(if done (println "ok"))` needs
+  no filler `0`; a `()` branch or `match` arm makes the whole form
+  answer `()`, dropping the other branches' values; and a function
+  declared to answer `()` drops its body's value. A dropped value is
+  released, a dropped `Result` is still `AX3046`, and reading a `()`
+  where a value is wanted is a type error. Tested by
+  `tests/stdlib/890-unit-and-if.ax` and
+  `tests/diagnostics/1302-unit-value-used.ax`.
+
+- Propagate an error with a postfix `?`, as Rust does. `(f x)?`
+  answers the `Ok` payload of a `Result`, and when it is an `Err` the
+  enclosing function or lambda answers that `Err` and nothing after
+  the `?` runs. Axiom has no early return, so the expander moves the
+  rest of the body into the `Ok` arm of a `match`, binding anything
+  evaluated before the `?` first so effects keep their order. A `?`
+  inside a branch, a `let` body or a loop whose value something still
+  uses has no rest of the body to move, and is `AX3123`. The formatter,
+  the language server and the REPL read it; `try` stays until the
+  standard library moves over. Tested by
+  `tests/stdlib/847-try-operator.ax` and
+  `tests/diagnostics/1300-try-position.ax`.
 - Four defects a read-only audit found, fixed. `((vecGet v 0) 41)`
   passed 41 to `vecGet` and printed an address: a call that supplies
   more arguments than an imported callee declares now applies the rest
