@@ -4678,7 +4678,14 @@
 (pub fn (parsePostfix tokens r)
   (let ((pos (memGetWord r 2)))
     (if (peekIs tokens pos TK_QUESTION)
-      (let ((inner (memGetWord r 1)))
+      (let (
+        (inner (memGetWord r 1))
+        (qsp (tokenSpan (vecGet tokens pos)))
+      )
+        ; An `if` or a block carries no span of its own (`mkEIf`,
+        ; `mkEBegin`), so the `?` starts its own span there; reading
+        ; the operand's null span was a crash on `(if ...)?`
+        ; (tests/stdlib/891-try-on-forms.ax).
         (parsePostfix
           tokens
           (pOk
@@ -4687,7 +4694,9 @@
               inner
               0
               0
-              (mkSpan (spanStart (nodeSpan inner)) (spanEnd (tokenSpan (vecGet tokens pos)))))
+              (mkSpan (if (== (nodeSpan inner) 0)
+                (spanStart qsp)
+                (spanStart (nodeSpan inner))) (spanEnd qsp)))
             (advance pos))))
       r)))
 

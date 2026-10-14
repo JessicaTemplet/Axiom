@@ -51,12 +51,22 @@
   (let ((a (makeOwner hits 99)))
     (__resource_disarm a.handle)))
 
+; A region's owner reports by printing, not by storing: the callback
+; runs as the region is reclaimed, and a store from it into anything
+; outside the region is read as an escape (AX3060) - a `vecPush` would
+; grow the outer vector with a block from the region's arena, and a
+; parameter's value is taken as fresh in the region.
+(:: makeLoudOwner (-> Int Owner))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (makeLoudOwner n)
+  (Owner (__resource_new (lambda (v) { (println v) 0 }) n)))
+
 (:: regionDrop Int)
 ;@axiom:effect(io)
 (fn (regionDrop)
-  (let ((hits vecNew))
-    { (region r (let ((a (makeOwner hits 9))) (useOwner a)))
-      (vecGet hits 0) }))
+  { (region r (let ((a (makeLoudOwner 9))) (useOwner a)))
+    0 })
 
 (:: main Int)
 ;@axiom:effect(io)

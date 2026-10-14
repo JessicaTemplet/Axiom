@@ -16,6 +16,15 @@ its changelog too.
 
 ## Unreleased
 
+- Two `?` defects fixed. `(if ...)?` and `{ ... }?` crashed the parser,
+  which read the operand's span to start the `?`'s and an `if` or a
+  block has none; the `?` now starts its own span there. And the
+  expander's walk for `?` visited a shared node once per path, so a
+  macro that uses its parameter twice, nested forty deep, hung `check`
+  and the language server for good; the walk now marks the nodes it
+  has seen. Tested by `tests/stdlib/891-try-on-forms.ax` and the
+  server fuzzer's `lint-dag` session.
+
 - A unit type with a value: `()` is both the type and its one value. An
   `if` without an else answers `()`, so `(if done (println "ok"))` needs
   no filler `0`; a `()` branch or `match` arm makes the whole form

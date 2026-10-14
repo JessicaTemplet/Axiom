@@ -7339,8 +7339,35 @@
   (mut failed : Bool))
 
 ;; Does `e` hold a `?` outside any lambda?
+;
+; Memoised on the node's word 7, which nothing has written yet at
+; this point in the pipeline (the region walk stamps it later): 1
+; means no `?` below, 2 means one, 3 means the walk is inside this
+; node. A macro that uses its parameter twice shares the argument
+; between both uses, so an expansion is a DAG and a walk without the
+; memo visits one node once per path: a 40-deep nesting of such a
+; macro hung the compiler (tests/fuzz/lsp/lint-dag.lspfuzz). `qmBody`
+; clears the marks when it is done (`qmClear`).
 (pub :: qmHas (-> Int Bool))
 (pub fn (qmHas e)
+  (if (== e 0)
+    false
+    (let ((m (memGetWord e 7)))
+      (if (== m 1)
+        false
+        (if (|| (== m 2) (== m 3))
+          (== m 2)
+          {
+            (memSetWord e 7 3)
+            (let ((r (qmHasCore e)))
+              {
+                (memSetWord e 7 (if r 2 1))
+                r
+              })
+          })))))
+
+(pub :: qmHasCore (-> Int Bool))
+(pub fn (qmHasCore e)
   (if (== e 0)
     false
     (let ((tag (nodeTag e)))
@@ -7374,12 +7401,88 @@
       true
       (qmHasArms arms (+ i 1)))))
 
+; Clear `qmHas`'s marks below `e`: a node whose mark is already 0 was
+; never marked, or is cleared, so the walk stops there.
+(pub :: qmClear (-> Int Int))
+(pub fn (qmClear e)
+  (if (== e 0)
+    0
+    (if (== (memGetWord e 7) 0)
+      0
+      (let ((tag (nodeTag e)))
+        {
+          (memSetWord e 7 0)
+          ; Only words that hold NODES are walked: a `let`'s word 1 and
+          ; a `set`'s are names, and a field access's word 2 is one.
+          (if (|| (== tag TAG_E_TRY) (|| (== tag TAG_E_FIELD) (== tag TAG_E_REGION)))
+            (if (== tag TAG_E_REGION)
+              (qmClear (nodeB e))
+              (qmClear (nodeA e)))
+            (if (|| (== tag TAG_E_LET) (== tag TAG_E_LETM))
+              {
+                (qmClear (nodeB e))
+                (qmClear (nodeC e))
+              }
+            (if (|| (== tag TAG_E_APP) (|| (== tag TAG_E_SETF) (== tag TAG_E_HANDLE)))
+              {
+                (qmClear (nodeA e))
+                (if (== tag TAG_E_APP)
+                  (qmClear (nodeB e))
+                  (qmClear (nodeC e)))
+              }
+              (if (== tag TAG_E_IF)
+                {
+                  (qmClear (nodeA e))
+                  (qmClear (nodeB e))
+                  (qmClear (nodeC e))
+                }
+                (if (== tag TAG_E_SET)
+                  (qmClear (nodeB e))
+                  (if (== tag TAG_E_BEGIN)
+                    (qmClearVec (nodeAVec e) 0)
+                    (if (== tag TAG_E_WHILE)
+                      {
+                        (qmClear (nodeA e))
+                        (qmClearVec (nodeBVec e) 0)
+                      }
+                      (if (== tag TAG_E_MATCH)
+                        {
+                          (qmClear (nodeA e))
+                          (qmClearArms (nodeBVec e) 0)
+                        }
+                        0))))))))
+          0
+        }))))
+
+(pub :: qmClearVec (-> (Vec Int) Int Int))
+(pub fn (qmClearVec xs i)
+  (if (>= i (vecLen xs))
+    0
+    {
+      (qmClear (vecGet xs i))
+      (qmClearVec xs (+ i 1))
+    }))
+
+(pub :: qmClearArms (-> (Vec Int) Int Int))
+(pub fn (qmClearArms arms i)
+  (if (>= i (vecLen arms))
+    0
+    {
+      (qmClear (nodeB (vecGet arms i)))
+      (qmClearArms arms (+ i 1))
+    }))
+
 ;; Rewrite every `?` in a body; a body with none comes back unchanged.
 (pub :: qmBody (-> Int Int Int))
 (pub fn (qmBody env e)
-  (if (qmHas e)
+  (let ((r (if (qmHas e)
     (qmRw env e)
-    e))
+    e)))
+    {
+      (qmClear e)
+      (qmClear r)
+      r
+    }))
 
 ; `e` is in tail position.
 (pub :: qmRw (-> Int Int Int))

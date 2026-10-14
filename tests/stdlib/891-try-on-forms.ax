@@ -1,0 +1,57 @@
+; `?` on a form that carries no span of its own: an `if`, a block, a
+; `let` and a `match`. The parser used to read the operand's span to
+; start the `?`'s, and an `if` or a block has none (`mkEIf`,
+; `mkEBegin`), so `(if ...)?` crashed the compiler. Each shape answers
+; through `?` once with `Ok` and once with `Err`.
+(import IO)
+(import Err)
+
+(:: pick (-> Int (Result Int Error)))
+(fn (pick n)
+  (if (> n 0)
+    (Ok n)
+    (Err (mkError 1 "not positive"))))
+
+(:: viaIf (-> Int (Result Int Error)))
+(fn (viaIf n)
+  (let ((v (if (== n 7) (Ok 70) (pick n))?))
+    (Ok (+ v 1))))
+
+(:: viaBlock (-> Int (Result Int Error)))
+(fn (viaBlock n)
+  (let ((v { (pick n) }?))
+    (Ok (+ v 2))))
+
+(:: viaLet (-> Int (Result Int Error)))
+(fn (viaLet n)
+  (let ((v (let ((m (* n 2))) (pick m))?))
+    (Ok (+ v 3))))
+
+(:: viaMatch (-> Int (Result Int Error)))
+(fn (viaMatch n)
+  (let ((v (match n (0 (Err (mkError 2 "zero"))) (_ (pick n)))?))
+    (Ok (+ v 4))))
+
+(:: show (-> String (Result Int Error) Int))
+;@axiom:effect(io)
+(fn (show name r)
+  (match r
+    ((Ok v) (println "{name}: Ok {v}"))
+    ((Err e)
+      (let ((text (errorText e)))
+        (println "{name}: Err {text}")))))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (show "if" (viaIf 7))
+    (show "if" (viaIf -1))
+    (show "block" (viaBlock 5))
+    (show "block" (viaBlock -5))
+    (show "let" (viaLet 4))
+    (show "let" (viaLet -4))
+    (show "match" (viaMatch 3))
+    (show "match" (viaMatch 0))
+    0
+  })

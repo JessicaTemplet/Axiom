@@ -1090,7 +1090,7 @@ PINNED_CORPUS = {
     "b.ax": '(data Shape (Circle Int) (Sq Int))\n(:: area (-> Shape Int))\n'
             '(fn (area s)\n  (match s\n    ((Circle r) (* 3 (* r r)))\n    ((Sq w) (* w w))))\n',
 }
-PINNED_DIGEST = "a67838039f92c4b0f4d63015c41ebaeb68bc70175c8007faf1eb6cdf3c32b79c"
+PINNED_DIGEST = "2e039589c81471bee8e4591b23200a9502bf1aac93ffafed7d9dd42c4ced71b2"
 
 
 def pinned_digest():
