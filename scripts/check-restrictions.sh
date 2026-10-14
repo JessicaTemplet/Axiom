@@ -787,21 +787,22 @@ python3 - "$work/exabl/self_host/typecheck.ax" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-# Each arm's PREDICATE becomes a constant that is never 1, so its
-# `then` - the skip - is unreachable and every operator the scans
-# found is reported again. The `for`-bump arm occurs once; the float
+# Each arm's PREDICATE becomes a constant, so the skip is unreachable
+# and every operator the scans found is reported again: each arm is an
+# `if` with no else that scans unless the form is a bump or a float
+# operation, and with its test `(! (== 2 1))` it scans always. The `for`-bump arm occurs once; the float
 # arm occurs twice - once per restriction sharing it - and both copies
 # are scoped. Each count is asserted so the ablation cannot silently
 # become more arms, or none.
-forbump = '                            (if (== (isForBump e) 1)\n'
-floatop = '        (if (== (tcFloatOpIn tc (spineHead w)) 1)\n'
+forbump = '                            (if (! (== (isForBump e) 1))\n'
+floatop = '        (if (! (== (tcFloatOpIn tc (spineHead w)) 1))\n'
 assert s.count(forbump) == 1, ('for-bump', s.count(forbump))
 assert s.count(floatop) == 2, ('float', s.count(floatop))
-s = s.replace(forbump, forbump[:len(forbump) - len(forbump.lstrip())] + '(if (== 2 1)\n', 1)
-s = s.replace(floatop, floatop[:len(floatop) - len(floatop.lstrip())] + '(if (== 2 1)\n')
+s = s.replace(forbump, forbump[:len(forbump) - len(forbump.lstrip())] + '(if (! (== 2 1))\n', 1)
+s = s.replace(floatop, floatop[:len(floatop) - len(floatop.lstrip())] + '(if (! (== 2 1))\n')
 open(p, 'w').write(s)
 PY
-if grep -q '(if (== 2 1)' "$work/exabl/self_host/typecheck.ax"; then
+if grep -q '(if (! (== 2 1))' "$work/exabl/self_host/typecheck.ax"; then
   if gate_build_tree "$axiom" "$work/exabl" "$AXIOM_STDLIB" "$work/exabl/axc" > "$work/exabl/build.log" 2>&1; then
     ( cd "$work/exempt" && "$work/exabl/axc" --diagnostic-format=ai check exempt.ax ) > /dev/null 2> "$work/exempt/abl.err" || true
     restriction_lines "$work/exempt/abl.err" > "$work/exempt/abl.hits"

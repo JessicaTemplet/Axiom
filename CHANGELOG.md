@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- A macro whose template is `()` expands to the unit value, not to the
+  integer 0: rebuilding a template's literal kept its value and lost
+  the mark that makes it `()`, so `(macro (m x) ())` gave `main` a
+  body of `0` and `(+ (m 1) 1)` checked.
+
 - The standard library and the compiler drop their filler `0`s too:
   2,299 of them across 69 files, the same shapes the tests and
   examples lost. Possible now that the seed knows an `if`'s branches

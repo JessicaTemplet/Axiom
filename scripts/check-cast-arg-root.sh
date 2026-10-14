@@ -150,13 +150,18 @@ echo "--- 1. user-level cast count does not grow ---"
 # One more is `tests/parallel/immutable-borrow.ax`'s `countOf`, which
 # reads a value's count word to show a scoped immutable borrow takes
 # no share: the MM-VAL-23 reason.
+# Baseline 476 measured 2026-10-14: four arrived and two left. The four
+# are `tests/diagnostics/1260-spawn-forging-cast.human`, the rendering
+# of a fixture whose forged `(cast Spawn w)` handles are its subject;
+# a human golden quotes the source lines it points at. The two left
+# with `vecFree`'s fixtures (48b43283).
 cast_count="$(git -C "$repo_root" grep -h -o '(cast ' -- stdlib tests examples ':!tests/fuzz' | wc -l | tr -d ' ')"
 if [ "$cast_count" -eq 0 ]; then
   bad "user-level: the cast count read 0 - the measurement is broken, not the tree clean"
-elif [ "$cast_count" -le 475 ]; then
-  ok "user-level (cast count $cast_count <= 475)"
+elif [ "$cast_count" -le 476 ]; then
+  ok "user-level (cast count $cast_count <= 476)"
 else
-  bad "user-level (cast count $cast_count > 475): new casts need a MM-VAL-23 reason and a baseline bump"
+  bad "user-level (cast count $cast_count > 476): new casts need a MM-VAL-23 reason and a baseline bump"
 fi
 
 echo "--- 2. type-preserving casts keep ownership ---"

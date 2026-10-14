@@ -98,8 +98,13 @@ deg() {
 
 echo "== degenerate forms: none may die by signal =="
 
-# The empty form `()` in every position an expression can appear, each
-# refused with a diagnostic, and a few `if` and `cond` shapes beside them.
+# The unit value `()` in every position an expression can appear, and a
+# few `if` and `cond` shapes beside them. Where a value of another type
+# is wanted (an `Int` body, an operand of `+`, an `if`'s test) it is
+# refused with AX3004 or its like; where its value is dropped, bound,
+# matched or cast, it is accepted. A macro whose template is `()`
+# expands to `()`, not to the integer 0 (`expRebuildLit` keeps the
+# mark), so `empty-in-macro-tpl` is refused as `empty-body` is.
 deg empty-body 1 <<'AXEOF'
 (:: main Int)
 (fn (main) ())
@@ -108,7 +113,7 @@ deg empty-arg 1 <<'AXEOF'
 (:: main Int)
 (fn (main) (+ 1 ()))
 AXEOF
-deg empty-let-val 1 <<'AXEOF'
+deg empty-let-val 0 <<'AXEOF'
 (:: main Int)
 (fn (main) (let ((x ())) 0))
 AXEOF
@@ -124,7 +129,7 @@ deg empty-if-then 1 <<'AXEOF'
 (:: main Int)
 (fn (main) (if true () 2))
 AXEOF
-deg empty-block 1 <<'AXEOF'
+deg empty-block 0 <<'AXEOF'
 (:: main Int)
 (fn (main) { () 0 })
 AXEOF
@@ -140,7 +145,7 @@ deg empty-head 1 <<'AXEOF'
 (:: main Int)
 (fn (main) (() 1))
 AXEOF
-deg empty-match-scrut 1 <<'AXEOF'
+deg empty-match-scrut 0 <<'AXEOF'
 (:: main Int)
 (fn (main) (match () ((_) 0)))
 AXEOF
@@ -152,7 +157,7 @@ deg empty-while-test 1 <<'AXEOF'
 (:: main Int)
 (fn (main) (while () 0))
 AXEOF
-deg empty-while-body 1 <<'AXEOF'
+deg empty-while-body 0 <<'AXEOF'
 (:: main Int)
 (fn (main) (while false ()))
 AXEOF
@@ -160,7 +165,7 @@ deg empty-set-val 1 <<'AXEOF'
 (:: main Int)
 (fn (main) (let mut ((x 1)) { (set x ()) x }))
 AXEOF
-deg empty-ascribe 1 <<'AXEOF'
+deg empty-ascribe 0 <<'AXEOF'
 (:: main Int)
 (fn (main) (:: () Int))
 AXEOF
@@ -316,11 +321,9 @@ AXEOF
 # Type position. `()` is a type, the empty tuple. `ascribe-unit` shows
 # the two positions are separate: `(:: 1 ())` parses its type with
 # `parseExpr`.
-# `sig-unit-type` is AX3004: the body answers `Int` under a declared
-# `()`. No body can satisfy that signature, because `()` in expression
-# position is AX2001. The case pins that the compiler answers with a
-# diagnostic.
-deg sig-unit-type 1 <<'AXEOF'
+# `sig-unit-type` is accepted: a function declared `()` drops its
+# body's value, as a procedure does.
+deg sig-unit-type 0 <<'AXEOF'
 (:: main ())
 (fn (main) 0)
 AXEOF

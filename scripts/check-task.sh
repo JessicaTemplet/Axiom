@@ -547,13 +547,13 @@ cuts = {
   # a guard then lets go of the lock its parent holds.
   "pid": [("Sync.ax", "(if (|| (!= (/ (syncLoad m 0) 4) (/ syncMe 4)) (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial)))", "(if (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial))")],
   # A guard a trap abandoned lets go without poisoning the mutex.
-  "poison": [("Sync.ax", "        (if syncUnwinding\n          (syncStore m 3 1)\n          0)", "        0")],
+  "poison": [("Sync.ax", "        (if syncUnwinding\n          (syncStore m 3 1))", "        0")],
   # A task is joined on its answer alone, as it first was.
   "exitjoin": [("Task.ax", "        ((Ok b)\n          (if b\n            1\n            (if answered\n              2\n              0))", "        ((Ok b)\n          (if (|| b answered)\n            1\n            0)")],
   # A refused spawn traps past the pool again: no recovery point.
   "spawnrp": [("Task.ax", ";@axiom:effect(unsafe)\n(fn (taskSpawn wrapper arg mark)\n  (if (== mark 0)\n    (region r\n      (__axiom_recover\n        __axiom_arena_mark\n        (lambda (x) (taskWordOf (__proc_spawn wrapper arg)))))\n    {\n      (__axiom_arena_mark_into mark)\n      (__axiom_recover\n        mark\n        (lambda (x) (taskWordOf (__proc_spawn wrapper arg))))\n    }))", "(fn (taskSpawn wrapper arg mark)\n  (taskWordOf (__proc_spawn wrapper arg)))")],
   # A refused spawn no longer cancels the pool.
-  "refusecancel": [("Task.ax", "                  {\n                    (set cancelling 1)\n                    (set graceEnd (+ now graceUs))\n                  }\n                  0)", "                  0\n                  0)")],
+  "refusecancel": [("Task.ax", "                  {\n                    (set cancelling 1)\n                    (set graceEnd (+ now graceUs))\n                  })", "                  ())")],
   # The checked pool no longer kills its running slots on a refusal.
   "parkill": [("Par.ax", "(parKill (vecGet hs (% k w)))", "0")],
   # The microseconds conversion rounds without saturating.
@@ -572,7 +572,7 @@ cuts = {
   "capcut": [("Task.ax", "      (taskCapArena memory)\n", "      0\n")],
   # Section 12. The sleep stops after its first wait, which is asked
   # for a tenth of the time: a sleep that ends short.
-  "shortsleep": [("Sys.ax", "            (if (>= now deadline)\n              (set state 1)\n              {\n                (sysWaitWordTimeout (+ buf 16) 0 (- deadline now))\n                0\n              })", "            {\n              (sysWaitWordTimeout (+ buf 16) 0 (/ (- deadline now) 10))\n              (set state 1)\n            }")],
+  "shortsleep": [("Sys.ax", "            (if (>= now deadline)\n              (set state 1)\n              {\n                (sysWaitWordTimeout (+ buf 16) 0 (- deadline now))\n              })", "            {\n              (sysWaitWordTimeout (+ buf 16) 0 (/ (- deadline now) 10))\n              (set state 1)\n            }")],
   # Section 10. The raising pool's drain joins newest first.
   "drain": [("Par.ax", "      (while (< joined n)\n        {\n          (vecPush out (__proc_join (vecGet hs (% joined w))))", "      (while (< joined n)\n        {\n          (vecPush out (__proc_join (vecGet hs (% (- n (+ joined 1)) w))))")],
 }[kind]

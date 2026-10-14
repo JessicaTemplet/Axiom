@@ -3958,7 +3958,9 @@
 ; A template literal rebuilt with the invocation's span
 ; (MAC-EXP-14a): keeping the defining file's byte offsets renders
 ; against the invoking file's line table. Every literal kind carries
-; its value in word A and nothing else, so the rebuild is exact.
+; its value in word A; an integer literal also carries its mark in
+; word B (2 on the unit value `()`), which the rebuild keeps, or a
+; template's `()` would come out as the integer 0.
 (pub :: expRebuildLit (-> Int Int Int))
 (pub fn (expRebuildLit tpl isp)
   (let ((tag (nodeTag tpl)))
@@ -3966,7 +3968,7 @@
       (mkNodeAt
         TAG_E_INT
         (nodeA tpl)
-        0
+        (nodeB tpl)
         0
         isp)
       (if (== tag TAG_E_STR)
@@ -6415,11 +6417,9 @@
 ; caller with no table.
 (pub :: expAsmFileOf (-> Int String))
 (pub fn (expAsmFileOf env)
-  (let ((units (memGetWordVec env 12)))
-    (if (==
-      (cast Int units)
-      0)
-      ""
+  (if (== (memGetWord env 12) 0)
+    ""
+    (let ((units (memGetWordVec env 12)))
       (let ((u (expUnitOfMod units (memGetWord env 11))))
         (if (>= u (vecLen units))
           ""
