@@ -1290,12 +1290,28 @@ slips are refused wherever they stand
 (`tests/diagnostics/1031-pure-tag-spelling.ax`). An unknown key is
 still legal metadata, so the tag namespace stays open.
 
-**ERR-DIAG-3 (P). Poisoning, not cascading.** Where a check on an error
-type fails, propagate `TError` and guard downstream comparisons, so one
-mistake draws one diagnostic. Reach for a group key only when a real
-cascade survives poisoning. The `dedup` pass in the retired Rust
-compiler never had a call site, and the lesson recorded in
-[diagnostics.md](diagnostics.md) is to build it *with* one.
+**ERR-DIAG-3 (H). Poisoning, not cascading.** One mistake draws one
+diagnostic. Once a check reports a mistake, the value it was about has
+the poison type, and every check downstream of that value stays quiet:
+
+- A call with a poisoned argument answers poison. Printing
+  `(vecGet broken 0)` draws nothing more.
+- A field read on a poisoned value isn't reported again.
+- A `match` whose pattern names an unknown constructor binds that
+  pattern's fields as poison, and isn't also called non-exhaustive.
+- A call to an undefined name, or to a signature with no definition,
+  is unresolved for the effect walk. The caller's effect claim isn't
+  called unsupported, because what the call performs is unknown.
+
+Poison never binds a placeholder another expression shares, so a
+separate mistake elsewhere still draws its own diagnostic. Reach for a
+group key only when a real cascade survives poisoning. Tested by
+`tests/diagnostics/1380-poisoned-checks.ax`, where five mistakes draw
+five errors.
+
+Not yet: a definition without a signature types its parameters as
+`Int`, so each use of a parameter that isn't an `Int` draws a
+mismatch. See the [roadmap](roadmap.md).
 
 ---
 
@@ -1484,15 +1500,16 @@ runs the direct read and the routed one and compares their answers.
 | `ERR-REC-7` | **H, gated** | `stdlib/Fallible.ax`; `410-fallible.ax`: thirteen values, four of them memory terms with an ablation; `tests/diagnostics/389-unhandled-at-main.ax` for the missing handler, which `AX3053` names at compile time; `scripts/check-steady-state.sh`'s `batch` probe, and `examples/batch-fallible` under the same gate |
 | `ERR-REC-8` | **R, superseded** | Range-constrained subtypes were refused as a type (roadmap item 11, D2), then built: `(subtype N is Int range lo..hi)` (`tests/selfhost/134-subtype-checked.ax`, `135-subtype-violated.ax`), with narrowing conversions checked by the contract trap (80). The `;@axiom:pre(...)` vehicle still stands beside it. `reference.md` documents the implemented subtype |
 | `ERR-DIAG-1` | H | `mkDiag` is the only channel |
-| `ERR-DIAG-2`, `3` | P | No proposal is open: the last one, `AX3043`, is built (`1008-error-payload-untyped.ax`). `scripts/check-doc-drift.sh` fails on a proposal whose number is spent |
+| `ERR-DIAG-2` | P | No proposal is open: the last one, `AX3043`, is built (`1008-error-payload-untyped.ax`). `scripts/check-doc-drift.sh` fails on a proposal whose number is spent |
+| `ERR-DIAG-3` | **H, gated** | `tests/diagnostics/1380-poisoned-checks.ax` |
 | `ERR-SUGAR-1` | **R, superseded** | by `ERR-SUGAR-4` |
 | `ERR-SUGAR-2` | **R, superseded** | by `ERR-SUGAR-4`; `try` is `AX2004` |
 | `ERR-SUGAR-3` | **H, gated** | `withContext`; `371` term 2 |
 | `ERR-SUGAR-4` | **H, gated** | `?`; `tests/stdlib/847-try-operator.ax`, `tests/diagnostics/1300-try-position.ax` |
 
 Every rule marked **H** names what holds it. What remains open is
-`ERR-REC-5`, `ERR-DIAG-2` and `ERR-DIAG-3`, whose rows say so, and the
-migration itself (§10).
+`ERR-REC-5` and `ERR-DIAG-2`, whose rows say so, and the migration
+itself (§10).
 
 ---
 

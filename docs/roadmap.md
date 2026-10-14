@@ -71,7 +71,8 @@ integrator would still need.
 | An `effect(unsafe)` claim is judged by what the body itself performs | Done | `AX3010`, `tests/diagnostics/1200-unsafe-claim-open-row.ax` |
 | A statically certain defect or a refuted claim is an error, not a warning | Done | `tests/diagnostics/severity.policy` |
 | Retired and never-assigned codes are recorded and never reused | Done | `ERR-DIAG-2` |
-| A check after an error is poisoned, not cascaded | Planned | `ERR-DIAG-3` |
+| A check after an error is poisoned, not cascaded | Done | `ERR-DIAG-3`, `tests/diagnostics/1380-poisoned-checks.ax` |
+| A definition without a signature draws one diagnostic, not one per use of its parameters | Planned | `ERR-DIAG-3` |
 | A cast to a spawn handle counts as forging | Done | `MM-PAR-8`, `tests/diagnostics/1260-spawn-forging-cast.ax` |
 | Two signatures for one name are refused, instead of the later one winning | Done | `tests/diagnostics/1255-duplicate-signature.ax` |
 
