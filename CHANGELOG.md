@@ -16,6 +16,14 @@ its changelog too.
 
 ## Unreleased
 
+- A program's `main` is declared `(:: main ())`: it runs for what it
+  does and the program exits 0. The tests, examples, docs, website
+  samples, `explain` pages, the VS Code snippet, the REPL and
+  `axiom new` all use it, and every main that only answered `0` no
+  longer ends with one. `(:: main Int)` stays for a program that chooses
+  its own exit status, such as a test runner that exits 1 on a failure,
+  and AX4001's help names the unit form.
+
 - `vecSortBy`'s comparator takes the elements at their own type:
   `(vecSortBy names (lambda (a b) (strCmp a b)))` sorts strings with no
   casts. **BREAKING**: a comparator written over `Int` words for a

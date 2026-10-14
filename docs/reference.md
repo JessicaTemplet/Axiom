@@ -21,22 +21,32 @@ For installation and editor setup, start at [Read Axiom's docs](README.md).
 ```scheme
 (import IO)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  {
-    (println "Hello, Axiom!")
-    0
-  })
+  (println "Hello, Axiom!"))
 ```
 
 Save this as `hello.ax` and run `axiom run hello.ax`. It prints
 `Hello, Axiom!`. `axiom build hello.ax -o hello` creates a native executable.
 
 `import` brings in a module, `::` declares a type, and `fn` defines a
-function. `main` returns the exit status. The `effect(io)` tag declares
-its I/O; the compiler checks that declaration. Braces evaluate
+function. `main` is declared `()`, the unit type: it runs for what it
+does, and the program exits 0 when it finishes. The `effect(io)` tag
+declares its I/O; the compiler checks that declaration. Braces evaluate
 expressions in order and answer the last one.
+
+### Choose the exit status
+
+Declare `(:: main Int)` when the program decides its own exit status,
+such as a test runner that exits 1 on a failure. `main`'s answer is the
+status:
+
+```scheme
+(:: main Int)
+(fn (main)
+  (if (> (+ 2 2) 4) 1 0))
+```
 
 ### Fallible main
 
@@ -127,13 +137,12 @@ line is a note for whoever maintains the code, and tools leave it out.
 (:: bump (-> Int Int))
 (fn (bump n) (+ n 1))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((v (bump 1)))
     {
       (println "{v}")
-      0
     }))
 ```
 
@@ -186,11 +195,10 @@ The core forms are `fn`, `lambda`, `let`, `if`, `while`, `for`, `match`,
 (fn (add x y)
   (+ x y))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (println (add 2 3))
-  0)
+  (println (add 2 3)))
 ```
 
 A signature `(-> A B C)` takes `A`, then `B`, and returns `C`. A
@@ -207,12 +215,12 @@ A lambda is a function value. It can capture values in its enclosing scope.
 (:: apply (-> (-> Int Int) Int Int))
 (fn (apply f x) (f x))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((offset 100))
     (println (apply (lambda (x) (+ x offset)) 5))
-    0))
+    ()))
 ```
 
 This prints `105`. Function parameters and record fields may hold
@@ -232,14 +240,14 @@ build a lambda for the missing arguments, from left to right:
 (:: sub (-> Int Int Int))
 (fn (sub x y) (- x y))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((subFrom50 (sub 50 _))    ; (lambda (y) (sub 50 y))
         (minus8 (sub _ 8)))       ; (lambda (x) (sub x 8))
     (println (subFrom50 8))
     (println (minus8 50))
-    0))
+    ()))
 ```
 
 This prints `42` twice. A bare `_` elsewhere in an expression is
@@ -276,11 +284,10 @@ numeric conversion. `String` equality reads contents; ordering uses `strCmp`.
         (y (* x 2)))
     (+ x y)))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (println (compute 4))
-  0)
+  (println (compute 4)))
 ```
 
 Bindings are sequential: `y` can read `x` above. A later binding can
@@ -293,14 +300,14 @@ Declare a mutable binding with `mut`, then change it with `set`:
 ```scheme
 (import IO)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((mut count 0))
     (set count (+ count 1))
     (set count (+ count 1))
     (println count)
-    0))
+    ()))
 ```
 
 This prints `2`. Assignment returns the assigned value. A closure may
@@ -330,14 +337,13 @@ form a chain, followed by the final default branch.
 (fn (classify n)
   (if (< n 0) "negative" (== n 0) "zero" "positive"))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (println (abs -7))
   (println (classify -3))
   (println (classify 0))
-  (println (classify 12))
-  0)
+  (println (classify 12)))
 ```
 
 Leave out the else when the branch is there for what it does. The `if`
@@ -348,7 +354,7 @@ own value is dropped:
 (import IO)
 (import Vec)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((seen vecNew))
@@ -358,7 +364,6 @@ own value is dropped:
       (if (> (vecLen seen) 3)
         (println "more than three"))
       (println (vecLen seen))
-      0
     }))
 ```
 
@@ -380,7 +385,7 @@ that are there for what they do need not agree:
 ```scheme
 (import IO)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((mut hits 0) (mut seen false))
@@ -390,7 +395,6 @@ that are there for what they do need not agree:
           (set hits (+ hits 1))
           (set seen true)))
       (println "{hits} {seen}")
-      0
     }))
 ```
 
@@ -450,13 +454,12 @@ where its work does.
 (fn (report what n)
   (println "{what}: {n}"))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
     (report "files" 3)
     (report "errors" 0)
-    0
   })
 ```
 
@@ -572,7 +575,7 @@ renderable data types; no derive is needed for printing.
     ((Cons _ (Nil))          "one item")
     ((Cons h (Cons h2 _))    (if (== h h2) "starts with a pair" "two or more"))))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
@@ -580,7 +583,6 @@ renderable data types; no derive is needed for printing.
     (println (describe (Cons 7 (Nil))))
     (println (describe (Cons 7 (Cons 7 (Nil)))))
     (println (describe (Cons 1 (Cons 2 (Cons 3 (Nil))))))
-    0
   })
 ```
 
@@ -608,7 +610,7 @@ before using `.field`.
 (:: shift (-> Point Int Point))
 (fn (shift p n) (Point (+ p.x n) p.y))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((p (shift (Point 1 2) 10)))
@@ -616,7 +618,6 @@ before using `.field`.
       {
         (println "{p}")
         (println "x + y = {total}")
-        0
       })))
 ```
 
@@ -661,13 +662,12 @@ handle: a `parallel` form lends it to its bindings, and it can't have a
   (let ((text (s.render v)))
     (println "{label}: {text}")))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
     (report showInt "retries" 3)
     (report showSwitch "verbose" true)
-    0
   })
 ```
 
@@ -708,7 +708,7 @@ A custom effect declares callable operations with signatures:
     (log name)
   })
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
@@ -720,7 +720,6 @@ A custom effect declares callable operations with signatures:
       (greet "Grace")
       (Console)
       (lambda (s) 0))
-    0
   })
 ```
 
@@ -865,13 +864,12 @@ wrappers and native archives; see [calling Rust](ffi.md).
 
 (macro (clamp lo hi x) (if (< x lo) lo (> x hi) hi x))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (clamp 0 10 42))   ; becomes (if (< 42 0) 0 (> 42 10) 10 42)
     (println (clamp 0 10 -3))
-    0
   })
 ```
 
@@ -897,7 +895,7 @@ compilation. `Pre` supplies two derivers, `deriveEq` and
 ```scheme
 (import IO)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((name "world") (n 42) (pi 3.14159))
@@ -907,7 +905,6 @@ compilation. `Pre` supplies two derivers, `deriveEq` and
       (println n)
       (let ((row (format "{name:<10}{n:>5}")))
         (println "[{row}]"))
-      0
     }))
 ```
 
@@ -953,7 +950,7 @@ Reference cycles require explicit application management.
 (import IO)
 (import Str)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((mut i 0) (mut total 0))
@@ -966,7 +963,6 @@ Reference cycles require explicit application management.
           (set i (+ i 1))
         })
       (println "built {total} bytes")
-      0
     }))
 ```
 
@@ -1007,7 +1003,7 @@ values are the same value exactly when their addresses are equal:
 (data Box
   (Bx String))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let (
@@ -1018,7 +1014,6 @@ values are the same value exactly when their addresses are equal:
     {
       (println (if (addrEq (addrOf a) (addrOf c)) "a is c" "a is not c"))
       (println (if (addrEq (addrOf a) (addrOf b)) "a is b" "a is not b"))
-      0
     }))
 ```
 
@@ -1053,13 +1048,10 @@ inherit nothing.
     (aarch64 "add {r}, {a}, {b}" (out r) (in a x) (in b y))
     (x86_64 "leaq ({a},{b}), {r}" (out r) (in a x) (in b y))))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  {
-    (println (fmtInt (add 40 2)))
-    0
-  })
+  (println (fmtInt (add 40 2))))
 ```
 
 ```text
@@ -1150,7 +1142,7 @@ instructions read every input before they write the output.
     (aarch64 "mov x0, {a}\nbl {f}" (out r "x0") (in a x) (sym f triple) (clobber_abi "C"))
     (x86_64 "movq {a}, %rdi\ncall {f}" (out r "rax") (in a x) (sym f triple) (clobber_abi "C"))))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
@@ -1158,7 +1150,6 @@ instructions read every input before they write the output.
     (println (fmtInt (bump 41)))
     (println (fmtInt (times8 5)))
     (println (fmtInt (viaCall 14)))
-    0
   })
 ```
 
@@ -1237,7 +1228,7 @@ barrier between two reads, and counts down in a loop:
     (aarch64 "mov {r}, {a}\n1: subs {r}, {r}, #1\nb.ne 1b\nadd {r}, {r}, #1" (out r) (in a n))
     (x86_64 "movq {a}, {r}\n1: decq {r}\njnz 1b\nincq {r}" (out r) (in a n))))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let (
@@ -1257,7 +1248,6 @@ barrier between two reads, and counts down in a loop:
           (set i (+ i 1))
         })
       (println total)
-      0
     }))
 ```
 
@@ -1334,7 +1324,7 @@ the arm are `AX3119`.
       (x86_64 "ud2" (options noreturn nomem nostack)))
     x))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
@@ -1342,7 +1332,6 @@ the arm are `AX3119`.
     (println (fmtInt (firstByte "Axiom")))
     (println (fmtInt relax))
     (println (fmtInt (checked 42)))
-    0
   })
 ```
 
@@ -1452,7 +1441,7 @@ Tested by `tests/stdlib/870-inline-asm-operands.ax` and
       acc
     }))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
@@ -1463,7 +1452,6 @@ Tested by `tests/stdlib/870-inline-asm-operands.ax` and
       {
         (println "a = {a}")
         (println "b = {b}")
-        0
       })))
 ```
 
@@ -1579,7 +1567,7 @@ server answers with a greeting.
     ((Ok conn) (serve conn))
     ((Err e) (die (errorText e) 1))))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (match (tcpListen "127.0.0.1:0")
@@ -1596,7 +1584,6 @@ server answers with a greeting.
               ((Ok (Some reply))
                 {
                   (println reply)
-                  0
                 }
               )
               (_ (die "no reply" 1))))

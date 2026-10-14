@@ -12,7 +12,7 @@ where its limits are.
 (import Crypto.Random)
 (import Crypto.Secret)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (main)
@@ -22,7 +22,6 @@ where its limits are.
         (println "{key}")
         (println (secretLen key))
         (secretWipe key)
-        0
       })
     ((Err e) (die (errorText e) 1))))
 ```
@@ -148,7 +147,7 @@ messages that share one.
 (import Crypto.Sha3)
 (import Crypto.Blake2b)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((h sha256New))
@@ -160,7 +159,6 @@ messages that share one.
       (println (hexEncode (sha3_256 "abc")))
       (println (hexEncode (shake256 "abc" 16)))
       (println (hexEncode (blake2b256 "abc")))
-      0
     }))
 ```
 
@@ -206,7 +204,7 @@ secret into as many independent keys as you need.
 (import Crypto.Hmac)
 (import Crypto.Hkdf)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (main)
@@ -229,7 +227,6 @@ secret into as many independent keys as you need.
                     (println (secretLen keys))
                     (secretWipe keys)
                     (secretWipe shared)
-                    0
                   }))))
         }))))
 ```
@@ -277,7 +274,7 @@ each with the same shape:
 (import Crypto.Aead)
 (import Crypto.AesGcm)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (main)
@@ -297,7 +294,6 @@ each with the same shape:
                 ((Ok plain) (println plain))
                 ((Err e) (println (errorText e))))
               (aes256GcmKeyWipe key)
-              0
             }))))))
 ```
 
@@ -423,7 +419,7 @@ deterministic, so the same key and message always give the same
 (import Err)
 (import Crypto.Ed25519)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (main)
@@ -437,7 +433,6 @@ deterministic, so the same key and message always give the same
           (println (ed25519Verify pk "release 0.8.0" sig))
           (println (ed25519Verify pk "release 0.8.1" sig))
           (ed25519KeyWipe key)
-          0
         }))))
 ```
 

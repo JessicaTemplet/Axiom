@@ -148,14 +148,13 @@ Here is a slightly bigger program. Put it in `shapes.ax`:
   (let ((a (area s)))
     (println "{name:<10}{a:>8.2}")))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
     (report "circle" (Circle 2.0))
     (report "rect" (Rect 3.0 4.5))
     (report "triangle" (Triangle 4.0 3.0))
-    0
   })
 ```
 

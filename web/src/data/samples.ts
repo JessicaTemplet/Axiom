@@ -121,14 +121,13 @@ triangle      6.00`,
   (let ((a (area s)))
     (println "{name:<10}{a:>8.2}")))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
     (report "circle" (Circle 2.0))
     (report "rect" (Rect 3.0 4.5))
     (report "triangle" (Triangle 4.0 3.0))
-    0
   })`,
 }
 
@@ -255,13 +254,10 @@ export const NEW_PROJECT = {
   name: 'hello',
   main: `(import IO)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  {
-    (println "Hello from Axiom! 🚀")
-    0
-  })`,
+  (println "Hello from Axiom! 🚀"))`,
   output: 'Hello from Axiom! 🚀',
 }
 
@@ -323,7 +319,7 @@ AX-1044  delivered             -`,
   )
     (println "{id:<9}{s:<22}{a}")))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
@@ -332,7 +328,6 @@ AX-1044  delivered             -`,
     (row "AX-1042" (InTransit "DHL" 2))
     (row "AX-1043" (Held "customs"))
     (row "AX-1044" Delivered)
-    0
   })`,
   },
   {
@@ -368,7 +363,7 @@ AX-1044  delivered             -`,
       })
     0))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((shelf vecNew))
@@ -379,7 +374,6 @@ AX-1044  delivered             -`,
       (for item in shelf
         (let ((ordered (restock item)))
           (println "{ordered:>4} ordered  {item}")))
-      0
     }))`,
     refusal: {
       label: "Write a field that is not mut",
@@ -403,7 +397,7 @@ AX-1044  delivered             -`,
       })
     0))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((shelf vecNew))
@@ -414,7 +408,6 @@ AX-1044  delivered             -`,
       (for item in shelf
         (let ((ordered (restock item)))
           (println "{ordered:>4} ordered  {item}")))
-      0
     }))`,
       human: `error[AX3012]: cannot assign to field \`min\` of \`Item\`: the field is not declared \`mut\`
   --> stock.ax:15:19
@@ -575,7 +568,7 @@ test: 4 pauses recorded, 0 ms slept`,
 
 ; Each message is split on byte 32 (a space); each word of four
 ; letters or more is interned and counted, then the ids are ranked.
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let (
@@ -607,7 +600,6 @@ test: 4 pauses recorded, 0 ms slept`,
             (w (internLookup words id))
           )
             (println "{n:>4}  {w}"))))
-      0
     }))`,
   },
   {
@@ -707,7 +699,7 @@ compilation failed due to 1 previous error`,
 (fn (render id)
   (format "GET /orders/{id} 200 {id:x}"))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((mut bytes 0))
@@ -716,7 +708,6 @@ compilation failed due to 1 previous error`,
         (region req
           (set bytes (+ bytes (strLen (render id))))))
       (println "1000000 requests, {bytes} bytes rendered")
-      0
     }))`,
     refusal: {
       label: "Keep a string past its region",
@@ -729,7 +720,7 @@ compilation failed due to 1 previous error`,
 (fn (render id)
   (format "GET /orders/{id} 200 {id:x}"))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((mut last ""))
@@ -738,7 +729,6 @@ compilation failed due to 1 previous error`,
         (region req
           (set last (render id))))
       (println "last request: {last}")
-      0
     }))`,
       human: `error[AX3059]: \`last\` is bound outside region \`req\`, and the value stored into it has type \`String\`
   --> requests.ax:16:16
@@ -822,14 +812,13 @@ Team    129385889792 bytes  <- shared`,
   )
     (println "{p:<6}{bytes:>14} bytes{mark}")))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
     (row Free)
     (row Pro)
     (row Team)
-    0
   })`,
   },
   {
@@ -1025,7 +1014,7 @@ ok   testOlder
         (delay (durationParse "PT1H30M")?))
     (datetimeAdd start delay)))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (match arrival
@@ -1033,7 +1022,6 @@ ok   testOlder
     ((Ok end)
       {
         (println (datetimeToString end))
-        0
       }
     )))`,
   },
@@ -1063,7 +1051,7 @@ job 3: 9`,
   (let ((square (* i i)))
     (format "job {i}: {square}")))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
@@ -1074,7 +1062,6 @@ job 3: 9`,
         (match answer
           ((Ok text) (println text))
           ((Err e) (println (errorText e)))))
-      0
     }))`,
   },
   {
@@ -1102,7 +1089,7 @@ job 3: 9`,
   (let ((envelope (obfuscationSeal key "demo/message/v1" "asset opened")?))
     (obfuscationOpen key "demo/message/v1" envelope)))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (main)
@@ -1117,7 +1104,6 @@ job 3: 9`,
             ((Ok text)
               {
                 (println text)
-                0
               }
             ))
         })
@@ -1145,7 +1131,7 @@ Err:     invalid digit found in string`,
 
 ; Demo is the module axiom-bindgen writes from the crate's
 ; #[axiom_export] functions; --crate builds and links its archive.
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (main)
@@ -1163,7 +1149,6 @@ Err:     invalid digit found in string`,
       (match (parseInt "12x")
         ((Ok n) (println "parsed:  {n}"))
         ((Err why) (println "Err:     {why}")))
-      0
     }))`,
     rust: {
       path: 'rust/examples/demo/src/lib.rs',

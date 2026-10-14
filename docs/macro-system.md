@@ -710,7 +710,7 @@ never outranks a binder:
 (fn (f v)
   v)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let (
@@ -721,7 +721,6 @@ never outranks a binder:
   )
     {
       (println "{a} {b} {c}")
-      0
     }))
 ```
 

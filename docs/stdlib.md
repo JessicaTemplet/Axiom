@@ -35,7 +35,7 @@ Import `Err` when working with `Result`, and use `?` to propagate errors.
 (import Vec)
 (import Map)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((counts mapNew))
@@ -46,7 +46,6 @@ Import `Err` when working with `Result`, and use `?` to propagate errors.
       (for n in (vecSort (mapKeys counts))
         (let ((count (mapGet counts n 0)))
           (println "{n}: {count}")))
-      0
     }))
 ```
 
@@ -497,7 +496,7 @@ with `internFind`, and recover bytes with `internLookup`.
 (import IO)
 (import Intern)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((names internNew)
@@ -506,7 +505,6 @@ with `internFind`, and recover bytes with `internLookup`.
       (println id)
       (println (internLookup names id))
       (internFree names)
-      0
     }))
 ```
 

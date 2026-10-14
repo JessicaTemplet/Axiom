@@ -2547,12 +2547,12 @@ saved position and answers the body's scalar result.
 (import IO)
 (import Str)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((id 42))
     (let ((n (region r (strLen (format "GET /orders/{id}")))))
-      { (println "rendered {n} bytes") 0 })))
+      { (println "rendered {n} bytes") })))
 ```
 
 ```text
@@ -2566,12 +2566,12 @@ length, an `Int`, leaves. Answering the string itself is refused:
 (import IO)
 (import Str)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((id 42))
     (let ((s (region r (format "GET /orders/{id}"))))
-      { (println s) 0 })))
+      { (println s) })))
 ```
 
 ```text
@@ -2827,7 +2827,7 @@ of a function that returns `Int`: `(fn (bump p) (set p.x 1))` declared
   (mut x : Int)
   (y : Int))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((p (P 1 2)) (q p))
@@ -2835,7 +2835,6 @@ of a function that returns `Int`: `(fn (bump p) (set p.x 1))` declared
       (set p.x 99)
       (let ((seen q.x))
         (println "q.x is {seen}"))
-      0
     }))
 ```
 
@@ -3369,7 +3368,7 @@ A `mut` local whose type is a reference owns what it holds:
 (import IO)
 (import Str)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((mut s "") (mut i 0))
@@ -3380,7 +3379,6 @@ A `mut` local whose type is a reference owns what it holds:
           (set i (+ i 1))
         })
       (println s)
-      0
     }))
 ```
 
@@ -4781,7 +4779,7 @@ dies. So a `Vec` of `File`s closes every descriptor when it dies.
 (import Str)
 (import Fmt)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((mut i 0) (mut total 0))
@@ -4797,7 +4795,6 @@ dies. So a `Vec` of `File`s closes every descriptor when it dies.
           (set i (+ i 1))
         })
       (println "{total} rows")
-      0
     }))
 ```
 

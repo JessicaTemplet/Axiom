@@ -29,12 +29,12 @@ AXQL, its query language.
     (Ok 0)
   })
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (match (axqWith "shop.db" openOptions shop)
-    ((Ok _) 0)
-    ((Err e) { (println (errorText e)) 0 })))
+    ((Ok _) ())
+    ((Err e) { (println (errorText e)) })))
 ```
 
 ```text

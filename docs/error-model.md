@@ -722,13 +722,12 @@ raw operator keeps its semantics.** `stdlib/Err.ax` ships them:
     ((Ok q) (println "quotient {q}"))
     ((Err e) (println (errorText e)))))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
     (report (divChecked 10 2))
     (report (divChecked 10 0))
-    0
   })
 ```
 
@@ -996,13 +995,12 @@ the record nothing.**
       acc
     }))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (cast Int (handle (total 20) (Fallible) fallibleSkip)))
     (println (cast Int (handle (total 20) (Fallible) (fallibleDefault 100))))
-    0
   })
 ```
 

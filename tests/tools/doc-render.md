@@ -37,7 +37,7 @@ and a line break<br> here.
 ;;! Module doc line.
 ;; Doc comment with `code`.
 ; A plain comment, and #| a block |# comment.
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((mut n 1) (s "text \"quoted\"") (c 'x') (f 1.5))
@@ -46,7 +46,6 @@ and a line break<br> here.
       (if (&& true (!= n 0)) (println "{n}") 0)
       (match (Some n) ((Some v) v) ((None) 0))
       (fn data data)
-      0
     }))
 ```
 

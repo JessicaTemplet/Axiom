@@ -270,13 +270,10 @@ function that gives yours:
     status
   })
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  {
-    (println "running")
-    0
-  })
+  (println "running"))
 ```
 
 The runtime writes its own line first, as it does with no hook, so the

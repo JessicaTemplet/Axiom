@@ -11,7 +11,7 @@ to use it and what it assumes.
 (import Err)
 (import Chrono)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (match (datetimeParse "2024-01-31T09:30:00")
@@ -27,7 +27,6 @@ to use it and what it assumes.
             ((Ok end) (println (datetimeToString end)))
             ((Err e) (println (errorText e))))
           (println (unwrapOr (datetimeFormat "%A %d %B %Y, %H:%M" start) ""))
-          0
         }))))
 ```
 
@@ -107,7 +106,7 @@ Printing then parsing always gives back the same value.
     ((Ok dt) (datetimeToString dt))
     ((Err e) (errorText e))))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
@@ -115,7 +114,6 @@ Printing then parsing always gives back the same value.
     (println (show "2016-12-31T23:59:60"))
     (println (show "2024-02-30T10:00"))
     (println (show "2024-02-29T14:05Z"))
-    0
   })
 ```
 
@@ -172,7 +170,7 @@ siblings.
     ((Ok d) (dateToString d))
     ((Err e) (errorText e))))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let (
@@ -184,7 +182,6 @@ siblings.
       (println (show (dateAddMonths jan31 2)))
       (println (show (dateAddYears leapDay 1)))
       (println (show (dateAddDays dateMax 1)))
-      0
     }))
 ```
 
@@ -220,7 +217,7 @@ replaced, and every other byte is copied as it is:
 (import Err)
 (import Chrono)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (match (datetimeParse "2024-03-10T02:30:05.123456789")
@@ -232,7 +229,6 @@ replaced, and every other byte is copied as it is:
         (match (datetimeFormat "%Y-%m-%d %q" dt)
           ((Ok s) (println s))
           ((Err e) (println (errorText e))))
-        0
       })))
 ```
 
@@ -289,7 +285,7 @@ long something took and to set deadlines, and `sleepFor` or
 (import Err)
 (import Chrono)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (main)
@@ -305,7 +301,6 @@ long something took and to set deadlines, and `sleepFor` or
                 "slept at least 250 ms"
                 "woke early")))
             ((Err e) (println (errorText e))))
-          0
         }))))
 ```
 
