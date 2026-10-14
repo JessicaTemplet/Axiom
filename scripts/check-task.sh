@@ -11,7 +11,7 @@
 # this gate puts them under load, against the clock, against ablated
 # copies of the library, and checks the processes the pool leaves.
 #
-# ELEVEN SECTIONS.
+# TWELVE SECTIONS.
 #
 #   1. Mutual exclusion. tests/litmus/sync-load.ax: four bindings,
 #      released together, add 1 to one PLAIN shared word N times each
@@ -129,10 +129,22 @@
 #      can't see: 2,000 and 100,000 channels, mutexes and tokens made and
 #      let go hold the same peak RSS within 1 MiB, and the control that
 #      keeps 5,000 channels must grow it by at least 8 MiB.
+#  12. The sleep and the monotonic clock (Chrono's `sleepFor`, Sys's
+#      `sysNowMonotonicNanos`). tests/litmus/sleep-load.ax sleeps 200
+#      ms, which must take 200 ms to 200 ms plus the slack by the
+#      monotonic clock and agree with the realtime clock to 10 ms - on
+#      Darwin that is the arm64 counter's frequency, checked; reads the
+#      clock 200,000 times, never backwards; keeps at most 4 KiB after
+#      200,000 typed readings; and sleeps 500 ms in each
+#      of two `parallel` bindings, which must take one sleep and not
+#      two. Both lowerings. Ablation `shortsleep`: a sleep that stops
+#      after its first wait, a tenth of the time asked, must come back
+#      short.
 #
 # WHAT THE NUMBERS ARE. Peak RSS (`max_rss_kb`), in KiB, of the whole
 # program. Times are the programs' own `sysTimeoutMicros` readings -
-# CLOCK_MONOTONIC on Linux, the realtime clock on Darwin (MM-PAR-12).
+# CLOCK_MONOTONIC on Linux, the processor's counter on darwin-aarch64
+# (MM-PAR-12).
 #
 # LIMITS. A load that passed is evidence on the runs made, on this
 # host; the lock, the protocol and the pool are not proved. FreeBSD
@@ -533,6 +545,9 @@ cuts = {
   # completion-order fold MM-PAR-14 rules out.
   "completion": [("Task.ax", "                        {\n                          (set progress 1)\n                          (if (&& (== r 1) opts.failFast)", "                        {\n                          (taskDeliver sink scoped st s slab slotBytes)\n                          (set progress 1)\n                          (if (&& (== r 1) opts.failFast)"),
                  ("Task.ax", "                (taskDeliver\n                  sink\n                  scoped\n                  st\n                  (% head w)\n                  slab\n                  slotBytes)\n", "                0\n")],
+  # Section 12. The sleep stops after its first wait, which is asked
+  # for a tenth of the time: a sleep that ends short.
+  "shortsleep": [("Sys.ax", "            (if (>= now deadline)\n              (set state 1)\n              {\n                (sysWaitWordTimeout (+ buf 16) 0 (- deadline now))\n                0\n              })", "            {\n              (sysWaitWordTimeout (+ buf 16) 0 (/ (- deadline now) 10))\n              (set state 1)\n            }")],
   # Section 10. The raising pool's drain joins newest first.
   "drain": [("Par.ax", "      (while (< joined n)\n        {\n          (vecPush out (__proc_join (vecGet hs (% joined w))))", "      (while (< joined n)\n        {\n          (vecPush out (__proc_join (vecGet hs (% (- n (+ joined 1)) w))))")],
 }[kind]
@@ -1187,6 +1202,51 @@ else
   bad "owners: no 802 binary to measure"
 fi
 
+# ---------------------------------------------------------------------
+echo "== 12. the sleep and the monotonic clock =="
+sleeper="$repo_root/tests/litmus/sleep-load.ax"
+# num <text> <key>: the number after `key` on its line.
+num() { field "$1" "$2"; }
+for lowering in processes threads; do
+  flags=(); [[ "$lowering" == threads ]] && flags=(--threads)
+  bin="$work/sleep-$lowering"
+  if ! build "$bin" "$sleeper" ${flags[@]+"${flags[@]}"} --opt 2; then
+    bad "$lowering: sleep-load did not build"; sed 's/^/    /' "$bin.build" | head -8; continue
+  fi
+  rc=0; out="$(gate_timeout 30 "$bin" sleep 200 2>&1)" || rc=$?
+  mono="$(num "$out" mono-us)"; wall="$(num "$out" wall-us)"
+  if [[ $rc -eq 0 && "$(num "$out" answer)" == 0 && "$mono" =~ ^[0-9]+$ && "$wall" =~ ^-?[0-9]+$ ]] \
+     && (( mono >= 200000 && mono <= (200 + SLACK) * 1000 )) && (( mono - wall <= 10000 && wall - mono <= 10000 )); then
+    ok "$lowering: a 200 ms sleep took $((mono / 1000)) ms by the monotonic clock and $((wall / 1000)) ms by the realtime one"
+  else
+    bad "$lowering: sleep exit $rc, '$(tr '\n' ';' <<<"$out")' - wanted 200 to $((200 + SLACK)) ms, the clocks within 10 ms"
+  fi
+  rc=0; out="$(gate_timeout 60 "$bin" reads 200000 2>&1)" || rc=$?
+  if [[ $rc -eq 0 && "$out" == "reads 200000 backwards 0" ]]; then
+    ok "$lowering: 200,000 monotonic readings, none earlier than the one before"
+  else
+    bad "$lowering: reads exit $rc, '$out'"
+  fi
+  rc=0; out="$(gate_timeout 60 "$bin" instants 200000 2>&1)" || rc=$?
+  grew="${out##* grew }"
+  if [[ $rc -eq 0 && "$out" == "instants 200000 failures 0 grew "* && "$grew" =~ ^-?[0-9]+$ ]] && (( grew <= 4096 )); then
+    ok "$lowering: 200,000 typed readings keep only ${grew} arena bytes"
+  else
+    bad "$lowering: typed readings exit $rc, '$out' - wanted no failures and at most 4 KiB retained"
+  fi
+  rc=0; out="$(gate_timeout 30 "$bin" pair 500 2>&1)" || rc=$?
+  pair="$(num "$out" pair-us)"
+  if [[ $rc -eq 0 && "$(num "$out" answers)" == 0 && "$pair" =~ ^[0-9]+$ ]] && (( pair >= 500000 && pair < 900000 )); then
+    ok "$lowering: two bindings sleeping 500 ms each took $((pair / 1000)) ms together - they slept at once"
+  else
+    bad "$lowering: pair exit $rc, '$(tr '\n' ';' <<<"$out")' - wanted 500 to 900 ms"
+  fi
+done
+if run_ablation shortsleep "$sleeper" 30 "$work/abl-shortsleep/prog" sleep 200; then
+  mono="$(num "$out" mono-us)"
+  red shortsleep "$([[ "$mono" =~ ^[0-9]+$ ]] && (( mono >= 200000 )) && echo 1 || echo 0)"
+fi
+
 echo
 if (( failed > 0 )); then
   echo "check-task: $failed failed, $checks passed"
@@ -1195,4 +1255,5 @@ fi
 echo "check-task: $checks checks - the mutex excludes in both lowerings, timed waits"
 echo "            keep time, every task failure is a value in its slot, no child"
 echo "            outlives the pool, memory is flat, ordered answers and float"
-echo "            reductions are the sequential bits, and every ablation turns it red"
+echo "            reductions are the sequential bits, a sleep keeps time on a clock"
+echo "            that never steps back, and every ablation turns it red"

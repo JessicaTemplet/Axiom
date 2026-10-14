@@ -1,0 +1,154 @@
+; The monotonic clock and the sleep against the wall clock
+; (stdlib/Chrono.ax `sleepFor`, stdlib/Sys.ax `sysNowMonotonicNanos`).
+; `scripts/check-task.sh` section 12 reads what this prints:
+;
+;   sleep-load sleep MS   sleep MS milliseconds, then print how long
+;                         that took by the monotonic clock and by the
+;                         realtime one, in microseconds: they must agree,
+;                         which is how the arm64 counter's frequency is
+;                         checked on Darwin
+;   sleep-load reads N    read the monotonic clock N times and print how
+;                         often it stepped backwards (never)
+;   sleep-load pair MS    two `parallel` bindings each sleep MS
+;                         milliseconds: print how long the pair took,
+;                         which is one sleep and not two
+(import IO)
+(import Str)
+(import Fmt)
+(import Mem)
+(import Err)
+(import Sys)
+(import Chrono)
+
+(:: mono Int)
+;@axiom:effect(io)
+(fn (mono)
+  (match (sysNowMonotonicNanos (memAlloc 16))
+    ((Ok t) t)
+    ((Err e) -1)))
+
+(:: wall Int)
+;@axiom:effect(io)
+(fn (wall)
+  (match (sysNowRealtimeNanos (memAlloc 16))
+    ((Ok t) t)
+    ((Err e) -1)))
+
+(:: napMs (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (napMs ms)
+  (match (durationFromMillis ms)
+    ((Ok d)
+      (match (sleepFor d)
+        ((Ok z) 0)
+        ((Err e) (errCode e)))
+    )
+    ((Err e) (errCode e))))
+
+(:: sleepMode (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (sleepMode ms)
+  (let (
+    (m0 mono)
+    (w0 wall)
+    (r (napMs ms))
+    (m1 mono)
+    (w1 wall)
+  )
+    (let (
+      (monoUs (/ (- m1 m0) 1000))
+      (wallUs (/ (- w1 w0) 1000))
+    )
+      {
+        (println "answer {r}")
+        (println "mono-us {monoUs}")
+        (println "wall-us {wallUs}")
+        0
+      })))
+
+(:: readsMode (-> Int Int))
+;@axiom:effect(io)
+(fn (readsMode n)
+  (let (
+    (buf (memAlloc 16))
+    (mut last 0)
+    (mut back 0)
+  )
+    {
+      (for i in 0..n
+        (match (sysNowMonotonicNanos buf)
+          ((Ok t)
+            {
+              (if (< t last)
+                (set back (+ back 1))
+                0)
+              (set last t)
+            }
+          )
+          ((Err e)
+            (set back (+ back 1))
+          )))
+      (println "reads {n} backwards {back}")
+      0
+    }))
+
+; Repeated typed readings must release their clock scratch.
+(:: instantsMode (-> Int Int))
+;@axiom:effect(io)
+(fn (instantsMode n)
+  (let (
+    (before memStats)
+    (mut failures 0)
+  )
+    {
+      (for i in 0..n
+        (match instantNow
+          ((Ok t) 0)
+          ((Err e)
+            (set failures (+ failures 1))
+          )))
+      (let ((after memStats))
+        (let ((grew (- after.backlogBytes before.backlogBytes)))
+          (println "instants {n} failures {failures} grew {grew}")))
+      0
+    }))
+
+(:: pairMode (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (pairMode ms)
+  (let ((m0 mono))
+    (let ((s 
+      (parallel p (
+        (a (napMs ms))
+        (b (napMs ms))
+      )
+        (+ a b))))
+      (let ((us (/ (- mono m0) 1000)))
+        {
+          (println "answers {s}")
+          (println "pair-us {us}")
+          0
+        }))))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  (let (
+    (mode (sysArg 1))
+    (n (match (strParseInt (sysArg 2))
+      ((Some v) v)
+      ((None) 100)))
+  )
+    (if (strEq mode "sleep")
+      (sleepMode n)
+      (if (strEq mode "reads")
+        (readsMode n)
+        (if (strEq mode "instants")
+          (instantsMode n)
+          (pairMode n))))))

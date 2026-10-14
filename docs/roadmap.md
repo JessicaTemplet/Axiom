@@ -97,7 +97,7 @@ integrator would still need.
 | Failure answers a `Result` or `Option`, never a sentinel | In progress | `ERR-ADOPT-1`, `compat/SENTINELS` |
 | `Map` is generic, and `vecSortBy` takes a typed comparator | Not started | |
 | `Par` folds into `Task` | Not started | |
-| Sleep and a monotonic clock | Not started | |
+| Sleep and a monotonic clock | Done | `MM-PAR-12`, `tests/stdlib/851-instant-sleep.ax` |
 | A would-block test for sockets: `errorKind` answers `WouldBlock` | Done | `tests/stdlib/840-error-kind.ax` |
 | AXQLite: links between tables, a dump that loads back, and messages that name the statement and say what to do | Done | `tests/axqlite/513-axql-links.ax`, `tests/axqlite/618-api-errors.ax` |
 | AXQLite: aggregates, `GROUP BY`, functions, `LIKE`, `IN`, `UPSERT`, `DEFAULT`, `CHECK` and `ALTER TABLE ADD COLUMN` | Done | `tests/axqlite/512-axql-aggregates.ax`, `tests/axqlite/514-axql-constraints.ax` |

@@ -5922,12 +5922,26 @@ target, because the kernel measured the last slice. A wait that is
 woken early and must wait again is charged what `sysTimeoutMicros`
 saw.
 
-That clock is `CLOCK_MONOTONIC` on Linux and FreeBSD. On Darwin it is
-the realtime clock, because Darwin has no monotonic clock reachable
-without libSystem (`clockHasMonotonic`). A step of the Darwin clock
-moves a wait by at most the one slice it lands in. Each timed call
-checks its condition once more after its last wait, so a word that
-arrives as the time runs out is still taken.
+That clock is the monotonic one wherever a target has it
+(`sysHasMonotonic`). Linux and FreeBSD read `CLOCK_MONOTONIC`. On
+darwin-aarch64 it is the processor's counter, `CNTVCT_EL0`, which is
+what `mach_absolute_time` reads and needs nothing from libSystem. The
+darwin-x86_64 target has no clock a program can read without
+libSystem, so there it is the realtime clock, and a step of it moves a wait by at
+most the one slice it lands in. Each timed call checks its condition
+once more after its last wait, so a word that arrives as the time runs
+out is still taken.
+
+*Sleeping.* `sysSleepUntilNanos deadline` waits on a word of its own
+that nothing changes, with the time left as the timeout, and reads the
+monotonic clock again after every wait until it reaches the deadline.
+So a sleep never ends short: a signal, a spurious wake or Darwin's
+71.6-minute cap only start another wait. `sysSleepNanos n` is the same
+with a deadline `n` from now, saturating at the clock's end, and
+`Chrono`'s `sleepFor` and `sleepUntil` are the typed forms over a
+`Duration` and an `Instant`. A target without a monotonic clock answers
+`Err` 78 (`chronoClockUnavailable` from `Chrono`), since nothing could
+tell it when to wake. A sleep performs `Block`.
 
 *Timeouts add no edge.* A wait that times out has synchronized with
 nothing. What a caller may read afterwards is what `MM-PAR-9`'s edges
@@ -5961,6 +5975,15 @@ guarantee. Linux's `futex` also compares only the word's low 32 bits
 - `scripts/check-task.sh` §6 asks the kernel for a tenth of the time,
   on a copy of the library. The timed receive comes back early and the
   check turns red.
+- `tests/stdlib/851-instant-sleep.ax`: sleeps for and until a time,
+  zero and negative sleeps, and an instant outside the clock's range.
+- `scripts/check-task.sh` §12, in both lowerings. A 200 ms sleep takes
+  200 to 1,000 ms by the monotonic clock and agrees with the realtime
+  clock to 10 ms, which checks the counter's frequency on Darwin.
+  200,000 readings never step back, typed readings retain at most 4 KiB
+  of arena storage, and two bindings sleeping 500 ms
+  each take one sleep together. A sleep that stops after its first wait, on
+  a copy of the library, comes back short and turns the check red.
 
 The bounds hold on the runs made. A loaded host can exceed any slack.
 
@@ -6084,7 +6107,7 @@ deadline/cancellation handling. Tested by
   death without an answer is found at the task's deadline. With no
   deadline, it is found by blocking on the oldest running task's join,
   and a cancellation then waits for that join.
-- On Darwin, deadlines are measured on the realtime clock
+- On darwin-x86_64, deadlines are measured on the realtime clock
   (`MM-PAR-12`).
 
 *Program obligations.*

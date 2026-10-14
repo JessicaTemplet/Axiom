@@ -7,20 +7,24 @@
 ;;!     (datetimeParseUtc "2024-03-10T02:30:00+05:30")
 ;;!                                               ; (Ok 2024-03-09T21:00:00)
 ;;!     (durationParse "PT90M")                   ; (Ok PT1H30M)
+;;!     instantNow                                ; (Ok i), monotonic
+;;!     (sleepFor d)                              ; (Ok 0) once d has passed
 ;
 ; Values print as their type's name, `<Date>`; `dateToString` and its
 ; siblings are how to show one.
 ;
-; Four types. A `Date` is a day from -9999-01-01 to 9999-12-31. A
+; Five types. A `Date` is a day from -9999-01-01 to 9999-12-31. A
 ; `Time` is a time of day, 00:00:00 to 23:59:59.999999999. A
 ; `NaiveDateTime` is a date and a time with no zone or offset. A
 ; `Duration` is a signed count of nanoseconds, at most 2^63 - 1 either
-; way, which is about 292 years.
+; way, which is about 292 years. An `Instant` is a reading of the
+; monotonic clock, which never steps backwards: the clock to time work
+; and set deadlines by.
 ;
-; Every value is valid. `Date`, `Time` and `Duration` are sealed word
-; structs (docs/reference.md, "Make a handle other modules can't
-; forge"): only this module makes one, and every function that does
-; checks first, so nothing here meets 30 February or 25 o'clock. A
+; Every value is valid. `Date`, `Time`, `Duration` and `Instant` are
+; sealed word structs (docs/reference.md, "Make a handle other modules
+; can't forge"): only this module makes one, and every function that
+; does checks first, so nothing here meets 30 February or 25 o'clock. A
 ; `NaiveDateTime` is an ordinary struct any module may build, and every
 ; combination of a date and a time is a valid one.
 ;
@@ -92,7 +96,8 @@
 (pub fn (chronoInvalidFormat)
   1205)
 
-;; This target has no realtime clock, or reading it failed.
+;; This target has no realtime clock, or no monotonic one for an
+;; `Instant` or a sleep, or reading it failed.
 (pub :: chronoClockUnavailable Int)
 (pub fn (chronoClockUnavailable)
   1206)
@@ -135,6 +140,12 @@
 ;; Make one with `durationFromSeconds` and its siblings or
 ;; `durationParse`.
 (pub struct Duration word shared
+  (slot : Int))
+
+;; A reading of the monotonic clock, in nanoseconds from an unspecified
+;; start: 0 to 2^63 - 1. Only the difference between two means
+;; anything. Make one with `instantNow` or `instantAdd`.
+(pub struct Instant word shared
   (slot : Int))
 
 ; ------------------------------------------------------------------
@@ -793,6 +804,113 @@
               (concat "the realtime clock failed with errno " (decimal (errCode e)))))
           "datetimeNowUtc")
       ))))
+
+; ------------------------------------------------------------------
+; Instants and sleeping.
+; ------------------------------------------------------------------
+; The message for a target with no monotonic clock, or one that failed.
+(:: monotonicMessage (-> Error String))
+(fn (monotonicMessage e)
+  (if (== (errCode e) 78)
+    "this target has no monotonic clock"
+    (concat "the monotonic clock failed with errno " (decimal (errCode e)))))
+
+; The clock's scratch is counted and released after the read. An
+; `Instant` holds only the reading, so repeated reads keep no buffer.
+(:: chronoMonotonicNanos (Result Int Error))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (chronoMonotonicNanos)
+  (let ((buf (memAlloc 16)))
+    {
+      (__retain buf)
+      (let ((r (sysNowMonotonicNanos buf)))
+        {
+          (__release buf)
+          r
+        })
+    }))
+
+;; The monotonic clock now (`Sys.sysNowMonotonicNanos`). It never steps
+;; backwards, whatever happens to the time of day, so two readings
+;; measure the time between them. A target without one, such as Windows
+;; or bare metal, answers `chronoClockUnavailable`.
+(pub :: instantNow (Result Instant Error))
+;@axiom:effect(io)
+(pub fn (instantNow)
+  (match chronoMonotonicNanos
+    ((Ok ns) (Ok (Instant ns)))
+    ((Err e) (chronoErr chronoClockUnavailable (monotonicMessage e) "instantNow"))))
+
+;; The time from `a` to `b`: negative when `b` is the earlier. Two
+;; instants are each 0 to 2^63 - 1, so this always fits.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: instantUntil (-> Instant Instant Duration))
+(pub fn (instantUntil a b)
+  (Duration (- b.slot a.slot)))
+
+;; The time since `i`, read on the monotonic clock now.
+(pub :: instantElapsed (-> Instant (Result Duration Error)))
+;@axiom:effect(io)
+(pub fn (instantElapsed i)
+  (match instantNow
+    ((Ok now) (Ok (instantUntil i now)))
+    ((Err e) (Err e))))
+
+;; `i` moved by `d`, or `chronoOutOfRange` when the result would be
+;; below 0 or past 2^63 - 1 nanoseconds. A deadline is
+;; `(instantAdd now timeout)`.
+(pub :: instantAdd (-> Instant Duration (Result Instant Error)))
+(pub fn (instantAdd i d)
+  (let ((ns (addNs i.slot d.slot)))
+    (if (|| (== ns nsBad) (< ns 0))
+      (chronoErr chronoOutOfRange "the instant is outside the monotonic clock's range" "instantAdd")
+      (Ok (Instant ns)))))
+
+;; -1, 0 or 1 as `a` is earlier than, the same as, or later than `b`.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: instantCompare (-> Instant Instant Int))
+(pub fn (instantCompare a b)
+  (cmpInt a.slot b.slot))
+
+;; Whether `a` and `b` are the same reading.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: instantEq (-> Instant Instant Bool))
+(pub fn (instantEq a b)
+  (== a.slot b.slot))
+
+;; Block until the monotonic clock reaches `i`: `Ok 0` once it has, and
+;; at once for an instant already past. A wake that comes early sleeps
+;; again, so the sleep never ends short. A target without a monotonic
+;; clock answers `chronoClockUnavailable`.
+(pub :: sleepUntil (-> Instant (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(pub fn (sleepUntil i)
+  (match (sysSleepUntilNanos i.slot)
+    ((Ok z) (Ok 0))
+    ((Err e) (chronoErr chronoClockUnavailable (monotonicMessage e) "sleepUntil"))))
+
+;; Block for at least `d`, measured on the monotonic clock: `Ok 0` once
+;; it has passed. Zero or a negative duration answers at once, and a
+;; duration past the clock's range sleeps until its end. A target
+;; without a monotonic clock answers `chronoClockUnavailable`.
+(pub :: sleepFor (-> Duration (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(pub fn (sleepFor d)
+  (if (<= d.slot 0)
+    (Ok 0)
+    (match instantNow
+      ((Ok now)
+        (sleepUntil
+          (Instant
+            (let ((ns (addNs now.slot d.slot)))
+              (if (== ns nsBad)
+                9223372036854775807
+                ns))))
+      )
+      ((Err e) (Err e)))))
 
 ; ------------------------------------------------------------------
 ; Printing.

@@ -111,6 +111,7 @@ that passes it a bad one. `axiom symbols` marks every trusted function
 | R-C6 | Channels, mutexes and tokens are sealed owners, freed when their last holder lets go and never while a binding uses them; safe code can't forge a spawn handle, a guessed word names no live one, and a rejoined or forged one traps with status 85 | `MM-PAR-8`, `MM-PAR-16` | `tests/stdlib/803-shared-owner.ax`, `tests/diagnostics/1260-spawn-forging-cast.ax`, `scripts/check-handles.sh` |
 | R-C7 | A `parallel` binding can borrow its parent's strings and immutable data, and no binding's count traffic reaches the parent | `MM-PAR-6b` | `tests/stdlib/630-parallel-borrow.ax`, `scripts/check-race.sh` |
 | R-C8 | A pure parallel computation answers the same at every width and in both lowerings | `MM-PAR-14` | `tests/stdlib/620-par-float-order.ax` |
+| R-C9 | A sleep ends no sooner than asked, measured on a monotonic clock that never steps backwards | `MM-PAR-12` | `tests/stdlib/851-instant-sleep.ax`, `scripts/check-task.sh` |
 | R-C10 | A `parallel` form keeps no arena storage once it returns, however many run, in both lowerings | `MM-RGN-7` | `tests/litmus/par-forms.ax`, `scripts/check-parallel.sh` |
 
 `scripts/check-race.sh` runs the threaded programs under

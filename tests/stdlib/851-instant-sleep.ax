@@ -1,0 +1,147 @@
+; The monotonic clock and the sleep (stdlib/Chrono.ax, stdlib/Sys.ax).
+; An `Instant` is a reading of a clock that never steps backwards, and
+; `sleepFor` and `sleepUntil` block until at least that much of it has
+; passed.
+;
+; Each line prints a fact, never a time, so the golden holds on any
+; host: two readings are ordered, a 50 ms sleep took at least 50 ms and
+; less than 50 ms plus a generous 5 s, a sleep until a past instant and
+; a zero or negative sleep answer at once, and the arithmetic refuses
+; an instant outside the clock's range with `chronoOutOfRange` (1203).
+; The raw sleep in `Sys` is held to the same floor.
+; `scripts/check-task.sh` section 12 times the sleep more tightly, in
+; both lowerings.
+(import IO)
+(import Str)
+(import Fmt)
+(import Err)
+(import Sys)
+(import Chrono)
+
+(:: say (-> String String Int))
+;@axiom:effect(io)
+(fn (say what v)
+  {
+    (println (concat what (concat ": " v)))
+    0
+  })
+
+(:: show (-> Bool String))
+(fn (show b)
+  (if b
+    "true"
+    "false"))
+
+(:: ms (-> Int Duration))
+(fn (ms n)
+  (match (durationFromMillis n)
+    ((Ok d) d)
+    ((Err e) durationZero)))
+
+; The clock now, or `fallback` when it failed.
+(:: nowOr (-> Instant Instant))
+;@axiom:effect(io)
+(fn (nowOr fallback)
+  (match instantNow
+    ((Ok t) t)
+    ((Err e) fallback)))
+
+; The time since `i` in nanoseconds, or -1 when the clock failed.
+(:: since (-> Instant Int))
+;@axiom:effect(io)
+(fn (since i)
+  (match (instantElapsed i)
+    ((Ok d) (durationNanos d))
+    ((Err e) -1)))
+
+; Whether a nanosecond count is at least `lo` ms and under `lo` ms plus
+; five seconds.
+(:: within (-> Int Int Bool))
+(fn (within ns lo)
+  (&& (>= ns (* lo 1000000)) (< ns (+ (* lo 1000000) 5000000000))))
+
+; A sleep's answer: "slept" for `Ok 0`, or the error's code.
+(:: slept (-> (Result Int Error) String))
+(fn (slept r)
+  (match r
+    ((Ok z) (concat "Ok " (fmtInt z)))
+    ((Err e) (concat "Err " (fmtInt (errCode e))))))
+
+; An instant's answer: "Ok", or the error's code.
+(:: made (-> (Result Instant Error) String))
+(fn (made r)
+  (match r
+    ((Ok i) "Ok")
+    ((Err e) (concat "Err " (fmtInt (errCode e))))))
+
+(:: run (-> Instant Int))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (run a)
+  (let ((b (nowOr a)))
+    {
+      (say "two readings are ordered" (show (>= (instantCompare b a) 0)))
+      (say "until is the negated until the other way" (show (== (durationNanos (instantUntil a b)) (- 0 (durationNanos (instantUntil b a))))))
+      (say "an instant equals itself" (show (instantEq a a)))
+      (let ((t0 (nowOr a)))
+        (let ((r (sleepFor (ms 50))))
+          {
+            (say "sleepFor 50 ms" (slept r))
+            (say "and it took 50 ms to 5 s" (show (within (since t0) 50)))
+          }))
+      (let ((t1 (nowOr a)))
+        (match (instantAdd t1 (ms 50))
+          ((Ok deadline)
+            (let ((r (sleepUntil deadline)))
+              {
+                (say "sleepUntil 50 ms ahead" (slept r))
+                (say "and the clock then read past the deadline" (show (>= (instantCompare (nowOr t1) deadline) 0)))
+              })
+          )
+          ((Err e) (say "instantAdd 50 ms" (fmtInt (errCode e))))))
+      (let ((t2 (nowOr a)))
+        (let ((r (sleepUntil a)))
+          {
+            (say "sleepUntil a past instant" (slept r))
+            (say "and it answered at once" (show (< (since t2) 1000000000)))
+          }))
+      (let ((t3 (nowOr a)))
+        {
+          (say "sleepFor zero" (slept (sleepFor durationZero)))
+          (say "sleepFor -20 ms" (slept (sleepFor (ms -20))))
+          (say "and neither slept" (show (< (since t3) 1000000000)))
+        })
+      (let ((far 
+        (match (durationFromNanos 9223372036854775807)
+          ((Ok d) d)
+          ((Err e) durationZero))))
+        {
+          (say "an instant past the clock's end" (made (instantAdd a far)))
+          (say "an instant before the clock's start" (made (instantAdd a (durationNeg far))))
+        })
+      (let ((t4 (nowOr a)))
+        (let ((r (sysSleepNanos 20000000)))
+          {
+            (say "sysSleepNanos 20 ms" (slept r))
+            (say "and it took 20 ms to 5 s" (show (within (since t4) 20)))
+          }))
+      0
+    }))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (main)
+  (match instantNow
+    ((Ok a)
+      {
+        (say "this target has a monotonic clock" (show sysHasMonotonic))
+        (run a)
+      }
+    )
+    ((Err e)
+      {
+        (say "instantNow" (fmtInt (errCode e)))
+        1
+      }
+    )))
