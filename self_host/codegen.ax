@@ -21682,6 +21682,7 @@
 ; came from, at the end of the module, where no function's body
 ; carries a file's name.
 (pub :: emitAsmFiles (-> Int Int))
+;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (emitAsmFiles cg)
   (let (
@@ -21691,11 +21692,49 @@
     {
       (while (< i (vecLen files))
         {
-          (emitLine cg (concat (concat (concat "; axiom-asm-file " (fmtInt i)) " \"") (concat (asmQuoteName (vecGetStr files i)) "\"")))
+          (emitLine cg (concat (concat (concat "; axiom-asm-file " (fmtInt i)) " \"") (concat (asmQuoteName (asmFileRecorded (vecGetStr files i))) "\"")))
           (set i (+ i 1))
         })
       cg
     }))
+
+; A file as its `; axiom-asm-file` line records it. A library file is
+; written from the library's root, `<stdlib>/Sys.ax`, so the emission
+; is the same wherever the library sits: the seed is regenerated in
+; another directory and compared byte for byte. The driver resolves it
+; back (`asmFileResolve`). Any other file is written as it was read.
+(pub :: asmFileRecorded (-> String String))
+;@axiom:effect(io)
+(pub fn (asmFileRecorded file)
+  (asmStdlibRel file stdlibSearchDirs 0))
+
+(pub :: asmStdlibRel (-> String (Vec Int) Int String))
+(pub fn (asmStdlibRel file dirs i)
+  (if (>= i (vecLen dirs))
+    file
+    (let ((d (vecGetStr dirs i)))
+      (if (&& (> (strLen d) 0) (strStartsWith file d))
+        (concat "<stdlib>/" (strSlice file (strLen d) (- (strLen file) (strLen d))))
+        (asmStdlibRel file dirs (+ i 1))))))
+
+; The file a recorded name stands for: `<stdlib>/Sys.ax` in the first
+; library root that holds it, and any other name as it is.
+(pub :: asmFileResolve (-> String String))
+;@axiom:effect(io)
+(pub fn (asmFileResolve name)
+  (if (strStartsWith name "<stdlib>/")
+    (asmStdlibFind (strSlice name 9 (- (strLen name) 9)) stdlibSearchDirs 0)
+    name))
+
+(pub :: asmStdlibFind (-> String (Vec Int) Int String))
+;@axiom:effect(io)
+(pub fn (asmStdlibFind rel dirs i)
+  (if (>= i (vecLen dirs))
+    (concat "<stdlib>/" rel)
+    (let ((p (concat (vecGetStr dirs i) rel)))
+      (if (fileExists p)
+        p
+        (asmStdlibFind rel dirs (+ i 1))))))
 
 ; The `!srcloc` node and the site comment for an arm whose LINES are
 ; known: one cookie per line, the first taken from pair slot 20 and
