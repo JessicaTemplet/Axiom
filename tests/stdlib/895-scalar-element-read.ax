@@ -1,0 +1,115 @@
+; A word read out of a `(Vec Int)` is a number, so the vector it came
+; from is still released at the end of its scope (MM-LIFE-2m). Each
+; line must read `true`.
+;
+;   1  the element is the `let`'s value: a loop of them holds no memory
+;   2  the element, read through a helper answering `Int`, is set into
+;      a `mut` slot: a loop of them holds no memory
+;   3  the same helper's answer is the `let`'s value: no memory held
+;   4  a `(Vec String)`'s element is still the vector's: answered past
+;      the vector's scope, it reads correctly after the allocator is
+;      churned
+;
+; Lines 1 to 3 held the whole vector each time before the escape walk
+; read the element at its type: `taskLoop`'s state vector leaked 160
+; bytes a pool that way. Line 4 is the other side, where releasing the
+; vector would free the element under its reader.
+(import IO)
+(import Vec)
+(import Str)
+(import Fmt)
+(import Mem)
+
+(:: churn Int)
+(fn (churn)
+  (let ((mut i 0) (mut acc 0))
+    {
+      (while (< i 20000)
+        {
+          (let ((s (concat "zz-" (fmtInt i))))
+            (set acc (+ acc (strLen s))))
+          (set i (+ i 1))
+        })
+      acc
+    }))
+
+(:: ints (-> Int (Vec Int)))
+(fn (ints n)
+  (let ((v (vecWithCapacity n)))
+    {
+      (for i in 0..n
+        (vecPush v (* i 3)))
+      v
+    }))
+
+(:: slot (-> (Vec Int) Int Int))
+(fn (slot v k)
+  (vecGet v k))
+
+(:: direct (-> Int Int))
+(fn (direct k)
+  (let ((v (ints 12)))
+    (vecGet v k)))
+
+(:: viaMut (-> Int Int))
+(fn (viaMut k)
+  (let ((v (ints 12)) (mut x 0))
+    {
+      (set x (slot v k))
+      x
+    }))
+
+(:: viaHelper (-> Int Int))
+(fn (viaHelper k)
+  (let ((v (ints 12)))
+    (slot v k)))
+
+(:: firstStr (-> Int String))
+(fn (firstStr k)
+  (let ((v vecNew))
+    {
+      (vecPush v (concat "element-" (fmtInt k)))
+      (vecGet v 0)
+    }))
+
+(:: held Int)
+(fn (held)
+  (let ((s memStats))
+    s.heldBytes))
+
+; `f` 2,000 times to warm the free lists, then 2,000 more: true when
+; the second run held no bytes and every answer was `want`.
+(:: flat (-> (-> Int Int) Int Bool))
+(fn (flat f want)
+  (let ((mut i 0) (mut bad 0))
+    {
+      (while (< i 2000)
+        {
+          (if (!= (f 4) want) (set bad (+ bad 1)))
+          (set i (+ i 1))
+        })
+      (let ((a held))
+        {
+          (set i 0)
+          (while (< i 2000)
+            {
+              (if (!= (f 4) want) (set bad (+ bad 1)))
+              (set i (+ i 1))
+            })
+          (&& (== (- held a) 0) (== bad 0))
+        })
+    }))
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println (if (flat direct 12) "true" "false"))
+    (println (if (flat viaMut 12) "true" "false"))
+    (println (if (flat viaHelper 12) "true" "false"))
+    (let ((s (firstStr 4242)))
+      {
+        churn
+        (println (if (strEq s "element-4242") "true" "false"))
+      })
+  })

@@ -48,7 +48,7 @@ integrator would still need.
 | A `mut` slot owns what it holds, and releases what `set` overwrites | Done | `MM-MUT-1`, `tests/stdlib/708-mut-slot-reassign.ax` |
 | A heap value returned where the signature says `Int` is refused | Done | `MM-VAL-24`, `tests/diagnostics/1240-record-through-int.ax` |
 | Identity and hashing of a heap value use the typed `Addr`, not a cast | Done | `tests/stdlib/810-addr-identity.ax` |
-| A container owns its elements: a `Vec` is released at scope end, and ownership follows the element type, not the constructor | Done | `MM-LIFE-2m`, `tests/stdlib/770-vec-files.ax` |
+| A container owns its elements: a `Vec` is released at scope end, and ownership follows the element type, not the constructor | Done | `MM-LIFE-2m`, `tests/stdlib/770-vec-files.ax`, `tests/stdlib/895-scalar-element-read.ax` |
 | An element passed beside its container to a function that overwrites its slot keeps a share, as one bound by a `let` does | Done | `MM-LIFE-2m`, `tests/stdlib/778-vec-lent-argument.ax` |
 | A field passed beside its struct, or a result typed by a type variable, keeps a share for the call | Done | `MM-LIFE-2m`, `tests/stdlib/893-vecget-temporary.ax`, `tests/stdlib/894-field-beside-struct.ax` |
 | An element taken out with `vecPop` is released: a trusted function declares `result(owned)` and the caller hands the share back | Done | `MM-LIFE-2n`, `tests/stdlib/846-vec-pop-release.ax` |

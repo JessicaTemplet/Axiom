@@ -3694,6 +3694,14 @@ other shape: when the vector is a temporary the caller owns, the
 element takes a share of its own at the call and the vector is
 released, so neither leaks (`tests/stdlib/893-vecget-temporary.ax`).
 
+At a machine-scalar type the answer aliases nothing. A `(Vec Int)`
+holds its words without a share, so its release frees nothing they
+point to, just as a scalar field's read is a number. The compiler
+drops the owner word of a parameter declared a reference from the
+callee's ret mask at such a call. So a `(Vec Int)` is released at the
+end of its scope however its elements are read
+(`tests/stdlib/895-scalar-element-read.ax`).
+
 These cases don't leak:
 
 - A closure record carries a reference map for the captures it
@@ -4830,7 +4838,9 @@ reference. A `let`, an owning `mut` slot, a struct field, a closure
 capture and a self-tail-call parameter each count a vector as they
 count a string (`MM-LIFE-2c`). The flow analysis knows a `Vec`'s
 header: words 0, 1 and 3 are numbers, and word 2 is the data block, so
-an element read out of a vector keeps that vector alive.
+an element read out of a vector keeps that vector alive. An element of
+a machine-scalar type is a number and keeps nothing alive, so a
+`(Vec Int)` read in value position is still released.
 
 A `let` bound to an element a call lends, such as `(vecGet v i)` at a
 counted type, takes a share of its own when it doesn't escape, as a

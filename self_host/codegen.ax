@@ -1950,6 +1950,50 @@
       0
       (memGetWord e 8))))
 
+; The RET mask of `name` as the call `e` reads it. A type-variable
+; result at a machine-scalar instantiation (`tyvarResultScalar`) is a
+; number when the callee read it out of a parameter declared a
+; reference - the owner half, a `(Vec Int)`'s element. The container
+; holds a scalar without a share, so its release frees nothing the
+; word points to, just as a scalar field's read is a number
+; (`fieldReadIsScalar`). Those owner bits go; the arrival and word
+; halves stay, because there the answer IS the argument or a word of
+; it, whatever its type. Without this, an `Int` read out of a
+; `(Vec Int)` kept the vector alive: `taskLoop`'s state vector, 160
+; bytes a pool.
+(pub :: callRetMask (-> Int Int String Int))
+(pub fn (callRetMask cg e name)
+  (let ((m (fnRetMask cg name)))
+    (if (== (ownerPart m) 0)
+      m
+      (if (== (tyvarResultScalar cg e) 1)
+        (& m (^ (refParamOwnerBits cg name) (- 0 1)))
+        m))))
+
+; The owner bit of every parameter of `name` declared a reference
+; (`fldClass` 2). Parameters from 19 on share one bit, so they are
+; left out: a shared bit is dropped only when all of its parameters
+; could be, which this does not ask.
+(pub :: refParamOwnerBits (-> Int String Int))
+(pub fn (refParamOwnerBits cg name)
+  (let ((e (findFSigCg cg (mangledForCg cg name))))
+    (if (== e 0)
+      0
+      (let (
+        (n (fnArityCg cg name))
+        (mut i 0)
+        (mut m 0)
+      )
+        {
+          (while (&& (< i n) (< i 19))
+            {
+              (if (== (fldClass cg (arrowParamTy (memGetWord e 3) i)) 2)
+                (set m (| m (ownerBit i))))
+              (set i (+ i 1))
+            })
+          m
+        }))))
+
 ; The parameters this function CONSUMES - releases a share of, so the
 ; caller must not hand it back. `mapFree`'s `(__release (cast Int m))`
 ; is the shape: the body's release ends the caller's share exactly as
@@ -2206,7 +2250,7 @@
                               n_
                               params
                               env
-                              (fnRetMask cg n)
+                              (callRetMask cg e n)
                               0))
                           (if (!= (lookupType (memGetWordVec cg 3) n) 0)
                             ; a construction is a fresh block
@@ -25336,6 +25380,34 @@
                         cls
                         0))))))))))))
 
+; Is this a call whose declared result is a type variable, at an
+; instantiation the checker's stamp, read through its pins, makes a
+; machine scalar (`fldClass` 0)? `(vecGet v i)` over a `(Vec Int)` is
+; one: what it answers is a number. A call with no stamp of this
+; function's, or one whose type is not yet known, answers 0.
+(pub :: tyvarResultScalar (-> Int Int Int))
+(pub fn (tyvarResultScalar cg valExpr)
+  (if (!= (nodeTag valExpr) TAG_E_APP)
+    0
+    (let ((hd (spineHead valExpr)))
+      (if (!= (nodeTag hd) TAG_E_VAR)
+        0
+        (let ((n (nodeAName hd)))
+          (if (|| (isCastName n) (|| (isPrimName n) (isLocalValue cg n)))
+            0
+            (let ((e (findFSigCg cg (mangledForCg cg n))))
+              (if (|| (== e 0) (!= (spineArity valExpr) (fnArityCg cg n)))
+                0
+                (let ((res (fnDeclaredResultTy (memGetWord e 3) (fnArityCg cg n))))
+                  (if (|| (== res 0) (!= (nodeTag res) TAG_T_VAR))
+                    0
+                    (let ((st (nodeBinderTy valExpr)))
+                      (if (if (== st 0) true (|| (!= (nodeTag st) TAG_EVSTAMP) (!= (nodeC st) (memGetWord cg 36))))
+                        0
+                        (if (== (fldClass cg (pinnedTy (nodeA st) 64)) 0)
+                          1
+                          0)))))))))))))
+
 ; The class a pinned type answers for `letBorrowClass`: 1 for a counted
 ; type, `2+k` for this function's own type variable k (bit k of its
 ; evidence word), and 0 for anything else, a lambda's body included.
@@ -25985,7 +26057,9 @@
                   ; aliases, and a word the callee answers of a parameter
                   ; it cast aliases the typed argument just the same:
                   ; `(fn (asWord s) (cast Int s))` handed back a pointer
-                  ; into a `let` this walk then released. The CONSUME
+                  ; into a `let` this walk then released. It is read at
+                  ; this call's instantiation (`callRetMask`): an `Int`
+                  ; read out of a `(Vec Int)` is a number. The CONSUME
                   ; mask rides beside the stash mask: an argument the
                   ; callee ends is gone, so it escapes whatever the
                   ; position, and the scope-end release stays off it.
@@ -25997,7 +26071,7 @@
                     (|
                       (| (fnCallStashMask cg n (callFlowArgs e)) (fnConsumeMask cg n))
                       (if (&& (== vp 1) (!= (fnResultClass cg n) 2))
-                        (bothForms (fnRetMask cg n))
+                        (bothForms (callRetMask cg e n))
                         0))
                     0)
                   (let ((entry (lookupType (memGetWordVec cg 3) n)))

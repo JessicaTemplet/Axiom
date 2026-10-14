@@ -28,6 +28,14 @@ its changelog too.
   `compat/BREAKING` records both. Tested by
   `tests/stdlib/623-rpc-empty-frame.ax`.
 
+- A word read out of a `(Vec Int)` is a number, so the vector is
+  released at the end of its scope however its elements are read. An
+  element answered as a function's value, set into a `mut` slot, or
+  read through a helper that answers `Int` kept the whole vector alive.
+  A task pool's state vector leaked that way, 160 bytes a pool, once
+  `vecFree` left the library. Tested by
+  `tests/stdlib/895-scalar-element-read.ax` and `scripts/check-task.sh`.
+
 - A program's `main` is declared `(:: main ())`: it runs for what it
   does and the program exits 0. The tests, examples, docs, website
   samples, `explain` pages, the VS Code snippet, the REPL and
