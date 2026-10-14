@@ -50,6 +50,8 @@ Four things are required of every claim:
      `main`. Spans containing a backslash are exempt, and only those: an
      invalid escape sequence (AX1005) is a fragment of a string literal
      by construction, which is the whole reason it is being reported.
+     The letter of an escape such as `\n` ends a token too: an `asm`
+     template line starts straight after one (AX3091, AX3117).
 
 And one corroboration, counted rather than required per claim: where the
 message names something in backticks and the source slice spells exactly
@@ -324,6 +326,17 @@ def is_ident_ch(ch):
     return bool(ch) and (ch.isalnum() or ch == '_' or ch == "'")
 
 
+def after_escape(line, k):
+    """Is `line[k]` the letter of a backslash escape inside a string
+    literal, as the `n` of `\\n` is? Then the character after it starts
+    a token, as a template line in an `asm` form does. The backslash
+    must itself be unescaped: an odd run of them ends at `k - 1`."""
+    run = 0
+    while k - 1 - run >= 0 and line[k - 1 - run] == '\\':
+        run += 1
+    return run % 2 == 1
+
+
 class Fixtures(object):
     """`010-duplicate-fn.ax` -> the lines of whichever file really holds it."""
 
@@ -516,7 +529,8 @@ def main(argv):
                         why = None
                         if slice_ != slice_.strip():
                             why = 'begins or ends on whitespace'
-                        elif is_ident_ch(slice_[0]) and c1 >= 2 and is_ident_ch(line[c1 - 2]):
+                        elif is_ident_ch(slice_[0]) and c1 >= 2 and is_ident_ch(line[c1 - 2]) \
+                                and not after_escape(line, c1 - 2):
                             why = 'begins in the middle of an identifier'
                         elif is_ident_ch(slice_[-1]) and c2 - 1 < len(line) \
                                 and is_ident_ch(line[c2 - 1]):

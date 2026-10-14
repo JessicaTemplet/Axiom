@@ -1,0 +1,64 @@
+; Template lines llc rejects, each reported as AX3117 at the line that
+; asked for it, never as AX4003 with llc's own text and no position
+; (docs/memory-model.md MM-FFI-9). `check` accepts this file: only the
+; build assembles a template. `scripts/check-embedded.sh` A15 builds it
+; for the host and finds each refusal at the line its marker word names.
+;
+;   `mnemonic`   line 2 is an instruction no assembler knows
+;   `operand`    line 2 gives its instruction an operand it can't take
+;   `registers`  every register is clobbered, so the input has none
+(import IO)
+
+(:: mnemonic (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (mnemonic x)
+  (asm
+    (aarch64 "add {r}, {a}, #1\nfrobnicate {r}, {a}" (out r) (in a x))
+    (x86_64 "leaq 1({a}), {r}\nfrobnicate {a}, {r}" (out r) (in a x))))
+
+(:: operand (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (operand x)
+  (asm
+    (aarch64 "mov {r}, {a}\nadd {r}, {r}, #99999" (out r) (in a x))
+    (x86_64 "movq {a}, {r}\nmovq ({r}), ({a})" (out r) (in a x))))
+
+(:: registers (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (registers x)
+  (asm
+    (aarch64
+      "mov {r}, {a}"
+      (out r "x0")
+      (in a x)
+      (clobber
+        "x19"
+        "x20"
+        "x21"
+        "x22"
+        "x23"
+        "x24"
+        "x25"
+        "x26"
+        "x27"
+        "x28")
+      (clobber_abi "C"))
+    (x86_64
+      "movq {a}, {r}"
+      (out r "rax")
+      (in a x)
+      (clobber
+        "rbx"
+        "r12"
+        "r13"
+        "r14"
+        "r15")
+      (clobber_abi "C"))))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println (fmtInt (+ (mnemonic 1) (+ (operand 2) (registers 3)))))
+    0
+  })

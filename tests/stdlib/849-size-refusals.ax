@@ -1,0 +1,78 @@
+; Three library calls that took a size or a callback they could not
+; honour, and each now stops with a defined status instead:
+;
+;   * `(strAlloc -1)` asked the allocator for zero bytes and answered a
+;     String of length -1, which `concat` then read out of bounds;
+;     now it stops with 77, the status of a bad index;
+;   * `(mapWithCapacity 2305843009213693953)` doubled its capacity past
+;     2^63 to zero and never returned; now the allocator refuses the
+;     size with 70;
+;   * `vecSortBy` with a comparator that grew the vector swapped words
+;     in a block the vector had already given back; now the sort checks
+;     the vector after every comparison and stops with 77.
+;
+; Each runs inside a recovery point, so one program reports all three,
+; and an ordinary sort runs before and after them as the control.
+(import IO)
+(import Str)
+(import Map)
+(import Vec)
+(import Fmt)
+
+(:: negLen (-> Int Int))
+(fn (negLen x)
+  (strLen (concat "XYZ" (strAlloc (- 0 1)))))
+
+(:: hugeMap (-> Int Int))
+(fn (hugeMap x)
+  (mapLen (mapWithCapacity 2305843009213693953)))
+
+(:: growing (-> (Vec Int) (-> Int Int Int)))
+(fn (growing v)
+  (lambda (a b)
+    {
+      (if (== (vecLen v) 8)
+        {
+          (vecPush v 0)
+          0
+        }
+        0)
+      (- a b)
+    }))
+
+(:: sortGrow (-> Int Int))
+(fn (sortGrow x)
+  (let ((v (vecPush (vecPush (vecPush (vecPush (vecPush (vecPush (vecPush (vecPush (vecWithCapacity 8) 8) 7) 6) 5) 4) 3) 2) 1)))
+    {
+      (vecSortBy v (growing v))
+      (vecLen v)
+    }))
+
+(:: sorted (-> Int String))
+(fn (sorted x)
+  (let ((v (vecPush (vecPush (vecPush (vecPush vecNew 3) 1) 4) 2)))
+    {
+      (vecSortBy v (lambda (a b) (- a b)))
+      (let (
+        (a (vecGet v 0))
+        (b (vecGet v 1))
+        (c (vecGet v 2))
+        (d (vecGet v 3))
+      )
+        (concat (concat (concat (fmtInt a) (fmtInt b)) (fmtInt c)) (fmtInt d)))
+    }))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println (sorted 0))
+    (let ((s (__axiom_recover __axiom_arena_mark (lambda (x) (negLen x)))))
+      (println "strAlloc -1: {s}"))
+    (let ((s (__axiom_recover __axiom_arena_mark (lambda (x) (hugeMap x)))))
+      (println "mapWithCapacity 2^61+1: {s}"))
+    (let ((s (__axiom_recover __axiom_arena_mark (lambda (x) (sortGrow x)))))
+      (println "a comparator that grows the vector: {s}"))
+    (println (sorted 0))
+    0
+  })

@@ -101,6 +101,14 @@ under whenever it takes a lock, and drops the cache when they differ.
 `pagerBumpSchemaVersion` raises the schema version; the AXQL layer
 does it for every change to the schema.
 
+The schema table, rooted at page 1, holds one record per table or
+index: its kind (`'table'` or `'index'`), its name, the table it
+belongs to, its root page, and the `CREATE` statement that made it, as
+AXQL text. That text is the one description of a table's columns, so a
+table whose columns use `LINK`, `DEFAULT` or `CHECK` can be read only by
+a library whose AXQL parses them. The bytes of the format are the same
+either way, and its version stays 1.
+
 ## B-tree nodes
 
 Tables and indices use one B+tree. A node is a slotted page: a header,
@@ -273,7 +281,10 @@ A write transaction runs these steps:
    transaction cuts the journal to nothing and writes a new header.
    Pages added by the transaction aren't journalled.
 3. When the page cache must evict a changed page before the commit,
-   sync the journal, then write the page to the file.
+   sync the journal, then write that page and every other changed page
+   the current operation isn't using to the file. They stay cached,
+   and one written early is written again at the commit only if it
+   changes again.
 4. To commit: write the new header into page 0, sync the journal,
    write every changed page, truncate the file if it shrank, and sync
    the file.

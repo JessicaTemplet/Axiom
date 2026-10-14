@@ -52,7 +52,7 @@
 (pub fn (lexKind w)
   (if (lexIn w "fn lambda let set if match while for data struct type subtype effect handle region parallel macro emacro import pub extern syntax/for alloc begin cond consume define union foreign trait impl")
     "keyword"
-    (if (lexIn w "mut in by is range :: -> .. _ cast sizeof alignof asm syntax/join syntax/binders syntax/constructors syntax/arity syntax/fields decl")
+    (if (lexIn w "mut in by is range :: -> .. ? _ cast sizeof alignof asm syntax/join syntax/binders syntax/constructors syntax/arity syntax/fields decl")
       "form"
       (if (lexIn w "Int Float Bool Char String Foreign Handle Vec Option Result Addr ()")
         "type"
@@ -80,7 +80,7 @@
         (if (strEq w "set")
           "(set slot value)"
           (if (strEq w "if")
-            "(if test then else)\n(if t1 b1 t2 b2 ... else)"
+            "(if test then else)\n(if test then)\n(if t1 b1 t2 b2 ... else)"
             (if (strEq w "match")
               "(match value (pattern body) ... (_ body))"
               (if (strEq w "while")
@@ -153,7 +153,9 @@
               "(:: name Type)"
               (if (strEq w "->")
                 "(-> Arg ... Result)"
-                (if (strEq w "..")
+                (if (strEq w "?")
+                  "(f x)?"
+            (if (strEq w "..")
                   "lo..hi"
                   (if (strEq w "_")
                     "(match v (_ body))\n(f _ 2)"
@@ -164,7 +166,7 @@
                         (if (strEq w "alignof")
                           "(alignof Type)"
                           (if (strEq w "asm")
-                            "(asm \"template\" (out ...) (in ...))"
+                            "(asm (ARCH \"template\" operand...) ...)"
                             (if (strEq w "syntax/join")
                               "(syntax/join prefix Name)"
                               (if (strEq w "syntax/binders")
@@ -177,7 +179,7 @@
                                       "(syntax/fields Struct)"
                                       (if (strEq w "decl")
                                         "(decl declaration ...)"
-                                        (lexFormType w)))))))))))))))))))))
+                                        (lexFormType w))))))))))))))))))))))
 
 (:: lexFormType (-> String String))
 (fn (lexFormType w)
@@ -204,7 +206,7 @@
                       (if (strEq w "Addr")
                         "Addr"
                         (if (strEq w "()")
-                          "()"
+                          "()\n(:: log (-> String ()))"
                           (lexFormEffect w))))))))))))))
 
 (:: lexFormEffect (-> String String))
@@ -255,7 +257,7 @@
         (if (strEq w "set")
           "Overwrites a `mut` slot. The slot owns what it holds, so the previous value is released (`MM-MUT-1`). Writing to a binding that is not `mut` is `AX3012`."
           (if (strEq w "if")
-            "Branches on a `Bool`. Both branches must have the same type. With more than three operands it is a chain: `(if t1 b1 t2 b2 else)` is `(if t1 b1 (if t2 b2 else))`. Use braces for a branch of several expressions."
+            "Branches on a `Bool`. Both branches must have the same type, unless one is `()`: then the `if` answers `()` and the other branch's value is dropped. Leave out the else and the `if` supplies `()`, so `(if done (println \"ok\"))` needs no filler. With more operands it is a chain: `(if t1 b1 t2 b2 else)` is `(if t1 b1 (if t2 b2 else))`. Use braces for a branch of several expressions."
             (if (strEq w "match")
               "Compares a value against patterns in order and runs the first body that fits. A pattern is a constructor with binders, a literal, a name or `_`. A `match` that misses a constructor is `AX3005`; a bare capitalised name such as `None` binds a variable rather than testing a tag, so write `(None)`."
               (if (strEq w "while")
@@ -328,6 +330,8 @@
               "A type signature. At the top level it declares the type of the function or constant below it, `(:: bump (-> Int Int))`. Inside an `effect`, it types an operation. Two signatures for one name are refused with `AX3006`."
               (if (strEq w "->")
                 "A function type: the argument types, then the result. `(-> Int String)` takes an `Int` and answers a `String`; `(-> a a)` answers the type it takes."
+                (if (strEq w "?")
+                  "Propagates an error. `(f x)?` answers the `Ok` payload of the `Result` `(f x)`; when it is an `Err`, the enclosing function or lambda answers that `Err` instead, and nothing after the `?` runs. Axiom has no early return, so the compiler makes the rest of the body the `Ok` arm of a `match`: a `?` belongs in the body's tail or in an argument on the way there, and one inside a branch, a `let` body or a loop whose value something still uses is `AX3123`. The error passes through unchanged; change it first with `mapErr`."
                 (if (strEq w "..")
                   "A range, `lo` included and `hi` excluded in `for`, both included in a `subtype`'s `range`."
                   (if (strEq w "_")
@@ -339,7 +343,7 @@
                         (if (strEq w "alignof")
                           "The alignment in bytes of a type's representation. Takes exactly one type (`AX3069`)."
                           (if (strEq w "asm")
-                            "Inline assembly: a template, its outputs and its inputs. A form the compiler cannot lower is `AX3091`, and an assembler error is reported at the form. See the reference's inline assembly section for the operand syntax."
+                            "Inline assembly: one arm per architecture, each a template and its operands. A form the compiler cannot lower is `AX3091`, and a template line the assembler rejects is `AX3117`, reported at that line when the program is built. See the reference's inline assembly section for the operands and options."
                             (if (strEq w "syntax/join")
                               "Inside a macro template, builds a name from parts: `(syntax/join eq T)` with `T` bound to `Colour` is `eqColour`."
                               (if (strEq w "syntax/binders")
@@ -352,7 +356,7 @@
                                       "Inside a macro template, the fields of a `struct`, each as a name and a type."
                                       (if (strEq w "decl")
                                         "Inside a declaration macro, splices the declarations it holds into the module."
-                                        (lexDocType w)))))))))))))))))))))
+                                        (lexDocType w))))))))))))))))))))))
 
 (:: lexDocType (-> String String))
 (fn (lexDocType w)
@@ -379,7 +383,7 @@
                       (if (strEq w "Addr")
                         "The identity of a heap value, from `addrOf`, for comparing values by identity and hashing them without a cast."
                         (if (strEq w "()")
-                          "The empty tuple type. It has no expression value; a function that answers nothing useful answers `Int` 0 instead."
+                          "The unit type, and its one value. A function declared to answer `()` drops its body's value, an `if` without an else answers `()`, and a `()` branch or `match` arm makes the whole form answer `()`. Using a `()` where a value is wanted is a type error, so a dropped value can't be read by mistake."
                           (lexDocEffect w))))))))))))))
 
 (:: lexDocEffect (-> String String))
@@ -449,6 +453,8 @@
 
 (:: lexAnchorSlug (-> String String))
 (fn (lexAnchorSlug w)
+  (if (strEq w "?")
+    "propagate-an-error-with-"
   (if (lexIn w "fn :: ->")
     "functions"
     (if (strEq w "lambda")
@@ -503,7 +509,7 @@
                                                       "operators"
                                                       (if (lexIn w "true false")
                                                         "literals"
-                                                        ""))))))))))))))))))))))))))))
+                                                        "")))))))))))))))))))))))))))))
 
 ; ------------------------------------------------------------------
 ; AXTAG keys and values
@@ -537,7 +543,9 @@
                         "Names the effects a raw syscall number performs, so every function that names the number owes them. The value is a comma list of effect names."
                         (if (strEq k "precondition")
                           "Removed: contracts are `pre` and `post` (`AX3095`)."
-                          "")))))))))))))
+                          (if (strEq k "result")
+                            "`result(owned)` says the function's type-variable result carries a share the caller owns, so the caller releases it at scope end, after a call or when it is discarded, as `vecPop`'s is. Accepted only beside `effect(unsafe)`, since the checker cannot see a share transferred through a raw load (`AX3116`)."
+                            ""))))))))))))))
 
 ;; What a value of an AXTAG key means, or "" when the pair is not one
 ;; the lexicon knows.
@@ -567,6 +575,10 @@
           (if (strEq v "trap")
             "An operation of this effect that reaches `main` unhandled stops the program, by design."
             "")
+          (if (strEq k "result")
+            (if (strEq v "owned")
+              "The caller owns the result's share and hands it back; the one value this key takes."
+              "")
           (if (strEq k "nolint")
             (if (strEq v "lint-dead-branch")
               "The hint that an `if` test is constant, so one branch never runs."
@@ -583,7 +595,7 @@
                         (if (nolintIsCode v)
                           "This warning code, where the checker draws it on this declaration. An error code quiets nothing."
                           "")))))))
-            ""))))))
+            "")))))))
 
 (:: lexRestrictionDoc (-> String String))
 (fn (lexRestrictionDoc v)
@@ -665,6 +677,7 @@
       (vecPush v "::")
       (vecPush v "->")
       (vecPush v "..")
+      (vecPush v "?")
       (vecPush v "_")
       (vecPush v "cast")
       (vecPush v "sizeof")
@@ -741,6 +754,7 @@
       (vecPush v "unhandled")
       (vecPush v "syscall")
       (vecPush v "nolint")
+      (vecPush v "result")
       (vecPush v "precondition")
       v
     }))

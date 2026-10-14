@@ -355,7 +355,9 @@ failed syscall are different facts, and the type keeps them apart.
 **ERR-TYPE-5 (H). Error payload fields MUST declare their real types.**
 Not `Int`. A `String` stored through a field declared `Int` is
 invisible to reclamation and leaks, so this is a memory-safety
-obligation as much as a type-design one (`ERR-MEM-1`).
+obligation as much as a type-design one (`ERR-MEM-1`). A reference
+cast into such a field, where the checker can see the operand, is
+refused with `AX3043`.
 
 ---
 
@@ -1142,7 +1144,7 @@ This section records the codes below. All of them are built, and
 | `AX3040` `result-only-tyvar` | a type variable the caller chooses and the callee produces | The slug names the shape it was built for and stays as the machine key. The rule also covers a function-typed parameter's own variable. |
 | `AX3041` `extern-library-name` | an `extern` block's library name that isn't one | Reported by the parser. |
 | `AX3042` `undeclared-effect` | a function that performs a required effect (`IO`, `Entropy`, `Spawn` or `Block`) and doesn't declare it | |
-| `AX3043` `error-payload-untyped` | a reference smuggled through a field declared `Int` | A warning. `tests/diagnostics/1008-error-payload-untyped.ax` |
+| `AX3043` `error-payload-untyped` | a reference smuggled through a field declared `Int` | `tests/diagnostics/1008-error-payload-untyped.ax` |
 | `AX3044` `ambiguous-type` | a bare type name declared in more than one imported module | Reported by the namespace pass. |
 | `AX3045` `recursion-in-scrutinee` | a self-recursive call in the scrutinee of a `match` | A warning. `ERR-PROP-4` |
 | `AX3046` `discarded-result` | a `Result`-typed expression in statement position, its value unused | An error. A deliberate discard binds it to `_`. `tests/diagnostics/1006-discarded-result.ax` |
@@ -1165,9 +1167,14 @@ This section records the codes below. All of them are built, and
 | `AX3073` `undeclared-unsafe` | a declaration performs a raw primitive, calls an `extern` or forges a reference or a spawn handle without `;@axiom:effect(unsafe)` | An error. `tests/diagnostics/1004-undeclared-unsafe.ax`, `tests/diagnostics/1040-forging-cast.ax`, `tests/diagnostics/1116-extern-unsafe.ax`, `tests/diagnostics/1260-spawn-forging-cast.ax` |
 | `AX3089` `signature-needed` | a function with no signature, called from inside its own body or from a declaration above it, before its type is known | An error. `tests/diagnostics/1032-signature-needed.ax` |
 | `AX3090` `recover-thunk-unseen` | a recovery point's thunk that isn't a lambda written at the call or a top-level function, so the region check can't walk it | An error. `tests/diagnostics/1033-recover-escape.ax` |
-| `AX3091` `inline-asm` | an `asm` form the compiler can't lower: an unknown architecture or operand kind, a second arm for one architecture, a template naming no operand, a second output, or a register an arm can't name | An error, where the form is written. `tests/diagnostics/1044-inline-asm.ax` |
+| `AX3091` `inline-asm` | an `asm` form the compiler can't lower: an unknown architecture, operand kind or option, a second arm for one architecture, a template naming no operand or defining a named label, a second answered output, a `const` it can't fold, a `sym` with no symbol, or a register an arm can't name | An error, where the form is written. `tests/diagnostics/1044-inline-asm.ax`, `tests/diagnostics/1280-inline-asm-forms.ax` |
 | `AX3095` `precondition-removed` | a `;@axiom:precondition(...)` tag, which the language no longer has | An error wherever the tag stands. `tests/diagnostics/1043-precondition-removed.ax` |
+| `AX3123` `try-position` | a `?` with no tail to propagate to: inside a branch, a `let` body, a loop, a region or a handler whose value an expression around it still uses | `tests/diagnostics/1300-try-position.ax` |
+| `AX3116` `result-claim` | a `result(...)` claim the compiler cannot read: a value other than `owned`, or the claim on a function that is not a trusted encapsulation | `tests/diagnostics/1259-result-claim.ax` |
 | `AX3110` `axtag-never-checked` | an `effect(div)` claim, which names an effect nothing infers | An error, because no body can ever support it. `tests/diagnostics/359-div-not-inferred.ax` |
+| `AX3117` `inline-asm-rejected` | a line of an `asm` template the assembler rejects, or whose operands the register allocator can't place | An error when the program is built, at the template line, with status 1. `tests/embedded/asm-rejected.ax` |
+| `AX3118` `asm-operand-unused` | an `asm` operand the template never names, so no instruction can reach it | An error, at the operand. `tests/diagnostics/1281-asm-operand-unused.ax` |
+| `AX3119` `asm-options` | `asm` options that contradict each other or the arm | An error, at the option. `tests/diagnostics/1282-asm-options.ax` |
 
 Every warning in the table is listed, with its reason, in
 `tests/diagnostics/severity.policy`. The `restrict(...)` codes are
@@ -1294,14 +1301,11 @@ compiler never had a call site, and the lesson recorded in
 
 ## 7. Surface
 
-**ERR-SUGAR-1 (R). There is no `?` postfix operator, and there will not
-be one spelled that way.** `?` isn't an identifier character: `empty?`
-is `AX1001`, and the compiler's own help says so: *"`?`, `~` and `@`
-are not identifier characters at all"*. Admitting it is a language
-change that moves the lexer, `tree-sitter-axiom/` and
-`self_host/format.ax` together. Even that wouldn't be enough. Rust's
-`?` means *return from the enclosing function*, and Axiom has no early
-return, so the operator would have nothing to expand into.
+**ERR-SUGAR-1 (R, superseded by `ERR-SUGAR-4`).** This rule refused a
+`?` postfix operator on two grounds: `?` was not a token, and Axiom has
+no early return for it to expand into. `ERR-SUGAR-4` answers both: `?`
+is its own token, and it expands into the `match` this rule's
+successor already used, with the rest of the body in the `Ok` arm.
 
 **ERR-SUGAR-2 (H). The propagation form is a binding form.**
 `(try x e body)` binds `x` to the success value of `e` and runs
@@ -1358,6 +1362,59 @@ This holds in all three binder positions the expander owns: `let`,
 `lambda` parameters and pattern binders. An argument that isn't a name
 is `AX3035`. `tests/stdlib/371-err-module.ax` term 16 gates `try`, and
 it doesn't compile against an expander without `MAC-HYG-10`.
+
+**ERR-SUGAR-4 (H). `e?` propagates an error.** `e?` answers the `Ok`
+payload of the `Result` `e`. When `e` is an `Err`, the enclosing
+function or lambda answers that `Err` unchanged, and nothing after the
+`?` runs:
+
+```scheme
+(import Err)
+
+(:: halveTwice (-> Int (Result Int Error)))
+(fn (halveTwice n)
+  (let ((a (divChecked n 2)?)
+        (b (divChecked a 2)?))
+    (Ok b)))
+
+(:: main Int)
+(fn (main)
+  (match (halveTwice 40)
+    ((Ok v) v)
+    ((Err e) 1)))
+```
+
+`(halveTwice 40)` answers `(Ok 10)`, so the program exits 10.
+
+Axiom has no early return, so the expander (`self_host/expand.ax`,
+`qmBody`) makes the rest of the body the `Ok` arm of a `match` on `e`,
+the shape `ERR-PROP-3` calls safe:
+
+```scheme fragment
+(Ok (+ (f x)? 1))
+
+; becomes
+(match (f x)
+  ((Err er) (Err er))
+  ((Ok t) (Ok (+ t 1))))
+```
+
+A `?` is rewritten wherever the rest of the body can follow it. That is
+the body's tail: a `let`'s body, a block's last expression, or an `if`
+branch or `match` arm in the tail. It is also anything evaluated on the
+way there: an argument, a `let`'s value, an `if` test, a `match`
+scrutinee or a block statement. Each sibling evaluated before the `?` is bound to a
+fresh `try.N` first, so `(f (g) (h)?)` still runs `(g)` before `(h)`.
+A `?` inside a branch, a `let` body, a loop, a `region` or a `handle`
+whose value an expression around it still uses has no rest of the body
+to move, and is refused with `AX3123`. A lambda is its own body: its
+`?`s answer the lambda.
+
+The operand must be a `Result`. An `Option` converts first with
+`okOr`, and an error that needs another type is changed with `mapErr`
+before the `?`. Tested by `tests/stdlib/847-try-operator.ax`, which
+checks the order of effects in every shape, and
+`tests/diagnostics/1300-try-position.ax`.
 
 **ERR-SUGAR-3 (H). A contextual wrapper is a function, not a form.**
 `(withContext r "reading the manifest")` replaces an `Err`'s `context`
@@ -1477,9 +1534,10 @@ runs the direct read and the routed one and compares their answers.
 | `ERR-REC-8` | **R, superseded** | Range-constrained subtypes were refused as a type (roadmap item 11, D2), then built: `(subtype N is Int range lo..hi)` (`tests/selfhost/134-subtype-checked.ax`, `135-subtype-violated.ax`), with narrowing conversions checked by the contract trap (80). The `;@axiom:pre(...)` vehicle still stands beside it. `reference.md` documents the implemented subtype |
 | `ERR-DIAG-1` | H | `mkDiag` is the only channel |
 | `ERR-DIAG-2`, `3` | P | No proposal is open: the last one, `AX3043`, is built (`1008-error-payload-untyped.ax`). `scripts/check-doc-drift.sh` fails on a proposal whose number is spent |
-| `ERR-SUGAR-1` | R | `?` is `AX1001` |
+| `ERR-SUGAR-1` | **R, superseded** | by `ERR-SUGAR-4` |
 | `ERR-SUGAR-2` | **H, gated** | `try`; `371` term 16, `MAC-HYG-10` |
 | `ERR-SUGAR-3` | **H, gated** | `withContext`; `371` term 2 |
+| `ERR-SUGAR-4` | **H, gated** | `?`; `tests/stdlib/847-try-operator.ax`, `tests/diagnostics/1300-try-position.ax` |
 
 Every rule marked **H** names what holds it. What remains open is
 `ERR-REC-5`, `ERR-DIAG-2` and `ERR-DIAG-3`, whose rows say so, and the

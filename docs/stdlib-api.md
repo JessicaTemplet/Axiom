@@ -50,7 +50,7 @@ Agent.Tags — reading what the compiler already says about a program.
 
 ## `Axqlite`
 
-`stdlib/Axqlite.ax` — 58 public names
+`stdlib/Axqlite.ax` — 66 public names
 
 Axqlite - an embedded, single-file, transactional database.
 
@@ -115,6 +115,14 @@ Axqlite - an embedded, single-file, transactional database.
 | `axqQueryOn` | value | `(-> Connection Query (Result Rows Error))` | `Alloc,IO,Mut` | Run a query and answer all its rows. |
 | `axqQueryEachOn` | value | `(-> Connection Query (-> Row (Result Bool Error)) (Result Int Error))` | `Alloc,IO,Mut` | Run a query, calling `f` with each row as it is produced, as `axqQueryEach` does. |
 | `axqQueryMap` | value | `(-> Connection Query (-> Row (Result a Error)) (Result (Vec a) Error))` | `Alloc,IO,Mut` | Run a query and answer `f` of each row, stopping at the first `Err` from the query or from `f`. |
+| `axqQueryOne` | value | `(-> Connection Query (Result (Option Row) Error))` | `Alloc,IO,Mut` | The first row a query answers, or `None` when it answers none. The scan stops at that row. |
+| `axqQueryInt` | value | `(-> Connection Query (Result Int Error))` | `Alloc,IO,Mut` | The INTEGER in the first column of the first row a query answers, such as `SELECT count(*) FROM t`. No row is `axqNotFound`; NULL or another type is `axqType`. |
+| `ColumnInfo` | struct |  |  | One column of a table, as `axqColumns` describes it: its name, its type as AXQL spells it, whether it is NOT NULL and whether it is the PRIMARY KEY, the table it links to ("" for none), and the column as its CREATE TABLE wrote it, with any DEFAULT and CHECK. |
+| `IndexInfo` | struct |  |  | One index of a table: its name, whether it is UNIQUE, and its columns in order. |
+| `axqTables` | value | `(-> Connection (Result (Vec String) Error))` | `Alloc,IO,Mut` | The names of the database's tables, in the order they were created. |
+| `axqColumns` | value | `(-> Connection String (Result (Vec ColumnInfo) Error))` | `Alloc,IO,Mut` | The columns of table `table`, in order. A table that doesn't exist is `axqSchema`. |
+| `axqIndexes` | value | `(-> Connection String (Result (Vec IndexInfo) Error))` | `Alloc,IO,Mut` | The indices of table `table`, in the order they were created. |
+| `axqDump` | value | `(-> Connection (Result String Error))` | `Alloc,IO,Mut` | The whole database as an AXQL script: every CREATE TABLE, then each table's rows as INSERTs with their rowids, then every CREATE INDEX. `(axqExecBatch db script)` on an empty database loads it back. Tables that link to each other in a cycle can't be ordered, and are `axqSchema`. |
 | `RowReader` | struct |  |  | A row being read into a record: the row, and the first failure. Each read answers a stand-in value after a failure, so a record can be built in one expression and checked once at the end. |
 | `axqlReader` | value | `(-> Row RowReader)` | `Alloc` | A reader over `row`. |
 | `axqlReadInt` | value | `(-> RowReader String Int)` | `Alloc,Mut` | The column named `name` as an INTEGER, or 0 after recording why not. |
@@ -129,7 +137,7 @@ Axqlite - an embedded, single-file, transactional database.
 
 ## `Axqlite.AxqlAst`
 
-`stdlib/Axqlite/AxqlAst.ax` — 32 public names
+`stdlib/Axqlite/AxqlAst.ax` — 44 public names
 
 Axqlite.AxqlAst - the parsed form of one AXQL statement.
 
@@ -151,6 +159,7 @@ Axqlite.AxqlAst - the parsed form of one AXQL statement.
 | `opGe` | value | `Int` |  | `>=`. |
 | `opAnd` | value | `Int` |  | `AND`. |
 | `opOr` | value | `Int` |  | `OR`. |
+| `opConcat` | value | `Int` |  | `\|\|`, text concatenation. |
 | `opIsComparison` | value | `(-> Int Bool)` |  | Whether `op` is one of the six comparisons. |
 | `opIsArithmetic` | value | `(-> Int Bool)` |  | Whether `op` is one of the five arithmetic operators. |
 | `opText` | value | `(-> Int String)` |  | The operator as AXQL spells it, for messages. |
@@ -161,19 +170,30 @@ Axqlite.AxqlAst - the parsed form of one AXQL statement.
 | `typeNull` | value | `Int` |  | The type of an expression whose value is always NULL, such as the literal `NULL`. Never a column's type. |
 | `typeName` | value | `(-> Int String)` |  | A type's name as a statement spells it. |
 | `Expr` | data |  |  | An expression. Every variant that can fail at run time carries the byte offset of its operator, so a message can say where. |
-| `ColumnDef` | struct |  |  | One column of a `CREATE TABLE`. |
+| `ColumnDef` | struct |  |  | One column of a `CREATE TABLE`: its name, type, whether it is NOT NULL and whether it is the PRIMARY KEY, the table it links to ("" for none), its DEFAULT and CHECK expressions, its text as the statement wrote it, and where in that text the linked table's name starts (-1 for none). |
+| `aggCount` | value | `Int` |  | The aggregates: `count`, `sum`, `avg`, `min` and `max`. |
+| `aggSum` | value | `Int` |  | `sum(e)`. |
+| `aggAvg` | value | `Int` |  | `avg(e)`. |
+| `aggMin` | value | `Int` |  | `min(e)`. |
+| `aggMax` | value | `Int` |  | `max(e)`. |
+| `aggName` | value | `(-> Int String)` |  | An aggregate's name as AXQL spells it. |
+| `axqlEditDistance` | value | `(-> String String Int)` | `Alloc,Mut` | How many single-byte edits, ignoring ASCII case, turn `a` into `b`, counted up to 3. An edit inserts, deletes or changes a byte, or swaps two neighbours. |
+| `axqlNear` | value | `(-> String String Bool)` | `Alloc,Mut` | Whether `name` is near enough `other` to suggest it: within two edits, or one for a name of four bytes or fewer, and fewer edits than `name` has bytes. |
+| `axqlFunctionNames` | value | `String` |  | The functions an expression may call, by their lower-case names, as one string for messages. |
+| `axqlFunMinArgs` | value | `(-> String Int)` | `Alloc,Mut` | The fewest arguments function `name` (in lower case) takes, or -1 when there is no such function. |
+| `axqlFunMaxArgs` | value | `(-> String Int)` | `Alloc,Mut` | The most arguments function `name` takes, or -1 when there is no such function. `coalesce`, `min` and `max` take up to 32. |
 | `SelectItem` | struct |  |  | One item of a `SELECT` list: the expression, the name `AS` gave it ("" when none), and the text the statement wrote it with. |
 | `OrderTerm` | struct |  |  | One `ORDER BY` term. |
-| `Select` | struct |  |  | A `SELECT`. `star` is true for `SELECT *`, and then `items` is empty. `from` is "" when the statement has no FROM clause. |
+| `Select` | struct |  |  | A `SELECT`. `star` is true for `SELECT *`, and then `items` holds only the `link.*` items written after it. `from` is "" when the statement has no FROM clause. |
 | `Stmt` | data |  |  | One statement. |
-| `Parsed` | struct |  |  | CREATE TABLE [IF NOT EXISTS] name (columns) DROP TABLE [IF EXISTS] name CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (columns): unique, ifNotExists, name, table, columns DROP INDEX [IF EXISTS] name INSERT INTO table [(columns)] VALUES (row), ...: the columns are empty when the statement names none UPDATE table SET column = expr, ... [WHERE expr] DELETE FROM table [WHERE expr] A parsed statement with what the parameter scan found: how many parameters it takes, the names of named ones in index order (empty when it uses `?` or `?N`), and the statement's own text, from its first token to its last. |
+| `Parsed` | struct |  |  | CREATE TABLE [IF NOT EXISTS] name (columns) DROP TABLE [IF EXISTS] name CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (columns): unique, ifNotExists, name, table, columns DROP INDEX [IF EXISTS] name INSERT INTO table [(columns)] VALUES (row), ...: the columns are empty when the statement names none UPSERT INTO table [(columns)] VALUES (row), ...: the same shape; a row whose rowid exists is updated in the columns given ALTER TABLE table ADD COLUMN column ALTER TABLE table RENAME TO name UPDATE table SET column = expr, ... [WHERE expr] DELETE FROM table [WHERE expr] A parsed statement with what the parameter scan found: how many parameters it takes, the names of named ones in index order (empty when it uses `?` or `?N`), and the statement's own text, from its first token to its last. |
 | `stmtIsQuery` | value | `(-> Stmt Bool)` |  | Whether a statement answers rows. |
 | `stmtIsDdl` | value | `(-> Stmt Bool)` |  | Whether a statement changes the schema. |
 | `axqlPosText` | value | `(-> String Int String)` | `Alloc,Mut` | "line L, column C" for byte offset `at` of `src`. |
 
 ## `Axqlite.AxqlEval`
 
-`stdlib/Axqlite/AxqlEval.ax` — 18 public names
+`stdlib/Axqlite/AxqlEval.ax` — 27 public names
 
 Axqlite.AxqlEval - what AXQL's operators do to values.
 
@@ -195,16 +215,25 @@ Axqlite.AxqlEval - what AXQL's operators do to values.
 | `axqlComparison` | value | `(-> Int Value Value (Result Value Error))` | `Alloc,Mut` | The six comparisons over two values, with NULL on either side giving NULL. |
 | `axqlArith` | value | `(-> Int Value Value (Result Value Error))` | `Alloc,Mut` | One of `+ - * / %` over two values. NULL on either side gives NULL. |
 | `axqlNegate` | value | `(-> Value (Result Value Error))` | `Alloc,Mut` | Unary minus. The most negative INTEGER has no negation. |
+| `axqlLike` | value | `(-> String String Bool)` | `Alloc,Mut` | Whether TEXT `s` matches LIKE pattern `p`: `%` matches any run of bytes, `_` any one byte, `\` makes the next byte literal, and every other byte matches itself, case and all. |
+| `axqlApply` | value | `(-> String (Vec Value) (Result Value Error))` | `Alloc,Mut` | Function `name` (in lower case) applied to argument values `vs`, whose number the parser has checked. Every function but `coalesce`, `nullif` and `typeOf` answers NULL when an argument is NULL. |
 | `axqlEval` | value | `(-> Expr (Vec Value) Int (Vec Value) (Result Value Error))` | `Alloc,Mut` | Evaluate `e` over one row: `row` holds the table's columns and `rowid` its rowid. `params` are the bound parameters. An unbound name is a refusal: the binder rewrites every name before evaluation. |
+| `axqlEvalAll` | value | `(-> (Vec Expr) (Vec Value) Int (Vec Value) (Result (Vec Value) Error))` | `Alloc,Mut` | Every expression of `es` evaluated over one row, or the first failure. |
 | `axqlConjuncts` | value | `(-> Expr (Vec Expr))` | `Alloc,Mut` | The top-level AND terms of `e`, left to right. |
 | `axqlKeep` | value | `(-> (Vec Expr) (Vec Value) Int (Vec Value) (Result Bool Error))` | `Alloc,Mut` | Whether a row passes a WHERE given as its AND terms. The row is dropped when any term is FALSE or NULL, whatever the others do; a term's failure is the answer only when no term drops the row. |
 | `axqlTypeOf` | value | `(-> String Expr (Vec Int) (Vec Value) (Result Int Error))` | `Alloc,Mut` | The type `e` has whenever it isn't NULL, given the types of the table's columns (the rowid is INTEGER) and the bound parameters. `typeNull` means always NULL. A mismatch is `axqType`, named with its place in `src`, before any row is read. |
 | `axqlFold` | value | `(-> Expr (Vec Value) (Result Expr Error))` | `Alloc,Mut` | `e` with each largest subexpression that names no column replaced by its value. Those are evaluated once, before any row is read, so a failure among them fails the statement even when no row would have reached it. |
 | `axqlIsConstant` | value | `(-> Expr Bool)` |  | Whether `e` names no column: a literal, a parameter, or operators over those. |
+| `axqlChildren` | value | `(-> Expr (Vec Expr))` | `Alloc,Mut` | The expressions directly inside `e`, left to right. |
+| `axqlHasAgg` | value | `(-> Expr Bool)` | `Alloc,Mut` | Whether `e` holds an aggregate anywhere. |
+| `axqlAggPos` | value | `(-> Expr Int)` | `Alloc,Mut` | The offset of the first aggregate in `e`, or -1. |
+| `axqlHasParamOrLink` | value | `(-> Expr Bool)` | `Alloc,Mut` | Whether `e` holds a parameter or a link path anywhere: what a DEFAULT or CHECK stored in the schema can't hold. |
+| `axqlColumnsRead` | value | `(-> Expr (Vec Int) Int)` | `Alloc,Mut` | Every column number a bound `e` reads, pushed onto `out`. |
+| `axqlExprEq` | value | `(-> Expr Expr Bool)` | `Alloc,Mut` | Whether two bound expressions are written the same way. |
 
 ## `Axqlite.AxqlExec`
 
-`stdlib/Axqlite/AxqlExec.ax` — 13 public names
+`stdlib/Axqlite/AxqlExec.ax` — 14 public names
 
 Axqlite.AxqlExec - planning and running one AXQL statement.
 
@@ -215,12 +244,13 @@ Axqlite.AxqlExec - planning and running one AXQL statement.
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
 | `Undo` | data |  |  | A change to reverse when a statement fails: put back an old value, delete a key the statement added, drop a tree it created, or give up (a dropped tree can't come back). |
-| `Exec` | struct |  |  | One statement's context: the pager, the statement's text (for messages), its parameters, the undo log, and what it did. |
+| `Exec` | struct |  |  | One statement's context: the pager, the statement's text (for messages), its parameters, the undo log, what it did, and the rows it wrote to a table with links, whose links are checked when it ends. |
 | `axqlExec` | value | `(-> Pager String (Vec Value) Bool Exec)` | `Alloc,Mut` | A context for running the statement `src` with `params`. |
 | `axqlUndo` | value | `(-> Pager (Vec Undo) (Result Int Error))` | `Alloc,IO,Mut` | Reverse every change `undo` records, newest first. `Err` when one of them can't be reversed; the caller then rolls back the transaction. |
 | `Access` | data |  |  | How a statement finds its rows. |
 | `RowRef` | struct |  |  | A row as a scan meets it: its rowid and its values. |
-| `SelectPlan` | struct |  |  | A planned SELECT. |
+| `GroupPlan` | struct |  |  | How a grouped SELECT works out its rows: the GROUP BY terms, the aggregates it computes, and its select list, HAVING and ORDER BY with each aggregate replaced by a parameter past the statement's own, which carries the aggregate's value for the group. |
+| `SelectPlan` | struct |  |  | A planned SELECT. `fetch` marks the links whose rows it reads, and `group` is there when it groups its rows. |
 | `axqlPlanNames` | value | `(-> SelectPlan (Vec String))` |  | The column names a SELECT answers. |
 | `axqlPlanSelect` | value | `(-> Exec Schema Select (Result SelectPlan Error))` | `Alloc,Mut` | Bind, check, fold and plan a SELECT. Needs a lock. |
 | `axqlRunSelect` | value | `(-> Exec SelectPlan (-> (Vec Value) (Result Bool Error)) (Result Int Error))` | `Alloc,IO,Mut` | Run a planned SELECT, calling `onRow` with each result row. Stops early when `onRow` answers `Ok false`. Answers the rows returned. |
@@ -230,7 +260,7 @@ Axqlite.AxqlExec - planning and running one AXQL statement.
 
 ## `Axqlite.AxqlMacro`
 
-`stdlib/Axqlite/AxqlMacro.ax` — 41 public names
+`stdlib/Axqlite/AxqlMacro.ax` — 42 public names
 
 Axqlite.AxqlMacro - AXQL statements written as Axiom forms.
 
@@ -278,18 +308,19 @@ Axqlite.AxqlMacro - AXQL statements written as Axiom forms.
 | `axqlFieldColumn` | emacro |  |  | One `(name Type)` field of `axqlTable` as its column. |
 | `axqlTableRest` | macro |  |  | The second half of `axqlTable`, which it invokes: what it declares once the struct exists, because a struct's fields can be read by name only through `syntax/fields`, which answers only for a struct already declared. It is public because a declaration macro's own invocation is resolved where `axqlTable` is used; a program has no need to call it. |
 | `axqlSpread` | emacro |  |  | Spread a parenthesised list into the arguments of a helper: `(axqlSpread k qb (a b c))` is `(k qb a b c)`. Public because the statement macros that use it are expanded where they are invoked. |
-| `axqlSelect` | emacro |  |  | A SELECT from table `t`: its select list (`*`, one column, or a list of columns and `(as e name)` items), then its clauses in this order, each optional: `(where e)`, `(orderBy term ...)`, `(limit n)`, and `(offset n)` after a `limit`. `n` is an Axiom `Int`, bound as a parameter. |
+| `axqlSelect` | emacro |  |  | A SELECT from table `t`: its select list (`*`, one column, or a list of columns and `(as e name)` items), then its clauses in this order, each optional: `(where e)`, `(groupBy e ...)` with up to three terms, `(having e)`, `(orderBy term ...)`, `(limit n)`, and `(offset n)` after a `limit`. `n` is an Axiom `Int`, bound as a parameter. |
 | `axqlFieldNames` | emacro |  |  | `(names f ...)`, spread: names separated by `, `. Public, as the helpers `axqlTable` reaches are, because a declaration macro's expansion is resolved where it is used. |
 | `axqlMarks` | emacro |  |  | `(names f ...)`, spread: one `?` per name. |
 | `axqlFieldColumns` | emacro |  |  | `(fields (f t) ...)`, spread: each field as its column. |
 | `axqlInsert` | emacro |  |  | An INSERT into table `t`: `*` for every column in order, or the columns the rows fill, then one `(values e ...)` per row, up to 16. |
+| `axqlUpsert` | emacro |  |  | An UPSERT into table `t`, shaped as `axqlInsert` is: a row whose rowid names a row that exists sets the columns listed and keeps the rest, and any other row is inserted. |
 | `axqlCreateTable` | emacro |  |  | A CREATE TABLE: an optional `IF NOT EXISTS`, the table's name, and one `(name TYPE ...)` per column, up to 32. |
 | `axqlFieldValues` | emacro |  |  | The typed values of a record's fields, as parameters. |
 | `axqlTable` | macro |  |  | A table of typed rows. `(axqlTable User users (id RowId) (name String) (age OptInt))` declares, for table `users`: |
 
 ## `Axqlite.AxqlParse`
 
-`stdlib/Axqlite/AxqlParse.ax` — 5 public names
+`stdlib/Axqlite/AxqlParse.ax` — 6 public names
 
 Axqlite.AxqlParse - AXQL text to statements.
 
@@ -303,6 +334,7 @@ Axqlite.AxqlParse - AXQL text to statements.
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
 | `axqlMaxDepth` | value | `Int` |  | How deep parentheses may nest in one expression. The parser is recursive, so this is a stack budget: a deeper expression is a refusal rather than a crash. |
+| `axqlMaxOperators` | value | `Int` |  | The most operators one statement may hold. Its expressions are parsed, checked and worked out by recursion, so this is a stack budget, as `axqlMaxDepth` is: a longer statement is a refusal rather than a crash, on a thread's stack as on a process's. |
 | `axqlMaxParams` | value | `Int` |  | The most parameters a statement may take, and the largest `?N`. |
 | `axqlParse` | value | `(-> String (Result Parsed Error))` | `Alloc,Mut` | Parse exactly one statement, with an optional `;` after it and nothing else but whitespace and comments. |
 | `axqlParseScript` | value | `(-> String (Result (Vec Parsed) Error))` | `Alloc,Mut` | Parse a script: statements separated by `;`. Empty statements are skipped, so a script may end with `;`. |
@@ -310,7 +342,7 @@ Axqlite.AxqlParse - AXQL text to statements.
 
 ## `Axqlite.AxqlSchema`
 
-`stdlib/Axqlite/AxqlSchema.ax` — 18 public names
+`stdlib/Axqlite/AxqlSchema.ax` — 24 public names
 
 Axqlite.AxqlSchema - the tables and indices a database holds.
 
@@ -323,14 +355,20 @@ Axqlite.AxqlSchema - the tables and indices a database holds.
 | `SchemaEntry` | struct |  |  | One row of the schema table. |
 | `Schema` | struct |  |  | Every entry, in rowid order. |
 | `IndexDef` | struct |  |  | An index: its name, root page, whether it's UNIQUE, and the numbers of the table columns it covers, in order. |
-| `TableDef` | struct |  |  | A table: its name as created, root page, columns, the number of its INTEGER PRIMARY KEY column (-1 when it has none), and its indices. |
+| `TableDef` | struct |  |  | A table: its name as created, root page, columns, the number of its INTEGER PRIMARY KEY column (-1 when it has none), its indices, and the tables its LINK columns point at. |
+| `LinkDef` | struct |  |  | A LINK column: its number in the table, and the table it points at, whose own indices and links are left empty. |
 | `kindTable` | value | `String` |  | The kind of a table entry. |
 | `kindIndex` | value | `String` |  | The kind of an index entry. |
 | `axqlLoadSchema` | value | `(-> Pager (Result Schema Error))` | `Alloc,IO,Mut` | Read every entry of the schema table. Needs a lock. |
 | `axqlFindEntry` | value | `(-> Schema String (Option SchemaEntry))` | `Alloc` | The entry named `name`, table or index. |
 | `axqlColumnIndex` | value | `(-> (Vec ColumnDef) String Int)` |  | The number of the column named `name`, or -1. |
 | `axqlPrimaryKey` | value | `(-> (Vec ColumnDef) Int)` |  | The primary key column among `cols`, or -1. |
-| `axqlTableDef` | value | `(-> Schema String (Result TableDef Error))` | `Alloc,Mut` | The table named `name` with its indices, or `axqSchema`. |
+| `axqlTableNames` | value | `(-> Schema (Vec String))` | `Alloc,Mut` | The names of every table, in the order they were created. |
+| `axqlHint` | value | `(-> String (Vec String) String String)` | `Alloc,Mut` | A hint naming what `name` might have meant among `names`, the kind of thing they are given by `what` ("tables", "columns"): the closest one within two edits (one, for a name of four bytes or fewer), else the list, else that there are none. |
+| `axqlTableDef` | value | `(-> Schema String (Result TableDef Error))` | `Alloc,Mut` | The table named `name` with its indices and links, or `axqSchema`. |
+| `axqlBareTableDef` | value | `(-> Schema String (Result TableDef Error))` | `Alloc,Mut` | The table named `name` without its indices or links: what a LINK reads. |
+| `axqlLinksTo` | value | `(-> Schema String (Result (Vec String) Error))` | `Alloc,Mut` | Every LINK column of another table that points at table `name`, as `table.column`. |
+| `axqlTableColumns` | value | `(-> String (Result (Vec ColumnDef) Error))` | `Alloc,Mut` | The columns a table's CREATE TABLE text declares. |
 | `axqlRowRecord` | value | `(-> TableDef (Vec Value) (Result String Error))` | `Alloc,Mut` | The record a row of `t` is stored as: `values` in column order, with the primary key column, if any, stored as NULL. |
 | `axqlRowValues` | value | `(-> TableDef String Int (Result (Vec Value) Error))` | `Alloc,Mut` | A row of `t` read back from its record and rowid, with the primary key column filled in. A record of the wrong width, or a value whose type its column doesn't allow, is `axqCorrupt`. |
 | `axqlIndexPrefix` | value | `(-> IndexDef (Vec Value) (Result String Error))` | `Alloc,Mut` | The encoded values of `ix`'s columns for a row: the prefix every key for those values starts with. |
@@ -469,7 +507,7 @@ is their values' order.
 
 ## `Axqlite.Value`
 
-`stdlib/Axqlite/Value.ax` — 14 public names
+`stdlib/Axqlite/Value.ax` — 15 public names
 
 Axqlite.Value - the values an AXQLite database holds, and the error
 codes every AXQLite module answers.
@@ -494,7 +532,8 @@ codes every AXQLite module answers.
 | `axqIoFailed` | value | `Int` |  | The operating system refused a read, write, sync or lock. The context carries its errno. |
 | `axqTooBig` | value | `Int` |  | A value, key, row or database larger than AXQLite supports. |
 | `axqNotADatabase` | value | `Int` |  | The file exists but isn't an AXQLite database, or was written by a format version this library doesn't read. |
-| `axqArithmetic` | value | `Int` |  | Integer arithmetic in a statement overflowed 64 bits, or divided by zero. |
+| `axqArithmetic` | value | `Int` |  | Arithmetic in a statement overflowed 64 bits or divided by zero, or a function was given a number outside what it takes. |
+| `axqNotFound` | value | `Int` |  | A query asked for one row and found none. |
 | `axqErr` | value | `(-> Int String String (Result a Error))` | `Alloc` | An `Err` carrying one of the codes above, with a message and the name of the function that raised it as context. |
 
 ## `Chan`
@@ -1880,7 +1919,7 @@ Str - length-prefixed strings, in Axiom.
 |---|---|---|---|---|
 | `strWrap` | value | `(-> Int Int String)` | `Alloc,Mut` | Wrap `len` bytes at `bytes` as a `Str` without copying. |
 | `strWrapOwned` | value | `(-> Int Int Int String)` | `Alloc,Mut,Unsafe` | The same, naming the block that OWNS the bytes (MM-LIFE-2d's `Str` half): word 2 holds the handle whose death should free them, or 0 when no such block exists - a literal's bytes are loader-resident, a syscall's are the kernel's, and an interior wrap over an arena keep block belongs to the arena. A slice inherits its parent's owner rather than naming the parent, so the chain is one hop deep however many times a slice is sliced, and the address counted is never interior. |
-| `strAlloc` | value | `(-> Int String)` | `Alloc,Mut,Unsafe` | A `Str` over freshly allocated, zeroed space for `len` bytes. |
+| `strAlloc` | value | `(-> Int String)` | `Alloc,Mut,Unsafe` | A `Str` over freshly allocated, zeroed space for `len` bytes. A negative `len` stops the program with status 77, as a bad index does. |
 | `strFromLit` | value | `(-> Int String)` | `Alloc,Mut` | A `Str` sharing the bytes at a NUL-terminated address. |
 | `cstrLen` | value | `(-> Int Int Int)` | `Unsafe` | Length of NUL-terminated bytes at `addr`, scanning from `i`. |
 | `strLen` | value | `(-> String Int)` |  | The length of `s` in bytes. |
@@ -1931,7 +1970,7 @@ A mutual-exclusion lock between `parallel` bindings, in both lowerings
 
 ## `Sys`
 
-`stdlib/Sys.ax` — 50 public names
+`stdlib/Sys.ax` — 51 public names
 
 Sys - portable syscall wrappers.
 
@@ -1949,6 +1988,7 @@ Sys - portable syscall wrappers.
 | `sysTermSignal` | value | `(-> Int Int)` |  | The signal that killed a child, or 0 if it exited normally. |
 | `sysRun` | value | `(-> Int Int Int (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn` | Run `path` to completion and answer its exit code. |
 | `sysRunPath` | value | `(-> String Int Int (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn` | Run `name`, searching `PATH` for it when it contains no slash. |
+| `sysRunPathErrTo` | value | `(-> String Int Int String (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn,Unsafe` | Run `name` as `sysRunPath` does, with the child's standard error written to the file at `errPath`, created or truncated, rather than to this process's. `(Ok code)` is the child's answer and `(Err e)` a child that never ran, as `sysRunPath` answers; a file that can't be opened is `(Err e)` too, and then nothing runs. A target with no syscall ABI runs the child with standard error where it was. |
 | `sysPid` | value | `Int` | `IO,Unsafe` | The calling process's own id - the per-session suffix scratch files need so two concurrent processes cannot collide. The syscall takes no arguments; the unused ones are simply zero. |
 | `sysNowMicros` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Unsafe` | Microseconds now, from the platform's cheapest correct clock: Darwin answers gettimeofday's timeval (realtime; Darwin's syscall table has no clock_gettime), Linux and FreeBSD answer CLOCK_MONOTONIC via clock_gettime - under the id `clockMonotonicId` names, because the id is not portable: 1 on Linux, and on FreeBSD 4, where 1 is CLOCK_VIRTUAL, the process's CPU time. That one was a literal here until 2026-08-29, and a clock that measures CPU time never runs backwards either, so nothing would have caught it. |
 | `sysHasMonotonic` | value | `Bool` | `Mut` | Whether this target has a monotonic clock, so that `sysNowMonotonic`, `sysNowMonotonicNanos` and `sysSleepNanos` answer `Ok`. Linux, FreeBSD and darwin-aarch64 have one; Windows, bare metal and darwin-x86_64 don't. |
@@ -2167,21 +2207,24 @@ target being compiled for (this one is `darwin`).
 
 ## `Task`
 
-`stdlib/Task.ax` — 18 public names
+`stdlib/Task.ax` — 21 public names
 
 Structured tasks with typed results across the process boundary
 (R-C2, docs/memory-model.md MM-PAR-13).
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `TaskOpts` | struct |  |  | `width` children at most (clamped to 1..n); `limit` bytes per answer (0 or more); `deadline` nanoseconds per task from its spawn, 0 for none; `grace` nanoseconds a running task gets after a cancellation; `failFast` cancels the pool at the first error; `token` is `Some` a token from `taskTokenNew`, or `None` for one private to the call. |
-| `taskOpts` | value | `(-> Int Int TaskOpts)` | `Alloc` | No deadline, a 100 ms grace, no fail-fast, a private token. |
+| `TaskOpts` | struct |  |  | `width` children at most (clamped to 1..n); `limit` bytes per answer (0 or more); `deadline` nanoseconds per task from its spawn, 0 for none; `grace` nanoseconds a running task gets after a cancellation; `failFast` cancels the pool at the first error; `token` is `Some` a token from `taskTokenNew`, or `None` for one private to the call; `keep` bytes of answers one call may hold, and `memory` bytes one task's arena may map, each 0 for no bound. |
+| `taskOpts` | value | `(-> Int Int TaskOpts)` | `Alloc` | No deadline, a 100 ms grace, no fail-fast, a private token, and no `keep` or `memory` bound. |
 | `taskWithDeadline` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` | The options with a deadline of `nanos` nanoseconds for the whole run. |
 | `taskWithGrace` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` | The options with `nanos` nanoseconds of grace after cancellation before a task is abandoned. |
 | `taskWithFailFast` | value | `(-> TaskOpts Bool TaskOpts)` | `Alloc` | The options with fail-fast `on` or off: when on, the first failure cancels the rest. |
 | `taskWithToken` | value | `(-> TaskOpts CancelToken TaskOpts)` | `Alloc` | The options with `tok` as the cancel token: cancelling it cancels the run. |
+| `taskWithKeep` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` | The options with a `keep` budget of `bytes`: the answers one call holds may total at most that many bytes. The answer that would pass it answers `Err taskOverBudgetCode` instead, and the pool is then cancelled as a refused spawn cancels it. `taskFold` holds no answer, so the budget doesn't bound it. 0 is no bound. |
+| `taskWithMemory` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` | The options with a `memory` budget of `bytes`: each task's arena may map at most that many bytes beyond what its process began with. A task that asks for more traps 70 in its own process and answers `Err 70`; its siblings and the caller are untouched. 0 is no bound. |
 | `taskCancelledCode` | value | `Int` |  | The error code a cancelled task answers, 1002. |
 | `taskTooLargeCode` | value | `Int` |  | The error code for a task whose input is larger than the budget allows, 1003. |
+| `taskOverBudgetCode` | value | `Int` |  | The error code a task answers when its answer would take the call past its `keep` budget, 1012. |
 | `taskPollNanos` | value | `Int` |  | How often a sleeping pool looks at its running children: 10 ms. |
 | `CancelToken` | struct |  |  | A cancellation token: one owner whose value is a shared page - word 0 the cancelled flag, word 1 the event counter a pool sleeps on (MM-PAR-16). |
 | `taskTokenNew` | value | `(Result CancelToken Error)` | `Alloc,IO` | A fresh token, not set, or `Err` the mapping's error. |

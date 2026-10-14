@@ -1,0 +1,105 @@
+# ALTER TABLE: ADD COLUMN gives every row the new column's DEFAULT,
+# or NULL, and RENAME TO renames a table, its indices' entries and the
+# links that point at it. Expected results follow docs/axql.md.
+
+statement ok
+CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL)
+
+statement ok
+CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT NOT NULL, team LINK teams)
+
+statement ok
+CREATE INDEX playersByName ON players (name)
+
+statement ok
+INSERT INTO teams VALUES (1, 'red'), (2, 'blue')
+
+statement ok
+INSERT INTO players VALUES (1, 'ann', 1), (2, 'bo', 2), (3, 'cy', NULL)
+
+statement ok
+ALTER TABLE players ADD COLUMN goals INTEGER NOT NULL DEFAULT 0 CHECK (goals >= 0)
+
+statement ok
+ALTER TABLE players ADD nick TEXT
+
+query
+SELECT id, name, team, goals, nick FROM players ORDER BY id
+----
+1,'ann',1,0,NULL
+2,'bo',2,0,NULL
+3,'cy',NULL,0,NULL
+
+statement ok
+INSERT INTO players (name) VALUES ('dee')
+
+query
+SELECT name, goals FROM players WHERE id = 4
+----
+'dee',0
+
+statement error axqConstraint a row of players breaks the CHECK on goals
+UPDATE players SET goals = -1
+
+statement error axqSchema players already has a column named goals
+ALTER TABLE players ADD COLUMN goals INTEGER
+
+statement error axqSchema it needs a DEFAULT for the rows already there
+ALTER TABLE players ADD COLUMN rank INTEGER NOT NULL
+
+statement error axqSchema ALTER TABLE can't add a PRIMARY KEY
+ALTER TABLE players ADD COLUMN pid INTEGER PRIMARY KEY
+
+statement error axqConstraint a row of players breaks the CHECK on level
+ALTER TABLE players ADD COLUMN level INTEGER DEFAULT 0 CHECK (level > 0)
+
+statement error axqConstraint players.coach is 9, but players has no row 9
+ALTER TABLE players ADD COLUMN coach LINK players DEFAULT 9
+
+statement ok
+ALTER TABLE players ADD COLUMN captain LINK players DEFAULT 1
+
+query
+SELECT name, captain.name FROM players ORDER BY id
+----
+'ann','ann'
+'bo','ann'
+'cy','ann'
+'dee','ann'
+
+statement ok
+ALTER TABLE teams RENAME TO squads
+
+statement error axqSchema no such table: teams
+SELECT * FROM teams
+
+query
+SELECT name, team.name FROM players WHERE team IS NOT NULL ORDER BY id
+----
+'ann','red'
+'bo','blue'
+
+statement ok
+ALTER TABLE players RENAME TO members
+
+query
+SELECT name FROM members WHERE name = 'bo'
+----
+'bo'
+
+statement ok
+INSERT INTO members (name, captain) VALUES ('eve', 2)
+
+query
+SELECT name, captain.name FROM members WHERE name = 'eve'
+----
+'eve','bo'
+
+statement error axqSchema there is already a table named squads
+ALTER TABLE members RENAME TO squads
+
+statement error axqSchema no such table: nope
+ALTER TABLE nope RENAME TO other
+
+statement error axqSyntax expected ADD COLUMN or RENAME TO
+ALTER TABLE members DROP COLUMN nick

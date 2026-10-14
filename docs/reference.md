@@ -42,9 +42,56 @@ expressions in order and answer the last one.
 
 `main` may return `(Result Int Error)` instead. Import `Err`: `(Ok n)`
 exits with `n`; `(Err e)` prints `axiom: ` followed by `errorText e` and
-exits 70. Use `try` to propagate failures. See [error handling](stdlib.md#err-and-fallible).
+exits 70. Use `?` to propagate failures (below). See [error handling](stdlib.md#err-and-fallible).
 
 Tested by `tests/stdlib/490-main-result-ok.ax` and `tests/stdlib/491-main-result-err.ax`.
+
+### Propagate an error with `?`
+
+`e?` answers the `Ok` payload of the `Result` `e`. When `e` is an
+`Err`, the function you are in answers that `Err`, and nothing after
+the `?` runs:
+
+```scheme
+(import IO)
+(import Err)
+
+(:: halveTwice (-> Int (Result Int Error)))
+(fn (halveTwice n)
+  (let ((a (divChecked n 2)?)
+        (b (divChecked a 2)?))
+    (Ok b)))
+
+(:: main (Result Int Error))
+;@axiom:effect(io)
+(fn (main)
+  (let ((v (halveTwice 40)?))
+    {
+      (println "{v}")
+      (Ok 0)
+    }))
+```
+
+```text
+10
+```
+
+Use `?` in a function's tail or in anything evaluated on the way
+there: an argument, a `let`'s value, an `if` test, a `match`
+scrutinee or a block statement. Arguments before the `?` run first, as
+written. A `?` inside a lambda answers the lambda.
+
+Axiom has no early return, so the compiler moves the rest of your
+function into the `Ok` arm of a `match` on `e`. That's why a `?`
+inside a branch, a `let` body or a loop whose value something still
+uses is refused (`AX3123`): there is no rest of the function to move.
+Bind the value first, or take the `Result` apart with `match`.
+
+The operand must be a `Result`, and the error passes through as it
+is. Convert an `Option` with `okOr`, and change an error's type with
+`mapErr`, before the `?`.
+
+Tested by `tests/stdlib/847-try-operator.ax`.
 
 ## Syntax basics
 
@@ -293,6 +340,39 @@ form a chain, followed by the final default branch.
   0)
 ```
 
+Leave out the else when the branch is there for what it does. The `if`
+then answers `()`, the [unit value](#the-unit-type), and the branch's
+own value is dropped:
+
+```scheme
+(import IO)
+(import Vec)
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let ((seen vecNew))
+    {
+      (for n in 0..10
+        (if (== (% n 3) 0) (vecPush seen n)))
+      (if (> (vecLen seen) 3)
+        (println "more than three"))
+      (println (vecLen seen))
+      0
+    }))
+```
+
+```text
+more than three
+4
+```
+
+A `()` branch does the same for an `if` with an else, and a `()` arm
+for a `match`: the form answers `()` and the other branches' values
+are dropped. Reading that `()` where a value is wanted is a type error,
+`expected Int, found ()`. Tested by `tests/stdlib/890-unit-and-if.ax`
+and `tests/diagnostics/1302-unit-value-used.ax`.
+
 ### while loops
 
 `while` repeats its body while its `Bool` condition is true. There is
@@ -324,7 +404,40 @@ Tested by `tests/stdlib/466-for-loop.ax`.
 | `String` | byte string |
 | `Foreign` | externally owned pointer; ARC does not follow it |
 | `Handle` | counted owner with an external destructor |
-| `()` | empty tuple type, with no expression value |
+| `()` | the unit type, whose one value is `()` |
+
+### The unit type
+
+`()` is a type with one value, also written `()`. A function declared to
+answer `()` is a procedure: its body's value is dropped, so it ends
+where its work does.
+
+```scheme
+(import IO)
+
+(:: report (-> String Int ()))
+;@axiom:effect(io)
+(fn (report what n)
+  (println "{what}: {n}"))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (report "files" 3)
+    (report "errors" 0)
+    0
+  })
+```
+
+```text
+files: 3
+errors: 0
+```
+
+An `if` without an else answers `()` too (see [if](#if)). A dropped
+value is released as a statement's is, and a dropped `Result` is still
+`AX3046`.
 
 Compound types include `(Vec Int)`, `(-> Int String)` and `(* Int)`.
 Use `struct` for products and `data` for sums; list and non-empty tuple
@@ -888,10 +1001,12 @@ Tested by `tests/stdlib/810-addr-identity.ax`.
 ### Inline assembly
 
 `asm` runs instructions the language has no form for: a cycle counter,
-a barrier, a system register. A function that uses it says
-`;@axiom:effect(unsafe)`, because the compiler can't see what the
-instructions do. Callers of that function inherit nothing.
+a barrier, a system register, a call in a calling convention of your
+own. A function that uses it says `;@axiom:effect(unsafe)`, because the
+compiler can't see what the instructions do. Callers of that function
+inherit nothing.
 
+<!-- doc-gate:run -->
 ```scheme
 (import IO)
 
@@ -922,31 +1037,123 @@ no arm is refused (`AX4008`) when your program reaches the function.
 
 #### Operands
 
-| Operand | Meaning |
+After its template, an arm lists its operands, and then anything it
+clobbers and the options it promises:
+
+| Item | Meaning |
 |---|---|
 | `(in name value)` | `value`, an `Int`, in a register |
-| `(out name)` | a register the form answers when the instructions end |
+| `(out name)` | a register the instructions write, which the form answers |
+| `(lateout name)` | as `out`, but it may share a register with an input |
 | `(inout name value)` | starts as `value` and is answered, in one register |
+| `(inlateout name value)` | as `inout`, but it may share a register with another input |
+| `(const name n)` | an integer the compiler works out, written into the template as text |
+| `(sym name f)` | the symbol of `f`, a top-level `fn` or an `extern` item |
 | `(clobber "reg" ...)` | registers the instructions write that no operand names |
+| `(clobber_abi "C")` | every register a call may overwrite under the platform's C convention |
+| `(options word ...)` | what the instructions promise (see [Options](#options)) |
 
-`in`, `out` and `inout` can name their register, as in
-`(in a "x8" x)`. An arm answers at most one value. With no `out` or
-`inout`, the form answers 0. Inputs are evaluated once each, in the
-order written, before the instructions run.
+`in`, `out` and the other register operands can name their register,
+as in `(in a "x8" x)`. A `const` is a literal, or `+`, `-` and `*` over
+literals.
+
+An arm answers one output at most. Every other output ends with
+`into` and the `mut` binding it is stored in, as in
+`(out r into rem)`, and the binding must be an `Int` this function can
+assign. With no answered output, the form answers 0. Inputs are
+evaluated once each, in the order written, before the instructions run.
+
+`out` and `inout` get a register no input uses, so the instructions may
+write them before they have read every input. `lateout` and
+`inlateout` drop that guarantee to save a register: use them when the
+instructions read every input before they write the output.
+
+<!-- doc-gate:run -->
+```scheme
+(import IO)
+
+; Two outputs: the quotient is the answer, and the remainder is stored
+; in `rem`.
+(:: divmod (-> Int Int Int))
+;@axiom:effect(unsafe)
+(fn (divmod n d)
+  (let ((mut rem 0))
+    (let ((q (asm
+      (aarch64 "udiv {q}, {a}, {b}\nmsub {r}, {q}, {b}, {a}" (out q) (out r into rem) (in a n) (in b d))
+      (x86_64 "xorl %edx, %edx\ndivq {b}" (inout q "rax" n) (out r "rdx" into rem) (in b d)))))
+      (+ (* q 100) rem))))
+
+; One instruction reads its input before it writes its output, so the
+; two may share a register.
+(:: bump (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (bump x)
+  (asm
+    (aarch64 "add {r}, {a}, #1" (lateout r) (in a x))
+    (x86_64 "leaq 1({a}), {r}" (lateout r) (in a x))))
+
+; A number written into the template.
+(:: times8 (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (times8 x)
+  (asm
+    (aarch64 "lsl {r}, {a}, #{n}" (out r) (in a x) (const n 3))
+    (x86_64 "movq {a}, {r}\nshlq ${n}, {r}" (out r) (in a x) (const n 3))))
+
+(:: triple (-> Int Int))
+(fn (triple y)
+  (* y 3))
+
+; The instructions call `triple`. `clobber_abi` tells the compiler the
+; call may overwrite any register the C convention lets it, so the
+; answer names its register.
+(:: viaCall (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (viaCall x)
+  (asm
+    (aarch64 "mov x0, {a}\nbl {f}" (out r "x0") (in a x) (sym f triple) (clobber_abi "C"))
+    (x86_64 "movq {a}, %rdi\ncall {f}" (out r "rax") (in a x) (sym f triple) (clobber_abi "C"))))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println (fmtInt (divmod 47 5)))
+    (println (fmtInt (bump 41)))
+    (println (fmtInt (times8 5)))
+    (println (fmtInt (viaCall 14)))
+    0
+  })
+```
+
+```text
+902
+42
+40
+42
+```
 
 #### Templates
 
 The template is a string literal that reaches the assembler as
-written. `{name}` stands for an operand's register, and `{{` and `}}`
-are literal braces. `{name:m}` picks a view of the register: `w` or `x`
-on AArch64, and `b`, `h`, `w`, `k` or `q` on x86-64. Separate
-instructions with `\n`. x86-64 templates use AT&T syntax, so a
-literal `$` is written as is.
+written. `{name}` stands for an operand's register, a `const`'s value
+or a `sym`'s symbol, and `{{` and `}}` are literal braces. `{name:m}`
+picks a view of a register: `w` or `x` on AArch64, and `b`, `h`, `w`,
+`k` or `q` on x86-64. Separate instructions with `\n`. x86-64 templates
+use AT&T syntax unless the arm says `intel_syntax`, and a literal `$`
+is written as is.
+
+A template can't define a named label such as `spin:`, because the
+optimiser may copy a block: into each caller it inlines, or into each
+pass of a loop it unrolls. Each copy would define the label again. Use
+a numbered label, `1:`, and branch to it as `1b` (back) or `1f`
+(forward).
 
 This program reads a register through its 32-bit view, uses fixed
-registers with a scratch register, reads the CPU's counter, and puts a
-barrier between two reads:
+registers with a scratch register, reads the CPU's counter, puts a
+barrier between two reads, and counts down in a loop:
 
+<!-- doc-gate:run -->
 ```scheme
 (import IO)
 
@@ -985,6 +1192,15 @@ barrier between two reads:
     (aarch64 "")
     (x86_64 "")))
 
+; Counts `n` down to zero with a branch back to label 1, in a loop the
+; optimiser may unroll. It answers 1.
+(:: countdown (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (countdown n)
+  (asm
+    (aarch64 "mov {r}, {a}\n1: subs {r}, {r}, #1\nb.ne 1b\nadd {r}, {r}, #1" (out r) (in a n))
+    (x86_64 "movq {a}, {r}\n1: decq {r}\njnz 1b\nincq {r}" (out r) (in a n))))
+
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
@@ -992,11 +1208,19 @@ barrier between two reads:
     (before cycles)
     (_ fence)
     (after cycles)
+    (mut total 0)
+    (mut i 0)
   )
     {
       (println (low32 (+ 4294967296 7)))
       (println (viaRegs 41))
       (println (>= after before))
+      (while (< i 3)
+        {
+          (set total (+ total (countdown 5)))
+          (set i (+ i 1))
+        })
+      (println total)
       0
     }))
 ```
@@ -1005,39 +1229,173 @@ barrier between two reads:
 7
 42
 true
+3
 ```
 
-#### What the compiler does, and what you promise
+#### Options
 
-The compiler checks the form where you write it: its arms, operands
-and register names (`AX3091`). It keeps every block, in order, as a
-side effect that clobbers memory and the condition flags, so no load,
-store or call moves across it. An `out` never shares a register with
-an input.
+An `(options ...)` list says what the instructions do:
 
-It doesn't check the instructions. Your function promises that they:
+| Option | The instructions |
+|---|---|
+| `pure` | have no effect but their outputs |
+| `nomem` | read and write no memory |
+| `readonly` | read memory and write none |
+| `preserves_flags` | leave the condition flags as they found them |
+| `noreturn` | never finish |
+| `nostack` | use no stack, a red zone included |
+| `att_syntax` | are in AT&T syntax, the x86-64 default |
+| `intel_syntax` | are in Intel syntax, on x86-64 |
 
-- leave the stack pointer and frame pointer as they found them, and use
-  no stack;
-- write no register but the outputs and the clobbers;
-- end by falling through, with no branch out, return or exception
-  return;
-- perform no IO, blocking or trap the function doesn't declare.
+The compiler builds on those promises. It may drop a `pure` block
+whose outputs nothing reads, or merge two that are alike. It moves
+loads and stores across a `nomem` block, and loads across a
+`pure readonly` one. It keeps the flags live across `preserves_flags`,
+and treats the code after a `noreturn` block as unreachable. Without
+`nostack`, the instructions may push to the stack: the compiler aligns
+the stack pointer for a call and keeps nothing below it.
+
+A `pure` arm needs an output and `nomem` or `readonly`, and a
+`noreturn` arm has no outputs. Options that contradict each other or
+the arm are `AX3119`.
+
+<!-- doc-gate:run -->
+```scheme
+(import IO)
+(import Str)
+
+; The answer depends on the input alone.
+(:: square (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (square x)
+  (asm
+    (aarch64 "mul {r}, {a}, {a}" (out r) (in a x) (options pure nomem nostack))
+    (x86_64 "movq {a}, {r}\nimulq {a}, {r}" (out r) (in a x) (options pure nomem nostack))))
+
+; Reads a string's first byte through its address, and writes nothing.
+(:: firstByte (-> String Int))
+;@axiom:effect(unsafe)
+(fn (firstByte s)
+  (asm
+    (aarch64 "ldrb {r:w}, [{p}]" (out r) (in p (strData s)) (options pure readonly nostack))
+    (x86_64 "movzbq ({p}), {r}" (out r) (in p (strData s)) (options pure readonly nostack))))
+
+; A spin-wait hint: no outputs, no memory, flags untouched.
+(:: relax Int)
+;@axiom:effect(unsafe)
+(fn (relax)
+  (asm
+    (aarch64 "yield" (options nomem nostack preserves_flags))
+    (x86_64 "pause" (options nomem nostack preserves_flags))))
+
+; Stops the program at a breakpoint when `x` is negative.
+(:: checked (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (checked x)
+  (if (< x 0)
+    (asm
+      (aarch64 "brk #1" (options noreturn nomem nostack))
+      (x86_64 "ud2" (options noreturn nomem nostack)))
+    x))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println (fmtInt (square 7)))
+    (println (fmtInt (firstByte "Axiom")))
+    (println (fmtInt relax))
+    (println (fmtInt (checked 42)))
+    0
+  })
+```
+
+```text
+49
+65
+0
+42
+```
+
+#### When the assembler rejects a line
+
+`check` doesn't assemble a template, so its instructions meet the
+assembler when you build. A line it rejects, or one whose operands the
+register allocator can't place, fails the build with `AX3117` at that
+line, and the build exits 1. Building a program that calls this
+function:
+
+```scheme
+(:: next (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (next x)
+  (asm (aarch64 "add {r}, {a}, #1\nfrobnicate {r}" (out r) (in a x))))
+```
+
+```text
+error[AX3117]: llc rejected this line of an `asm` template: unrecognized instruction mnemonic
+ --> calc.ax:4:36
+  |
+4 |   (asm (aarch64 "add {r}, {a}, #1\nfrobnicate {r}" (out r) (in a x))))
+  |                                    ^^^^^^^^^^^^^^
+  |
+  = note: the assembler read `frobnicate x8`, with the operands in their registers
+```
+
+The note shows the instruction as the assembler read it, with each
+operand in its register. Tested by `tests/embedded/asm-rejected.ax`.
+
+#### What the compiler checks
+
+The compiler refuses a malformed form where you write it, at the part
+that is wrong:
+
+| Mistake | Code |
+|---|---|
+| an unknown architecture, operand kind or option, a second arm for one architecture, or a template that isn't a string literal | `AX3091` |
+| a `{name}` that names no operand, an unbalanced `{` or `}`, or a modifier the architecture has no view for | `AX3091` |
+| two operands with one name, an input and an output with one name, two operands or a clobber in one register, or a register the arm can't name | `AX3091` |
+| a template that defines a named label | `AX3091` |
+| a second answered output, an `into` on an input, or an option given twice | `AX3091` |
+| a `const` that isn't worked out from literals, or a `sym` naming a local, an operator or a polymorphic function | `AX3091` |
+| an operand the template never names, unless it has a register of its own | `AX3118` |
+| options that contradict each other or the arm | `AX3119` |
+| an `into` binding that isn't a `mut` `Int` this function can assign | `AX3012`, `AX3004` |
+| a reached form with no arm for the target | `AX4008` |
+| a template line the assembler rejects, when you build | `AX3117` |
 
 No operand or clobber may name the stack pointer, the frame pointer or
 AArch64's `x18`, and `x30` may appear only as a clobber. Operands are
-`Int` words in general-purpose registers: there are no memory,
-floating-point or vector operands, though vector registers may be
-clobbered. `check` doesn't assemble the template, so a mistake in its
-text fails when `llc` assembles it. Not yet: that failure is reported
-as `AX4003` with no location; see the [roadmap](roadmap.md#tools).
+`Int` words in general-purpose registers. Vector registers may be
+clobbered.
+
+#### What the compiler does, and what you promise
+
+The compiler keeps every block, in order, as a side effect unless it
+says `pure`. Unless an option says otherwise, a block reads and writes
+memory and clobbers the condition flags, so no load, store or call
+moves across it.
+
+It doesn't check the instructions. Your function promises that they:
+
+- leave the stack pointer and frame pointer as they found them, and,
+  with `nostack`, use no stack;
+- write no register but the outputs and the clobbers;
+- end by falling through, with no branch out, return or exception
+  return, unless the arm says `noreturn`;
+- keep every promise their options make;
+- perform no IO, blocking or trap the function doesn't declare.
+
+Not yet: floating-point, vector and memory operands, labels shared
+between blocks, and Rust's `may_unwind` and `raw`; see the
+[roadmap](roadmap.md#tools).
 
 The restricted profile refuses `asm` unless `--allow-asm` names the
 function (`RP-9`). The full contract is `MM-FFI-9` in the
 [memory model](memory-model.md).
 
-Tested by `tests/stdlib/581-inline-asm.ax` and
-`tests/diagnostics/1044-inline-asm.ax`.
+Tested by `tests/stdlib/870-inline-asm-operands.ax` and
+`tests/diagnostics/1280-inline-asm-forms.ax`.
 
 ## Concurrency
 
@@ -1322,9 +1680,11 @@ are exported.
 ## AXTAG metadata
 
 `;@axiom:` comments attach checked claims and tool metadata to
-functions and signatures. Effect claims, restrictions, contracts and
-interrupt tags affect validation. Descriptive tags remain metadata;
-they do not establish a proof by themselves.
+functions and signatures. Effect claims, restrictions, contracts,
+interrupt tags and `result(owned)` (a trusted function handing over a
+type-variable result, [memory model](memory-model.md) `MM-LIFE-2n`)
+affect validation. Descriptive tags remain metadata; they do not
+establish a proof by themselves.
 
 A key one slip from a checked key, such as `;@axiom:restirct(no-alloc)`
 or `;@axiom:Effect(io)`, is refused with `AX3039`, so a claim never

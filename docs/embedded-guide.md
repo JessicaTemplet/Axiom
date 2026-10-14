@@ -489,7 +489,7 @@ builds.
 | an alignment fault exiting 81 with its registers | QEMU `virt` (TCG) | A12 |
 | a periodic step on the virtual timer's interrupt through the GICv2, the restricted profile and a stack budget | QEMU `virt` (TCG); the profile and the bound compile-time | A13 |
 | `fw_cfg` DMA under an ownership protocol, a contract stopping a device-owned read, a timer deadline | QEMU `virt` (TCG) | A14 |
-| each target's `asm` arm, `opt -O2` keeping an unread block against a control, AX4008 for a missing arm | compile-only, every host | A15 |
+| each target's `asm` arm, every operand kind and option lowered and assembled, `opt -O2` keeping an unread block against a control, AX4008 for a missing arm, AX3117 at a template line the assembler rejects | compile-only, every host | A15 |
 | `tests/embedded/asm-el.ax` reading `CurrentEL` at EL1 through `asm` | QEMU `virt` (TCG) | A15 |
 | `_start`'s order and registers, the descriptors decoded, periodic and DMA carrying the same `_start` | compile-only, every host | A16 |
 | `SCTLR_EL1`, `TCR_EL1` and `MAIR_EL1` read back, and the image's layout | QEMU `virt` (TCG) | A16 |

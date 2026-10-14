@@ -4044,6 +4044,12 @@
       (regFnEff fns "__store8v" (mkIntArrow 3) (builtinEff "Mut"))
       (tcRegDevicePrims fns)
       (tcRegAsmPrims fns 0)
+      ; `(__asm.sym f)`: an `asm` form's `sym` operand (`expandAsm`).
+      ; The argument is checked as the reference it is - an undefined
+      ; name is AX3001 at the name - and `checkAsmSym` holds it to a
+      ; function with a symbol. Codegen never evaluates the call: it
+      ; reads the name and passes the symbol to the instructions.
+      (regFn fns "__asm.sym" (mkTArr (mkTVar "a") mkIntTy))
       (regFn fns "__load64" (mkIntArrow 2))
       ; `(__call_word fn arg)`: call a C function `i64 (i64)` by its
       ; ADDRESS - the destructor word of a foreign-form block
@@ -9744,7 +9750,9 @@
     mkUnitTy
     (let ((tag (nodeTag e)))
       (if (== tag TAG_E_INT)
-        mkIntTy
+        (if (isUnitLit e)
+          mkUnitTy
+          mkIntTy)
         (if (== tag TAG_E_FLT)
           mkFloatTy
           (if (== tag TAG_E_CHAR)
@@ -9830,7 +9838,16 @@
                                                 tt
                                                 mkSilentWild))
                                           }
-                                          mkSilentWild))))))))))))))))))))
+                                          ; A `?` the expander could not rewrite
+                                          ; (AX3123, already reported): its operand
+                                          ; is still checked, and the form answers
+                                          ; poison, so nothing cascades from it.
+                                          (if (== tag TAG_E_TRY)
+                                            {
+                                              (checkExprH tc (nodeA e) 0)
+                                              mkTErr
+                                            }
+                                            mkSilentWild)))))))))))))))))))))
 
 (pub :: checkExprSeq (-> Int (Vec Int) Int Int Int))
 (pub fn (checkExprSeq tc v i last)
@@ -9927,6 +9944,73 @@
       cty
     }))
 
+; ------------------------------------------------------------------
+; The unit type `()`, the empty tuple, and its one value `()`.
+;
+; A branch, an arm or a body whose type is `()` makes the form around
+; it answer `()`, and the values of the others are dropped: an `if`
+; with one `()` branch (which is every `if` written without an else,
+; `parseIfTail`), a `match` with one `()` arm, and a function declared
+; to answer `()`. Dropping is a rewrite of the dropped expression into
+; `{ e () }` (`discardToUnit`), so the code generator meets a block it
+; already handles: the value is released where it was a reference
+; (`emitSeq`), and the whole answers the unit word 0.
+; ------------------------------------------------------------------
+(pub :: tyIsUnit (-> Int Bool))
+(pub fn (tyIsUnit t)
+  (let ((r (tyResolve t)))
+    (if (== r 0)
+      false
+      (&& (== (nodeTag r) TAG_T_TUP) (== (vecLen (nodeAVec r)) 0)))))
+
+; Rewrite `e`, whose type is `t`, in place into `{ e () }`. The node
+; keeps its identity, so whatever holds it now holds the block; the
+; expression moves to a copy. A `Result` dropped this way is AX3046
+; and a pending lambda is flushed, as for any statement
+; (`checkExprSeq`).
+(pub :: discardToUnit (-> Int Int Int Int))
+(pub fn (discardToUnit tc e t)
+  (if (|| (== e 0) (tyIsUnit t))
+    0
+    {
+      (if (== (isDiscardedResultTy t) 1)
+        (emitDiscardedResult tc e)
+        0)
+      (flushPending tc t (spanOf e))
+      (let (
+        (copy (mkNodeAt (nodeTag e) (nodeA e) (nodeB e) (nodeC e) (nodeSpan e)))
+        (xs vecNew)
+        (mut k 5)
+      )
+        {
+          (while (< k 12)
+            {
+              (memSetWord copy k (memGetWord e k))
+              (set k (+ k 1))
+            })
+          (vecPush xs copy)
+          (vecPush xs (mkEUnitAt (nodeSpan e)))
+          ; Built as a node first, so the block holds its share of
+          ; `xs`; `e` then takes the block's words. AST nodes are never
+          ; released, so neither the copy's words nor the block's lose
+          ; an owner.
+          (let ((blk (mkNodeAt TAG_E_BEGIN xs 0 0 (nodeSpan e))))
+            {
+              (memSetWord e 0 TAG_E_BEGIN)
+              (memSetWord e 1 (memGetWord blk 1))
+              (memSetWord e 2 0)
+              (memSetWord e 3 0)
+              (memSetWord e 5 0)
+              (memSetWord e 6 0)
+              (memSetWord e 7 0)
+              (memSetWord e 9 0)
+              (memSetWord e 10 0)
+              (memSetWord e 11 0)
+              0
+            })
+        })
+    }))
+
 (pub :: checkIf (-> Int Int Int))
 (pub fn (checkIf tc e)
   {
@@ -9935,14 +10019,22 @@
     ; the then-branch as the expectation - stage0's shape.
     (let ((thenTy (checkExprH tc (nodeB e) 0)))
       (let ((elseTy (checkExprH tc (nodeC e) 0)))
-        {
-          (if (&& (== (tyIsErr thenTy) 0) (&& (== (tyIsErr elseTy) 0) (== (tyCompat tc thenTy elseTy) 0)))
-            (emitMismatchTy tc thenTy elseTy (spanOf (nodeC e)))
-            0)
-          (if (== (tyIsErr thenTy) 1)
-            elseTy
-            thenTy)
-        }))
+        ; A `()` branch makes the `if` answer `()`, and the other
+        ; branch's value is dropped: `(if t b)` is `(if t b ())`.
+        (if (|| (tyIsUnit thenTy) (tyIsUnit elseTy))
+          {
+            (discardToUnit tc (nodeB e) thenTy)
+            (discardToUnit tc (nodeC e) elseTy)
+            mkUnitTy
+          }
+          {
+            (if (&& (== (tyIsErr thenTy) 0) (&& (== (tyIsErr elseTy) 0) (== (tyCompat tc thenTy elseTy) 0)))
+              (emitMismatchTy tc thenTy elseTy (spanOf (nodeC e)))
+              0)
+            (if (== (tyIsErr thenTy) 1)
+              elseTy
+              thenTy)
+          })))
   })
 
 ; `cond` is AX2004: no arm checks one. A variadic `if` reaches
@@ -11913,9 +12005,12 @@
 ; field, poison, or a variable are skipped the way they always have
 ; been - missing those is the status quo, and a direct mismatch is
 ; owned by the error beside it, which is why the call sites run this
-; only where compatibility already succeeded. THIS IS A WARNING: the
-; program is well-typed, and an error would refuse a cast the author
-; wrote on purpose alongside the leaks. Answers 1 when it emitted.
+; only where compatibility already succeeded. AN ERROR: what it reports
+; is a statically certain leak, not a limit of the analysis, and the
+; answer is always available - declare the field's real type. It was
+; a warning until 0.7.8, on the grounds that the cast was written on
+; purpose; a cast written on purpose still leaks. Answers 1 when it
+; emitted.
 (pub fn (emitPayloadSmuggled tc wantArg arg span)
   (if (== wantArg 0)
     0
@@ -11936,7 +12031,7 @@
                     0
                     {
                       (emitDiag tc (diagSetLabel (mkDiagNote
-                        SEV_WARNING
+                        SEV_ERROR
                         "AX3043"
                         "error-payload-untyped"
                         span
@@ -12064,10 +12159,15 @@
                     (nodeB (nodeA e))
                     (nodeB e)
                     head)
-                  (if (&& (== headIsVar 1) (&& (|| (strEq hname "__contract") (strEq hname "parallel$lends")) (== (spineArgs e 0) 2)))
+                  ; `(__asm.sym f)` names `f` without using it as a value:
+                  ; a function of two parameters is no bare value (AX3013),
+                  ; and is still a function `bl` can reach (`checkAsmSym`).
+                  (if (&& (== headIsVar 1) (|| (&& (|| (strEq hname "__contract") (strEq hname "parallel$lends")) (== (spineArgs e 0) 2)) (&& (strEq hname "__asm.sym") (== (spineArgs e 0) 1))))
                     (if (strEq hname "parallel$lends")
                       (checkParLends tc e)
-                      (checkContractForm tc e))
+                      (if (strEq hname "__asm.sym")
+                        (checkAsmSym tc (nodeB e))
+                        (checkContractForm tc e)))
                     (if (&& (== headIsVar 1) (== (isCastLike hname) 1))
                       (checkCastForm tc e hname)
                       (if (&& (== headIsVar 1) (== (isMacroName tc hname) 1))
@@ -17541,9 +17641,51 @@
 ; anywhere, which is this set's definition at its widest.
 (pub :: isAsmPrim (-> String Int))
 (pub fn (isAsmPrim n)
-  (if (strStartsWith n "__asm.")
+  (if (&& (strStartsWith n "__asm.") (&& (> (strLen n) 6) (&& (>= (strByte n 6) 48) (<= (strByte n 6) 57))))
     1
     0))
+
+;; An `asm` form's `sym` operand, `(__asm.sym f)` (MM-FFI-9), which
+;; names `f` for the instructions to call and answers the `Int` the
+;; primitive takes. The name is looked up, never checked as a value:
+;; a function of two parameters is no bare value (AX3013) and is still
+;; one `bl` reaches. The expander has refused a local binding already.
+;; What is refused here is a name that resolves to nothing (AX3001, or
+;; AX3023 for a private one), to something with no symbol of its own -
+;; an operator or primitive, an effect operation - or to a polymorphic
+;; function, which takes a hidden evidence word the instructions would
+;; have to supply.
+(pub :: checkAsmSym (-> Int Int Int))
+(pub fn (checkAsmSym tc a)
+  (if (!= (nodeTag a) TAG_E_VAR)
+    mkIntTy
+    (let ((ent (findFnEnt tc (nodeAName a))))
+      (if (== ent 0)
+        {
+          (emitUndefinedVar tc (nodeAName a) (nodeSpan a))
+          mkIntTy
+        }
+        (if (|| (!= (memGetWord ent 3) 0) (== (memGetWord ent 4) 1))
+          (checkAsmSymBad tc a (concat (concat "`" (srcSpelling (nodeAName a))) "` has no symbol of its own; a `sym` operand names a function the program defines, or an `extern` item"))
+          (if (== (tyHasSrcVar (memGetWord ent 1)) 1)
+            (checkAsmSymBad tc a (concat (concat "`" (srcSpelling (nodeAName a))) "` is polymorphic, so it takes a hidden evidence word the instructions would have to supply; name a function whose signature has no type variable"))
+            mkIntTy))))))
+
+(pub :: checkAsmSymBad (-> Int Int String Int))
+(pub fn (checkAsmSymBad tc a msg)
+  {
+    (emitDiag tc (mkDiagNote
+      SEV_ERROR
+      "AX3091"
+      "inline-asm"
+      (nodeSpan a)
+      msg
+      0
+      0
+      "an `asm` form's `(sym name f)` passes the symbol of `f`, a top-level `fn` or an `extern` item, for instructions such as `bl {name}` or `call {name}`"
+      "run `axiom explain AX3091` for the full form"))
+    mkIntTy
+  })
 
 ; The handle table's three (MM-PAR-8). Each takes or answers an
 ; ADDRESS its caller will dereference: the checker cannot see what that
@@ -19325,7 +19467,7 @@
             ; Compatibility succeeded, so a direct mismatch owns
             ; nothing here; a value still unknown against a
             ; ground field refuses, and a reference smuggled
-            ; through an `Int` field still warns (AX3043).
+            ; through an `Int` field is still refused (AX3043).
             {
               (if (&& (== (tyIsUnknown aty) 1) (== (tyIsGround fty) 1))
                 (refuseUnknownOperand tc (tyRender fty) aty (spanOf (vecGet args i)))
@@ -20210,7 +20352,9 @@
           (if (&& (== (nodeTag scrutTy) TAG_T_VAR) (== (tyIsSrcVar scrutTy) 0))
             (armsCtorTy tc (nodeBVec e) 0)
             0))))
-        (let ((resTy 
+        (let (
+          (tys vecNew)
+          (resTy0
           (checkArms
             tc
             (nodeBVec e)
@@ -20222,7 +20366,18 @@
             (if (== exhTy 0)
               scrutTy
               exhTy)
-            0)))
+            0
+            tys))
+        )
+        ; A `()` arm makes the `match` answer `()`, and the other arms'
+        ; values are dropped (`armJoin` accepts the mix).
+        (let ((resTy
+          (if (matchArmsUnit tys 0)
+            {
+              (discardArms tc (nodeBVec e) tys 0)
+              mkUnitTy
+            }
+            resTy0)))
           {
             (let ((ctorChecked 
               (if (&& (== (memGetWord catchall 0) 0) (!= exhTy 0))
@@ -20247,7 +20402,7 @@
                   "a match no arm matched used to answer 0 silently at exit 0 - the result cell's zeroed contents, indistinguishable from a real answer (docs/memory-model.md MM-VAL-9b)") "no arm catches a non-matching value"))
                 0))
             resTy
-          }))
+          })))
     }))
 
 ; The declared result type of the first constructor the arms name -
@@ -20347,8 +20502,8 @@
 ; `((Red) 1) ((Big) 2)` over a lambda parameter refuses `Big` instead
 ; of checking exhaustiveness over whichever type came first. Binders
 ; still bind at `scrutTy`.
-(pub :: checkArms (-> Int (Vec Int) Int (Vec Int) Int Int Int Int Int Int))
-(pub fn (checkArms tc arms i covered catchall resTy scrutTy fitTy joinTy)
+(pub :: checkArms (-> Int (Vec Int) Int (Vec Int) Int Int Int Int Int (Vec Int) Int))
+(pub fn (checkArms tc arms i covered catchall resTy scrutTy fitTy joinTy tys)
   (if (>= i (vecLen arms))
     resTy
     (let ((arm (vecGet arms i)))
@@ -20373,6 +20528,7 @@
             0
             "iteration is an expansion-time facility: move the match into a declaration macro's template, or write the arms by hand"
             "the query vocabulary is CLOSED and compiler-implemented (macro-system.md MAC-CAP-5/6): every query is answered from the declaration list at expansion time"))
+          (vecPush tys 0)
           (checkArms
             tc
             arms
@@ -20382,7 +20538,8 @@
             resTy
             scrutTy
             fitTy
-            joinTy)
+            joinTy
+            tys)
         }
         (let ((mark (vecLen (tcScopeVec tc))))
           {
@@ -20391,6 +20548,7 @@
             (let ((t (checkExprH tc (nodeB arm) 0)))
               {
                 (scopeTrunc (tcScopeVec tc) mark)
+                (vecPush tys t)
                 (checkArms
                   tc
                   arms
@@ -20400,7 +20558,8 @@
                   t
                   scrutTy
                   fitTy
-                  (armJoin tc joinTy t (nodeB arm)))
+                  (armJoin tc joinTy t (nodeB arm))
+                  tys)
               })
           })))))
 
@@ -20416,12 +20575,35 @@
     joinTy
     (if (== joinTy 0)
       t
-      {
-        (if (== (tyCompat tc joinTy t) 0)
-          (emitMismatchTy tc joinTy t (armTailSpan body))
-          0)
-        joinTy
-      })))
+      (if (|| (tyIsUnit joinTy) (tyIsUnit t))
+        mkUnitTy
+        {
+          (if (== (tyCompat tc joinTy t) 0)
+            (emitMismatchTy tc joinTy t (armTailSpan body))
+            0)
+          joinTy
+        }))))
+
+(pub :: matchArmsUnit (-> (Vec Int) Int Bool))
+(pub fn (matchArmsUnit tys i)
+  (if (>= i (vecLen tys))
+    false
+    (if (if (== (vecGet tys i) 0)
+      false
+      (tyIsUnit (vecGet tys i)))
+      true
+      (matchArmsUnit tys (+ i 1)))))
+
+(pub :: discardArms (-> Int (Vec Int) (Vec Int) Int Int))
+(pub fn (discardArms tc arms tys i)
+  (if (>= i (vecLen arms))
+    0
+    {
+      (if (&& (< i (vecLen tys)) (!= (vecGet tys i) 0))
+        (discardToUnit tc (nodeB (vecGet arms i)) (vecGet tys i))
+        0)
+      (discardArms tc arms tys (+ i 1))
+    }))
 
 ; Where an arm's value comes from: the last expression of a block or
 ; a `let` body, which is what a reader has to change.
@@ -25842,7 +26024,57 @@
                 eff
                 eparams
                 lex))))
-        (axtagKeyTypo tc d key)))))
+        (if (strEq key "result")
+          (checkResultTag tc d val lex)
+          (axtagKeyTypo tc d key))))))
+
+; Does either half of the declaration say `effect(unsafe)`? `checkAxtags`
+; asks about every tag with the `fn` as `d`, so the signature's tags
+; are read through `sigAxtagsFor`, as `checkAxtags` itself reads them.
+(pub :: declTrusted (-> Int Int Int))
+(pub fn (declTrusted tc d)
+  (if (== (declHasAxtag d "effect(unsafe)") 1)
+    1
+    (let ((sig (sigAxtagsFor tc (nodeAName d))))
+      (if (== (cast Int sig) 0)
+        0
+        (declHasAxtagFrom sig "effect(unsafe)" 0)))))
+
+; `result(owned)`: the declaration's type-variable result carries a
+; share the caller owns (MM-LIFE-2n). Codegen releases such a result
+; at a counted instantiation, so the claim has to be true, and nothing
+; in the checker can see that a raw load's share was transferred -
+; which is why the claim is accepted only inside a trusted
+; encapsulation: a declaration that also says `effect(unsafe)` on this
+; half, or whose body performs an unsafe operation itself (`lex`).
+; Any other value, or the claim on a safe function, is AX3116.
+(pub :: checkResultTag (-> Int Int String Int Int))
+(pub fn (checkResultTag tc d val lex)
+  (if (== (nodeSpan d) 0)
+    0
+    (if (strEq val "owned")
+      (if (|| (== (declTrusted tc d) 1) (== lex 1))
+        0
+        (emitDiag tc (diagSetLabel (mkDiagNote
+          SEV_ERROR
+          "AX3116"
+          "result-claim"
+          (nodeSpan d)
+          (concat (concat "`result(owned)` on `" (bareOf (nodeAName d))) "` is a claim only a trusted function may make")
+          0
+          0
+          "put `;@axiom:effect(unsafe)` beside it on the same declaration, or let the result's ownership be inferred"
+          "the checker cannot see that a share was transferred through a raw load, so the claim is accepted only inside a trusted encapsulation (MM-LIFE-2n)") "safe code claims it")))
+      (emitDiag tc (diagSetLabel (mkDiagNote
+        SEV_ERROR
+        "AX3116"
+        "result-claim"
+        (nodeSpan d)
+        (concat (concat (concat (concat "`result(" val) ")` on `") (bareOf (nodeAName d))) "` is not a claim the compiler reads")
+        0
+        0
+        "write `;@axiom:result(owned)`, the one value this key takes"
+        "`result(owned)` says a type-variable result carries a share the caller must release; codegen acts on it, so a value it does not know is refused rather than ignored") "not `owned`")))))
 
 ; AX3076: `;@axiom:effect(io, unsafe)`. An `effect(...)` tag names ONE
 ; effect, and a list was read as one CUSTOM effect named `io, unsafe` -
@@ -26601,7 +26833,11 @@
                   ; checked.
                   (if (strEq key "ct")
                     1
-                    0))))))))))
+                    ; `result(owned)` is read by codegen (MM-LIFE-2n), so
+                    ; a slip of it would leak every call silently.
+                    (if (strEq key "result")
+                      1
+                      0)))))))))))
 
 (pub :: axtagNearMiss (-> String String))
 (pub fn (axtagNearMiss key)
@@ -26627,7 +26863,9 @@
                     "syscall"
                     (if (== (axtagSlip key "ct") 1)
                       "ct"
-                      "")))))))))))
+                      (if (== (axtagSlip key "result") 1)
+                        "result"
+                        ""))))))))))))
 
 (pub :: axtagSlip (-> String String Int))
 (pub fn (axtagSlip key known)
@@ -27317,6 +27555,10 @@
     0
     (if (== got 0)
       0
+    ; A function declared to answer `()` drops its body's value: a
+    ; procedure ends where its work does, with no value written out.
+    (if (&& (tyIsUnit want) (&& (! (tyIsUnit got)) (&& (== (tyIsErr got) 0) (== (isPendingNode got) 0))))
+      (discardToUnit tc (nodeC d) got)
       ; `got` is all but never pending here - the tail infers a
       ; pending body standalone before this runs - but a path that
       ; bypassed the tail must still judge it: where an arrow or a
@@ -27357,7 +27599,7 @@
                   (emitMismatchTy tc want got (spanOf (nodeC d))))
                 (if (== (declResultCompat tc want got) 1)
                   0
-                  (emitMismatchTy tc want got (spanOf (nodeC d)))))))))))))
+                  (emitMismatchTy tc want got (spanOf (nodeC d))))))))))))))
 
 ; 1 when a body of type `got` may stand where the signature declares
 ; `want`. Two arrows meet part by part, so a closure's parameters and
@@ -28175,8 +28417,19 @@
 (pub fn (rgnVar rc e)
   (let ((idx (rgnEnvFind rc (nodeAName e))))
     (if (< idx 0)
-      ; a global: a function's name, a constructor, a builtin - static
-      0
+      ; A global: a function's name, a constructor, a builtin - static,
+      ; with one exception. A NULLARY function written bare, `vecNew`,
+      ; is a call, and its answer is fresh in the caller's region like
+      ; any call's. Read as static it carried no origin, so
+      ; `(let ((v vecNew)) (region r (vecPush v s)))` stored a region
+      ; value into a vector nothing checked, and reading it after the
+      ; region ended crashed (tests/diagnostics/1301-region-bare-nullary.ax).
+      (let ((ent (findFnEnt (rgnTc rc) (nodeAName e))))
+        (if (if (== ent 0)
+          false
+          (&& (== (memGetWord ent 2) 0) (&& (== (memGetWord ent 3) 0) (== (memGetWord ent 4) 0))))
+          (rgnApp rc e)
+          0))
       {
         ; A read below the innermost lambda's base is a CAPTURE, and
         ; the closure's origins grow by it.

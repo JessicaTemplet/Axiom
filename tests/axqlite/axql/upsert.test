@@ -1,0 +1,71 @@
+# UPSERT: a row whose rowid names a row that exists sets the columns
+# the statement lists and keeps the rest; any other row is inserted.
+# Expected results follow docs/axql.md.
+
+statement ok
+CREATE TABLE kv (id INTEGER PRIMARY KEY, k TEXT NOT NULL, v INTEGER DEFAULT 0, note TEXT)
+
+statement ok
+CREATE UNIQUE INDEX kvByK ON kv (k)
+
+statement ok
+INSERT INTO kv VALUES (1, 'a', 10, 'first'), (2, 'b', 20, NULL)
+
+statement ok
+UPSERT INTO kv (id, v) VALUES (1, 11)
+
+statement ok
+UPSERT INTO kv (id, k) VALUES (3, 'c')
+
+statement ok
+UPSERT INTO kv VALUES (2, 'bb', 22, 'second')
+
+query
+SELECT id, k, v, note FROM kv ORDER BY id
+----
+1,'a',11,'first'
+2,'bb',22,'second'
+3,'c',0,NULL
+
+query
+SELECT id FROM kv WHERE k = 'b'
+----
+
+statement ok
+UPSERT INTO kv (k, v) VALUES ('d', 4)
+
+query
+SELECT id, k, v FROM kv WHERE k = 'd'
+----
+4,'d',4
+
+statement error axqConstraint the UNIQUE index kvByK on (k) already holds that value for another row of kv
+UPSERT INTO kv (id, k) VALUES (1, 'c')
+
+statement error axqConstraint kv.k may not be NULL
+UPSERT INTO kv (id, v) VALUES (1, 1), (9, 9)
+
+query
+SELECT id, v FROM kv ORDER BY id
+----
+1,11
+2,22
+3,0
+4,4
+
+statement ok
+CREATE TABLE plain (a TEXT, b INTEGER)
+
+statement ok
+UPSERT INTO plain (rowid, a, b) VALUES (5, 'x', 1)
+
+statement ok
+UPSERT INTO plain (rowid, b) VALUES (5, 2)
+
+query
+SELECT rowid, a, b FROM plain
+----
+5,'x',2
+
+statement error axqSchema table kv has no column named nope
+UPSERT INTO kv (id, nope) VALUES (1, 1)

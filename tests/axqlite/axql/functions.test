@@ -1,0 +1,165 @@
+# Functions, LIKE, IN, BETWEEN and ||: what each answers, how NULL
+# passes through, and what each refuses. Expected results follow
+# docs/axql.md.
+
+statement ok
+CREATE TABLE w (id INTEGER PRIMARY KEY, s TEXT, n INTEGER, r REAL, b BLOB)
+
+statement ok
+INSERT INTO w VALUES (1, 'Hello', 5, 2.5, x'00ff'), (2, '  pad  ', -7, -2.5, x''), (3, NULL, NULL, NULL, NULL), (4, '100%', 0, 0.49999999999999994, x'61')
+
+query
+SELECT length(s), lower(s), upper(s), trim(s) FROM w ORDER BY id
+----
+5,'hello','HELLO','Hello'
+7,'  pad  ','  PAD  ','pad'
+NULL,NULL,NULL,NULL
+4,'100%','100%','100%'
+
+query
+SELECT length(b), substr(b, 2), substr(s, 2, 3), substr(s, 9), substr(s, 1, 0) FROM w WHERE id = 1
+----
+2,x'ff','ell','',''
+
+query
+SELECT replace(s, 'l', 'L'), replace(s, '', 'x'), instr(s, 'l'), instr(s, 'z'), instr(b, x'ff') FROM w WHERE id = 1
+----
+'HeLLo','Hello',3,0,2
+
+query
+SELECT abs(n), abs(r), round(r), round(2.5), round(-0.5), round(n) FROM w ORDER BY id
+----
+5,2.5,3,3,-1,5
+7,2.5,-3,3,-1,-7
+NULL,NULL,NULL,3,-1,NULL
+0,0.49999999999999994,0,3,-1,0
+
+query
+SELECT coalesce(s, 'none'), coalesce(n, r, 0), nullif(n, 5), typeOf(s), typeOf(n), typeOf(r), typeOf(b) FROM w ORDER BY id
+----
+'Hello',5,NULL,'text','integer','real','blob'
+'  pad  ',-7,-7,'text','integer','real','blob'
+'none',0,NULL,'null','null','null','null'
+'100%',0,0,'text','integer','real','blob'
+
+query
+SELECT asInt(' 42 '), asInt(2.9), asInt(-2.9), asReal('1e3'), asReal(3), asText(12), asText(2.0), asText(x'6869')
+----
+42,2,-2,1000.0,3.0,'12','2.0','hi'
+
+query
+SELECT min(3, 1, 2), max(3, 1, 2), min('b', 'a'), max(1, 2.5), min(1, NULL)
+----
+1,3,'a',2.5,NULL
+
+query
+SELECT 'ab' || 'cd', x'01' || x'02', 'a' || NULL, asText(1) || '!'
+----
+'abcd',x'0102',NULL,'1!'
+
+query
+SELECT id FROM w WHERE s LIKE 'H%' OR s LIKE '%pad%'
+----
+1
+2
+
+query
+SELECT id FROM w WHERE s LIKE '_ello' AND s NOT LIKE 'h%'
+----
+1
+
+query
+SELECT id FROM w WHERE s LIKE '100\%'
+----
+4
+
+query
+SELECT 'abc' LIKE 'a%c', 'abc' LIKE 'A%', 'a_c' LIKE 'a\_c', 'abc' LIKE 'a\_c', NULL LIKE 'a', 'a' LIKE NULL
+----
+1,0,1,0,NULL,NULL
+
+query
+SELECT id FROM w WHERE n IN (5, 0) ORDER BY id
+----
+1
+4
+
+query
+SELECT id FROM w WHERE n NOT IN (5, 0) ORDER BY id
+----
+2
+
+query
+SELECT 1 IN (1, NULL), 2 IN (1, NULL), 2 NOT IN (1, NULL), NULL IN (1), 2.0 IN (1, 2)
+----
+1,NULL,NULL,NULL,1
+
+query
+SELECT id FROM w WHERE n BETWEEN -7 AND 0 ORDER BY id
+----
+2
+4
+
+query
+SELECT id FROM w WHERE n NOT BETWEEN -7 AND 0 ORDER BY id
+----
+1
+
+query
+SELECT lower(UPPER('MiXeD')), LENGTH('abc'), Substr('abc', 2)
+----
+'mixed',3,'bc'
+
+statement error axqSyntax no function named frob
+SELECT frob(1)
+
+statement error axqSyntax lower takes 1 argument
+SELECT lower('a', 'b')
+
+statement error axqSyntax substr takes 2 to 3 arguments
+SELECT substr('a')
+
+statement error axqType lower's argument 1 needs TEXT, not INTEGER
+SELECT lower(1)
+
+statement error axqType length's argument 1 needs TEXT or BLOB, not INTEGER
+SELECT length(5)
+
+statement error axqType abs's argument 1 needs a number, not TEXT
+SELECT abs('x')
+
+statement error axqType LIKE matches TEXT against a TEXT pattern
+SELECT 1 LIKE '1'
+
+statement error axqType IN can't compare INTEGER with TEXT
+SELECT 1 IN (1, 'a')
+
+statement error axqType || joins TEXT with TEXT or BLOB with BLOB, not TEXT and INTEGER
+SELECT 'a' || 1
+
+statement error axqType coalesce's arguments need one type
+SELECT coalesce(1, 'a')
+
+statement error axqType asInt can't read 'x1' as an INTEGER
+SELECT asInt('x1')
+
+statement error axqType asReal can't read 'one' as a REAL
+SELECT asReal('one')
+
+statement error axqArithmetic substr counts from 1
+SELECT substr('abc', 0)
+
+statement error axqArithmetic integer overflow
+SELECT abs(-9223372036854775807 - 1)
+
+statement error axqArithmetic asInt of 1e+300 is outside the INTEGER range
+SELECT asInt(1e300)
+
+statement error axqSyntax IN needs at least one value
+SELECT 1 IN ()
+
+statement error axqSyntax expected AND, found the end of the statement
+SELECT 1 BETWEEN 0
+
+statement error axqSyntax a single "|"
+SELECT 'a' | 'b'

@@ -122,6 +122,7 @@ host does not extend its claim to other targets or hardware.
 | R-A1–A4 | Recovery, child sweeps, spawn failure and thread teardown (`MM-PAR-7`) | `scripts/check-parallel.sh` |
 | R-A5, A7, A9 | Allocation refusal, free-list integrity and count overflow (`MM-ALLOC-7a`, `MM-LIFE-2k`, `MM-LIFE-2l`) | `scripts/check-runtime-model.sh` |
 | R-A6, A8, A10 | Unsafe effects, join ownership and name resolution | `scripts/check-diagnostics.sh`, `scripts/check-metamorphic.sh` |
+| R-A11 | Inline assembly checked at the form, and an assembler error reported at its line (`MM-FFI-9`) | `scripts/check-embedded.sh`, `scripts/check-diagnostics.sh` |
 | R-B1–B3 | Bounds, bounded pools and checked regions | `scripts/check-reclaim-soak.sh`, `scripts/check-region-escape.sh` |
 | R-B4–B6 | Program obligations, foreign captures and trusted Unsafe boundaries | `scripts/check-restrictions.sh` |
 | R-B7–B10 | Iterative release, slab reuse, recovery and typed kernel buffers | `scripts/check-reclaim-soak.sh`, `tests/stdlib/610-typed-io-bounds.ax` |
@@ -4854,8 +4855,6 @@ applies from the second stage of the bootstrap ladder.
 
 These leak, which is the safe direction:
 
-- a counted element taken out by `vecPop`, whose type-variable result
-  the caller never releases;
 - a vector passed straight to `vecGet` without a binding;
 - a container whose first element arrives through a call that can't
   see its type, such as a `cast` or a function value's thunk, which
@@ -4865,6 +4864,30 @@ These leak, which is the safe direction:
 
 `vecFree` and `mapFree` still end a container early. As after any
 release, using the handle afterwards is a use after free.
+
+**MM-LIFE-2n (H). A trusted function can hand its type-variable result
+over.** A call whose declared result is a type variable answers a value
+the caller borrows: `vecGet` lends an element the vector still holds,
+so the caller takes a share only when it binds the value and gives it
+back at scope end (above). `vecPop` is the other shape. It zeroes the
+vector's slot and hands the element's share to the caller, which a
+type-variable result can't say by itself, and the share leaked.
+
+A function says so with `;@axiom:result(owned)` on its signature. At a
+counted instantiation the caller then owns the result and releases it:
+at a `let`'s scope end when the binding doesn't escape, after a call
+it was passed to, and on the spot when it is discarded. Inside a
+polymorphic function the release follows the type variable's evidence
+bit, as a borrowed binding's does.
+
+The checker can't see that a share came back through a raw load, so
+the claim is accepted only on a declaration that also says
+`effect(unsafe)` on the same half, or whose body performs an unsafe
+operation; anywhere else it is `AX3116`, and so is any value but
+`owned`. A safe function's result ownership is inferred from its body
+and needs no claim. Tested by `tests/stdlib/846-vec-pop-release.ax`,
+`tests/diagnostics/1259-result-claim.ax` and
+`scripts/check-container-reclaim.sh`.
 
 A container is reclaimed by a raw arena reset like any other block
 (`MM-LIFE-4`), and the reset asks no count. So a counted binding, a
@@ -6765,32 +6788,54 @@ an instruction no primitive covers:
     1))
 ```
 
-A form is `(asm ARM...)`, and an arm is `(ARCH "template" operand...)`
+A form is `(asm ARM...)`, and an arm is `(ARCH "template" item...)`
 with `ARCH` either `aarch64` or `x86_64`, one arm each at most. The
-operands are:
+items are:
 
-| Operand | Meaning |
+| Item | Meaning |
 |---|---|
 | `(in name value)` | `value`, an `Int`, in a general-purpose register |
-| `(out name)` | a register the form answers when the instructions end |
-| `(inout name value)` | starts as `value` and is answered, in one register |
+| `(out name)` | a register the instructions write, no input's (`=&r`) |
+| `(lateout name)` | a register the instructions write, perhaps an input's (`=r`) |
+| `(inout name value)` | starts as `value` and ends as an output, no other input's register |
+| `(inlateout name value)` | as `inout`, perhaps sharing another input's register |
+| `(const name n)` | an integer folded from literals, written into the template as text |
+| `(sym name f)` | the symbol of `f`, a top-level `fn` or an `extern` item (`s`) |
 | `(clobber "reg"...)` | registers the instructions write that no operand names |
+| `(clobber_abi "C")` | every register the target's C convention lets a callee overwrite |
+| `(options word...)` | `pure`, `nomem`, `readonly`, `preserves_flags`, `noreturn`, `nostack`, `att_syntax`, `intel_syntax` |
 
-Any of the first three may name its register, as in `(in a "x8" v)`.
-An arm answers at most one value; with no `out` or `inout` the form
-answers 0. In the template, `{name}` is the operand's register,
-`{name:m}` a view of it (`w` or `x` on aarch64; `b`, `h`, `w`, `k` or
-`q` on x86_64), and `{{` and `}}` are literal braces. Everything else
-reaches the assembler as written, `$` included. x86_64 templates use
-AT&T syntax.
+The five register operands may name their register, as in
+`(in a "x8" v)`. An arm answers one output at most; every other output
+ends `into slot`, a `mut` `Int` binding the output is stored in after
+the instructions. With no answered output the form answers 0. In the
+template, `{name}` is an operand's register, a `const`'s text or a
+`sym`'s symbol, `{name:m}` a view of a register (`w` or `x` on aarch64;
+`b`, `h`, `w`, `k` or `q` on x86_64), and `{{` and `}}` are literal
+braces. Everything else reaches the assembler as written, `$`
+included. x86_64 templates use AT&T syntax unless the arm says
+`intel_syntax`.
 
 *What the implementation guarantees.* The compiler **MUST** refuse a
-malformed form where it is written, with `AX3091`. That covers an
-unknown architecture or operand kind, a second arm for one
-architecture, a template naming no operand, a second output, two
-operands in one register, and a register an arm can't name. The stack
-pointer, the frame pointer and AArch64's `x18` are never nameable, and
-`x30` only as a clobber.
+malformed form where it is written, at the part that is wrong, before
+any assembler runs:
+
+- `AX3091`: an unknown architecture, operand kind or option, or a
+  second arm for one architecture;
+- `AX3091`: a template naming no operand, with an unbalanced brace, with
+  a modifier the architecture has no view for, or defining a named
+  label;
+- `AX3091`: a second answered output, two operands with one name, two
+  operands or a clobber in one register, or a register an arm can't
+  name;
+- `AX3091`: a `const` it can't fold, or a `sym` naming a local, an
+  operator or a polymorphic function;
+- `AX3118`: an operand the template never names, unless it has a
+  register of its own;
+- `AX3119`: options that contradict each other or the arm.
+
+The stack pointer, the frame pointer and AArch64's `x18` are never
+nameable, and `x30` only as a clobber.
 
 It **MUST** emit only the arm for the target's architecture. That arm's
 inputs are evaluated once each, in the order written, before its
@@ -6799,10 +6844,21 @@ is type-checked. A form with no arm for the target is `AX4008` when a
 function the program reaches holds it, so a portable module may hold an
 arm per architecture.
 
-Every block is kept and ordered as a side effect (`sideeffect`) and
-clobbers memory and the condition flags, so it moves across no load,
-store or other side effect. An `out` never shares a register with an
-input (`=&r`).
+Every block is kept and ordered as a side effect (`sideeffect`) unless
+it says `pure`, and clobbers memory and the condition flags unless
+`nomem` or `preserves_flags` says otherwise, so it moves across no load,
+store or other side effect it might touch. `pure` lets the optimiser
+drop or merge a block (`memory(none)` with `nomem`, `memory(read)` with
+`readonly`). Unless it says `nostack`, a block may push to the stack:
+the stack pointer is aligned for a call and the function keeps nothing
+below it (`alignstack`). Code after a `noreturn` block is unreachable.
+An `out` or `inout` never shares a register with an input.
+
+Every template line carries a `!srcloc` cookie that names its bytes in
+the source. A line the assembler rejects, or whose operands the
+register allocator can't place, fails the build as `AX3117` at that
+line, with status 1. An `llc` failure that names no cookie stays
+`AX4003`.
 
 *What it does not guarantee*, each a program obligation:
 
@@ -6811,30 +6867,40 @@ input (`=&r`).
   (`MM-EXEC-9c`). That declaration says `;@axiom:effect(unsafe)` and
   vouches that the instructions keep every rule of this document,
   exactly as a trusted encapsulation vouches for a raw access
-  (`MM-EXEC-9d`). Any IO, blocking or trap they perform is the
-  declaration's to state.
+  (`MM-EXEC-9d`). Any IO, blocking or trap they perform, and any
+  function a `sym` lets them call, is the declaration's to state.
 - **The registers and the stack.** The instructions **MUST** leave the
-  stack pointer and the frame pointer as they found them, write no
-  register but the outputs and the clobbers, and use no stack. The
-  stack bound of `restricted-profile.md` rests on that.
+  stack pointer and the frame pointer as they found them, and write no
+  register but the outputs and the clobbers. With `nostack` they
+  **MUST** use no stack, a red zone included. The stack bound of
+  `restricted-profile.md` counts no push a block makes.
 - **Control flow.** The instructions **MUST** end by falling through:
-  no branch out of the block, no return and no exception return.
-- **The assembler.** `check` does not assemble a template. An
-  instruction the target's assembler rejects fails the build with the
-  assembler's message.
+  no branch out of the block, no return and no exception return. A
+  `noreturn` block **MUST** never finish.
+- **The options.** The instructions **MUST** keep every promise their
+  options make: a `pure` block has no effect but its outputs, a `nomem`
+  one touches no memory, a `readonly` one writes none, and a
+  `preserves_flags` one leaves the flags as it found them.
 
 *Limits.* Operands are `Int` words in general-purpose registers: no
-memory, floating-point or vector operands, and one output. Vector
-registers may be clobbered.
+memory, floating-point or vector operands. Vector registers may be
+clobbered. A label can't be shared between blocks.
 
-*Evidence:* `tests/stdlib/581-inline-asm.ax` answers the same on
-aarch64 and x86_64 at every `--opt` (`.optstable`).
-`tests/diagnostics/1044-inline-asm.ax` refuses each malformed shape
-beside a well-formed control, and
+*Evidence:* `tests/stdlib/581-inline-asm.ax` and
+`tests/stdlib/870-inline-asm-operands.ax` answer the same on aarch64
+and x86_64 at every `--opt` (`.optstable`).
+`tests/diagnostics/1044-inline-asm.ax` and
+`tests/diagnostics/1280-inline-asm-forms.ax` refuse each malformed
+shape beside well-formed controls, `1281-asm-operand-unused.ax`,
+`1282-asm-options.ax` and `1283-asm-sym-into.ax` hold `AX3118`,
+`AX3119` and the checker's half, and
 `tests/diagnostics/1045-inline-asm-unsafe.ax` holds the unsafe boundary.
 `scripts/check-embedded.sh` A15 keeps an unused block through
-`opt -O2`, checks the lowering on every target, and draws `AX4008` for
-a reached form with no arm and nothing for an unreached one.
+`opt -O2`, and checks and assembles the lowering of every operand kind
+and option on every target. It draws `AX4008` for a reached form with
+no arm and nothing for an unreached one. It builds
+`tests/embedded/asm-rejected.ax` and finds each `AX3117` at the line
+the fixture's bytes name.
 
 ---
 

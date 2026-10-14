@@ -208,7 +208,9 @@ The linker script reserves 8 KiB of stack (`baremetalLinkScript`,
   arbitrary word breaks that, and `__call_word` is Unsafe.
 - Inline assembly, the compiler's own (the trap exits, the recovery
   point, `_start`) and a program's `asm` forms, uses no stack beyond
-  its function's frame. Each such function is named in the report.
+  its function's frame. A program's `asm` form keeps that promise when
+  it says `nostack`; one that doesn't may push, and the bound doesn't
+  count what it pushes. Each such function is named in the report.
 - An interrupt adds one handler's bound on top of the interrupted
   code's (no nesting); the vector stub's register save area is not in
   the object and is not counted.

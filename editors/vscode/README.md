@@ -62,6 +62,10 @@ When the server's semantic tokens arrive they refine the grammar's
 answer, so a `let` binding or a parameter named like a function keeps
 the colour it should have.
 
+Editors with tree-sitter colour each token the same way: the queries in
+`tree-sitter-axiom/` give it the role the server and this grammar give
+it. Tested by `scripts/check-highlight-parity.sh`.
+
 The grammar's keyword list is written from the compiler's parser by
 `scripts/sync-keywords.mjs`. Run it after the parser learns a keyword.
 

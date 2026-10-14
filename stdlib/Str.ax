@@ -83,23 +83,31 @@
       (cast String s)
     }))
 
-;; A `Str` over freshly allocated, zeroed space for `len` bytes.
+;; A `Str` over freshly allocated, zeroed space for `len` bytes. A
+;; negative `len` stops the program with status 77, as a bad index does.
 ;
 ; `len + 1` bytes are reserved so the NUL terminator never overwrites
 ; payload; the allocator zeroes, so the terminator is already in place.
+;
+; The negative case is refused HERE, before the arithmetic: `-1` asked
+; the allocator for `len + 1 = 0` bytes, which it grants, and answered
+; a `String` whose length was -1 - `(concat "XYZ" s)` printed `XY` and
+; the program then crashed (tests/stdlib/849-size-refusals.ax).
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: strAlloc (-> Int String))
 ;@axiom:effect(unsafe)
 (pub fn (strAlloc len)
-  ; the header's own share of its buffer - one retain here makes
-  ; the rule uniform ("a `Str` header's death releases its owner
-  ; once"), which is what lets a slice outlive the header it was
-  ; cut from without the buffer going early or staying forever
-  (let ((bytes (memAlloc (+ len 1))))
-    {
-      (__retain bytes)
-      (strWrapOwned bytes len bytes)
-    }))
+  (if (< len 0)
+    __indexTrap
+    ; the header's own share of its buffer - one retain here makes
+    ; the rule uniform ("a `Str` header's death releases its owner
+    ; once"), which is what lets a slice outlive the header it was
+    ; cut from without the buffer going early or staying forever
+    (let ((bytes (memAlloc (+ len 1))))
+      {
+        (__retain bytes)
+        (strWrapOwned bytes len bytes)
+      })))
 
 ;; A `Str` sharing the bytes at a NUL-terminated address.
 ;

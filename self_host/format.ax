@@ -141,6 +141,12 @@
 (pub fn (FT_REGION)
   22)
 
+; `?`, the postfix that propagates an error. It joins the form it
+; TOUCHES, as `.name` does (`readPostfix`), and prints with no space.
+(pub :: FT_QUESTION Int)
+(pub fn (FT_QUESTION)
+  23)
+
 ; A token: its kind and its half-open byte range in the source.
 ;
 ; The lexeme is not stored. Every use of a token's text wants a slice of
@@ -318,7 +324,10 @@
                         true
                         (if (== ch 124)  ; |
                           true
-                          (if (== ch 63)  ; ?
+                          ; `?` is not an operator character: it is the
+                          ; postfix `FT_QUESTION`, its own token, as the
+                          ; compiler's lexer has it.
+                          (if false
                             true
                             (if (== ch 126)  ; ~
                               true
@@ -704,6 +713,11 @@
                                   (vecPush toks (mkFTok FT_DOT p (+ p 1)))
                                   (+ p 1)
                                 })
+                              (if (== ch 63)
+                                {
+                                  (vecPush toks (mkFTok FT_QUESTION p (+ p 1)))
+                                  (+ p 1)
+                                }
                               (if (isFOperChar ch)
                                 (fscanOperator src p len toks)
                                 (if (&& (== ch 64) (&& (< (+ p 1) len) (isFNameStart (strByte src (+ p 1)))))
@@ -717,7 +731,7 @@
                                     {
                                       (vecPush toks (mkFTok FT_ERROR p (+ p 1)))
                                       (+ p 1)
-                                    }))))))))))))))))))
+                                    })))))))))))))))))))
 
 ; A number, integer or float. `_` is a digit separator and a `.` makes
 ; it a float only when a digit follows, so `1.foo` is `1` then `.foo`.
@@ -987,6 +1001,11 @@
 (pub :: FN_QUAL Int)
 (pub fn (FN_QUAL)
   6)
+
+; `e?`: kid 0 is `e`.
+(pub :: FN_TRY Int)
+(pub fn (FN_TRY)
+  7)
 
 ; kind: one of the above. tok: the token for an ATOM or a PREFIX's
 ; marker, 0 otherwise. kids: a Vec of child nodes, 0 for an ATOM.
@@ -1321,6 +1340,16 @@
             (node (frNode cur))
           )
             (let ((k (ftKind (vecGet toks p))))
+              (if (&& (== k FT_QUESTION) (== (ftStart (vecGet toks p)) (fnEnd node)))
+                (set cur (mkFRead
+                  1
+                  (mkFNode
+                    FN_TRY
+                    (vecGet toks p)
+                    (vecPush vecNew node)
+                    (fnStart node)
+                    (ftEnd (vecGet toks p)))
+                  (+ p 1)))
               (if (&& (|| (== k FT_DOT) (== k FT_DCOLON)) (&& (== (ftStart (vecGet toks p)) (fnEnd node)) (== (ftEnd (vecGet toks p)) (ftStart (vecGet toks (+ p 1))))))
                 (let ((nameTok (vecGet toks (+ p 1))))
                   (if (!= (ftKind nameTok) FT_IDENT)
@@ -1348,7 +1377,7 @@
                             (ftEnd nameTok))
                           (+ p 2)))
                       })))
-                (set go 0)))))
+                (set go 0))))))
         cur
       })))
 
@@ -1742,6 +1771,8 @@
 
 (pub :: isSimpleForm (-> String Int Bool))
 (pub fn (isSimpleForm src n)
+  (if (== (fnKind n) FN_TRY)
+    (isSimpleForm src (fnKid n 0))
   (if (== (fnKind n) FN_ATOM)
     true
     ; A singleton brace block parses to its inner expression - `{e}` IS
@@ -1769,7 +1800,7 @@
             (allSimple src n 0)
             (if (isKeywordHead (fnHeadText src n))
               false
-              (allSimple src n 0))))))))
+              (allSimple src n 0)))))))))
 
 (pub :: allSimple (-> String Int Int Bool))
 (pub fn (allSimple src n i)
@@ -2615,7 +2646,9 @@
 ; parser would.
 (pub fn (fpIf p n)
   (let ((elems (fpExprElems n 1)))
-    (if (|| (< (vecLen elems) 3) (== (% (vecLen elems) 2) 0))
+    ; A chain that ends on a complete pair has no else and answers
+    ; `()` (`parseIfTail`), so two operands and any even count print.
+    (if (< (vecLen elems) 2)
       (fpBad p)
       (if (== (vecLen elems) 3)
         (let (
@@ -3299,6 +3332,11 @@
                 (fpP p (fnText src (fnKid n 1)))
               }
               (fpBad p))))
+        (if (== k FN_TRY)
+          {
+            (fpExpr p (fnKid n 0))
+            (fpP p "?")
+          }
         (if (== k FN_QUAL)
           {
             (fpQualLeft p (fnKid n 0))
@@ -3367,11 +3405,8 @@
                     (fpBeginVec p (fpExprElems n 0) 0)))
                 ; FN_PAREN.
                 (if (== (fnLen n) 0)
-                  ; `()` in expression position: refused by the parser, so refused
-                  ; here. It used to print `()` back and exit 0 - the formatter
-                  ; declaring a program well-formed that segfaulted the compiler
-                  ; that was about to read it.
-                  (fpBad p)
+                  ; `()`, the unit value.
+                  (fpP p "()")
                   (let ((h (fnHeadText src n)))
                     (if (strEq h "lambda")
                       (fpLambda p n)
@@ -3464,7 +3499,7 @@
                                                   ; through to `parseAppForm`: `(data 1)`
                                                   ; calls whatever `data` is bound to,
                                                   ; and the checker says what that is.
-                                                  (fpApp p n)))))))))))))))))))))))))
+                                                  (fpApp p n))))))))))))))))))))))))))
 
 ; ------------------------------------------------------------------
 ; Anchors: `Expr::span()` as a byte offset.
@@ -3961,6 +3996,8 @@
 (pub :: fpAnchor (-> String Int Int))
 (pub fn (fpAnchor src n)
   (let ((k (fnKind n)))
+    (if (== k FN_TRY)
+      (fpAnchor src (fnKid n 0))
     (if (== k FN_ATOM)
       (fnStart n)
       (if (== k FN_FIELD)
@@ -4020,7 +4057,7 @@
                                 (if (> (fnLen n) 1)
                                   (fnStart (fnKid n 1))
                                   0)
-                                (fpAnchor src (fnKid n 0))))))))))))))))))
+                                (fpAnchor src (fnKid n 0)))))))))))))))))))
 
 ; The operands a `cast` applies its result to, each after a space.
 (pub :: fpCastSurplus (-> Int (Vec Int) Int Int))

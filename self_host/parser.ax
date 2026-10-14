@@ -435,6 +435,13 @@
 (pub fn (TAG_E_HANDLE)
   42)
 
+; `E?`: propagate the error of `E`. a = E. The expander rewrites every
+; one into a `match` before the checker runs (`expTryRewrite`), so no
+; later pass sees it; the span covers `E` and the `?`.
+(pub :: TAG_E_TRY Int)
+(pub fn (TAG_E_TRY)
+  57)
+
 ; A NAMED constructor pattern: `(Rect { h = h, w = w })`. a=constructor
 ; name, b=Vec of field-name nodes (TAG_E_VAR, so each carries its own
 ; span - AX3007 anchors at the field name), c=Vec of sub-patterns,
@@ -749,6 +756,22 @@
 (pub :: mkEVar (-> String Int))
 (pub fn (mkEVar n)
   (mkNode TAG_E_VAR n 0 0))
+
+; `()`, the unit value: the one value of the unit type `()`, the empty
+; tuple. It is an integer literal 0 marked with 2 in word 2, so every
+; pass that treats a literal as a constant word with no ownership -
+; which is all of them - already handles it; only the checker reads
+; the mark, to give it the unit type. (Word 2 is 1 on the zero that
+; unary `-` inserts, `unaryMinusToBinary`.)
+(pub :: mkEUnitAt (-> Int Int))
+(pub fn (mkEUnitAt sp)
+  (mkNodeAt TAG_E_INT 0 2 0 sp))
+
+(pub :: isUnitLit (-> Int Bool))
+(pub fn (isUnitLit e)
+  (if (== e 0)
+    false
+    (&& (== (nodeTag e) TAG_E_INT) (== (nodeB e) 2))))
 
 ; Type-node constructors. parseType builds these; only the checker
 ; reads them.
@@ -4642,6 +4665,34 @@
 ; ------------------------------------------------------------------
 (pub :: parseExpr (-> (Vec Int) Int Int))
 (pub fn (parseExpr tokens pos)
+  (let ((r (parseExprCore tokens pos)))
+    (if (== (memGetWord r 0) 0)
+      r
+      (parsePostfix tokens r))))
+
+; A `?` directly after an expression wraps it: `(f x)?`, `v?`. It binds
+; tighter than application, so `(g (f x)?)` passes the propagated value
+; to `g`. Several in a row stack, `(f x)??`, which the expander then
+; propagates twice.
+(pub :: parsePostfix (-> (Vec Int) Int Int))
+(pub fn (parsePostfix tokens r)
+  (let ((pos (memGetWord r 2)))
+    (if (peekIs tokens pos TK_QUESTION)
+      (let ((inner (memGetWord r 1)))
+        (parsePostfix
+          tokens
+          (pOk
+            (mkNodeAt
+              TAG_E_TRY
+              inner
+              0
+              0
+              (mkSpan (spanStart (nodeSpan inner)) (spanEnd (tokenSpan (vecGet tokens pos)))))
+            (advance pos))))
+      r)))
+
+(pub :: parseExprCore (-> (Vec Int) Int Int))
+(pub fn (parseExprCore tokens pos)
   (if (peekIs tokens pos TK_INT)
     (parseLit tokens pos)
     (if (peekIs tokens pos TK_FLOAT)
@@ -4674,6 +4725,9 @@
 
 (pub :: parseInner (-> (Vec Int) Int Int))
 (pub fn (parseInner tokens pos)
+  (if (peekIs tokens pos TK_RPAREN)
+    ; `()`, the unit value.
+    (pOk (mkEUnitAt (tokenSpan (vecGet tokens (- pos 1)))) (advance pos))
   (if (peekIs tokens pos TK_IDENT)
     (let ((kw (vecGet tokens pos)))
       (let ((name (tokenLexeme kw)))
@@ -4801,7 +4855,7 @@
         ; drops it, and the formatter deletes it
         ; (`tests/fmt/parity/100-empty-form-dropped`).
         (pErrExp pos "expression")
-        (parseAppForm tokens pos)))))
+        (parseAppForm tokens pos))))))
 
 ; `(:: expr Type)` - a type ascription in EXPRESSION position, which is
 ; not the same form as the top-level `(:: name Type)` declaration even
@@ -5771,23 +5825,20 @@
 ;
 ; The arity falls out of the grammar rather than a count: after each
 ; pair the next expression is either the final else (a `)` follows)
-; or the next test. An even number of operands therefore fails exactly
-; where a missing operand always has - `(if t b e x)` at the `)`,
-; wanting an expression the way `(if t)` does - and every shorter
-; shape fails where it always has. Where it fails, it fails NAMED:
-; a missing operand at a `)` draws the `if` shape rather than the
-; generic "expected expression", because `(if t b)` is not a broken
-; expression but a chain without its else - reference.md's rule, "an
-; `if` always ends in its else operand: write it out". A genuinely
-; broken operand anywhere else keeps the generic refusal, which is
-; about the operand rather than the chain.
+; or the next test. A chain that ends on a complete pair has no else,
+; and the `if` supplies `()`: `(if t b)` and `(if t1 b1 t2 b2)` answer
+; the unit value, and the checker drops their branches' values
+; (`checkIf`). A missing test or branch still fails NAMED: `(if)` and
+; `(if t)` draw the `if` shape rather than the generic "expected
+; expression". A genuinely broken operand anywhere else keeps the
+; generic refusal, which is about the operand rather than the chain.
 ; ------------------------------------------------------------------
 (pub :: parseIfExpr (-> (Vec Int) Int Int))
 (pub fn (parseIfExpr tokens pos)
   (let ((testR (parseExpr tokens pos)))
     (if (== (memGetWord testR 0) 0)
       (if (peekIs tokens pos TK_RPAREN)
-        (pErrExp pos "the test operand: `if` takes `(if test then else)`, variadically `(if t1 b1 t2 b2 ... els)`")
+        (pErrExp pos "the test operand: `if` takes `(if test then else)`, or `(if test then)` to answer `()`, variadically `(if t1 b1 t2 b2 ... els)`")
         testR)
       (let (
         (test (memGetWord testR 1))
@@ -5796,7 +5847,7 @@
         (let ((thenR (parseExpr tokens afterTest)))
           (if (== (memGetWord thenR 0) 0)
             (if (peekIs tokens afterTest TK_RPAREN)
-              (pErrExp afterTest "the `then` branch and the else operand: `if` takes `(if test then else)`, variadically `(if t1 b1 t2 b2 ... els)`")
+              (pErrExp afterTest "the `then` branch: `if` takes `(if test then else)`, or `(if test then)` to answer `()`, variadically `(if t1 b1 t2 b2 ... els)`")
               thenR)
             (parseIfTail tokens (memGetWord thenR 2) test (memGetWord thenR 1))))))))
 
@@ -5805,16 +5856,17 @@
 ; the next test otherwise, whose own branch is parsed and the tail
 ; recursed. One `TAG_E_IF` per pair, right-nested - the fold is the
 ; desugar, so there is no second representation for any later pass
-; to learn. A `)` here ends the chain without its else, whatever the
-; depth: `(if t b)`, `(if t1 b1 t2 b2)`, and `(if t1 b1 t2)` all stop
-; where a pair is complete, so all three draw the shape rather than
-; the generic want.
+; to learn. A `)` where an else could stand ends the chain with the
+; unit value as its else: `(if t b)` and `(if t1 b1 t2 b2)`.
 (pub :: parseIfTail (-> (Vec Int) Int Int Int Int))
 (pub fn (parseIfTail tokens pos test thenEx)
   (let ((eR (parseExpr tokens pos)))
     (if (== (memGetWord eR 0) 0)
       (if (peekIs tokens pos TK_RPAREN)
-        (pErrExp pos "the else operand: `if` takes test-branch pairs and a final else `(if t1 b1 t2 b2 ... els)` - write it out, or continue with the next test")
+        ; No else: the `if` supplies `()`, so `(if t b)` runs `b` when
+        ; `t` holds and answers the unit value either way (the checker
+        ; drops `b`'s value, `checkIf`).
+        (pOk (mkEIf test thenEx (mkEUnitAt (tokenSpan (vecGet tokens pos)))) (advance pos))
         eR)
       (let (
         (e (memGetWord eR 1))
@@ -5986,7 +6038,11 @@
             vecNew
             vecNew)
           (parseArmPatternArgs tokens (advance (advance pos)) (mkEVarAt (tokenLexeme nameTok) (tokenSpan nameTok))))))
-    (parseExpr tokens pos)))
+    ; `()` is the unit value in an expression and no pattern: read as
+    ; one it would be the literal 0 and match a zero.
+    (if (&& (peekIs tokens pos TK_LPAREN) (peekIs tokens (advance pos) TK_RPAREN))
+      (pErrExp (advance pos) "expression")
+      (parseExpr tokens pos))))
 
 ; Reorder a named constructor pattern into the positional spine the
 ; rest of both compilers already understands. `declared` is the

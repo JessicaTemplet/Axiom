@@ -1112,7 +1112,7 @@
                         ; value follows the target in the source
                         ; and in this list.
                         (lspLintWalk lx (nodeB e))
-                        (if (== tag TAG_E_FIELD)
+                        (if (|| (== tag TAG_E_FIELD) (== tag TAG_E_TRY))
                           (lspLintWalk lx (nodeA e))
                           (if (== tag TAG_E_SETF)
                             {
@@ -2228,8 +2228,8 @@
           true
           (&& (== a 46) (== b 46)))))))
 
-; A two-byte punctuation token at the cursor - `::`, `->` or `..` -
-; as a span, or 0. The cursor may sit on either byte.
+; A punctuation token at the cursor - `::`, `->`, `..` or the postfix
+; `?` - as a span, or 0. The cursor may sit on either byte of a pair.
 (pub :: lspPunctSpan (-> String Int Int))
 (pub fn (lspPunctSpan src off)
   (let ((n (strLen src)))
@@ -2239,7 +2239,12 @@
         (lspPunctPairAt src (- off 1) n)
         false)
         (mkSpan (- off 1) (+ off 1))
-        0))))
+        ; `?`, the one-byte postfix that propagates an error
+        (if (if (< off n)
+          (== (strByte src off) 63)
+          false)
+          (mkSpan off (+ off 1))
+          0)))))
 
 ; Past the key of an AXTAG: the bytes up to its `(` or the end of the
 ; line, with trailing blanks left out.
@@ -5124,7 +5129,7 @@
                           (lspNavRef nv (nodeAName e) (nodeSpan e) NAV_WRITE)
                           (lspNavWalk nv (nodeB e))
                         }
-                        (if (== tag TAG_E_FIELD)
+                        (if (|| (== tag TAG_E_FIELD) (== tag TAG_E_TRY))
                           ; A field name is not a variable; the
                           ; base is.
                           (lspNavWalk nv (nodeA e))
@@ -6773,7 +6778,9 @@
     0
     (let ((tag (nodeTag e)))
       (if (== tag TAG_E_INT)
-        mkIntTy
+        (if (isUnitLit e)
+          mkUnitTy
+          mkIntTy)
         (if (== tag TAG_E_STR)
           mkStringTy
           (if (== tag TAG_E_CHAR)
@@ -9210,7 +9217,7 @@
                         (nodeB e)
                         rs
                         re)
-                      (if (== tag TAG_E_FIELD)
+                      (if (|| (== tag TAG_E_FIELD) (== tag TAG_E_TRY))
                         (lspViewHintsExpr
                           out
                           src
@@ -13567,7 +13574,9 @@
     "(syntax/unrenderable 0)"
     (let ((tag (nodeTag e)))
       (if (== tag TAG_E_INT)
-        (lspRenderInt (nodeA e))
+        (if (isUnitLit e)
+          "()"
+          (lspRenderInt (nodeA e)))
         (if (== tag TAG_E_STR)
           (lspRenderStr (nodeAName e))
           (if (== tag TAG_E_CHAR)
@@ -13602,6 +13611,8 @@
       (if (== tag TAG_E_REGION)
         (lspRenderForm (lspParts3 "region" (lspRenderName (nodeAName e)) (lspRenderExpr (nodeB e) (+ ind 2))) ind)
         (concat (concat (concat "(while " (lspRenderExpr (nodeA e) (+ ind 2))) (lspRenderLines (nodeBVec e) (+ ind 2))) ")"))
+      (if (== tag TAG_E_TRY)
+        (concat (lspRenderExpr (nodeA e) ind) "?")
       (if (== tag TAG_E_FIELD)
         (concat (concat (lspRenderExpr (nodeA e) ind) ".") (nodeBName e))
         (if (== tag TAG_E_SETF)
@@ -13618,7 +13629,7 @@
                       (lspRenderSynFor e ind)
                       (if (== tag TAG_M_ARM)
                         (lspRenderArm e ind)
-                        (concat (concat "(syntax/unrenderable " (fmtInt tag)) ")"))))))))))))
+                        (concat (concat "(syntax/unrenderable " (fmtInt tag)) ")")))))))))))))
 
 (pub :: lspParts2 (-> String String (Vec String)))
 (pub fn (lspParts2 a b)
@@ -14530,6 +14541,13 @@
 (pub fn (SEM_H_MACHDR)
   22)
 
+; `(syntax/join a B)`: the parts of a name a template builds. They are
+; read as plain words, whatever the form around the join expects of
+; the name, as the tree-sitter queries read them.
+(pub :: SEM_H_JOIN Int)
+(pub fn (SEM_H_JOIN)
+  23)
+
 ; The contexts. EXPR is a body; TYPE is a type position, where an
 ; uppercase name is a type and a lowercase name a type variable;
 ; DATA is directly inside a `data`, so a nested form is a constructor
@@ -14672,9 +14690,11 @@
                   SEM_H_HANDLE
                   (if (|| (strEq word "for") (strEq word "syntax/for"))
                     SEM_H_FOR
-                    (if (lspHlIsKeyword st word SEM_C_EXPR)
-                      SEM_H_KW
-                      SEM_H_OTHER)))))))))))
+                    (if (strEq word "syntax/join")
+                      SEM_H_JOIN
+                      (if (lspHlIsKeyword st word SEM_C_EXPR)
+                        SEM_H_KW
+                        SEM_H_OTHER))))))))))))
 
 ; The context a form's OWN identifiers take once its head is known:
 ; `import` names modules, `data` holds constructors, the type-shaped
@@ -14690,7 +14710,7 @@
       SEM_C_DATA
       (if (|| (== hc SEM_H_STRUCT) (|| (== hc SEM_H_SIG) (|| (== hc SEM_H_TYPE) (|| (== hc SEM_H_SUBTYPE) (|| (== hc SEM_H_EXTERN) (== hc SEM_H_EFFECT))))))
         SEM_C_TYPE
-        (if (|| (== hc SEM_H_FN) (== hc SEM_H_MACRO))
+        (if (|| (== hc SEM_H_FN) (|| (== hc SEM_H_MACRO) (== hc SEM_H_JOIN)))
           SEM_C_EXPR
           ctx)))))
 
@@ -15533,9 +15553,9 @@
     0
     (if (|| (strEq word "true") (strEq word "false"))
       (lspHlEmit st s e SEM_KEYWORD SEM_M_LIB)
-      (if (&& head (== (strVecHas (memGetWordVec st 8) word) 1))
+      (if (&& head (&& (lspHlFormHead ctx word) (== (strVecHas (memGetWordVec st 8) word) 1)))
         (lspHlEmit st s e SEM_KEYWORD SEM_M_DEPRECATED)
-        (if (|| (&& head (lspHlIsKeyword st word ctx)) (|| (&& (== hc SEM_H_FOR) (lspHlIn word "in by")) (&& (== hc SEM_H_SUBTYPE) (lspHlIn word "is range"))))
+        (if (|| (&& head (&& (lspHlFormHead ctx word) (lspHlIsKeyword st word ctx))) (|| (&& (== hc SEM_H_FOR) (lspHlIn word "in by")) (&& (== hc SEM_H_SUBTYPE) (lspHlIn word "is range"))))
           (lspHlEmit st s e SEM_KEYWORD 0)
           (if (lspHlIsOpWord (memGetWordStr st 0) s e)
             (lspHlEmit st s e SEM_OPERATOR (if (!= (lspShapeBuiltinRes word) 0)
@@ -15543,10 +15563,25 @@
               0))
             (if (&& (== state 1) (== hc SEM_H_CAST))
               (lspHlEmitPacked st s e (lspHlTypeClass word))
-              (let ((o (lspHlOccAt st s)))
-                (lspHlEmitPacked st s e (if (!= o 0)
-                  (lspHlOccClass st o word head ctx)
-                  (lspHlFormClass st s e word head hc state ctx)))))))))))
+              ; A `parallel`'s region name is a region, as a
+              ; `region`'s is, though the walk records it as a binding.
+              (if (&& (== state 1) (== hc SEM_H_PARALLEL))
+                (lspHlEmit st s e SEM_REGION 0)
+                (let ((o (lspHlOccAt st s)))
+                  (lspHlEmitPacked st s e (if (!= o 0)
+                    (lspHlOccClass st o word head ctx)
+                    (lspHlFormClass st s e word head hc state ctx))))))))))))
+
+; Can a keyword stand at the head of a bracket in context `ctx`? Not
+; where the head is a binder or a field: `(let ((for 5)) ...)` binds a
+; variable named `for`, and `(struct S (consume : Int))` declares a
+; field named `consume`, as the parser reads them. `mut` heads a
+; binding or a field, and a `syntax/` word builds a name anywhere.
+(pub :: lspHlFormHead (-> Int String Bool))
+(pub fn (lspHlFormHead ctx word)
+  (if (|| (strEq word "mut") (strStartsWith word "syntax/"))
+    true
+    (! (|| (== ctx SEM_C_LETPAIR) (|| (== ctx SEM_C_FNHDR) (|| (== ctx SEM_C_MACHDR) (|| (== ctx SEM_C_LAMHDR) (|| (== ctx SEM_C_FORHDR) (|| (== ctx SEM_C_MACPAT) (|| (== ctx SEM_C_MACPATIN) (== ctx SEM_C_TYPE)))))))))))
 
 ; What an occurrence's key says. A local is a parameter or a variable
 ; by its binder's kind, declared at its binder, modified at a `set`,

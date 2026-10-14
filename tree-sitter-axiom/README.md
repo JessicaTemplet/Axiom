@@ -9,8 +9,10 @@ tree-sitter-axiom/
 ├── src/scanner.c            the external scanner: nesting `#| ... |#`
 ├── src/parser.c             generated from grammar.js, committed
 ├── queries/highlights.scm   highlighting captures
+├── queries/locals.scm       scopes and bindings, so a parameter's uses take its colour
 ├── queries/rainbows.scm     bracket pairs by nesting depth (Helix `rainbow-brackets`, rainbow-delimiters.nvim)
 ├── test/corpus/             tree-shape tests
+├── test/highlight/          highlighting assertions, including loop keywords
 └── tree-sitter.json         CLI configuration
 ```
 
@@ -36,7 +38,9 @@ It runs these checks in order:
 3. `tree-sitter test` runs the corpus in `test/corpus/`, which pins the
    tree *shape* of each construct. A change that still parses
    everything but reorganises the tree would silently break every
-   query. This catches it.
+   query. This catches it. The highlighting assertions in
+   `test/highlight/` also check the captures, including `for`, `in`,
+   `by` and `set`.
 4. Every `.ax` file in the repository must parse with no `ERROR` node.
    This check matters most. Whoever changes the grammar writes the
    corpus, but `stdlib/` and `self_host/` get new language forms first,
@@ -47,6 +51,31 @@ It runs these checks in order:
    against those same files. A query that names a node type the grammar
    no longer has fails to load, so this proves the queries still match.
    The rainbow query must also capture brackets.
+
+## Colours match VS Code
+
+The queries give every token the role VS Code gives it: the language
+server's semantic token where it sends one, the extension's TextMate
+grammar everywhere else. There is one keyword colour, a word spelled
+only with operator characters is an operator wherever it stands, a
+capitalised name in an expression is a constructor, and the lexicon's
+builtin types and effects take the library's colour. No node is
+captured twice, so Neovim (where the last pattern wins) and Helix (where
+the first does) colour alike.
+
+`locals.scm` colours a parameter's uses as the parameter, as the server
+does. Tree-sitter's own highlighter and Helix read it for colour; Neovim
+reads it for navigation only, so there a parameter's uses are variables.
+
+Not yet: a use of a top-level function or macro outside its own body,
+or of a name from another module, is coloured by its syntax (a call, or
+a variable), where VS Code's server resolves it. A highlighter files a
+binding in the innermost scope it is written in, and a function's name
+is written inside the function. See the [roadmap](../docs/roadmap.md).
+
+Tested by `scripts/check-highlight-parity.sh`, which compares the two,
+character by character, over the standard library, the examples and the
+language server's fixtures.
 
 ## Design notes
 
@@ -107,12 +136,13 @@ compiler does decide, a `prec.dynamic` on the type-parameter list of
 
 ## Known gaps
 
-- No `injections.scm`, `locals.scm` or `folds.scm`. Highlighting and
-  structural selection work. Scope-aware rename and code folding don't.
+- No `injections.scm` or `folds.scm`. Highlighting and structural
+  selection work. Code folding doesn't.
 - No language bindings (`bindings/node`, `bindings/rust`). The grammar
   is verified through the CLI. The LSP will need bindings to use the
   grammar in-process, and that is when they should be added. Until
   something imports them, they would only be files to keep in sync.
-- `handle` inherits an ambiguity from the language. The grammar
-  reproduces the compiler's greedy reading, and the right fix belongs in
-  the language, not here.
+- `handle` inherits an ambiguity from the language: `(foo)` after the
+  body could be an effect list or a handler. The grammar takes the
+  compiler's reading, an effect list, and the right fix belongs in the
+  language, not here.

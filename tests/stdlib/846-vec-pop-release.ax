@@ -1,0 +1,76 @@
+; `vecPop` transfers the vector's share of the popped element to the
+; caller, and `;@axiom:result(owned)` on its signature is what lets
+; the caller's code hand that share back (MM-LIFE-2n): at a `let`'s
+; scope end, after a call it was an argument to, and on the spot when
+; it is discarded. Each shape below pops a fresh string many times; the
+; gate `scripts/check-container-reclaim.sh` measures that the loop's
+; memory stays flat, and this fixture pins that the value is still
+; whole at every use - a release one count too early would show as a
+; wrong length or a trap, not as silence.
+(import IO)
+(import Vec)
+(import Str)
+(import Fmt)
+
+(:: viaLet (-> Int Int))
+(fn (viaLet n)
+  (let ((v vecNew) (mut i 0) (mut total 0))
+    {
+      (while (< i n)
+        {
+          (vecPush v (concat "row-" (fmtInt i)))
+          (let ((s (vecPop v)))
+            (set total (+ total (strLen s))))
+          (set i (+ i 1))
+        })
+      total
+    }))
+
+(:: viaArg (-> Int Int))
+(fn (viaArg n)
+  (let ((v vecNew) (mut i 0) (mut total 0))
+    {
+      (while (< i n)
+        {
+          (vecPush v (concat "row-" (fmtInt i)))
+          (set total (+ total (strLen (vecPop v))))
+          (set i (+ i 1))
+        })
+      total
+    }))
+
+(:: viaDiscard (-> Int Int))
+(fn (viaDiscard n)
+  (let ((v vecNew) (mut i 0))
+    {
+      (while (< i n)
+        {
+          (vecPush v (concat "row-" (fmtInt i)))
+          (vecPop v)
+          (set i (+ i 1))
+        })
+      (vecLen v)
+    }))
+
+; A popped value that ESCAPES its `let` keeps its share: the binding is
+; returned, so the scope end must not release it.
+(:: popOut (-> (Vec String) String))
+(fn (popOut v)
+  (let ((s (vecPop v)))
+    s))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let ((v vecNew))
+    {
+      (vecPush v (concat "kept-" (fmtInt 1)))
+      (let ((k (popOut v)))
+        {
+          (println (viaLet 1000))
+          (println (viaArg 1000))
+          (println (viaDiscard 1000))
+          (println k)
+          0
+        })
+    }))

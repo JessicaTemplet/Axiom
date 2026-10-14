@@ -1,0 +1,118 @@
+; Describing and dumping a database: axqTables, axqColumns and
+; axqIndexes describe the schema, axqQueryOne and axqQueryInt read one
+; row, and axqDump writes a script that axqExecBatch loads into an
+; empty database, which then dumps to the same script. A DEFAULT or
+; CHECK can't take a parameter, and tables that link in a cycle can't
+; be dumped.
+(import IO)
+(import Str)
+(import Vec)
+(import Err)
+(import Axqlite)
+(import Axqlite.Value)
+(import AxqlKit)
+
+(:: showColumns (-> Connection String Int))
+;@axiom:effect(io)
+(fn (showColumns db table)
+  (match (axqColumns db table)
+    ((Ok cs)
+      (for c in cs
+        (let (
+          (n c.name)
+          (t c.columnType)
+          (nn c.notNull)
+          (pk c.primaryKey)
+          (l c.link)
+          (x c.text)
+        )
+          (println "  {n} {t} notNull={nn} pk={pk} link={l}: {x}"))))
+    ((Err e) (println (kitErrText e)))))
+
+(:: showIndexes (-> Connection String Int))
+;@axiom:effect(io)
+(fn (showIndexes db table)
+  (match (axqIndexes db table)
+    ((Ok ixs)
+      (for ix in ixs
+        (let (
+          (n ix.name)
+          (u ix.unique)
+          (cs (kitJoinNames ix.columns))
+        )
+          (println "  index {n} unique={u} on {cs}"))))
+    ((Err e) (println (kitErrText e)))))
+
+(:: kitJoinNames (-> (Vec String) String))
+(fn (kitJoinNames names)
+  (let ((mut out ""))
+    {
+      (for (n i) in names
+        (set out (if (== i 0)
+          n
+          (concat out (concat "," n)))))
+      out
+    }))
+
+(:: dumpOf (-> Connection String))
+;@axiom:effect(io)
+(fn (dumpOf db)
+  (match (axqDump db)
+    ((Ok s) s)
+    ((Err e) (concat "dump failed: " (kitErrText e)))))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let ((db (kitOpen "schema.db")))
+    {
+      (kitRun "teams" (axqExec db "CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"))
+      (kitRun "people" (axqExec db "CREATE TABLE \"people\" (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT 'anon', team LINK teams, boss LINK people, score REAL CHECK (score >= 0), photo BLOB)"))
+      (kitRun "index" (axqExec db "CREATE UNIQUE INDEX peopleByName ON people (name, team)"))
+      (kitRun "notes" (axqExec db "CREATE TABLE notes (body TEXT)"))
+      (kitRun "teams rows" (axqExec db "INSERT INTO teams VALUES (1, 'red'), (2, 'it''s blue')"))
+      (kitRun "people rows" (axqExec db "INSERT INTO people (id, name, team, boss, score, photo) VALUES (1, 'ann', 1, 2, 1e999, x'00ff'), (2, 'bo', 2, 2, 0.5, NULL), (3, 'cy', NULL, 1, NULL, x'')"))
+      (kitRun "notes rows" (axqExec db "INSERT INTO notes (rowid, body) VALUES (7, 'seven'), (9, NULL)"))
+      (match (axqTables db)
+        ((Ok ts) (let ((names (kitJoinNames ts))) (println "tables: {names}")))
+        ((Err e) (println (kitErrText e))))
+      (println "people:")
+      (showColumns db "people")
+      (showIndexes db "people")
+      (println "a table that isn't there:")
+      (showColumns db "peple")
+      (match (axqQueryOne db (axqlSelect people (name) (where (= id (int 2)))))
+        ((Ok (Some r)) (println (axqlRowText r)))
+        ((Ok (None)) (println "no row"))
+        ((Err e) (println (kitErrText e))))
+      (match (axqQueryOne db (axqlSelect people (name) (where (= id (int 9)))))
+        ((Ok (Some r)) (println (axqlRowText r)))
+        ((Ok (None)) (println "no row 9"))
+        ((Err e) (println (kitErrText e))))
+      (kitRun "count" (axqQueryInt db (axqlSelect people (as (count *) n))))
+      (kitRun "count of no row" (axqQueryInt db (axqlSelect people (id) (where (= id (int 9))))))
+      (kitRun "an int of TEXT" (axqQueryInt db (axqlSelect people (name))))
+      (let ((first (dumpOf db)))
+        {
+          (println first)
+          (let ((copy (kitOpen "copy.db")))
+            {
+              (kitRun "load" (axqExecBatch copy first))
+              (let (
+                (second (dumpOf copy))
+                (same (strEq first second))
+              )
+                (println "the copy dumps the same: {same}"))
+              (kitDump copy "SELECT name, team.name, boss.name, score FROM people ORDER BY id")
+              (kitRun "close copy" (axqClose copy))
+            })
+        })
+      (kitRun "default with a parameter" (axqRunOn db (Query "CREATE TABLE x (a INTEGER DEFAULT ?)" (vec1 (VInt 1)))))
+      (kitRun "check with a parameter" (axqRunOn db (Query "CREATE TABLE x (a INTEGER CHECK (a > ?))" (vec1 (VInt 1)))))
+      (kitRun "a" (axqExec db "CREATE TABLE a (id INTEGER PRIMARY KEY)"))
+      (kitRun "b" (axqExec db "CREATE TABLE b (id INTEGER PRIMARY KEY, toA LINK a)"))
+      (kitRun "a links b" (axqExec db "ALTER TABLE a ADD COLUMN toB LINK b"))
+      (println (dumpOf db))
+      (kitRun "close" (axqClose db))
+      0
+    }))

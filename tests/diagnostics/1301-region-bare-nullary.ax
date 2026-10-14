@@ -1,0 +1,53 @@
+; AX3060: a region value stored into a container built by a nullary
+; function written bare, `vecNew`. The region walk read such a name as
+; a static, so the container carried no origin and the store was never
+; checked; reading the string after the region ended crashed. The same
+; hole let a recovery point's thunk store into a vector built that way
+; before it (MM-ALLOC-23). `inside` is the control: a vector built in
+; the region it is filled in.
+(import IO)
+(import Str)
+(import Vec)
+
+(:: viaRegion Int)
+(fn (viaRegion)
+  (let ((v vecNew))
+    {
+      (region r
+        {
+          (vecPush v (concat "hel" "lo"))
+          0
+        })
+      (strLen (vecGet v 0))
+    }))
+
+(:: viaRecover Int)
+(fn (viaRecover)
+  (let ((v (vecPush vecNew (concat "orig" "inal"))))
+    {
+      (__axiom_recover
+        __axiom_arena_mark
+        (lambda (x)
+          {
+            (vecSet v 0 (concat "new-" "value"))
+            0
+          }))
+      (strLen (vecGet v 0))
+    }))
+
+(:: inside Int)
+(fn (inside)
+  (region r
+    (let ((v vecNew))
+      {
+        (vecPush v (concat "hel" "lo"))
+        (strLen (vecGet v 0))
+      })))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println (+ viaRegion (+ viaRecover inside)))
+    0
+  })

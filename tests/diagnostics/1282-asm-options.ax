@@ -1,0 +1,79 @@
+; AX3119: options that contradict each other or the form
+; (docs/memory-model.md MM-FFI-9). `good` is the control: options that
+; agree draw nothing.
+;
+;   `pureNothing`  `pure` with no output, so it does nothing
+;   `pureMemory`   `pure` without `nomem` or `readonly`
+;   `memBoth`      `nomem` and `readonly` together
+;   `pureForever`  `pure` and `noreturn` together
+;   `foreverOut`   `noreturn` with an output
+;   `syntaxArm`    `att_syntax` on aarch64
+;   `syntaxBoth`   `att_syntax` and `intel_syntax` together
+;   `memClobber`   `nomem` beside a `memory` clobber
+;   `flagClobber`  `preserves_flags` beside a flag clobber
+;   `abiAnyReg`    `clobber_abi` with an output in any register
+(:: good (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (good x)
+  (asm
+    (aarch64 "add {r}, {a}, {a}" (out r) (in a x) (options pure nomem nostack preserves_flags))
+    (x86_64 "lea {r}, [{a} + {a}]" (out r) (in a x) (options
+      pure
+      nomem
+      nostack
+      preserves_flags
+      intel_syntax))))
+
+(:: pureNothing Int)
+;@axiom:effect(unsafe)
+(fn (pureNothing)
+  (asm (aarch64 "nop" (options pure nomem))))
+
+(:: pureMemory (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (pureMemory x)
+  (asm (aarch64 "ldr {r}, [{a}]" (out r) (in a x) (options pure))))
+
+(:: memBoth (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (memBoth x)
+  (asm (aarch64 "ldr {r}, [{a}]" (out r) (in a x) (options nomem readonly))))
+
+(:: pureForever Int)
+;@axiom:effect(unsafe)
+(fn (pureForever)
+  (asm (aarch64 "brk #1" (options pure noreturn))))
+
+(:: foreverOut Int)
+;@axiom:effect(unsafe)
+(fn (foreverOut)
+  (asm (aarch64 "mov {r}, #1\nbrk #1" (out r) (options noreturn))))
+
+(:: syntaxArm Int)
+;@axiom:effect(unsafe)
+(fn (syntaxArm)
+  (asm (aarch64 "nop" (options att_syntax))))
+
+(:: syntaxBoth Int)
+;@axiom:effect(unsafe)
+(fn (syntaxBoth)
+  (asm (x86_64 "nop" (options att_syntax intel_syntax))))
+
+(:: memClobber Int)
+;@axiom:effect(unsafe)
+(fn (memClobber)
+  (asm (aarch64 "nop" (clobber "memory") (options nomem))))
+
+(:: flagClobber Int)
+;@axiom:effect(unsafe)
+(fn (flagClobber)
+  (asm (x86_64 "nop" (clobber "flags") (options preserves_flags))))
+
+(:: abiAnyReg Int)
+;@axiom:effect(unsafe)
+(fn (abiAnyReg)
+  (asm (aarch64 "mov {r}, #1" (out r) (clobber_abi "C"))))
+
+(:: main Int)
+(fn (main)
+  0)
