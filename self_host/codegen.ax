@@ -604,6 +604,9 @@
       ; of the module (`emitAsmFiles`) rather than into each function,
       ; so a function's body never depends on its file's name.
       (vecPushVec ps vecNew)
+      ; slot 22: the module names `__axiom_arena_cap`, so the allocator
+      ; checks the cap before it maps a chunk (`arenaCapOn`, `parScan`).
+      (vecPush ps 0)
       (addTypeNamed
         ts
         "Some"
@@ -6134,6 +6137,7 @@
         1
         0))
     (pairSetSlot cg 19 (resRegistryWanted decls))
+    (pairSetSlot cg 22 (declsNamePrim decls "__axiom_arena_cap" 0))
     cg
   })
 
@@ -11770,6 +11774,7 @@
     (emitLine cg "  store i64 %cnext, ptr %prevlinkp")
     (emitLine cg "  br label %install")
     (emitLine cg "map:")
+    (emitArenaCapCheck cg "%chunk")
     (emitRuntimeMap cg "%chunk")
     (emitLine cg "  %failed_low = icmp ult i64 %addr, 4096")
     (emitLine cg "  %failed_neg = icmp ugt i64 %addr, -4096")
@@ -14680,8 +14685,77 @@
     (emitLine cg "")
     (emitArenaKeepHelper cg)
     (emitMemStatFn cg)
+    (emitArenaCapRuntime cg)
     cg
   })
+
+; ------------------------------------------------------------------
+; THE ARENA CAP (docs/memory-model.md MM-PAR-17). `(__axiom_arena_cap n)`
+; sets the most bytes the calling arena may have mapped - MM-ALLOC-24's
+; count 2, active and free chunks together - and answers the cap it
+; replaces; 0 is no cap. The allocator asks before it maps a FRESH
+; chunk, on both of its mapping paths (`refill:`'s `map:` and the keep
+; helper's `fresh:`): a mapping that would take the count past the cap
+; is refused as an out-of-memory trap, status 70 with a sentence of its
+; own, recoverable as the mapping refusal is. A chunk reused from the
+; free list maps nothing and is never refused.
+;
+; ONLY A MODULE THAT NAMES THE PRIMITIVE PAYS FOR IT (slot 22,
+; `parScan`): every other module's allocator is byte for byte what it
+; was, with no global, no call and no branch. The cap is a mutable
+; runtime global (`cgMutGlobal`), so under `--threads` it is per
+; thread, as the arena it caps is; a forked child inherits its
+; parent's, which `stdlib/Task.ax` sets in the child before the task
+; runs. The count is walked, not kept: the walk runs once per fresh
+; chunk (a megabyte), only while a cap is set.
+(pub :: arenaCapOn (-> Int Bool))
+(pub fn (arenaCapOn cg)
+  (== (pairSlot cg 22) 1))
+
+(pub :: emitArenaCapCheck (-> Int String Int))
+(pub fn (emitArenaCapCheck cg sizeExpr)
+  (if (arenaCapOn cg)
+    (emitLine cg (concat "  call void @__axiom_arena_cap_check(i64 " (concat sizeExpr ")")))
+    cg))
+
+(pub :: emitArenaCapRuntime (-> Int Int))
+(pub fn (emitArenaCapRuntime cg)
+  (if (arenaCapOn cg)
+    (let ((msg "axiom: out of memory (arena cap reached)"))
+      (let ((n (fmtInt (+ (strLen msg) 1))))
+        {
+          (emitLine cg (concat "@__axiom_arena_cap = " (concat (cgMutGlobal cg) " i64 0")))
+          (emitLine cg (concat "@__axiom_cap_msg = private unnamed_addr constant [" (concat n (concat " x i8] c\"" (concat msg "\\0A\"")))))
+          (emitLine cg (concat "define internal i64 @__axiom_arena_capped() " (concat trapFnAttrs " {")))
+          (emitLine cg "entry:")
+          (emitLine cg "  call i64 @__axiom_recover_abort(i64 70)")
+          (emitLine cg "  %capp = ptrtoint ptr @__axiom_cap_msg to i64")
+          (emitRuntimeWrite cg "%capp" n)
+          (emitLine cg "  call void @__axiom_backtrace()")
+          (emitRuntimeExit cg "70")
+          (emitLine cg "  unreachable")
+          (emitLine cg "}")
+          (emitLine cg "")
+          (emitLine cg "define internal void @__axiom_arena_cap_check(i64 %want) #0 {")
+          (emitLine cg "entry:")
+          (emitLine cg "  %cap = load i64, ptr @__axiom_arena_cap")
+          (emitLine cg "  %on = icmp ne i64 %cap, 0")
+          (emitLine cg "  br i1 %on, label %count, label %fits")
+          (emitLine cg "count:")
+          (emitLine cg "  %mapped = call i64 @__axiom_mem_stat_fn(i64 2)")
+          (emitLine cg "  %after = add i64 %mapped, %want")
+          (emitLine cg "  %over = icmp ugt i64 %after, %cap")
+          (emitLine cg "  br i1 %over, label %refuse, label %fits")
+          (emitLine cg "refuse:")
+          (emitLine cg "  call i64 @__axiom_arena_capped()")
+          (emitLine cg "  unreachable")
+          (emitLine cg "fits:")
+          (emitLine cg "  ret void")
+          (emitLine cg "}")
+          (emitLine cg "")
+          cg
+        }))
+    cg))
 
 ; MM-ALLOC-24: `@__axiom_mem_stat_fn(k)`, the allocator's own counts.
 ;
@@ -14823,6 +14897,7 @@
     ; static region on a keep that fits.
     (emitLine cg (concat "  %rounded0 = add i64 %need, " (concat (fmtInt (- (targetArenaGrainBytes (memGetWord cg 26)) 1)) "")))
     (emitLine cg (concat "  %want = and i64 %rounded0, " (concat (fmtInt (- 0 (targetArenaGrainBytes (memGetWord cg 26)))) "")))
+    (emitArenaCapCheck cg "%want")
     (emitRuntimeMap cg "%want")
     (emitLine cg "  %failed_low = icmp ult i64 %addr, 4096")
     (emitLine cg "  %failed_neg = icmp ugt i64 %addr, -4096")
@@ -20026,7 +20101,7 @@
                                       true
                                       (if (strEq nm "__axiom_arena_reset_keeping")
                                         true
-                                        (if (strEq nm "__axiom_mem_stat")
+                                        (if (|| (strEq nm "__axiom_mem_stat") (strEq nm "__axiom_arena_cap"))
                                         true
                                         ; Not spellable in source: `checkNumeric` rewrites `==`/`!=` into
                                         ; these when it can see that BOTH operands are `String`. They are
@@ -20146,8 +20221,8 @@
                                         (if (strEq fnName "__axiom_arena_mark_into") (emitPrimArenaMarkInto args cg) (emitPrimArenaReset args cg))
                                         (if (strEq fnName "__axiom_arena_reset_keeping")
                                           (emitPrimArenaResetKeeping args cg)
-                                          (if (strEq fnName "__axiom_mem_stat")
-                                          (emitPrimMemStat args cg)
+                                          (if (|| (strEq fnName "__axiom_mem_stat") (strEq fnName "__axiom_arena_cap"))
+                                          (if (strEq fnName "__axiom_mem_stat") (emitPrimMemStat args cg) (emitPrimArenaCap args cg))
                                           (if (strEq fnName "__streq")
                                             (emitPrimStrEq args cg 1)
                                             (if (strEq fnName "__strne")
@@ -20714,6 +20789,22 @@
       (let ((r (regStr (allocReg cg0))))
         (let ((cg1 (emitLine cg0 (concat "  " (concat r (concat " = call i64 @__axiom_mem_stat_fn(i64 " (concat k ")")))))))
           {
+            (memSetWord cg1 2 r)
+            cg1
+          })))))
+
+; `(__axiom_arena_cap n)` -> the cap it replaces (MM-PAR-17): one load
+; and one store of `@__axiom_arena_cap`, which `emitArenaCapRuntime`
+; defines in every module that names the primitive.
+(pub :: emitPrimArenaCap (-> (Vec Int) Int Int))
+;@axiom:effect(io)
+(pub fn (emitPrimArenaCap args cg)
+  (let ((cg0 (emitExpr (vecGet args 0) cg)))
+    (let ((v (strDup (memGetWordStr cg0 2))))
+      (let ((r (regStr (allocReg cg0))))
+        (let ((cg1 (emitLine cg0 (concat "  " (concat r " = load i64, ptr @__axiom_arena_cap")))))
+          {
+            (emitLine cg1 (concat "  store i64 " (concat v ", ptr @__axiom_arena_cap")))
             (memSetWord cg1 2 r)
             cg1
           })))))

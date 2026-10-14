@@ -6054,6 +6054,8 @@ deadline/cancellation handling. Tested by
   and unstarted tasks. The pool state predates each snapshot.
   `scripts/check-task.sh` compares its peak RSS at 500 and 5,000 tasks
   of 4 KiB answers.
+- **Budgets.** `MM-PAR-17` lists every budget a pool keeps, and what
+  running out of each answers.
 - **A refused spawn is a value too.** A spawn the kernel refuses, or
   one the handle table has no slot for, answers `Err` 78 in its task's
   slot, or 70 when no page could be mapped for the handle. It cancels
@@ -6439,6 +6441,68 @@ and 2 and holds the peak RSS after 100,000 of each to that after
 `tests/diagnostics/1235-shared-free-removed.ax`: the removed frees and
 a capture at a hand-written spawn refused.
 `tests/diagnostics/1236-shared-heap-marker.ax`: the marker's shape.
+
+**MM-PAR-17 (H; its stack clause P). A task pool's budgets are fixed
+when it starts, and running one out is an answer in a slot.** It is
+never a hang or a dropped task. `TaskOpts` holds every bound a `Task`
+pool keeps (`MM-PAR-13`), and each has a stated outcome:
+
+| Budget | Set by | Bounds | When it runs out |
+|---|---|---|---|
+| Workers | `width` | children alive at once, and the handles they hold | a spawn the kernel or the handle table refuses answers `Err` 78 (or 70) in its slot, and the pool is cancelled |
+| Queue | none | a task not yet started is its index, so waiting costs nothing; submission blocks while `width` are out | nothing to run out of |
+| Answers in flight | `width` and `limit` | the slab: `width` slots of `limit` bytes | an answer over `limit` answers `Err` 1003 |
+| Kept answers | `keep` (`taskWithKeep`) | the answer bytes one `taskMap`, `taskMapWith` or `taskMapDecoded*` call holds | the answer that would pass it, and every non-empty `Ok` after it, answers `Err` `taskOverBudgetCode` (1012), and the pool is cancelled |
+| Task memory | `memory` (`taskWithMemory`) | bytes one task's arena may map beyond what its process began with | the task traps 70 in its own process and answers `Err` 70, "task out of memory"; its siblings and the caller go on |
+| Stack | none yet | a task runs on the stack of the thread that started the pool | a task that overflows it dies of the signal and answers that status, 139 or 138, in its slot |
+
+`keep` and `memory` default to 0, no bound. `taskFold` holds no answer,
+so `keep` doesn't bound it, and each task's arena is its own process's.
+A call still answers one `Result` per task, so `taskMap`'s answer is
+O(n) words however small `keep` is.
+
+*Shutdown.* A cancellation, from the token, `failFast`, a refused spawn
+or the `keep` budget, starts nothing more. Every task not yet started
+answers 1002, every running task gets `grace` and is then killed and
+reaped, and every slot is delivered once, in submit order. The pool
+then returns through its normal path: the slab is unmapped, a private
+token let go, and the closure that held the caller's function, with
+everything it captured, released.
+
+*The arena cap.* `(__axiom_arena_cap n)` sets the most bytes the
+calling arena may have mapped, active and free chunks together
+(`MM-ALLOC-24`'s count 2), and answers the cap it replaces; 0 is no
+cap. The allocator asks before it maps a fresh chunk, on both of its
+mapping paths. A mapping that would pass the cap is refused as an
+out-of-memory trap: status 70, `axiom: out of memory (arena cap
+reached)`, recoverable as the mapping refusal is.
+
+A chunk reused from the free list maps nothing and is never refused. A
+module that doesn't name the primitive emits none of it. The cap is a
+mutable runtime global, so under `--threads` it is per thread, as the
+arena it caps is. A task's child sets it before the task runs.
+
+*Limits.* Not yet: a task's stack size isn't a budget, so a pool started
+from a `--threads` binding gives its tasks that thread's smaller stack
+([roadmap](roadmap.md#concurrency-and-bounded-execution)). The memory
+budget counts the arena's mapped chunks, not what the kernel or a
+foreign library maps for the task.
+
+*Evidence.* `tests/stdlib/852-task-budgets.ax`: a `keep` budget
+spent on the third answer, a task over its `memory` budget beside one
+under it, and a shutdown from inside a task with the arena's live
+bytes back where they were. `scripts/check-task.sh` §13 runs both
+lowerings:
+
+- peak RSS flat from 500 to 5,000 tasks under `keep`, against a
+  control that grows;
+- the runaway tasks held under 64 MiB, against one that reaches
+  200 MiB;
+- a shutdown with 36 tasks queued or running, whose pids are all gone;
+- 20 against 200 rounds of an over-budget pool, flat in peak RSS and in
+  the arena's live bytes;
+- three ablations, each red: the budget never checked, the cap never
+  set, and a region around each spawn again.
 
 ---
 

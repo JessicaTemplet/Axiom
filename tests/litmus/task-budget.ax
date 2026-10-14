@@ -1,0 +1,273 @@
+; A task pool's budgets under load (stdlib/Task.ax, docs/memory-model.md
+; MM-PAR-17). `scripts/check-task.sh` section 13 reads what each mode
+; prints, and measures peak RSS around some of them.
+;
+;   task-budget keep N        N tasks of 4 KiB answers, width 4, a `keep`
+;                             budget of 64 KiB: prints how many answered
+;                             Ok, over the budget (1012) and cancelled
+;                             (1002)
+;   task-budget nokeep N      the same with no `keep` budget: the control
+;                             that holds every answer
+;   task-budget hog MIB       three tasks, a `memory` budget of 16 MiB:
+;                             one allocates 1 MiB, one MIB MiB, one for
+;                             ever; prints each answer
+;   task-budget hog2 MIB      the first two of those tasks, under the same
+;                             budget: what an ablation can run safely
+;   task-budget nocap MIB     those two tasks with no `memory` budget: the
+;                             control, whose MIB-MiB task answers Ok
+;   task-budget shutdown      40 tasks of 200 ms, width 4, cancelled from
+;                             a sibling binding at 300 ms with 50 ms of
+;                             grace: prints the counts, every task's pid
+;                             and how long the pool took, and the bytes
+;                             the arena held before and after it
+;   task-budget soak R        R rounds of 16 tasks of 4 KiB answers, each
+;                             round over its 48 KiB `keep` budget, the
+;                             answers let go after each round; prints the
+;                             arena's live bytes at the end
+;   task-budget soakkeep R    the same, keeping every round's answers: the
+;                             control
+(import IO)
+(import Str)
+(import Fmt)
+(import Mem)
+(import Vec)
+(import Err)
+(import Sys)
+(import Chrono)
+(import Task)
+
+(:: nap (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (nap ms)
+  (match (durationFromMillis ms)
+    ((Ok d)
+      (match (sleepFor d)
+        ((Ok z) 0)
+        ((Err e) (errCode e)))
+    )
+    ((Err e) (errCode e))))
+
+; Counts of the answers: Ok, 1012 and 1002, then the rest.
+(:: tally (-> (Vec (Result String Error)) String))
+(fn (tally rs)
+  (let (
+    (mut ok 0)
+    (mut over 0)
+    (mut cancelled 0)
+    (mut other 0)
+  )
+    {
+      (for i in 0..(vecLen rs)
+        (match (vecGet rs i)
+          ((Ok s)
+            (set ok (+ ok 1))
+          )
+          ((Err e)
+            (if (== (errCode e) taskOverBudgetCode)
+              (set over (+ over 1))
+              (if (== (errCode e) taskCancelledCode)
+                (set cancelled (+ cancelled 1))
+                (set other (+ other 1))))
+          )))
+      (concat (concat (concat "ok " (fmtInt ok)) (concat " over " (fmtInt over))) (concat (concat " cancelled " (fmtInt cancelled)) (concat " other " (fmtInt other))))
+    }))
+
+; 4096 bytes of `x`: an answer whose pages the copy must touch.
+(:: page4k String)
+(fn (page4k)
+  (let ((mut s "xxxxxxxxxxxxxxxx"))
+    {
+      (for i in 0..8
+        (set s (concat s s)))
+      s
+    }))
+
+(:: answers (-> Int Int Int (Vec (Result String Error))))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (answers n width keep)
+  (taskMapWith
+    (lambda (i) page4k)
+    n
+    (taskWithKeep (taskOpts width 4096) keep)))
+
+; A task that allocates `mib` MiB of arena in 4 KiB strings, so every
+; page is touched by a block's header, or allocates for ever when `mib`
+; is negative. Answers how many MiB it allocated.
+(:: hog (-> Int Int))
+(fn (hog mib)
+  (let (
+    (keep vecNew)
+    (mut i 0)
+  )
+    {
+      (while (|| (< mib 0) (< i (* mib 256)))
+        {
+          (vecPush keep (strAlloc 4080))
+          (set i (+ i 1))
+        })
+      (/ (vecLen keep) 256)
+    }))
+
+(:: show (-> (Result String Error) String))
+(fn (show r)
+  (match r
+    ((Ok s) (concat "ok " s))
+    ((Err e) (concat (concat "err " (fmtInt (errCode e))) (concat " " (errMessage e))))))
+
+(:: hogs (-> Int Int Bool Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (hogs mib cap endless)
+  (let ((rs 
+    (taskMapWith
+      (lambda (i)
+        (fmtInt
+          (hog
+            (if (== i 0)
+              1
+              (if (== i 1)
+                mib
+                (- 0 1)))))
+      )
+      (if endless
+        3
+        2)
+      (taskWithMemory (taskOpts 3 64) cap))))
+    {
+      (for i in 0..(vecLen rs)
+        (println (concat (concat "task " (fmtInt i)) (concat ": " (show (vecGet rs i))))))
+      0
+    }))
+
+; Shutdown with work queued and running: every task records its pid in
+; the page and sleeps 200 ms; a sibling binding cancels at 300 ms.
+(:: shutdown (-> Instant Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (shutdown t0)
+  (match taskTokenNew
+    ((Ok tok)
+      (match (sysMapShared 4096)
+        ((Ok page)
+          (let ((before memStats))
+            (let ((pair 
+              (parallel p (
+                (a (let ((rs 
+                  (taskMapWith
+                    (lambda (i)
+                      {
+                        (memSetWord page (+ i 1) sysPid)
+                        (nap 200)
+                        "done"
+                      }
+                    )
+                    40
+                    (taskWithGrace (taskWithToken (taskOpts 4 64) tok) 50000000))))
+                  (println (tally rs))))
+                (b {
+                  (nap 300)
+                  (taskCancel tok)
+                })
+              )
+                (+ a b))))
+              (let ((after memStats))
+                {
+                  (println
+                    (concat
+                      "ms "
+                      (fmtInt
+                        (/
+                          (match (instantElapsed t0)
+                            ((Ok d) (durationNanos d))
+                            ((Err e) 0))
+                          1000000))))
+                  (for i in 0..40
+                    (let ((pid (memGetWord page (+ i 1))))
+                      (if (> pid 0)
+                        (println (concat "pid " (fmtInt pid)))
+                        0)))
+                  (println (concat "backlog-grew " (fmtInt (- after.backlogBytes before.backlogBytes))))
+                  0
+                })))
+        )
+        ((Err e) 1))
+    )
+    ((Err e) 1)))
+
+(:: soak (-> Int Bool Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (soak rounds keepAll)
+  (let (
+    (held vecNew)
+    (mut ok 0)
+  )
+    {
+      (for r in 0..rounds
+        (let ((rs (answers 16 4 49152)))
+          {
+            (for i in 0..(vecLen rs)
+              (match (vecGet rs i)
+                ((Ok s)
+                  (set ok (+ ok 1))
+                )
+                ((Err e) 0)))
+            (if keepAll
+              {
+                (vecPush held rs)
+                0
+              }
+              0)
+          }))
+      (let ((st memStats))
+        (let ((live st.backlogBytes))
+          (println (concat (concat (concat "rounds " (fmtInt rounds)) (concat " ok " (fmtInt ok))) (concat " live " (fmtInt live))))))
+      (vecLen held)
+    }))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  (let (
+    (mode (sysArg 1))
+    (n (match (strParseInt (sysArg 2))
+      ((Some v) v)
+      ((None) 100)))
+  )
+    (if (strEq mode "keep")
+      {
+        (println (tally (answers n 4 65536)))
+        0
+      }
+      (if (strEq mode "nokeep")
+        {
+          (println (tally (answers n 4 0)))
+          0
+        }
+        (if (strEq mode "hog")
+          (hogs n 16777216 true)
+          (if (strEq mode "hog2")
+            (hogs n 16777216 false)
+            (if (strEq mode "nocap")
+              (hogs n 0 false)
+              (if (strEq mode "shutdown")
+                (match instantNow
+                  ((Ok t0) (shutdown t0))
+                  ((Err e) 1))
+                (if (strEq mode "soak")
+                  {
+                    (soak n false)
+                    0
+                  }
+                  {
+                    (soak n true)
+                    0
+                  })))))))))

@@ -164,6 +164,24 @@ its changelog too.
   compiler reports is an error. Tested by
   `tests/diagnostics/1008-error-payload-untyped.ax`.
 
+- Give task pools a `keep` and a `memory` budget. `taskWithKeep`
+  bounds the answer bytes one `taskMap` call holds: the answer that
+  would pass it answers `Err taskOverBudgetCode` (1012) and the pool is
+  cancelled. `taskWithMemory` caps each task's arena, so a task that
+  runs away traps 70 in its own process and answers `Err 70`, "task out
+  of memory", while its siblings and the caller go on. The cap is a new
+  runtime primitive, `__axiom_arena_cap`, emitted only into a module
+  that names it. `TaskOpts` gains the two fields, so a program that
+  builds one by hand passes two more zeros. Not yet: a task's stack
+  size. Tested by `tests/stdlib/852-task-budgets.ax` and
+  `scripts/check-task.sh`.
+- `taskMap` no longer loses about 110 bytes of arena a task. Each spawn
+  ran inside a `region`, whose reset emptied the allocator's free lists,
+  so what the pool had given back since the last spawn was lost for the
+  life of the process. A pool that keeps its answers now refreshes one
+  mark cell for its recovery points instead. Tested by
+  `scripts/check-task.sh`, which holds the arena's live bytes over 200
+  rounds of a pool to what they were after 20.
 - A cast to a spawn handle is a forging cast. `(cast Spawn x)`, or a
   cast to an alias of `Spawn`, where `x` isn't already a `Spawn`, now
   needs `;@axiom:effect(unsafe)` on its declaration, and draws

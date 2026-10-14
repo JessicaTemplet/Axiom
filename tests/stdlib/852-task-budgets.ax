@@ -1,0 +1,142 @@
+; A task pool's budgets (docs/memory-model.md MM-PAR-17). Every line is
+; the same on every run:
+;
+;   * `keep`: six tasks of 100-byte answers, one at a time, under a
+;     250-byte budget. Two answers fit; the third would pass it and
+;     answers 1012, and the pool stops, so the last three never start
+;     and answer 1002.
+;   * `memory`: under a 16 MiB budget a task that maps 1 MiB answers Ok
+;     and one that maps 64 MiB traps 70 in its own process and answers
+;     70, "task out of memory". The caller goes on.
+;   * Shutdown from inside the pool: task 1 cancels the pool's token and
+;     answers; task 0 sees the token, stops and answers; the four tasks
+;     queued behind them never start and answer 1002. The closure that
+;     held the caller's function and its 32 KiB capture is let go when
+;     the pool returns, so the arena's live bytes come back.
+;
+; `scripts/check-task.sh` section 13 runs the budgets at scale, in both
+; lowerings, with peak RSS measured against controls.
+(import IO)
+(import Str)
+(import Fmt)
+(import Mem)
+(import Vec)
+(import Err)
+(import Task)
+
+; An answer as a line: an `Ok` of 40 bytes or more by its length.
+(:: show (-> (Result String Error) String))
+(fn (show r)
+  (match r
+    ((Ok s)
+      (if (>= (strLen s) 40)
+        (concat (concat "ok, " (fmtInt (strLen s))) " bytes")
+        (concat "ok " s))
+    )
+    ((Err e) (concat (concat "err " (fmtInt (errCode e))) (concat " " (errMessage e))))))
+
+(:: showAll (-> String (Vec (Result String Error)) Int))
+;@axiom:effect(io)
+(fn (showAll what rs)
+  {
+    (for i in 0..(vecLen rs)
+      (println (concat (concat what (concat " " (fmtInt i))) (concat ": " (show (vecGet rs i))))))
+    0
+  })
+
+; Map `mib` MiB of arena, touching each block. Answers how many.
+(:: hog (-> Int Int))
+(fn (hog mib)
+  (let ((keep vecNew))
+    {
+      (for i in 0..mib
+        (vecPush keep (strAlloc 1048576)))
+      (vecLen keep)
+    }))
+
+(:: keepRun Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (keepRun)
+  (showAll
+    "keep"
+    (taskMapWith
+      (lambda (i) (strAlloc 100))
+      6
+      (taskWithKeep (taskOpts 1 128) 250))))
+
+(:: memoryRun Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (memoryRun)
+  (showAll
+    "memory"
+    (taskMapWith
+      (lambda (i)
+        (fmtInt
+          (hog
+            (if (== i 0)
+              1
+              64)))
+      )
+      2
+      (taskWithMemory (taskOpts 2 64) 16777216))))
+
+; Task 1 cancels; task 0 waits for the token and stops. Both read the
+; 32 KiB string the closure captured.
+(:: shutdownRun Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (shutdownRun)
+  (match taskTokenNew
+    ((Ok tok)
+      (let ((big (strAlloc 32768)))
+        (let ((rs 
+          (taskMapWith
+            (lambda (i)
+              (if (== i 1)
+                {
+                  (taskCancel tok)
+                  (concat "cancelled, " (fmtInt (strLen big)))
+                }
+                (if (== i 0)
+                  {
+                    (while (! (taskCancelled tok))
+                      0)
+                    (concat "stopped, " (fmtInt (strLen big)))
+                  }
+                  "ran"))
+            )
+            6
+            (taskWithToken (taskOpts 2 64) tok))))
+          (showAll "shutdown" rs)))
+    )
+    ((Err e) 1)))
+
+(:: live Int)
+(fn (live)
+  (let ((st memStats))
+    st.backlogBytes))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  (let ((before live))
+    {
+      keepRun
+      memoryRun
+      shutdownRun
+      (let ((grew (- live before)))
+        (println
+          (concat
+            "the arena's live bytes came back: "
+            (if (<= grew 4096)
+              "yes"
+              (fmtInt grew)))))
+      0
+    }))

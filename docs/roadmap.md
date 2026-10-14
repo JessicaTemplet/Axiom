@@ -113,7 +113,7 @@ integrator would still need.
 | Channels, mutexes and cancel tokens are owners, so disposal can't race a use | Done | `MM-PAR-15`, `MM-PAR-16`, `tests/stdlib/803-shared-owner.ax` |
 | Owned task inputs and results, with cleanup across joins, cancellation and failure | In progress | `MM-PAR-6` |
 | A `parallel` form keeps no arena storage once it returns, in both lowerings | Done | `tests/litmus/par-forms.ax`, `scripts/check-parallel.sh` |
-| Fixed worker, queue, memory and stack budgets, with exhaustion and shutdown tests | Not started | `MM-ALLOC-20` |
+| Fixed worker, queue, memory and stack budgets, with exhaustion and shutdown tests | In progress: a task's stack size isn't a budget yet | `MM-PAR-17` |
 | Shared mutable heap graphs across tasks | Not started | |
 
 ## Tools
