@@ -1,0 +1,62 @@
+; A cast to `Spawn` forges a handle (docs/memory-model.md MM-PAR-8,
+; MM-EXEC-9d), so only a declaration that says `effect(unsafe)` may
+; write one. This is the trusted side: the ordinary spawn and join
+; need no tag, and a handle carried across as a word and turned back by
+; `handleOf`, the trusted encapsulation `Task` and `Par` use, joins as
+; the handle it was.
+;
+; The run-time checks stay behind the static one. `handleOf`'s
+; precondition refuses a word below 65,536, which is a status and never
+; a handle (80); a word no spawn answered passes it and traps 85 at the
+; join; the last forged join is not recovered and exits 85.
+; tests/diagnostics/1260-spawn-forging-cast.ax is the refused side.
+(import IO)
+(import Mem)
+
+; A handle's word is its slot's generation, at least 1, times 2^16
+; plus the slot, so a word below 65,536 is never one.
+(:: handleOf (-> Int Spawn))
+;@axiom:effect(unsafe)
+;@axiom:pre((>= hw 65536))
+(fn (handleOf hw)
+  (cast Spawn hw))
+
+(:: wordOf (-> Spawn Int))
+(fn (wordOf h)
+  (cast Int h))
+
+; Join the handle `handleOf` makes of `hw`, inside a recovery point.
+(:: joinWord (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (joinWord hw)
+  (__axiom_recover
+    __axiom_arena_mark
+    (lambda (x) (__proc_join (handleOf hw)))))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  (let (
+    (h (__proc_spawn
+      (lambda (x) (+ x 1))
+      41))
+    (g (__proc_spawn
+      (lambda (x) (* x 2))
+      21))
+  )
+    {
+      (println (__proc_join h))  ; 42
+      (println (joinWord (wordOf g)))  ; 42
+      (let ((st (joinWord 78)))
+        (println "a status as a handle: status {st}"))
+      (let ((st (joinWord 1234567)))
+        (println "a word no spawn answered: status {st}"))
+      (__proc_join (handleOf 1234567))
+      ; `writeStr` and not `println`: `verify-stdlib-out.py` reads a
+      ; `println` literal as a line the program prints, and it cannot see
+      ; that the call above traps.
+      (writeStr stdout "UNREACHABLE: the trap returned\n")
+    }))

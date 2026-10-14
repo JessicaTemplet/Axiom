@@ -1572,9 +1572,8 @@ fi
 # A spawn handle captured by another binding is refused where it is
 # written (AX3064, MM-PAR-8), so the probe carries the handle's word
 # across with `cast` to reach the runtime's own refusal, which stays as
-# the check behind the checker's. A cast to `Spawn` is not an unsafe
-# operation today (`Par.ax`'s `parHandleOf` records the same limit), so
-# `main` performs none and claims none.
+# the check behind the checker's. A cast to `Spawn` forges a handle
+# (MM-EXEC-9d), so `main` says `effect(unsafe)`.
 for kind in proc thread; do
   for form in raising checked; do
     join_expr="(__${kind}_join (cast Spawn hw))"
@@ -1587,6 +1586,7 @@ for kind in proc thread; do
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
+;@axiom:effect(unsafe)
 (fn (main)
   (let (
     (cell (memAlloc 8))

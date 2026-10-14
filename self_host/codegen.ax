@@ -6642,9 +6642,10 @@
         (strEq nm "__spawn_pid")))))
 
 ; The table's slot count and its mapping's length: a 64-byte header
-; (free-list head, bump index) and 65,536 slots of 16 bytes, rounded up
-; to pages. An index is the handle's low 16 bits, so every index a
-; word can spell is inside the mapping.
+; (free-list head, bump index, the salt `emitHandleFirstGen` reads) and
+; 65,536 slots of 16 bytes, rounded up to pages. An index is the
+; handle's low 16 bits, so every index a word can spell is inside the
+; mapping.
 (pub :: handleSlots Int)
 (pub fn (handleSlots)
   65536)
@@ -6700,6 +6701,65 @@
             cgV
           })))))
 
+; A SLOT'S FIRST GENERATION IS NOT 1. With every slot starting at 1,
+; the first handle a program made was always the word 65,536, the next
+; 65,537, and a trusted declaration that cast a guessed word to `Spawn`
+; joined a live child it never spawned: a scan of words from 0 joined
+; the first child and took its answer, and its owner's own join then
+; trapped 85. So a slot used for the first time starts at a generation
+; drawn from a salt - the table's own address, which the kernel
+; places, mixed with the counter read when the table is made - spread
+; per slot by SplitMix64's finalizer. A generation is 1 to 2^40, so a
+; word no spawn answered names a live slot with a chance near 2^-40,
+; and traps 85 instead. A reused slot still moves to the next
+; generation, and a word keeps its shape, `(generation << 16) | index`:
+; positive, and at least 65,536. This defends against a word that is
+; wrong, not one read out of memory: the unsafe layer can read the
+; table, and the salt is no secret from it (MM-PAR-8).
+;
+; The salt is word 2 of the table's header, stored before the install's
+; compare-and-swap publishes the table.
+(pub :: emitHandleSalt (-> Int Int Int))
+(pub fn (emitHandleSalt cg t)
+  {
+    (if (targetIsAArch64 t)
+      (emitLine cg "  %ctr = call i64 asm sideeffect \"mrs $0, cntvct_el0\", \"=r,~{memory}\"()")
+      (emitLine cg "  %ctr = call i64 asm sideeffect \"rdtsc\\0Ashlq $$32, %rdx\\0Aorq %rdx, %rax\", \"={ax},~{dx},~{dirflag},~{fpsr},~{flags},~{memory}\"()"))
+    (emitLine cg "  %salt = xor i64 %ctr, %m")
+    (emitLine cg "  %saltp0 = add i64 %m, 16")
+    (emitLine cg "  %saltp = inttoptr i64 %saltp0 to ptr")
+    (emitLine cg "  store atomic i64 %salt, ptr %saltp seq_cst, align 8")
+    cg
+  })
+
+; `@__axiom_handle_first_gen(t, idx)`: SplitMix64's finalizer over the
+; salt plus the index, cut to 40 bits, plus one: 1 to 2^40.
+(pub :: emitHandleFirstGen (-> Int Int))
+(pub fn (emitHandleFirstGen cg)
+  {
+    (emitLine cg "define internal i64 @__axiom_handle_first_gen(i64 %t, i64 %idx) #0 {")
+    (emitLine cg "entry:")
+    (emitLine cg "  %saltp0 = add i64 %t, 16")
+    (emitLine cg "  %saltp = inttoptr i64 %saltp0 to ptr")
+    (emitLine cg "  %salt = load atomic i64, ptr %saltp seq_cst, align 8")
+    (emitLine cg "  %x = add i64 %salt, %idx")
+    (emitLine cg "  %z0 = add i64 %x, -7046029254386353131")
+    (emitLine cg "  %z1s = lshr i64 %z0, 30")
+    (emitLine cg "  %z1x = xor i64 %z0, %z1s")
+    (emitLine cg "  %z1 = mul i64 %z1x, -4658895280553007687")
+    (emitLine cg "  %z2s = lshr i64 %z1, 27")
+    (emitLine cg "  %z2x = xor i64 %z1, %z2s")
+    (emitLine cg "  %z2 = mul i64 %z2x, -7723592293110705685")
+    (emitLine cg "  %z3s = lshr i64 %z2, 31")
+    (emitLine cg "  %z3 = xor i64 %z2, %z3s")
+    (emitLine cg "  %g40 = lshr i64 %z3, 24")
+    (emitLine cg "  %g = add i64 %g40, 1")
+    (emitLine cg "  ret i64 %g")
+    (emitLine cg "}")
+    (emitLine cg "")
+    cg
+  })
+
 (pub :: emitHandleRuntime (-> Int Int))
 (pub fn (emitHandleRuntime cg)
   (if (== (pairSlot cg 13) 0)
@@ -6741,6 +6801,9 @@
             (emitLine cg "  %bad = or i1 %low, %neg")
             (emitLine cg "  br i1 %bad, label %none, label %install")
             (emitLine cg "install:")
+            ; The salt goes in before the table is published, so every
+            ; thread that can find the table finds it salted.
+            (emitHandleSalt cg t)
             (emitLine cg "  %cx = cmpxchg ptr @__axiom_htab, i64 0, i64 %m seq_cst seq_cst")
             (emitLine cg "  %won = extractvalue { i64, i1 } %cx, 1")
             (emitLine cg "  br i1 %won, label %mine, label %lost")
@@ -6805,8 +6868,13 @@
         (emitLine cg "  %e = call i64 @__axiom_handle_slot(i64 %t, i64 %idx)")
         (emitLine cg "  %sp = inttoptr i64 %e to ptr")
         (emitLine cg "  %st = load atomic i64, ptr %sp seq_cst, align 8")
+        ; A slot never used before starts at the generation its salt
+        ; and index give it; a reused one moves to the next.
+        (emitLine cg "  %unused = icmp eq i64 %st, 0")
         (emitLine cg "  %g0 = lshr i64 %st, 9")
-        (emitLine cg "  %g = add i64 %g0, 1")
+        (emitLine cg "  %gnext = add i64 %g0, 1")
+        (emitLine cg "  %gfirst = call i64 @__axiom_handle_first_gen(i64 %t, i64 %idx)")
+        (emitLine cg "  %g = select i1 %unused, i64 %gfirst, i64 %gnext")
         (emitLine cg "  %pa = add i64 %e, 8")
         (emitLine cg "  %pp = inttoptr i64 %pa to ptr")
         (emitLine cg "  store atomic i64 %addr, ptr %pp seq_cst, align 8")
@@ -6822,6 +6890,7 @@
         (emitLine cg "  ret i64 0")
         (emitLine cg "}")
         (emitLine cg "")
+        (emitHandleFirstGen cg)
         ; The state a live handle `%h` of `%kind` must find in its slot.
         (emitLine cg "define internal i64 @__axiom_handle_want(i64 %kind, i64 %h) #0 {")
         (emitLine cg "entry:")

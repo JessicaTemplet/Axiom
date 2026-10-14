@@ -16,6 +16,23 @@ its changelog too.
 
 ## Unreleased
 
+- A cast to a spawn handle is a forging cast. `(cast Spawn x)`, or a
+  cast to an alias of `Spawn`, where `x` isn't already a `Spawn`, now
+  needs `;@axiom:effect(unsafe)` on its declaration, and draws
+  `AX3073` without it. Before, safe code could spell a handle no spawn
+  made, and only the handle table's trap at the join (status 85)
+  caught it. `Task` and `Par` keep their one such cast each, in a
+  trusted helper with a precondition. A program that casts a word to
+  `Spawn` adds the tag. Tested by
+  `tests/diagnostics/1260-spawn-forging-cast.ax` and
+  `scripts/check-handles.sh`.
+- A guessed word no longer names a live spawn handle. Each handle-table
+  slot's first generation is drawn from a salt instead of starting at
+  1, so the first handle a program makes is no longer the word 65,536.
+  A trusted cast of a guessed word traps 85 at the join instead of
+  joining a child it never spawned. Tested by
+  `tests/litmus/spawn-scan.ax`, which scans the words 0 to 400,000, in
+  `scripts/check-handles.sh`.
 - Add `axiom doc`. It renders the documentation set, one page per
   standard library module from the `;;` doc comments, and the language
   index to HTML under `~/.cache/axiom/doc` (or `--out DIR`), then opens
