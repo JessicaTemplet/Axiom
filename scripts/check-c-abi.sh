@@ -81,7 +81,7 @@ cat > "$work/usec.ax" <<'AX'
   (cCnt  :: (-> String Int Int) (symbol "axc_countbyte")))
 
 ;@axiom:effect(io)
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
@@ -93,7 +93,6 @@ cat > "$work/usec.ax" <<'AX'
       (println (fmtInt (cFib 30)))
       (println (fmtInt (cLen s)))
       (println (fmtInt (cCnt s 108)))
-      0
     }
   )
 )

@@ -223,13 +223,12 @@ echo "== 2. what each lowering imports =="
 cat > "$work/plain.ax" <<'PLAIN'
 (import IO)
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println "plain")
-    0
   }
 )
 PLAIN
@@ -400,7 +399,7 @@ done
 cat > "$work/fine.ax" <<'FINE'
 (import IO)
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -408,7 +407,7 @@ cat > "$work/fine.ax" <<'FINE'
 (fn (main)
   (parallel p ((a 1) (b 2))
     (println (+ a b))
-    0))
+    ()))
 FINE
 run_case "$work/fine.ax" "" fine || true
 if [[ "$(cat "$work/fine.status" 2>/dev/null)" == 0 && "$(cat "$work/fine.out")" == 3 ]]; then
@@ -773,7 +772,7 @@ cat > "$work/nrpar.ax" <<'NRPAR'
 
 (import Mem)
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -785,7 +784,6 @@ cat > "$work/nrpar.ax" <<'NRPAR'
         {
           (println (cast Int ans))
           (println (cast Int (memGetWord cell 0)))
-          0
         }))))
 NRPAR
 cat > "$work/nrtrap.ax" <<'NRTRAP'
@@ -793,7 +791,7 @@ cat > "$work/nrtrap.ax" <<'NRTRAP'
 
 (import Mem)
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -805,7 +803,6 @@ cat > "$work/nrtrap.ax" <<'NRTRAP'
         {
           (println (cast Int ans))
           (println (cast Int (memGetWord cell 0)))
-          0
         }))))
 NRTRAP
 if run_case "$work/nrpar.ax" "" nrpar-p && run_case "$work/nrpar.ax" "--threads" nrpar-t; then
@@ -960,7 +957,7 @@ cat > "$work/arena.ax" <<'ARENA'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -973,7 +970,6 @@ cat > "$work/arena.ax" <<'ARENA'
       (println c)
       (println d))
     (println (build 100))
-    0
   }
 )
 ARENA
@@ -1086,7 +1082,7 @@ cat > "$work/traps.ax" <<'TRAPS'
 
 (fn (fastDiv z) (/ 10 z))
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -1104,7 +1100,6 @@ cat > "$work/traps.ax" <<'TRAPS'
         (parallel q ((a (fastDiv zero)) (b (slowIndex 40000000)))
           (println (+ a b))))
       (println "UNREACHABLE")
-      0
     }
   )
 )
@@ -1654,7 +1649,7 @@ cat > "$work/refuse.ax" <<'AX'
   )
     (+ a b)))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
@@ -1667,7 +1662,6 @@ cat > "$work/refuse.ax" <<'AX'
       (println "recovered {st}"))
     (println (pair 1))
     (println "NOT REACHED")
-    0
   })
 AX
 if [[ "$(id -u)" == 0 ]]; then

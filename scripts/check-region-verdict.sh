@@ -329,14 +329,13 @@ cat > "$work/litprobe.ax" <<'AX'
     (strLen acc)
     (tailOf (- n 1) "in tail position")))
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (+ (argOf 1) (+ (letOf 1) (tailOf 3 "seed"))))
     (boxOf 1)
-    0
   })
 AX
 # name:pin - full-ablation pins, each its slice's pin plus the other
@@ -506,13 +505,12 @@ cat > "$work/combo.ax" <<'AX'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (loop 300000))
-    0
   }
 )
 AX

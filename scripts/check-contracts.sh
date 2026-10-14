@@ -86,7 +86,7 @@ cat > "$work/recover.ax" <<'AX'
 
 (fn (half n) (/ n 2))
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
@@ -98,7 +98,6 @@ cat > "$work/recover.ax" <<'AX'
     {
       (println "recovered {inside}")
       (half 0)
-      0
     }
   )
 )

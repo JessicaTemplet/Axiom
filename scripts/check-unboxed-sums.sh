@@ -94,13 +94,12 @@ write_fixture() {
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (sum 0 0))
-    0
   }
 )
 AX
@@ -237,7 +236,7 @@ cat > "$work/us/ref.ax" <<'AX'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
@@ -253,7 +252,6 @@ cat > "$work/us/ref.ax" <<'AX'
       (println s1)
       (println s2)
       (println (if (== c1 c2) (- a2 a1) (- 0 1)))
-      0
     }
   )
 )
@@ -340,13 +338,12 @@ cat > "$work/us/tail.ax" <<'AX'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (+ (viaTail 5) (viaTail (- 0 2))))
-    0
   }
 )
 AX
@@ -406,13 +403,12 @@ cat > "$work/us/indirect.ax" <<'AX'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (viaLet 21))
-    0
   }
 )
 AX
@@ -458,13 +454,12 @@ cat > "$work/us/value.ax" <<'AX'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (applyIt optFind 21))
-    0
   }
 )
 AX
@@ -523,13 +518,12 @@ cat > "$work/us/claim.ax" <<'AX'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (+ (direct 4) (stored 5)))
-    0
   }
 )
 AX

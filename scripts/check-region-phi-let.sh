@@ -262,13 +262,12 @@ cat > "$work/loop.ax" <<'AX'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (loop 300000))
-    0
   }
 )
 AX
@@ -333,7 +332,7 @@ cat > "$work/evil.ax" <<'AX'
 
 (fn (getInner o) (match o ((MkBox x) x)))
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
@@ -350,7 +349,6 @@ cat > "$work/evil.ax" <<'AX'
           (println (getInner c.b))
           0
         })
-      0
     }))
 AX
 built_new=0; built_abl=0

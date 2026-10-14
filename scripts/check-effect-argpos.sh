@@ -86,8 +86,8 @@ cat > "$work/probe/argpos.ax" <<'AX'
 (:: viaField (-> Cell Int Int))
 (fn (viaField c x) ((c.run) x))
 
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 AX
 
 # probe_rows <compiler> <outfile>: the probe file's own AXSYM rows.
@@ -175,8 +175,8 @@ cat > "$work/lib/lib.ax" <<'AX'
 (fn (dispatch h n)
   ((h.run) n))
 
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 AX
 ( cd "$work/lib" && AXIOM_STDLIB="$repo_root/stdlib" \
     "$axc" --diagnostic-format=ai symbols lib.ax ) 2>"$work/lib.err" \

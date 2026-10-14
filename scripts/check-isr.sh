@@ -62,8 +62,8 @@ cat > "$work/typo.ax" <<'TYPO'
 ;@axiom:isrr
 (fn (tick) 1)
 
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 TYPO
 "$axc" --diagnostic-format=ai check "$work/typo.ax" > "$work/typo.out" 2> "$work/typo.err"; rctypo=$?
 if [[ "$rctypo" == 1 ]] && grep -q '^E AX3039 .*did you mean `isr`' "$work/typo.err"; then

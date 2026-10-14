@@ -683,7 +683,7 @@ else
     ((Some v) v)
     ((None) 0)))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let (
@@ -694,7 +694,6 @@ else
   )
     {
       (println (fmtInt (peek p k)))
-      0
     }))
 AX
   abin="$work/overread"

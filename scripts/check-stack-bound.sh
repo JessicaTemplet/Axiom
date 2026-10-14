@@ -340,8 +340,8 @@ cat >"$work/hi.ax" <<'AX'
 (import IO)
 
 ;@axiom:effect(io)
-(:: main Int)
-(fn (main) { (println "hi") 0 })
+(:: main ())
+(fn (main) { (println "hi") })
 AX
 hi_ceiling=4096
 if pipeline "$work/hi.ax" 1 "hi"; then
@@ -376,12 +376,11 @@ if pipeline "$work/hi.ax" 1 "hi"; then
 (import Str)
 
 ;@axiom:effect(io)
-(:: main Int)
+(:: main ())
 (fn (main)
   (let ((s (concat "h" "i")))
     {
       (println s)
-      0
     }))
 AX
   if pipeline "$work/hirel.ax" 1 "hirel"; then

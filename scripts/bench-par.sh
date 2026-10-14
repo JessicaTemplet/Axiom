@@ -42,9 +42,9 @@ trap 'rm -rf "$work"' EXIT
 axiom="$AXIOM_AXC"
 
 cat > "$work/b_empty.ax" <<'AX'
-(:: main Int)
+(:: main ())
 (fn (main)
-  0)
+  ())
 AX
 
 cat > "$work/b_spawn.ax" <<'AX'
@@ -52,7 +52,7 @@ cat > "$work/b_spawn.ax" <<'AX'
 (import Par)
 (import Vec)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
@@ -61,7 +61,6 @@ cat > "$work/b_spawn.ax" <<'AX'
     (let ((s (vecSum out)))
       {
         (println "{s}")
-        0
       })))
 AX
 
@@ -79,7 +78,7 @@ cat > "$work/b_alloc.ax" <<'AX'
       (vecSum v)
     }))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
@@ -88,7 +87,6 @@ cat > "$work/b_alloc.ax" <<'AX'
     (let ((s (vecSum out)))
       {
         (println "{s}")
-        0
       })))
 AX
 
@@ -98,7 +96,7 @@ cat > "$work/b_runall.ax" <<'AX'
 (import Str)
 (import Vec)
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
@@ -116,7 +114,6 @@ cat > "$work/b_runall.ax" <<'AX'
           (let ((s (vecSum codes)))
             {
               (println "{n} {s}")
-              0
             })))
     }))
 AX

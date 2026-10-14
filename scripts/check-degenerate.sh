@@ -114,8 +114,8 @@ deg empty-arg 1 <<'AXEOF'
 (fn (main) (+ 1 ()))
 AXEOF
 deg empty-let-val 0 <<'AXEOF'
-(:: main Int)
-(fn (main) (let ((x ())) 0))
+(:: main ())
+(fn (main) (let ((x ())) ()))
 AXEOF
 deg empty-let-body 1 <<'AXEOF'
 (:: main Int)
@@ -130,8 +130,8 @@ deg empty-if-then 1 <<'AXEOF'
 (fn (main) (if true () 2))
 AXEOF
 deg empty-block 0 <<'AXEOF'
-(:: main Int)
-(fn (main) { () 0 })
+(:: main ())
+(fn (main) { () })
 AXEOF
 deg empty-block-tail 1 <<'AXEOF'
 (:: main Int)
@@ -146,8 +146,8 @@ deg empty-head 1 <<'AXEOF'
 (fn (main) (() 1))
 AXEOF
 deg empty-match-scrut 0 <<'AXEOF'
-(:: main Int)
-(fn (main) (match () ((_) 0)))
+(:: main ())
+(fn (main) (match () ((_) ())))
 AXEOF
 deg empty-match-arm 1 <<'AXEOF'
 (:: main Int)
@@ -191,18 +191,18 @@ deg empty-deep 1 <<'AXEOF'
 AXEOF
 deg empty-toplevel 1 <<'AXEOF'
 ()
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 AXEOF
 deg empty-toplevel-twice 1 <<'AXEOF'
 ()
 ()
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 AXEOF
 deg empty-fn-body-decl 1 <<'AXEOF'
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 (:: g Int)
 (fn (g) ())
 AXEOF
@@ -233,17 +233,17 @@ deg bracket-one 1 <<'AXEOF'
 AXEOF
 deg empty-struct-decl 0 <<'AXEOF'
 (struct S)
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 AXEOF
 deg empty-data-decl 0 <<'AXEOF'
 (data D)
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 AXEOF
 deg empty-let-binds 0 <<'AXEOF'
-(:: main Int)
-(fn (main) (let () 0))
+(:: main ())
+(fn (main) (let () ()))
 AXEOF
 # A lambda with no parameters can never be called, since `(f)` and `f`
 # are the same expression, so it is refused with AX3068. The case pins
@@ -253,7 +253,7 @@ deg empty-lambda-params 1 <<'AXEOF'
 (fn (main) ((lambda () 1)))
 AXEOF
 deg empty-match-arms 0 <<'AXEOF'
-(:: main Int)
+(:: main ())
 (fn (main) (match 1))
 AXEOF
 deg bare-cond-removed 1 <<'AXEOF'
@@ -275,8 +275,8 @@ deg empty-import 1 <<'AXEOF'
 AXEOF
 deg import-empty-names 0 <<'AXEOF'
 (import IO ())
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 AXEOF
 # `(trait T)`, `(impl T)` and `(type)` are a known keyword in a shape the
 # parser cannot read. Each is refused with AX2003, spanning the keyword.
@@ -284,13 +284,13 @@ AXEOF
 # parse of nothing lets a declaration vanish at exit 0.
 deg empty-trait 1 <<'AXEOF'
 (trait T)
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 AXEOF
 deg empty-impl 1 <<'AXEOF'
 (impl T)
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 AXEOF
 deg empty-macro-params 0 <<'AXEOF'
 (macro (m) 1)
@@ -342,8 +342,8 @@ AXEOF
 deg sig-nested-unit 0 <<'AXEOF'
 (:: f (-> () Int))
 (fn (f x) 0)
-(:: main Int)
-(fn (main) 0)
+(:: main ())
+(fn (main) ())
 AXEOF
 deg ascribe-unit 1 <<'AXEOF'
 (:: main Int)
@@ -357,8 +357,8 @@ deg deep-parens-200 0 <<'AXEOF'
 (fn (main) (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 (+ 1 0))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
 AXEOF
 deg deep-brace-200 0 <<'AXEOF'
-(:: main Int)
-(fn (main) { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { 0 } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } })
+(:: main ())
+(fn (main) { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { () } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } })
 AXEOF
 deg deep-list-200 1 <<'AXEOF'
 (:: main Int)
@@ -411,6 +411,7 @@ deg only-rparen 1 <<'AXEOF'
 )
 AXEOF
 deg empty-file 0 <<'AXEOF'
+
 AXEOF
 deg whitespace-only 0 <<'AXEOF'
    
@@ -477,16 +478,16 @@ AXEOF
 # Patterns. `parseArmPattern` falls back to `parseExpr`, so an empty
 # pattern is the same defect reached through another door.
 deg match-empty-pat 1 <<'AXEOF'
-(:: main Int)
-(fn (main) (match 1 (() 0)))
+(:: main ())
+(fn (main) (match 1 (() ())))
 AXEOF
 deg match-nested-empty 1 <<'AXEOF'
-(:: main Int)
-(fn (main) (match 1 ((Just ()) 0)))
+(:: main ())
+(fn (main) (match 1 ((Just ()) ())))
 AXEOF
 deg match-dup-binder 0 <<'AXEOF'
-(:: main Int)
-(fn (main) (match 1 ((x) 0)))
+(:: main ())
+(fn (main) (match 1 ((x) ())))
 AXEOF
 deg match-literal-pat 0 <<'AXEOF'
 (:: main Int)

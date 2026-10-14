@@ -83,13 +83,12 @@ bad() { echo "FAIL $1"; checks=$((checks + 1)); failed=$((failed + 1)); }
 cat > "$work/hello.ax" <<'PROBE'
 (import IO)
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println "hello")
-    0
   }
 )
 PROBE
@@ -123,7 +122,7 @@ cat > "$work/sorted.ax" <<'PROBE'
 
 (fn (desc a b) (- b a))
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
@@ -150,7 +149,6 @@ cat > "$work/sorted.ax" <<'PROBE'
       )
         (println "{x}{y}{z} {d}")
       )
-      0
     }
   )
 )
@@ -343,9 +341,9 @@ fi
 # all costs. Expressed against `bare` rather than as an absolute, so it
 # measures the pass and not this month's runtime size.
 cat > "$work/bare.ax" <<'PROBE'
-(:: main Int)
+(:: main ())
 
-(fn (main) 0)
+(fn (main) ())
 PROBE
 "$axc" build --input "$work/bare.ax" --output "$work/bare" >/dev/null 2>&1
 bare_n="$(nm "$work/bare" 2>/dev/null | wc -l | tr -d ' ')"

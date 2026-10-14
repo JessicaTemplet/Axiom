@@ -161,7 +161,7 @@ cat > "$work/nest.ax" <<'PROBE'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
@@ -175,7 +175,6 @@ cat > "$work/nest.ax" <<'PROBE'
         (println "outer saw {b}")
         (println "outer caught {c}")
         (println "deep {d}")
-        0
       }
     )
   )

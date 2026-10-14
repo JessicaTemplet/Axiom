@@ -158,7 +158,7 @@ cat > "$work/probe.ax" <<'AX'
 
 (fn (errInt r) (match r ((Ok n) n) ((Err e) (- 0 e.code))))
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
@@ -212,7 +212,6 @@ cat > "$work/probe.ax" <<'AX'
           (kvInt "SCOPE_RESTORED" (if (== (memCmp save again termiosBytes) 0) 1 0))
         })
       (println "PROBE_DONE=1")
-      0
     }
   )
 )
@@ -237,7 +236,7 @@ cat > "$work/neg.ax" <<'AX'
 
 (fn (code r) (match r ((Ok _) 0) ((Err e) (- 0 e.code))))
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
@@ -253,7 +252,6 @@ cat > "$work/neg.ax" <<'AX'
         })
       ((Err e) (kvInt "NULL_OPEN" (- 0 e.code))))
     (println "NEG_DONE=1")
-    0
   }
 )
 AX

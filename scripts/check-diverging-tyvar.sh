@@ -244,9 +244,9 @@ cat > "$work/shapes.ax" <<'AX'
   )
 )
 
-(:: main Int)
+(:: main ())
 
-(fn (main) 0)
+(fn (main) ())
 AX
 rc="$(check_of shapes.ax)"
 refused="$(grep -oE '`p[A-Za-z]+` returns type variable' "$work/out" | grep -oE '^`p[A-Za-z]+`' | tr -d '`' | tr '\n' ' ' || true)"
@@ -419,9 +419,9 @@ cat > "$work/lenient.ax" <<'AX'
 
 (fn (bump x) x)
 
-(:: main Int)
+(:: main ())
 
-(fn (main) 0)
+(fn (main) ())
 AX
 rc="$(check_of lenient.ax)"
 if (( rc == 0 )); then

@@ -168,23 +168,21 @@ echo "--- 2. type-preserving casts keep ownership ---"
 cat > "$work/cast3.ax" <<'EOF'
 (import Mem)
 (import Str)
-(:: main Int)
+(:: main ())
 (fn (main)
   (let ((p (memAlloc 8)))
     {
       (memSetWord p 0 (strDup "hi"))
-      0
     }))
 EOF
 cat > "$work/cast4.ax" <<'EOF'
 (import Mem)
 (import Str)
-(:: main Int)
+(:: main ())
 (fn (main)
   (let ((p (memAlloc 8)))
     {
       (memSetWord p 0 (cast String (strDup "hi")))
-      0
     }))
 EOF
 if "$axc" --diagnostic-format=ai check "$work/cast3.ax" >/dev/null 2>&1 \
@@ -214,10 +212,10 @@ fi
 
 cat > "$work/scalar.ax" <<'EOF'
 (import Mem)
-(:: main Int)
+(:: main ())
 (fn (main)
   (let ((p (memAlloc 8)))
-    { (memSetWord p 0 (cast Int 7)) 0 }))
+    { (memSetWord p 0 (cast Int 7)) }))
 EOF
 if "$axc" --diagnostic-format=ai emit-llvm "$work/scalar.ax" -o "$work/scalar.ll" \
      > /dev/null 2> "$work/scalar.err"; then
@@ -351,9 +349,9 @@ cat > "$work/erase.ax" <<'EOF'
 (fn (num n)
   (cast Float n))
 
-(:: main Int)
+(:: main ())
 (fn (main)
-  0)
+  ())
 EOF
 "$axc" --diagnostic-format=ai symbols "$work/erase.ax" > "$work/erase.axsym" 2> "$work/erase.err" || true
 got_erase="$(awk '$1 == "F" { n = 0; for (i = 4; i <= NF; i++) if ($i ~ /^#erasures=/) { n = $i; sub(/^#erasures=/, "", n) } print $2 "=" n }' "$work/erase.axsym" \

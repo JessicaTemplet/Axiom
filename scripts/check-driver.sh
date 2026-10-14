@@ -36,9 +36,9 @@ gate_build_axc s1 "$work/axiom"
 cd "$work"
 cat >hello.ax <<'EOF'
 (import IO)
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
-(fn (main) { (println "driver-ok") 0 })
+(fn (main) { (println "driver-ok") })
 EOF
 printf '(:: main Int)\n(fn (main) 17)\n' >ec.ax
 printf '(:: main Int)\n(fn (main) (nope 1))\n' >bad.ax

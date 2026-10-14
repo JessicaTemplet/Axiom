@@ -231,7 +231,7 @@ cat > "$work/soak.ax" <<'AX'
 (fn (argInt i)
   (atoiFrom (sysArg i) 0 0))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((n (argInt 1)) (live (argInt 2)) (maxLen (argInt 3)))
@@ -241,7 +241,6 @@ cat > "$work/soak.ax" <<'AX'
         (let ((total (churn v n live maxLen 42 0)))
           (let ((lb (liveBytes v 0 0)) (held (__axiom_mem_stat 0)) (filed (__axiom_mem_stat 1)))
             (println "{total} {lb} {held} {filed}")))
-        0
       })))
 AX
 soak() {  # <binary> <n> <live> <maxLen> <key>
@@ -345,7 +344,7 @@ cat > "$work/cycles.ax" <<'AX'
     acc
     (atoiFrom s (+ i 1) (+ (* acc 10) (- (strByte s i) 48)))))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((shape (atoiFrom (sysArg 1) 0 0)) (n (atoiFrom (sysArg 2) 0 0)))
@@ -354,7 +353,6 @@ cat > "$work/cycles.ax" <<'AX'
         (let ((per (/ (- (- (__axiom_mem_stat 0) (__axiom_mem_stat 1)) b0) n)))
           {
             (println "{per}")
-            0
           })))))
 AX
 if build "$work/cycles.ax" "$work/cycles" 1; then
@@ -483,7 +481,7 @@ else
       k
     }))
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 ;@axiom:effect(spawn)
@@ -501,7 +499,6 @@ else
           (let ((same (== p (memAlloc 4000))))
             {
               (println "bad {b} main-block-back {same}")
-              0
             })))
     }))
 AX

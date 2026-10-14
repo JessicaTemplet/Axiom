@@ -233,8 +233,8 @@ fi
 cat > "$work/run/lifetime-converged.ax" <<'EOF'
 (:: rotate (-> String String Int String))
 (fn (rotate a b n) (if (== n 0) a (rotate b a (- n 1))))
-(:: main Int)
-(fn (main) (region r 0))
+(:: main ())
+(fn (main) (region r ()))
 EOF
 if "$axc" --diagnostic-format=ai check "$work/run/lifetime-converged.ax" \
     > /dev/null 2> "$work/run/lifetime-converged.err"; then

@@ -101,7 +101,7 @@ cat > "$work/simd/sum.ax" <<'EOF'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
@@ -110,7 +110,6 @@ cat > "$work/simd/sum.ax" <<'EOF'
       {
         (for r in 0..50 (set total (+ total (sumVec v))))
         (println total)
-        0
       }
     )
   )
@@ -148,7 +147,7 @@ cat > "$work/simd/bytes.ax" <<'EOF'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
@@ -157,7 +156,6 @@ cat > "$work/simd/bytes.ax" <<'EOF'
       {
         (for r in 0..20 (set total (+ total (countA s))))
         (println total)
-        0
       }
     )
   )
@@ -183,13 +181,12 @@ cat > "$work/simd/steps.ax" <<'EOF'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (steps 27))
-    0
   }
 )
 EOF
@@ -223,7 +220,7 @@ cat > "$work/simd/bump.ax" <<'EOF'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
@@ -231,7 +228,6 @@ cat > "$work/simd/bump.ax" <<'EOF'
     {
       (bump a)
       (println (vecGet a 999))
-      0
     }
   )
 )

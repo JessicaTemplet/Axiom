@@ -353,13 +353,12 @@ cat > "$work/fit.ax" <<'AX'
   )
 )
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (chain 100 0))
-    0
   }
 )
 AX
@@ -834,13 +833,12 @@ checks=$((checks + 1))
 cat > "$work/divtrap.ax" <<'AX'
 (import IO)
 
-(:: main Int)
+(:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
   {
     (println (/ 10 0))
-    0
   }
 )
 AX
@@ -1181,13 +1179,12 @@ cat > "$work/vol.ax" <<'AX'
           (+ (__vload64 (+ p 8)) (__vload64 (+ p 8))))))
   })
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((p (memAlloc 16)))
     {
       (println (twice p))
-      0
     }))
 AX
 # The control: the same double write, through the ordinary primitives.
@@ -1206,13 +1203,12 @@ cat > "$work/plain.ax" <<'AX'
     (+ (__load8 p 0) (__load64 p 1))
   })
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((p (memAlloc 16)))
     {
       (println (twice p))
-      0
     }))
 AX
 # Every `__arm_*`, each once, in one function `main` calls.
@@ -1255,7 +1251,7 @@ cat > "$work/el0.ax" <<'AX'
     0
   })
 
-(:: main Int)
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
@@ -1264,7 +1260,6 @@ cat > "$work/el0.ax" <<'AX'
     __arm_isb
     (println (> __arm_cntfrq 0))
     (println (> __arm_cntvct 0))
-    0
   })
 AX
 checks=$((checks + 1))
@@ -1457,9 +1452,9 @@ cat > "$work/isr.ax" <<'AX'
 (fn (onTick)
   (+ 1 2))
 
-(:: main Int)
+(:: main ())
 (fn (main)
-  0)
+  ())
 AX
 sed 's/;@axiom:isr(irq)/;@axiom:isr(timer)/' "$work/isr.ax" > "$work/isr-name.ax"
 cat > "$work/isr-two.ax" <<'AX'
@@ -1473,9 +1468,9 @@ cat > "$work/isr-two.ax" <<'AX'
 (fn (second)
   0)
 
-(:: main Int)
+(:: main ())
 (fn (main)
-  0)
+  ())
 AX
 checks=$((checks + 1))
 prob=0
@@ -2426,9 +2421,9 @@ cat > "$work/twohooks.ax" <<'AX'
 (fn (second status vector esr elr far)
   status)
 
-(:: main Int)
+(:: main ())
 (fn (main)
-  0)
+  ())
 AX
 if emit "$axc" linux-aarch64 "$fhprog" "$work/fh.la.ll" --diagnostic-format=ai \
    || ! grep -q '^E AX4008 .*`isr(fault)` on `onFault` binds the fault hook' "$work/emit.log"; then
