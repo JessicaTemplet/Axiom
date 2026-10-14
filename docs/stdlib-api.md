@@ -1981,7 +1981,7 @@ A mutual-exclusion lock between `parallel` bindings, in both lowerings
 
 ## `Sys`
 
-`stdlib/Sys.ax` — 51 public names
+`stdlib/Sys.ax` — 52 public names
 
 Sys - portable syscall wrappers.
 
@@ -2000,6 +2000,7 @@ Sys - portable syscall wrappers.
 | `sysRun` | value | `(-> Int Int Int (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn` | Run `path` to completion and answer its exit code. |
 | `sysRunPath` | value | `(-> String Int Int (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn` | Run `name`, searching `PATH` for it when it contains no slash. |
 | `sysRunPathErrTo` | value | `(-> String Int Int String (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn,Unsafe` | Run `name` as `sysRunPath` does, with the child's standard error written to the file at `errPath`, created or truncated, rather than to this process's. `(Ok code)` is the child's answer and `(Err e)` a child that never ran, as `sysRunPath` answers; a file that can't be opened is `(Err e)` too, and then nothing runs. A target with no syscall ABI runs the child with standard error where it was. |
+| `sysSpawnOutErrTo` | value | `(-> Int Int Int String String (Result Int Error))` | `Alloc,IO,Mut,Spawn,Unsafe` | Spawn `path` as `sysSpawn` does, with the child's standard output written to the file at `outPath` and its standard error to the file at `errPath`, each created or truncated. Answers the child's pid, as `sysSpawn` does; a file that can't be opened is `(Err e)` and then nothing runs. The swap is the one `sysRunPathErrTo` makes, done for both descriptors and undone as soon as the child exists, because a spawned child keeps the descriptors it was born with. For as long as the spawn itself takes, this process's own output and error are the files too. A target with no syscall ABI runs the child with its output where it was. |
 | `sysPid` | value | `Int` | `IO,Unsafe` | The calling process's own id - the per-session suffix scratch files need so two concurrent processes cannot collide. The syscall takes no arguments; the unused ones are simply zero. |
 | `sysNowMicros` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Unsafe` | Microseconds now, from the platform's cheapest correct clock: Darwin answers gettimeofday's timeval (realtime; Darwin's syscall table has no clock_gettime), Linux and FreeBSD answer CLOCK_MONOTONIC via clock_gettime - under the id `clockMonotonicId` names, because the id is not portable: 1 on Linux, and on FreeBSD 4, where 1 is CLOCK_VIRTUAL, the process's CPU time. That one was a literal here until 2026-08-29, and a clock that measures CPU time never runs backwards either, so nothing would have caught it. |
 | `sysHasMonotonic` | value | `Bool` | `Mut` | Whether this target has a monotonic clock, so that `sysNowMonotonic`, `sysNowMonotonicNanos` and `sysSleepNanos` answer `Ok`. Linux, FreeBSD and darwin-aarch64 have one; Windows, bare metal and darwin-x86_64 don't. |
