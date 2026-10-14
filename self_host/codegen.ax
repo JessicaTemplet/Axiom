@@ -17424,9 +17424,17 @@
     (_1 (emitLine cg1 (concat (concat "  " cell) (concat " = ptrtoint ptr %__scr.h to i64" ""))))
     (mn (allocReg cg1))
     (mergeB (labelStr mn))
+    (held (if (== gotPair 2)
+      0
+      (placeScrutHeld node scrutExpr cg1 1)))
+    (_h (if (== held 1)
+      (emitRetainOf cg1 sv)
+      cg1))
     (rel (if (== gotPair 2)
       0
-      (tailScrutineeReleasable node scrutExpr cg1)))
+      (if (== held 1)
+        1
+        (tailScrutineeReleasable node scrutExpr cg1))))
     (pmark (vecLen (memGetWordVec cg1 42)))
     (_p (if (== rel 1)
       (vecPush
@@ -18497,7 +18505,15 @@
     (_1 (emitLine cg1 (concat (concat "  " cell) (concat " = ptrtoint ptr %__scr.h to i64" ""))))
     (mn (allocReg cg1))
     (mergeB (labelStr mn))
-    (rel (scrutineeReleasable node scrutExpr cg1))
+    (held (if (== gotPair 2)
+      0
+      (placeScrutHeld node scrutExpr cg1 0)))
+    (_h (if (== held 1)
+      (emitRetainOf cg1 sv)
+      cg1))
+    (rel (if (== held 1)
+      1
+      (scrutineeReleasable node scrutExpr cg1)))
     (prt (if (== gotPair 2)
       (pairScrutRetTy cg1 scrutExpr)
       0))
@@ -18567,6 +18583,56 @@
       (binderSummary node)) 1)
       0
       1)))
+
+; A match over a BORROWED place - `(match o.f ...)`, a counted field
+; read, or `(match (vecGet v i) ...)`, an element a call lends - holds
+; a share of the scrutinee for its arms when no binder escapes, and
+; hands it back where an owned scrutinee is released. The binders are
+; the scrutinee block's fields, and an arm can store over the place it
+; came from: `(match o.f ((Some x) { (set o.f None) (use x) }))` freed
+; the `Some` block, and `x` with it, before `use` read it. Measured,
+; `x` printed as the arm's own format buffer.
+;
+; In tail position, a binder that reaches the match's value is a tail
+; leaf, and where every leaf takes its own share on the way out
+; (`slotTailCovered`, as an owning slot's last value is judged) the
+; scrutinee's share can go back after it. A binder that escapes any
+; other way leaves the place as borrowed as before.
+(pub :: placeScrutHeld (-> Int Int Int Int Int))
+(pub fn (placeScrutHeld node scrutExpr cg tail)
+  (if (== (placeScrutClass cg scrutExpr) 0)
+    0
+    (if (== (escapesViaBinders cg (nodeBVec node) 1 0 (binderSummary node)) 0)
+      1
+      (if (== tail 0)
+        0
+        (if (== (escapesViaBinders cg (nodeBVec node) 0 0 (binderSummary node)) 1)
+          0
+          (tailLeavesCovered cg node))))))
+
+; Is every value the tail of `e` answers retained on the way out, or a
+; share of its own - with the retain unconditional inside a lambda?
+; The tail half of `slotReleasesAtEnd`, asked of any tail form.
+(pub :: tailLeavesCovered (-> Int Int Int))
+(pub fn (tailLeavesCovered cg e)
+  (if (== (pairSlot cg 7) 1)
+    (let ((lamTy (pairSlot cg 14)))
+      (if (== (fldClass cg (if (== lamTy 0) 0 (nodeB lamTy))) 2)
+        (slotTailCovered cg e)
+        0))
+    (slotTailCovered cg e)))
+
+; 1 when a match scrutinee is a borrowed place of a counted type: a
+; counted field read, or a value a call lends (`lendClass`). An owned
+; scrutinee is `scrutineeReleasable`'s, and a type-variable place
+; (class `2+k`) cannot be destructured by a constructor pattern.
+(pub :: placeScrutClass (-> Int Int Int))
+(pub fn (placeScrutClass cg scrutExpr)
+  (if (== (valueOwnedRef cg scrutExpr) 1)
+    0
+    (if (|| (== (lendClass cg scrutExpr) 1) (== (fieldArgClass cg scrutExpr) 1))
+      1
+      0)))
 
 (pub :: releaseScrutinee (-> String Int Int Int))
 (pub fn (releaseScrutinee sv cg scrutExpr)
@@ -25115,18 +25181,33 @@
           ; self tail call inside the body jumps back to the loop
           ; header and never reaches the scope end, so `emitTailJump`
           ; pays every pending share before the jump
+          ; In tail position the binding may also be the let's value
+          ; when every tail leaf takes a share of its own on the way
+          ; out (`tailLeavesCovered`): the leaf's share is taken before
+          ; the scope end gives this one back. `(let ((t o.f)) { (set
+          ; o.f None) t })` answered a freed block without it.
+          ;
+          ; A `let` bound to a call that answers a counted value without a
+          ; share of its own - a type-variable result such as `vecGet`'s,
+          ; instantiated at a counted type - borrows it from whatever holds
+          ; it, and a store there can release it under the binding: in
+          ; `(let ((t (vecGet v j))) { (vecSet v j x) (vecSet v k t) })` the
+          ; first `vecSet` freed the block the second stored. So it takes a
+          ; share as a field read does, under `lendCls`: 1, or `2+k` for
+          ; bit k of this function's evidence word.
           (let (
-            (fieldAlias 
-              (if (&& (== (nodeTag valExpr) TAG_E_FIELD) (&& (== (fieldReadIsScalar cg1 valExpr) 0) (== (escapes
-                cg1
-                name
-                body
-                1
-                (binderSummary body)) 0)))
-                1
-                0))
-            ; the same for a value a call lends: `letBorrowClass`
-            (borrowCls (letBorrowClass cg1 valExpr name body))
+            (fieldCand (if (&& (== (nodeTag valExpr) TAG_E_FIELD) (== (fieldReadIsScalar cg1 valExpr) 0)) 1 0))
+            (lendCls (lendClass cg1 valExpr))
+            (held (if (&& (== fieldCand 0) (== lendCls 0))
+              0
+              (let ((bnd (binderSummary body)))
+                (if (== (escapes cg1 name body 1 bnd) 0)
+                  1
+                  (if (&& (== tail 1) (&& (== (escapes cg1 name body 0 bnd) 0) (== (tailLeavesCovered cg1 body) 1)))
+                    1
+                    0)))))
+            (fieldAlias (if (&& (== fieldCand 1) (== held 1)) 1 0))
+            (borrowCls (if (== held 1) lendCls 0))
             ; a value a call TRANSFERS is already the binding's share
             ; (MM-LIFE-2n): nothing to take, and the same hand-back at
             ; scope end as a borrowed one - plain for a counted type,
@@ -25254,25 +25335,6 @@
                       })
                   }))))
         }))))
-
-; A `let` bound to a call that answers a counted value without a share
-; of its own - a type-variable result such as `vecGet`'s, instantiated
-; at a counted type - borrows it from whatever holds it, and a store
-; there can release it under the binding: in
-; `(let ((t (vecGet v j))) { (vecSet v j x) (vecSet v k t) })` the first
-; `vecSet` freed the block the second stored. So the binding takes a
-; share of its own when it does not escape, as a field read does
-; (`emitLetAt`), and hands it back at scope end. Answers the class to
-; take it under: 1, `2+k` for bit k of this function's evidence word,
-; or 0 for none.
-(pub :: letBorrowClass (-> Int Int String Int Int))
-(pub fn (letBorrowClass cg valExpr name body)
-  (let ((cls (lendClass cg valExpr)))
-    (if (== cls 0)
-      0
-      (if (== (escapes cg name body 1 (binderSummary body)) 1)
-        0
-        cls))))
 
 ; The same question for a value a call transfers (`transferClass`): the
 ; class to hand the binding's own share back under at scope end when
@@ -25487,7 +25549,7 @@
                           1
                           0)))))))))))))
 
-; The class a pinned type answers for `letBorrowClass`: 1 for a counted
+; The class a pinned type answers for a lent `let` (`emitLetAt`): 1 for a counted
 ; type, `2+k` for this function's own type variable k (bit k of its
 ; evidence word), and 0 for anything else, a lambda's body included.
 (pub :: pinnedClass (-> Int Int Int))

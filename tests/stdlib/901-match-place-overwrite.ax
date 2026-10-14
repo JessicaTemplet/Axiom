@@ -1,0 +1,174 @@
+; A `match` over a borrowed place holds a share of the scrutinee for its
+; arms, so an arm that overwrites the place still reads its binders
+; (MM-LIFE-2m). Each line must read `true`.
+;
+;   1  `(match o.f ((Some x) { (set o.f None) ... x ... }))`: the arm
+;      overwrites the field it destructured, then reads `x`
+;   2  the same in tail position, where the arm answers `x` itself
+;   3  `(match (vecGet v 0) ...)`, whose arm overwrites slot 0
+;   4  a `let` of the field in tail position, overwritten before the
+;      binding is answered
+;   5  the shares are handed back: 5,000 matches hold what 1,000 hold
+;
+; Without the share, the overwrite frees the scrutinee block and the
+; payload with it, and the churn reads the payload back as another
+; string.
+(import IO)
+(import Vec)
+(import Str)
+(import Fmt)
+(import Mem)
+
+(struct Holder
+  (mut f : (Option String)))
+
+(:: churn Int)
+(fn (churn)
+  (let (
+    (mut i 0)
+    (mut acc 0)
+  )
+    {
+      (while (< i 20000)
+        {
+          (let ((s (concat "zz-" (fmtInt i))))
+            (set acc (+ acc (strLen s))))
+          (set i (+ i 1))
+        })
+      acc
+    }))
+
+(:: holder (-> Int Holder))
+(fn (holder n)
+  (Holder (Some (concat "item-" (fmtInt n)))))
+
+(:: clearThenRead (-> Holder String Bool))
+(fn (clearThenRead o want)
+  (match o.f
+    ((Some x)
+      {
+        (set o.f None)
+        churn
+        (strEq x want)
+      }
+    )
+    ((None) false)))
+
+(:: clearThenAnswer (-> Holder String))
+(fn (clearThenAnswer o)
+  (match o.f
+    ((Some x)
+      {
+        (set o.f None)
+        x
+      }
+    )
+    ((None) "none")))
+
+(:: slotThenRead (-> (Vec (Option String)) String Bool))
+(fn (slotThenRead v want)
+  (match (vecGet v 0)
+    ((Some x)
+      {
+        (vecSet v 0 None)
+        churn
+        (strEq x want)
+      }
+    )
+    ((None) false)))
+
+(:: takeField (-> Holder (Option String)))
+(fn (takeField o)
+  (let ((t o.f))
+    {
+      (set o.f None)
+      t
+    }))
+
+(:: optVec (-> Int (Vec (Option String))))
+(fn (optVec n)
+  (let ((v vecNew))
+    {
+      (vecPush v (Some (concat "item-" (fmtInt n))))
+      v
+    }))
+
+(:: held Int)
+(fn (held)
+  (let ((s memStats))
+    s.heldBytes))
+
+(:: rounds (-> Int Int))
+(fn (rounds n)
+  (let (
+    (o (holder 7))
+    (mut k 0)
+    (mut ok 0)
+  )
+    {
+      (while (< k n)
+        {
+          (set o.f (Some (concat "item-" (fmtInt (+ 1000 (% k 1000))))))
+          (match o.f
+            ((Some x)
+              {
+                (set o.f None)
+                (set ok (+ ok (strLen x)))
+              }
+            )
+            ((None) 0))
+          (set k (+ k 1))
+        })
+      ok
+    }))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println
+      (if (clearThenRead (holder 1) "item-1")
+        "true"
+        "false"))
+    (let ((a (clearThenAnswer (holder 2))))
+      {
+        churn
+        (println
+          (if (strEq a "item-2")
+            "true"
+            "false"))
+      })
+    (println
+      (if (slotThenRead (optVec 3) "item-3")
+        "true"
+        "false"))
+    (let ((t (takeField (holder 4))))
+      {
+        churn
+        (println
+          (match t
+            ((Some x)
+              (if (strEq x "item-4")
+                "true"
+                "false")
+            )
+            ((None) "false")))
+      })
+    (rounds 1000)
+    (let ((a held))
+      {
+        (rounds 1000)
+        (let (
+          (d1 (- held a))
+          (b held)
+        )
+          {
+            (rounds 5000)
+            (println
+              (if (== (- held b) d1)
+                "true"
+                "false"))
+          })
+      })
+    0
+  })

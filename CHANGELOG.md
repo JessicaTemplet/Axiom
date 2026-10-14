@@ -43,6 +43,14 @@ its changelog too.
   `vecFree` left the library. Tested by
   `tests/stdlib/895-scalar-element-read.ax` and `scripts/check-task.sh`.
 
+- A `match` over a field or a vector element holds the scrutinee while
+  its arms run. `(match o.f ((Some x) { (set o.f None) (use x) }))`
+  freed the `Some` block, and `x` with it, before `use` read it; the
+  same happened to `(match (vecGet v 0) ...)` with a `vecSet` of slot
+  0 in the arm, to an arm that answers `x` after the overwrite, and to
+  `(let ((t o.f)) { (set o.f None) t })`. Tested by
+  `tests/stdlib/901-match-place-overwrite.ax`.
+
 - An element handed to a function whose result is a type variable keeps
   a share for as long as anything reads it. `(f v (vecGet v 0))`, where
   `f` overwrites slot 0 and answers its parameter, answered a freed

@@ -4847,6 +4847,15 @@ counted type, takes a share of its own when it doesn't escape, as a
 `let` of a field read does. So a `vecSet` of that slot can't free the
 element under the binding, and a swap spelled with a `let` and two
 `vecSet`s is safe (`tests/stdlib/777-vec-borrowed-element.ax`).
+In tail position the binding takes the share even when it is the
+answer, because the answer takes a share of its own on the way out.
+
+A `match` over the same borrowed places, a counted field read or a
+lent element, holds a share of the scrutinee for its arms on the same
+terms and hands it back after the merge. An arm can then overwrite the
+place it destructured and still read its binders, as in
+`(match o.f ((Some x) { (set o.f None) (use x) }))`
+(`tests/stdlib/901-match-place-overwrite.ax`).
 
 A lent element passed straight to a call, as in `(f v (vecGet v 0))`,
 takes a share when it is evaluated and gives it back when the call

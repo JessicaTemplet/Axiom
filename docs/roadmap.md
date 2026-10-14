@@ -51,6 +51,7 @@ integrator would still need.
 | A container owns its elements: a `Vec` is released at scope end, and ownership follows the element type, not the constructor | Done | `MM-LIFE-2m`, `tests/stdlib/770-vec-files.ax`, `tests/stdlib/895-scalar-element-read.ax` |
 | An element passed beside its container to a function that overwrites its slot keeps a share, as one bound by a `let` does | Done | `MM-LIFE-2m`, `tests/stdlib/778-vec-lent-argument.ax` |
 | A field passed beside its struct, or an element handed to a function whose result is a type variable, keeps a share for the call, and the result keeps it when it is that element | Done | `MM-LIFE-2m`, `tests/stdlib/894-field-beside-struct.ax`, `tests/stdlib/900-lent-arg-tyvar-result.ax` |
+| A `match` over a field or a vector element, and a `let` of one, keep the value while the code under them overwrites its place | Done | `MM-LIFE-2m`, `tests/stdlib/901-match-place-overwrite.ax` |
 | An element taken out with `vecPop` is released: a trusted function declares `result(owned)` and the caller hands the share back | Done | `MM-LIFE-2n`, `tests/stdlib/846-vec-pop-release.ax` |
 | A vector passed straight to `vecGet` is not leaked | Done | `MM-LIFE-2m`, `tests/stdlib/893-vecget-temporary.ax` |
 | `vecFree` and `mapFree` leave safe code, so an early drop can't free a block still in use | Done | `tests/stdlib/406-array-form-large-block.ax`, `tests/stdlib/489-map-free.ax` |
