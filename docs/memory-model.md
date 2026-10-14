@@ -2755,7 +2755,9 @@ region proof. It remains planned, and in the current compiler it
 doesn't follow from `MM-RGN-3`.
 
 Today, `parallel` desugars to spawn and join calls. It uses processes by
-default, and `--threads` selects the supported thread lowering. Each
+default, and `--threads` selects the supported thread lowering. The
+form's name is bound to the word 0, and a form keeps no arena storage
+once it returns (`tests/litmus/par-forms.ax`). Each
 binding answers an `Int` word, and results are joined in the order
 written. `AX3064` conservatively refuses counted or `Vec` captures and
 opaque thunk shapes. Raw addresses can still be carried as words, and

@@ -33,6 +33,11 @@ its changelog too.
   joining a child it never spawned. Tested by
   `tests/litmus/spawn-scan.ax`, which scans the words 0 to 400,000, in
   `scripts/check-handles.sh`.
+- A `parallel` form no longer leaks 48 bytes of arena. Its name was
+  bound to an arena mark, a 24-byte cell nothing freed, so 20,000
+  forms kept 960,000 bytes in either lowering. The name is bound to
+  the word 0 now. Tested by `tests/litmus/par-forms.ax` in
+  `scripts/check-parallel.sh`.
 - Add `axiom doc`. It renders the documentation set, one page per
   standard library module from the `;;` doc comments, and the language
   index to HTML under `~/.cache/axiom/doc` (or `--out DIR`), then opens

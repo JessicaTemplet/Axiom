@@ -5270,7 +5270,7 @@
 ; DESUGARED HERE, into nodes that already exist, the way `for` is:
 ;
 ;   (parallel p ((a E1) (b E2)) BODY)
-;     => (let ((p __axiom_arena_mark))
+;     => (let ((p 0))
 ;          (let ((parallel$h0 (__par_spawn (lambda (parallel$_) E1) 0)))
 ;            (let ((parallel$h1 (__par_spawn (lambda (parallel$_) E2) 0)))
 ;              (let ((a (__par_join parallel$h0)))
@@ -5283,9 +5283,15 @@
 ; repository rests on. Completion order is not observable through this
 ; form at all, which is the point.
 ;
-; `p` IS BOUND TO THE ARENA MARK of the region the form runs in - the
-; witness §2.5 of the design says a region carries, and the only thing
-; a region has to be today. It is a word; S2 and S3 give it a type.
+; `p` NAMES THE FORM, and is bound to the word 0. It will be the
+; witness §2.5 of the design says a region carries, once S2 and S3 give
+; the form a region (MM-RGN-7). It was bound to `__axiom_arena_mark`,
+; which allocates a 24-byte cell nothing ever freed: every form leaked
+; 48 bytes of arena, 960,000 over 20,000 forms in either lowering, and a
+; server that ran one per request grew without bound
+; (`scripts/check-parallel.sh` section 13 holds it flat). No program
+; read the mark, and a reset to it inside the body would have freed the
+; form's own borrow record.
 ;
 ; WHAT A BINDING MAY ANSWER is a word: the thunk is `(-> Int Int)` and
 ; `__par_join` answers `Int`, so a binding whose expression is a
@@ -5395,7 +5401,7 @@
 (pub fn (mkParallel rname rspan binds body kwSpan formPos)
   (let ((id (parIndexName formPos)))
     (let ((bname (concat "parallel$b" id)))
-      (mkELetAt rname (mkEVarAt "__axiom_arena_mark" kwSpan) (mkELetAt bname (mkEApp (mkEVarAt "parallel$borrow" kwSpan) (mkEInt 0)) (mkELetAt "parallel$l" (mkEApp (mkEApp (mkEVarAt "parallel$lends" kwSpan) (mkEVarAt bname kwSpan)) (mkEBegin vecNew)) (parSpawnLets binds 0 (parJoinLets binds 0 (mkELetAt "parallel$r" (mkEApp (mkEVarAt "parallel$return" kwSpan) (mkEVarAt bname kwSpan)) body kwSpan) kwSpan) kwSpan id) kwSpan) kwSpan) rspan))))
+      (mkELetAt rname (mkEInt 0) (mkELetAt bname (mkEApp (mkEVarAt "parallel$borrow" kwSpan) (mkEInt 0)) (mkELetAt "parallel$l" (mkEApp (mkEApp (mkEVarAt "parallel$lends" kwSpan) (mkEVarAt bname kwSpan)) (mkEBegin vecNew)) (parSpawnLets binds 0 (parJoinLets binds 0 (mkELetAt "parallel$r" (mkEApp (mkEVarAt "parallel$return" kwSpan) (mkEVarAt bname kwSpan)) body kwSpan) kwSpan) kwSpan id) kwSpan) kwSpan) rspan))))
 
 ; The spawns, outermost first, so the first binding starts first.
 (pub :: parSpawnLets (-> (Vec Int) Int Int Int String Int))

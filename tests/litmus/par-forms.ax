@@ -1,0 +1,59 @@
+; Many `parallel` forms, one after another, and what the arena holds
+; after them (docs/memory-model.md MM-PAR-6b, MM-RGN-7).
+; `scripts/check-parallel.sh` section 13 runs it at two counts in both
+; lowerings: the arena's held bytes must not grow with the count.
+;
+;   par-forms forms N    N forms of two bindings, the second borrowing
+;                        the parent's string; prints the answers' sum
+;                        and the arena's held and backlog bytes
+;   par-forms control N  the same, plus one arena mark per form, which
+;                        is what a form cost when its name was bound to
+;                        one: a 24-byte cell nothing freed, 48 bytes of
+;                        arena each
+(import IO)
+(import Mem)
+(import Str)
+(import Fmt)
+(import Sys)
+
+(:: pair (-> Int String Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (pair x s)
+  (parallel p (
+    (a (+ x 1))
+    (b (+ x (strLen s)))
+  )
+    (+ a b)))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  (let (
+    (mode (sysArg 1))
+    (n (match (strParseInt (sysArg 2))
+      ((Some v) v)
+      ((None) 2000)))
+    (s (concat "borrowed " (fmtInt 7)))
+    (mut sum 0)
+    (mut marks 0)
+  )
+    {
+      (for i in 0..n
+        {
+          (set sum (+ sum (pair i s)))
+          (if (strEq mode "control")
+            (set marks (+ marks (if (> __axiom_arena_mark 0) 1 0)))
+            0)
+        })
+      (let ((st memStats))
+        (let (
+          (held st.heldBytes)
+          (backlog st.backlogBytes)
+        )
+          (println "sum {sum} marks {marks} held {held} backlog {backlog}")))
+      0
+    }))

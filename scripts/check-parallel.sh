@@ -95,6 +95,12 @@
 #      stack has no `main` on it, so the walk's only stop could never
 #      fire and it named two frames of libSystem with this module's
 #      own symbols.
+#  13. A FORM KEEPS NOTHING. tests/litmus/par-forms.ax runs 2,000 and
+#      20,000 forms, each with a binding that borrows the parent's
+#      string, in both lowerings: the arena's held bytes must be the
+#      same at both counts. The control takes one arena mark per form,
+#      which is what the form's name cost when it was bound to one, and
+#      must grow by 48 bytes a form.
 #
 # NOTHING HERE IS LOAD-SENSITIVE, which is why this gate stays in
 # `run-gates.sh`'s PARALLEL set even though sections 8-10 are about
@@ -1697,6 +1703,35 @@ else
   fi
 fi
 
+# --------------------------------------------------------------------
+echo "== 13. a form keeps nothing: the arena is flat over 2,000 and 20,000 forms =="
+# --------------------------------------------------------------------
+forms="$repo_root/tests/litmus/par-forms.ax"
+held_of() { sed -n 's/.* held \([0-9]*\) backlog.*/\1/p' <<<"$1"; }
+for lowering in processes threads; do
+  flags=(); [[ "$lowering" == threads ]] && flags=(--threads)
+  bin="$work/par-forms-$lowering"
+  if ! (cd "$repo_root" && "$axc" build ${flags[@]+"${flags[@]}"} --opt 2 --input "$forms" --output "$bin") > "$bin.build" 2>&1; then
+    bad "13 ($lowering): par-forms did not build"; sed 's/^/     /' "$bin.build" | head -6; continue
+  fi
+  small="$(gate_timeout 120 "$bin" forms 2000 2>&1)"
+  large="$(gate_timeout 300 "$bin" forms 20000 2>&1)"
+  hs="$(held_of "$small")"; hl="$(held_of "$large")"
+  if [[ "$small" == "sum 4020000 marks 0 "* && "$large" == "sum 400200000 marks 0 "* && -n "$hs" && "$hs" == "$hl" ]]; then
+    ok "13 ($lowering): the arena holds $hs bytes after 2,000 forms and after 20,000"
+  else
+    bad "13 ($lowering): 2,000 forms '$small', 20,000 forms '$large'"
+  fi
+  csmall="$(gate_timeout 120 "$bin" control 2000 2>&1)"
+  clarge="$(gate_timeout 300 "$bin" control 20000 2>&1)"
+  cs="$(held_of "$csmall")"; cl="$(held_of "$clarge")"
+  if [[ -n "$cs" && -n "$cl" ]] && (( cl - cs == 18000 * 48 )); then
+    ok "13 ($lowering) control: a mark per form grows the arena by $(( (cl - cs) / 18000 )) bytes a form, so the measure sees a leak of one"
+  else
+    bad "13 ($lowering) control: one mark per form held '$cs' then '$cl' bytes - the measure cannot see a 48-byte leak"
+  fi
+done
+
 echo
 if (( failed > 0 )); then
   echo "check-parallel: $failed of $((checks + failed)) checks failed"
@@ -1714,4 +1749,5 @@ echo "                allocators answer as four processes do, two failing bindin
 echo "                are deterministic under processes and are not under threads,"
 echo "                and a thread's backtrace stops where its stack does;"
 echo "                every thunk shape a spawn can take is scanned or refused;"
-echo "                thread arenas come back and no child outlives its scope"
+echo "                thread arenas come back and no child outlives its scope;"
+echo "                and a form keeps nothing, however many run"
