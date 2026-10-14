@@ -25833,7 +25833,57 @@
                 eff
                 eparams
                 lex))))
-        (axtagKeyTypo tc d key)))))
+        (if (strEq key "result")
+          (checkResultTag tc d val lex)
+          (axtagKeyTypo tc d key))))))
+
+; Does either half of the declaration say `effect(unsafe)`? `checkAxtags`
+; asks about every tag with the `fn` as `d`, so the signature's tags
+; are read through `sigAxtagsFor`, as `checkAxtags` itself reads them.
+(pub :: declTrusted (-> Int Int Int))
+(pub fn (declTrusted tc d)
+  (if (== (declHasAxtag d "effect(unsafe)") 1)
+    1
+    (let ((sig (sigAxtagsFor tc (nodeAName d))))
+      (if (== (cast Int sig) 0)
+        0
+        (declHasAxtagFrom sig "effect(unsafe)" 0)))))
+
+; `result(owned)`: the declaration's type-variable result carries a
+; share the caller owns (MM-LIFE-2n). Codegen releases such a result
+; at a counted instantiation, so the claim has to be true, and nothing
+; in the checker can see that a raw load's share was transferred -
+; which is why the claim is accepted only inside a trusted
+; encapsulation: a declaration that also says `effect(unsafe)` on this
+; half, or whose body performs an unsafe operation itself (`lex`).
+; Any other value, or the claim on a safe function, is AX3116.
+(pub :: checkResultTag (-> Int Int String Int Int))
+(pub fn (checkResultTag tc d val lex)
+  (if (== (nodeSpan d) 0)
+    0
+    (if (strEq val "owned")
+      (if (|| (== (declTrusted tc d) 1) (== lex 1))
+        0
+        (emitDiag tc (diagSetLabel (mkDiagNote
+          SEV_ERROR
+          "AX3116"
+          "result-claim"
+          (nodeSpan d)
+          (concat (concat "`result(owned)` on `" (bareOf (nodeAName d))) "` is a claim only a trusted function may make")
+          0
+          0
+          "put `;@axiom:effect(unsafe)` beside it on the same declaration, or let the result's ownership be inferred"
+          "the checker cannot see that a share was transferred through a raw load, so the claim is accepted only inside a trusted encapsulation (MM-LIFE-2n)") "safe code claims it")))
+      (emitDiag tc (diagSetLabel (mkDiagNote
+        SEV_ERROR
+        "AX3116"
+        "result-claim"
+        (nodeSpan d)
+        (concat (concat (concat (concat "`result(" val) ")` on `") (bareOf (nodeAName d))) "` is not a claim the compiler reads")
+        0
+        0
+        "write `;@axiom:result(owned)`, the one value this key takes"
+        "`result(owned)` says a type-variable result carries a share the caller must release; codegen acts on it, so a value it does not know is refused rather than ignored") "not `owned`")))))
 
 ; AX3076: `;@axiom:effect(io, unsafe)`. An `effect(...)` tag names ONE
 ; effect, and a list was read as one CUSTOM effect named `io, unsafe` -
@@ -26592,7 +26642,11 @@
                   ; checked.
                   (if (strEq key "ct")
                     1
-                    0))))))))))
+                    ; `result(owned)` is read by codegen (MM-LIFE-2n), so
+                    ; a slip of it would leak every call silently.
+                    (if (strEq key "result")
+                      1
+                      0)))))))))))
 
 (pub :: axtagNearMiss (-> String String))
 (pub fn (axtagNearMiss key)
@@ -26618,7 +26672,9 @@
                     "syscall"
                     (if (== (axtagSlip key "ct") 1)
                       "ct"
-                      "")))))))))))
+                      (if (== (axtagSlip key "result") 1)
+                        "result"
+                        ""))))))))))))
 
 (pub :: axtagSlip (-> String String Int))
 (pub fn (axtagSlip key known)

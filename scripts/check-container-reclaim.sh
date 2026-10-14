@@ -119,6 +119,48 @@ emit_probe() {
   })
 AX
       ;;
+    pop)
+      # `vecPop` hands the vector's share of the element to the caller
+      # (MM-LIFE-2n): the live arm binds and drops each popped string,
+      # so its memory must plateau; the ablation also keeps every
+      # popped string in a second vector that outlives the loop, so it
+      # grows with n by construction. Both add the same `strLen`, and
+      # one subterm differs, in the same position. Each string carries
+      # a 1000-byte payload so the kept arm's growth is far past noise.
+      local keepIt='(vecLen keep)'
+      [[ "$variant" == kept ]] && keepIt='(vecLen (vecPush keep s))'
+      local sink="(+ (strLen s) (* 0 $keepIt))"
+      local payload
+      payload="$(printf 'p%.0s' $(seq 1 1000))"
+      cat > "$out" <<AX
+; $n iterations, each pushing a fresh String and popping it back.
+; Variant: $variant.
+(import IO)
+(import Vec)
+(import Str)
+(import Fmt)
+
+(:: loop (-> Int (Vec String) Int Int))
+(fn (loop n keep acc)
+  (if (== n 0)
+    acc
+    (let ((v vecNew))
+      {
+        (vecPush v (concat "$payload" (fmtInt n)))
+        (let ((s (vecPop v)))
+          (loop (- n 1) keep (+ acc $sink)))
+      })))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let ((keep vecNew))
+    {
+      (println (loop $n keep 0))
+      0
+    }))
+AX
+      ;;
     chain)
       # The ablation is one statement per container, and nothing
       # else. `mapHeld` takes a share nobody hands back, so the map
@@ -231,8 +273,8 @@ large=20000
 setv() { eval "V_$1=\"\$2\""; }
 getv() { eval "printf '%s' \"\${V_$1-}\""; }
 
-for probe in vec chain; do
-  if [[ "$probe" == vec ]]; then variants="mapped leaf"; else variants="freed held"; fi
+for probe in vec chain pop; do
+  if [[ "$probe" == vec ]]; then variants="mapped leaf"; elif [[ "$probe" == pop ]]; then variants="live kept"; else variants="freed held"; fi
   for variant in $variants; do
     for n in "$small" "$large"; do
       build_and_measure "$probe" "$variant" "$n" || { failed=1; continue; }
@@ -281,7 +323,7 @@ rssof() {
 if [[ "$report" == 1 ]]; then
   echo
   printf '%-18s %8s %8s  %s\n' "probe/variant" "n=$small" "n=$large" "growth"
-  for k in vec_mapped vec_leaf chain_freed chain_held; do
+  for k in vec_mapped vec_leaf chain_freed chain_held pop_live pop_kept; do
     a="$(rssof "${k}_${small}")"; b="$(rssof "${k}_${large}")"
     printf '%-18s %8s %8s  %sx\n' "$k" "$a" "$b" "$(( a > 0 ? b / a : 0 ))"
   done
@@ -309,8 +351,8 @@ ratio_at_least() {
   fi
 }
 
-for probe in vec chain; do
-  if [[ "$probe" == vec ]]; then live=mapped; dead=leaf; else live=freed; dead=held; fi
+for probe in vec chain pop; do
+  if [[ "$probe" == vec ]]; then live=mapped; dead=leaf; elif [[ "$probe" == pop ]]; then live=live; dead=kept; else live=freed; dead=held; fi
 
   # 1. THE COMPUTATION IS THE SAME ONE. Both spellings must print the
   #    same answer at both counts, or the two arms are not comparable

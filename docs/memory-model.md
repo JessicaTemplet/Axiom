@@ -4850,8 +4850,6 @@ applies from the second stage of the bootstrap ladder.
 
 These leak, which is the safe direction:
 
-- a counted element taken out by `vecPop`, whose type-variable result
-  the caller never releases;
 - a vector passed straight to `vecGet` without a binding;
 - a container whose first element arrives through a call that can't
   see its type, such as a `cast` or a function value's thunk, which
@@ -4861,6 +4859,30 @@ These leak, which is the safe direction:
 
 `vecFree` and `mapFree` still end a container early. As after any
 release, using the handle afterwards is a use after free.
+
+**MM-LIFE-2n (H). A trusted function can hand its type-variable result
+over.** A call whose declared result is a type variable answers a value
+the caller borrows: `vecGet` lends an element the vector still holds,
+so the caller takes a share only when it binds the value and gives it
+back at scope end (above). `vecPop` is the other shape. It zeroes the
+vector's slot and hands the element's share to the caller, which a
+type-variable result can't say by itself, and the share leaked.
+
+A function says so with `;@axiom:result(owned)` on its signature. At a
+counted instantiation the caller then owns the result and releases it:
+at a `let`'s scope end when the binding doesn't escape, after a call
+it was passed to, and on the spot when it is discarded. Inside a
+polymorphic function the release follows the type variable's evidence
+bit, as a borrowed binding's does.
+
+The checker can't see that a share came back through a raw load, so
+the claim is accepted only on a declaration that also says
+`effect(unsafe)` on the same half, or whose body performs an unsafe
+operation; anywhere else it is `AX3116`, and so is any value but
+`owned`. A safe function's result ownership is inferred from its body
+and needs no claim. Tested by `tests/stdlib/846-vec-pop-release.ax`,
+`tests/diagnostics/1259-result-claim.ax` and
+`scripts/check-container-reclaim.sh`.
 
 A container is reclaimed by a raw arena reset like any other block
 (`MM-LIFE-4`), and the reset asks no count. So a counted binding, a

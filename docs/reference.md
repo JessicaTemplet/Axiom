@@ -1319,9 +1319,11 @@ are exported.
 ## AXTAG metadata
 
 `;@axiom:` comments attach checked claims and tool metadata to
-functions and signatures. Effect claims, restrictions, contracts and
-interrupt tags affect validation. Descriptive tags remain metadata;
-they do not establish a proof by themselves.
+functions and signatures. Effect claims, restrictions, contracts,
+interrupt tags and `result(owned)` (a trusted function handing over a
+type-variable result, [memory model](memory-model.md) `MM-LIFE-2n`)
+affect validation. Descriptive tags remain metadata; they do not
+establish a proof by themselves.
 
 A key one slip from a checked key, such as `;@axiom:restirct(no-alloc)`
 or `;@axiom:Effect(io)`, is refused with `AX3039`, so a claim never

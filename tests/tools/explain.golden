@@ -102,6 +102,7 @@
   [93mAX3095[0m  a `;@axiom:precondition(...)` tag, which was removed  (precondition-removed)
   [93mAX3096[0m  a type alias with type parameters  (parameterised-alias)
   [93mAX3110[0m  an effect claim nothing in the compiler can check  (axtag-never-checked)
+  [93mAX3116[0m  a `result(...)` claim the compiler cannot read  (result-claim)
   [93mAX4001[0m  no `main` function  (missing-main)
   [93mAX4002[0m  code generation failed  (codegen-failure)
   [93mAX4003[0m  external toolchain command failed  (toolchain-failure)
@@ -2988,6 +2989,32 @@ and it measures IO, Alloc, Mut and Unsafe.
 A claim naming an effect the walk DOES produce stays AX3010 when the
 body does not support it.
 
+### explain AX3116
+AX3116 - a `result(...)` claim the compiler cannot read
+
+`;@axiom:result(owned)` says that a function's type-variable result
+carries a share the caller owns, so the caller's code releases it: at
+a `let`'s scope end, after a call it was an argument to, or on the
+spot when it is discarded. `vecPop` makes the claim: it zeroes the
+vector's slot and hands the element's share to the caller, which a
+type variable result could not say by itself (docs/memory-model.md
+MM-LIFE-2n).
+
+    ;@axiom:result(lent)
+    (:: top (-> (Vec a) a))          ; refused: the one value is `owned`
+
+    ;@axiom:result(owned)
+    (:: first (-> (Vec a) a))        ; refused: `first` is not trusted
+    (fn (first v) (vecGet v 0))
+
+The checker cannot see that a share was transferred through a raw
+load, so the claim is accepted only inside a trusted encapsulation: a
+declaration that also says `;@axiom:effect(unsafe)` on the same half,
+or whose body performs an unsafe operation itself. A safe function's
+result ownership is inferred from its body and needs no claim.
+
+Write `result(owned)` beside `effect(unsafe)`, or drop the claim.
+
 ### explain AX4001
 AX4001 - no `main` function
 
@@ -3456,6 +3483,7 @@ run `axiom explain --list` to see all known codes, or name a keyword, type, effe
   [93mAX3095[0m  a `;@axiom:precondition(...)` tag, which was removed  (precondition-removed)
   [93mAX3096[0m  a type alias with type parameters  (parameterised-alias)
   [93mAX3110[0m  an effect claim nothing in the compiler can check  (axtag-never-checked)
+  [93mAX3116[0m  a `result(...)` claim the compiler cannot read  (result-claim)
   [93mAX4001[0m  no `main` function  (missing-main)
   [93mAX4002[0m  code generation failed  (codegen-failure)
   [93mAX4003[0m  external toolchain command failed  (toolchain-failure)

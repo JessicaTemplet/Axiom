@@ -16,6 +16,17 @@ its changelog too.
 
 ## Unreleased
 
+- Release what `vecPop` hands over. A popped element's share was
+  transferred to the caller and never given back, about 78 bytes per
+  pop measured on a string. A trusted function now says
+  `;@axiom:result(owned)` when its type-variable result carries a
+  share, and the caller releases it at a `let`'s scope end, after a
+  call, or when it is discarded. The claim is accepted only beside
+  `effect(unsafe)`; anything else is `AX3116`. Tested by
+  `tests/stdlib/846-vec-pop-release.ax`,
+  `tests/diagnostics/1259-result-claim.ax` and
+  `scripts/check-container-reclaim.sh`.
+
 - Refuse a reference cast into a field declared `Int`. `AX3043` was a
   warning on the grounds that the cast was deliberate, but the leak is
   certain either way: the release walk follows declared types and
