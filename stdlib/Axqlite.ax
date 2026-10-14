@@ -1,16 +1,14 @@
 ;;! Axqlite - an embedded, single-file, transactional database.
 ;;!
-;;!     (match (axqOpen "app.db" openOptions)
-;;!       ((Ok db)
+;;!     (axqWith "app.db" openOptions
+;;!       (lambda (db)
 ;;!         {
-;;!           (axqExec db "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER)")
-;;!           (axqRunOn db (axqlInsert users (name age) (values (text "Ada") (int 36))))
-;;!           (match (axqQueryOn db (axqlSelect users (id name) (where (> age (int 30)))))
-;;!             ((Ok rows) (for r in rows.rows (println (unwrapOr (rowTextNamed r "name") "?"))))
-;;!             ((Err e) (println (errorText e))))
-;;!           (axqClose db)
-;;!         })
-;;!       ((Err e) ...))
+;;!           (axqExec db "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER)")?
+;;!           (axqRunOn db (axqlInsert users (name age) (values (text "Ada") (int 36))))?
+;;!           (for r in (axqAll db (axqlSelect users (id name) (where (> age (int 30))))?)
+;;!             (println (rowTextOr r "name" "?")))
+;;!           (Ok 0)
+;;!         }))
 ;
 ; A database is one file of tables, each a set of typed rows, queried in
 ; AXQL, Axiom's own query language: docs/axql.md defines it and
@@ -83,6 +81,12 @@
 (pub :: openOptions OpenOptions)
 (pub fn (openOptions)
   (OpenOptions true false 256))
+
+;; Open a database that must already exist, for reading only, with the
+;; same cache as `openOptions`. Every write on it is `axqReadOnly`.
+(pub :: readOnlyOptions OpenOptions)
+(pub fn (readOnlyOptions)
+  (OpenOptions false true 256))
 
 ; ------------------------------------------------------------------
 ; Handles.
@@ -376,6 +380,22 @@
             ((Ok _) (Ok 0))
             ((Err e) (Err (errContextOf e "axqClose")))))))))
 
+;; Open the database at `path`, run `f` on the connection, and close
+;; the connection whatever `f` answers. The answer is `f`'s, unless
+;; closing fails and `f` succeeded, in which case the close's error is
+;; the answer. This is the usual way to use a database: one `axqWith`
+;; in place of an `axqOpen` match and an `axqClose`.
+(pub :: axqWith (-> String OpenOptions (-> Connection (Result a Error)) (Result a Error)))
+;@axiom:effect(io)
+(pub fn (axqWith path opts f)
+  (match (axqOpen path opts)
+    ((Err e) (Err e))
+    ((Ok db)
+      (let ((r (f db)))
+        (match (axqClose db)
+          ((Ok _) r)
+          ((Err e) (match r ((Ok _) (Err e)) ((Err _) r))))))))
+
 ; True until `owner` is closed or disarmed: the runtime clears word 1 of
 ; a resource then. A drop callback's borrowed view has no owner, and the
 ; runtime runs a drop only while its owner is live.
@@ -634,6 +654,30 @@
 (pub :: rowBlobNamed (-> Row String (Result String Error)))
 (pub fn (rowBlobNamed r name)
   (let ((i (rowIndex r name)?)) (rowBlob r i)))
+
+;; The column named `name` as an INTEGER, or `default` when it is not
+;; one: NULL, another type, or no such column. These four readers are
+;; the everyday form, for a value you can fall back on; the `Result`
+;; readers above are for telling the cases apart.
+(pub :: rowIntOr (-> Row String Int Int))
+(pub fn (rowIntOr r name default)
+  (unwrapOr (rowIntNamed r name) default))
+
+;; The column named `name` as a REAL, or `default` when it is not one.
+(pub :: rowRealOr (-> Row String Float Float))
+(pub fn (rowRealOr r name default)
+  (unwrapOr (rowRealNamed r name) default))
+
+;; The column named `name` as TEXT, or `default` when it is not one.
+(pub :: rowTextOr (-> Row String String String))
+(pub fn (rowTextOr r name default)
+  (unwrapOr (rowTextNamed r name) default))
+
+;; The column named `name` as a BLOB's bytes, or `default` when it is
+;; not one.
+(pub :: rowBlobOr (-> Row String String String))
+(pub fn (rowBlobOr r name default)
+  (unwrapOr (rowBlobNamed r name) default))
 
 ; ------------------------------------------------------------------
 ; Running one statement.
@@ -1402,6 +1446,13 @@ f
 ; Queries: text and parameters together, as the `axql...` macros in
 ; `Axqlite.AxqlMacro` build them.
 ; ------------------------------------------------------------------
+;; A statement's text with no parameters: `(axqSql "SELECT 1")` is
+;; `(Query "SELECT 1" vecNew)` without building the empty vector.
+;; Give the parameters with `(Query text params)`.
+(pub :: axqSql (-> String Query))
+(pub fn (axqSql text)
+  (Query text vecNew))
+
 ;; Run a query that returns no rows. Answers the rows changed.
 (pub :: axqRunOn (-> Connection Query (Result Int Error)))
 ;@axiom:effect(io)
@@ -1429,6 +1480,13 @@ f
 ;@axiom:effect(io)
 (pub fn (axqQueryOn c q)
   (let ((parsed (inStatement (axqlParse q.text) q.text "axqQueryOn")?)) (queryParsed c parsed q.params "axqQueryOn")))
+
+;; Run a query and answer just its rows, without the `Rows` wrapper:
+;; the everyday form when the column names are not needed.
+(pub :: axqAll (-> Connection Query (Result (Vec Row) Error)))
+;@axiom:effect(io)
+(pub fn (axqAll c q)
+  (let ((rs (axqQueryOn c q)?)) (Ok rs.rows)))
 
 ;; Run a query, calling `f` with each row as it is produced, as
 ;; `axqQueryEach` does.
@@ -1496,6 +1554,16 @@ f
     (match got
       ((Some r) (inStatement (rowInt r 0) q.text "axqQueryInt"))
       ((None) (inStatement (axqErr axqNotFound "the query found no row" "axqQueryInt") q.text "axqQueryInt")))))
+
+;; The TEXT in the first column of the first row a query answers.
+;; No row is `axqNotFound`; NULL or another type is `axqType`.
+(pub :: axqQueryText (-> Connection Query (Result String Error)))
+;@axiom:effect(io)
+(pub fn (axqQueryText c q)
+  (let ((got (axqQueryOne c q)?))
+    (match got
+      ((Some r) (inStatement (rowText r 0) q.text "axqQueryText"))
+      ((None) (inStatement (axqErr axqNotFound "the query found no row" "axqQueryText") q.text "axqQueryText")))))
 
 ; ------------------------------------------------------------------
 ; The schema.

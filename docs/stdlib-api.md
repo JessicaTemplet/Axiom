@@ -50,31 +50,31 @@ Agent.Tags — reading what the compiler already says about a program.
 
 ## `Axqlite`
 
-`stdlib/Axqlite.ax` — 66 public names
+`stdlib/Axqlite.ax` — 75 public names
 
 Axqlite - an embedded, single-file, transactional database.
 
-    (match (axqOpen "app.db" openOptions)
-      ((Ok db)
+    (axqWith "app.db" openOptions
+      (lambda (db)
         {
-          (axqExec db "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER)")
-          (axqRunOn db (axqlInsert users (name age) (values (text "Ada") (int 36))))
-          (match (axqQueryOn db (axqlSelect users (id name) (where (> age (int 30)))))
-            ((Ok rows) (for r in rows.rows (println (unwrapOr (rowTextNamed r "name") "?"))))
-            ((Err e) (println (errorText e))))
-          (axqClose db)
-        })
-      ((Err e) ...))
+          (axqExec db "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER)")?
+          (axqRunOn db (axqlInsert users (name age) (values (text "Ada") (int 36))))?
+          (for r in (axqAll db (axqlSelect users (id name) (where (> age (int 30))))?)
+            (println (rowTextOr r "name" "?")))
+          (Ok 0)
+        }))
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
 | `OpenOptions` | struct |  |  | How `axqOpen` opens a database: whether a missing file becomes a new database, whether the connection may only read, and how many 4096-byte pages its cache holds. |
 | `openOptions` | value | `OpenOptions` | `Alloc` | The defaults: create the file when it's missing, read and write, and cache 256 pages (1 MiB). |
+| `readOnlyOptions` | value | `OpenOptions` | `Alloc` | Open a database that must already exist, for reading only, with the same cache as `openOptions`. Every write on it is `axqReadOnly`. |
 | `Connection` | struct |  |  | An open database. |
 | `Statement` | struct |  |  | A prepared statement: its text, checked against the schema when it was prepared, and parsed again against the current schema each time it runs. |
 | `Transaction` | struct |  |  | An open transaction, from `axqBegin`. |
 | `axqOpen` | value | `(-> String OpenOptions (Result Connection Error))` | `Alloc,IO,Mut,Unsafe` | Open the database at `path`. A missing file is created when `opts.create` is true, and is `axqIoFailed` otherwise; a file that isn't an AXQLite database is `axqNotADatabase`. |
 | `axqClose` | value | `(-> Connection (Result Int Error))` | `Alloc,IO,Mut,Unsafe` | Close the connection, rolling back a transaction it has open. Closing it again answers `Ok`, as `fileClose` does; any other later use stops the program with status 85. Statements prepared on it must still be finalized. |
+| `axqWith` | value | `(-> String OpenOptions (-> Connection (Result a Error)) (Result a Error))` | `Alloc,IO,Mut` | Open the database at `path`, run `f` on the connection, and close the connection whatever `f` answers. The answer is `f`'s, unless closing fails and `f` succeeded, in which case the close's error is the answer. This is the usual way to use a database: one `axqWith` in place of an `axqOpen` match and an `axqClose`. |
 | `axqValueText` | value | `(-> Value String)` | `Alloc,Mut` | A value written as AXQL would write it as a literal: an INTEGER in decimal, a REAL in the shortest form that reads back exactly, TEXT in single quotes with `''` for a quote, a BLOB as x'hex', and NULL. |
 | `axqlQuoteText` | value | `(-> String String)` | `Alloc,Mut` | `s` as an AXQL text literal: in single quotes, each quote doubled. |
 | `Row` | struct |  |  | One result row: the column names, shared by every row of a result, and the values. |
@@ -94,6 +94,10 @@ Axqlite - an embedded, single-file, transactional database.
 | `rowRealNamed` | value | `(-> Row String (Result Float Error))` | `Alloc,Mut` | The column named `name` as a REAL. |
 | `rowTextNamed` | value | `(-> Row String (Result String Error))` | `Alloc,Mut` | The column named `name` as TEXT. |
 | `rowBlobNamed` | value | `(-> Row String (Result String Error))` | `Alloc,Mut` | The column named `name` as a BLOB's bytes. |
+| `rowIntOr` | value | `(-> Row String Int Int)` | `Alloc,Mut` | The column named `name` as an INTEGER, or `default` when it is not one: NULL, another type, or no such column. These four readers are the everyday form, for a value you can fall back on; the `Result` readers above are for telling the cases apart. |
+| `rowRealOr` | value | `(-> Row String Float Float)` | `Alloc,Mut` | The column named `name` as a REAL, or `default` when it is not one. |
+| `rowTextOr` | value | `(-> Row String String String)` | `Alloc,Mut` | The column named `name` as TEXT, or `default` when it is not one. |
+| `rowBlobOr` | value | `(-> Row String String String)` | `Alloc,Mut` | The column named `name` as a BLOB's bytes, or `default` when it is not one. |
 | `axqBegin` | value | `(-> Connection (Result Transaction Error))` | `Alloc,IO,Mut,Unsafe` | Open a transaction. Statements then run inside it until `axqCommit` or `axqRollback`; one that fails is undone and the transaction stays open. No lock is taken until the first statement needs one. |
 | `axqCommit` | value | `(-> Transaction (Result Int Error))` | `Alloc,IO,Mut` | Commit the transaction: durable when this answers `Ok`. A transaction COMMIT or ROLLBACK already ended is `axqMisuse`. |
 | `axqRollback` | value | `(-> Transaction (Result Int Error))` | `Alloc,IO,Mut` | Roll the transaction back. |
@@ -111,12 +115,15 @@ Axqlite - an embedded, single-file, transactional database.
 | `axqRun` | value | `(-> Statement (Vec Value) (Result Int Error))` | `Alloc,IO,Mut` | Run a statement that returns no rows with `params`, one per parameter. Answers the rows changed. A SELECT is `axqMisuse`: use `axqQuery` or `axqQueryEach`. |
 | `axqQuery` | value | `(-> Statement (Vec Value) (Result Rows Error))` | `Alloc,IO,Mut` | Run a SELECT with `params` and answer all its rows. |
 | `axqQueryEach` | value | `(-> Statement (Vec Value) (-> Row (Result Bool Error)) (Result Int Error))` | `Alloc,IO,Mut` | Run a SELECT with `params`, calling `f` with each row as it is produced. Stops when `f` answers `Ok false` or `Err`, and answers that `Err`, or else the number of rows `f` was called with. |
+| `axqSql` | value | `(-> String Query)` | `Alloc,Mut` | A statement's text with no parameters: `(axqSql "SELECT 1")` is `(Query "SELECT 1" vecNew)` without building the empty vector. Give the parameters with `(Query text params)`. |
 | `axqRunOn` | value | `(-> Connection Query (Result Int Error))` | `Alloc,IO,Mut` | Run a query that returns no rows. Answers the rows changed. |
 | `axqQueryOn` | value | `(-> Connection Query (Result Rows Error))` | `Alloc,IO,Mut` | Run a query and answer all its rows. |
+| `axqAll` | value | `(-> Connection Query (Result (Vec Row) Error))` | `Alloc,IO,Mut` | Run a query and answer just its rows, without the `Rows` wrapper: the everyday form when the column names are not needed. |
 | `axqQueryEachOn` | value | `(-> Connection Query (-> Row (Result Bool Error)) (Result Int Error))` | `Alloc,IO,Mut` | Run a query, calling `f` with each row as it is produced, as `axqQueryEach` does. |
 | `axqQueryMap` | value | `(-> Connection Query (-> Row (Result a Error)) (Result (Vec a) Error))` | `Alloc,IO,Mut` | Run a query and answer `f` of each row, stopping at the first `Err` from the query or from `f`. |
 | `axqQueryOne` | value | `(-> Connection Query (Result (Option Row) Error))` | `Alloc,IO,Mut` | The first row a query answers, or `None` when it answers none. The scan stops at that row. |
 | `axqQueryInt` | value | `(-> Connection Query (Result Int Error))` | `Alloc,IO,Mut` | The INTEGER in the first column of the first row a query answers, such as `SELECT count(*) FROM t`. No row is `axqNotFound`; NULL or another type is `axqType`. |
+| `axqQueryText` | value | `(-> Connection Query (Result String Error))` | `Alloc,IO,Mut` | The TEXT in the first column of the first row a query answers. No row is `axqNotFound`; NULL or another type is `axqType`. |
 | `ColumnInfo` | struct |  |  | One column of a table, as `axqColumns` describes it: its name, its type as AXQL spells it, whether it is NOT NULL and whether it is the PRIMARY KEY, the table it links to ("" for none), and the column as its CREATE TABLE wrote it, with any DEFAULT and CHECK. |
 | `IndexInfo` | struct |  |  | One index of a table: its name, whether it is UNIQUE, and its columns in order. |
 | `axqTables` | value | `(-> Connection (Result (Vec String) Error))` | `Alloc,IO,Mut` | The names of the database's tables, in the order they were created. |

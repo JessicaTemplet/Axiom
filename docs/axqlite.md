@@ -13,27 +13,28 @@ AXQL, its query language.
 (import Err)
 (import Axqlite)
 
+(:: shop (-> Connection (Result Int Error)))
+;@axiom:effect(io)
+(fn (shop db)
+  {
+    (axqRunOn db (axqlCreateTable IF NOT EXISTS items (id INTEGER PRIMARY KEY) (name TEXT NOT NULL) (price INTEGER NOT NULL)))?
+    (axqRunOn db (axqlInsert items (name price) (values (text "tea") (int 4)) (values (text "pot") (int 25)) (values (text "cup") (int 6))))?
+    (let ((rows (axqAll db (axqlSelect items (name price) (where (< price (int 10))) (orderBy price)))?))
+      (for r in rows
+        (let (
+          (name (rowTextOr r "name" "?"))
+          (price (rowIntOr r "price" 0))
+        )
+          (println "{name} costs {price}"))))
+    (Ok 0)
+  })
+
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (match (axqOpen "shop.db" openOptions)
-    ((Err e) (println (errorText e)))
-    ((Ok db)
-      (let ((cheap 10))
-        {
-          (let ((_ (axqRunOn db (axqlCreateTable IF NOT EXISTS items (id INTEGER PRIMARY KEY) (name TEXT NOT NULL) (price INTEGER NOT NULL))))) 0)
-          (let ((_ (axqRunOn db (axqlInsert items (name price) (values (text "tea") (int 4)) (values (text "pot") (int 25)) (values (text "cup") (int 6)))))) 0)
-          (match (axqQueryOn db (axqlSelect items (name price) (where (< price (int cheap))) (orderBy price)))
-            ((Ok rows)
-              (for r in rows.rows
-                (let (
-                  (name (unwrapOr (rowTextNamed r "name") "?"))
-                  (price (unwrapOr (rowIntNamed r "price") 0))
-                )
-                  (println "{name} costs {price}"))))
-            ((Err e) (println (errorText e))))
-          (let ((_ (axqClose db))) 0)
-        }))))
+  (match (axqWith "shop.db" openOptions shop)
+    ((Ok _) 0)
+    ((Err e) { (println (errorText e)) 0 })))
 ```
 
 ```text
@@ -44,17 +45,27 @@ cup costs 6
 `(import Axqlite)` brings in everything: the connection API, the
 `axql` statement macros, and `Row` and `Rows`. `axqlCreateTable`,
 `axqlInsert` and `axqlSelect` are checked when the program compiles and
-expand to AXQL text with parameters. `(text "tea")` and `(int cheap)`
+expand to AXQL text with parameters. `(text "tea")` and `(int 10)`
 are values, bound as parameters, and never become part of a statement's
 text.
 
+Three shapes do most of the work above. `axqWith` opens a database,
+runs a function on it and closes it. A trailing `?` on a statement
+stops the function with that statement's error. `axqAll` answers a
+query's rows as one vector, and `rowTextOr` and `rowIntOr` read a
+column with a fallback, so a row needs no `match` of its own.
+
 ## Open a database
 
-`(axqOpen path opts)` answers `(Result Connection Error)`. A connection
-closes when its last owner leaves scope. `axqClose` closes it early and
+`(axqWith path opts f)` is the usual way in: it opens the database,
+runs `f` on the connection and closes it, and answers what `f`
+answers. `(axqOpen path opts)` answers `(Result Connection Error)`
+when you need to hold the connection yourself. A connection closes
+when its last owner leaves scope. `axqClose` closes it early and
 reports errors. `openOptions` is the usual choice: it creates the file when it's
-missing, opens it for reading and writing, and caches 256 pages. Build
-an `OpenOptions` yourself for anything else:
+missing, opens it for reading and writing, and caches 256 pages.
+`readOnlyOptions` opens a file that must exist, for reading only.
+Build an `OpenOptions` yourself for anything else:
 
 ```scheme fragment
 (axqOpen "shop.db" (OpenOptions false true 64))   ; must exist, read only, 64 pages of cache
@@ -204,12 +215,18 @@ parameters, and so is `(Query text params)`. Run one with:
 
 - `(axqRunOn db q)` for a statement that returns no rows. It answers
   how many rows the statement changed.
-- `(axqQueryOn db q)` for a `SELECT`. It answers every row as `Rows`.
+- `(axqAll db q)` for a `SELECT` whose rows you want as one
+  `(Vec Row)`, and `(axqQueryOn db q)` when you also need the result's
+  column names, as `Rows`.
 - `(axqQueryEachOn db q f)`, which calls `f` with each row as it is
   produced.
 - `(axqQueryOne db q)`, which answers the first row as an `Option`.
-- `(axqQueryInt db q)`, for a query of one number such as
-  `SELECT count(*) FROM items`. No row is `axqNotFound`.
+- `(axqQueryInt db q)` and `(axqQueryText db q)`, for a query of one
+  number or one text value such as `SELECT count(*) FROM items`.
+  No row is `axqNotFound`.
+
+`(axqSql text)` is a query with no parameters, so a statement built
+from text alone needs no empty parameter vector.
 
 `(axqExec db text)` runs a statement that takes no parameters.
 [axql.md](axql.md#statements-as-axiom-forms) lists the macro forms.
@@ -252,6 +269,14 @@ number out of range is `axqMisuse`, and a name the result doesn't have
 is `axqSchema`, with the names it does have. `rowLen`, `rowName` and
 `rowIndex` answer the shape. `axqValueText` writes any `Value` as AXQL
 would write it as a literal, which is handy for printing.
+
+For a value you can fall back on, `rowIntOr`, `rowRealOr`,
+`rowTextOr` and `rowBlobOr` read a column by name and answer a plain
+value: `(rowIntOr r "price" 0)` is the price, or 0 when the column is
+NULL, holds another type, or isn't there. Use the `Result` readers
+when you need to tell those cases apart.
+
+Tested by `tests/axqlite/626-api-ergonomics.ax`.
 
 A `Value` is `VNull`, `(VInt n)`, `(VReal x)`, `(VText s)` or
 `(VBlob b)`, from `Axqlite.Value`.

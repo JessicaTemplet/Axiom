@@ -1,0 +1,51 @@
+; The everyday API: `axqWith` opens and closes, `axqAll` answers the
+; rows themselves, the `row...Or` readers fall back instead of
+; answering a `Result`, `axqQueryInt` and `axqQueryText` read one
+; value, `axqSql` builds a parameterless query, and `readOnlyOptions`
+; opens a database that refuses writes.
+(import IO)
+(import Err)
+(import Vec)
+(import Float)
+(import Axqlite)
+(import Axqlite.Value)
+(import AxqlKit)
+
+(:: work (-> Connection (Result Int Error)))
+;@axiom:effect(io)
+(fn (work db)
+  {
+    (axqRunOn db (axqlCreateTable items (id INTEGER PRIMARY KEY) (name TEXT) (price INTEGER) (score REAL) (data BLOB)))?
+    (axqRunOn db (axqlInsert items (id name price score data) (values (int 1) (text "tea") (int 4) (real 2.5) (param (VBlob "xy")))))?
+    (axqRunOn db (axqlInsert items (id name price score data) (values (int 2) null null null null)))?
+    (let ((rows (axqAll db (axqlSelect items (id name price score data) (orderBy id)))?))
+      (for r in rows
+        (let (
+          (name (rowTextOr r "name" "?"))
+          (price (rowIntOr r "price" -1))
+          (score (rowRealOr r "score" 0.0))
+          (missing (rowTextOr r "nope" "fallback"))
+          (wrong (rowIntOr r "name" -9))
+          (scoreText (floatToString score))
+        )
+          (println "{name} price={price} score={scoreText} missing={missing} wrong={wrong}"))))
+    (let ((n (axqQueryInt db (axqSql "SELECT count(*) FROM items"))?))
+      (println "count={n}"))
+    (let ((s (axqQueryText db (axqlSelect items name (where (= id (int 1)))))?))
+      (println "first={s}"))
+    (Ok 0)
+  })
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (let ((_ (removeFile "ergo.db"))) ())
+    (kitDone "with" (axqWith "ergo.db" openOptions work))
+    (kitDone "read-only write" (axqWith "ergo.db" readOnlyOptions
+      (lambda (db) (axqExec db "INSERT INTO items VALUES (3, 'no', 1, 1.0, x'00')"))))
+    (kitDone "with missing" (axqWith "nope.db" readOnlyOptions (lambda (db) (Ok 0))))
+    (kitDone "with error" (axqWith "ergo.db" openOptions
+      (lambda (db) (axqErr axqConstraint "changed my mind" "with error"))))
+    0
+  })
