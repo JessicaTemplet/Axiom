@@ -485,11 +485,7 @@ grep -q 'add `(:: main Int)`' nm.err \
   && ok "\`emit-llvm\` accepts a module with no \`main\`" || bad "emit-llvm over-fires AX4001"
 
 # ---------------------------------------------------------------
-# An empty file is READ, not refused.
-#
-# `readFile` answers "" for a missing file and for an empty one, so
-# both reported `cannot read input` - a statement about the filesystem,
-# and false for the second. An empty file is a module with no
+# An empty file is READ, not refused. It is a module with no
 # declarations: it checks clean, and only `build` rejects it, for the
 # reason that is actually true.
 : >empty.ax

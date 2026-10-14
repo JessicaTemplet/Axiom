@@ -541,7 +541,7 @@ cat > "$work/res.ax" <<'AX'
 (:: openCount Int)
 ;@axiom:effect(io)
 (fn (openCount)
-  (vecLen (listDir "/dev/fd")))
+  (vecLen (unwrapOr (listDir "/dev/fd") vecNew)))
 
 (:: boom (-> Int Int))
 (fn (boom d)

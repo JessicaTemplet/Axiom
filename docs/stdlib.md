@@ -104,7 +104,7 @@ nothing. The other readers and writers take a `File`:
 | open and close | `openPath`, `fileClose` |
 | read | `readLine`, `readAll`, `fileRead` into a `ReadBuffer`, `readInto` into a `String` you allocated |
 | write | `writeStr` and `writeSlice` answer a count or a negative errno; `fileWrite` answers a `Result`; `writeOut` and `writeErr` write to the standard streams |
-| by path | `readFile`, `writeFile`, `appendFile`, `copyFile`, `removeFile`, `renamePath`, `fileExists`, `fileSize`, `isDir`, `readErrno`, `listDir`, `makeDir`, `makeDirAll`, `removeDir`, `cwd` |
+| by path | `readFile`, `writeFile`, `appendFile`, `copyFile`, `removeFile`, `renamePath`, `fileExists`, `fileSize`, `isDir`, `listDir`, `makeDir`, `makeDirAll`, `removeDir`, `cwd` |
 | wait on many | `pollerNew`, `pollerAdd`, `pollerRemove`, `pollerAddSignals`, `pollerWait`, `pollerToken`, `pollerSignal`, `pollerClose` |
 | terminals | `isTerminal`, `termSize`, and `termRaw`, which answers a `TermGuard` |
 | failures | `errorKind` names an `Error` the same way on every target, with Rust's `std::io::ErrorKind` names: `NotFound`, `WouldBlock`, `TimedOut` and the rest |
@@ -119,8 +119,10 @@ closes it when its last share goes. Raw mode is an owner too: releasing
 the `TermGuard` that `termRaw` answers puts the terminal back as it
 was, and `termRestore` does it early.
 
-`readFile` and `listDir` return an empty value on failure. Use
-`readErrno`, or open the file and read it, when you need the reason.
+`readFile` and `listDir` answer a `Result`: `(readFile path)?` gives
+you the text, or passes the error on. A missing file is ENOENT, a
+directory given to `readFile` is EISDIR, and an empty file is
+`(Ok "")`.
 
 Tested by `tests/stdlib/785-stdio-file.ax` and
 `tests/stdlib/786-poller-owned.ax`.

@@ -1536,7 +1536,7 @@ Fmt - number formatting, in Axiom.
 
 ## `IO`
 
-`stdlib/IO.ax` — 74 public names
+`stdlib/IO.ax` — 73 public names
 
 IO - files, standard streams, terminals, readiness and sockets.
 
@@ -1556,22 +1556,21 @@ IO - files, standard streams, terminals, readiness and sockets.
 | `fileWrite` | value | `(-> File String (Result Int Error))` | `Alloc,IO` | Write every byte of `s` to `f`: `(Ok n)`, or `(Err e)` whose code is the errno of the write that failed. |
 | `println` | macro |  |  | Print to standard output with a newline. A string literal's `{name}` holes interpolate the bindings they name, as in `(println "hello, {name}")`; any other argument is rendered, so `(println n)` prints an `Int`. |
 | `eprintln` | macro |  |  | Print to standard error with a newline, with the same holes as `println`. |
-| `readFile` | value | `(-> String String)` | `Alloc,IO,Mut` | The whole contents of the file at `path`, or "" if it cannot be read. |
+| `readFile` | value | `(-> String (Result String Error))` | `Alloc,IO,Mut` | The whole contents of the file at `path`: `(Ok text)`, or `(Err e)` whose code is the errno, its message `readFile: PATH: errno N`. A missing file is ENOENT, 2, and a directory is EISDIR, 21. An empty file is `(Ok "")`. |
 | `writeFile` | value | `(-> String String (Result Int Error))` | `Alloc,IO,Mut` | Write `s` to `path`, creating it or truncating what is there. Answers `(Ok bytes)`, or `(Err e)` whose code is the errno. |
 | `appendFile` | value | `(-> String String (Result Int Error))` | `Alloc,IO,Mut` | Add `s` to the end of `path`, creating it if absent. Answers `(Ok bytes)`, or `(Err e)` whose code is the errno. `O_APPEND` makes the seek and the write one operation, so two processes appending to one log interleave whole writes. |
 | `removeFile` | value | `(-> String (Result Int Error))` | `Alloc,IO,Mut` | Remove the file `path`. Answers `(Ok 0)`, or `(Err …)` carrying the errno. It does not remove a directory; that is `removeDir`. |
 | `renamePath` | value | `(-> String String (Result Int Error))` | `Alloc,IO,Mut` | Move `old` to `new`, answering `(Ok 0)` or `(Err …)` with the errno. |
 | `openPath` | value | `(-> String Int (Result File Error))` | `Alloc,IO,Mut` | Open `path` with `flags` (`oRdonly`, `oWronlyCreateTrunc`, ...): `(Ok file)`, or `(Err e)` whose code is the errno. New files get mode 0644. The file closes when its last owner leaves scope. |
-| `copyFile` | value | `(-> String String (Result Int Error))` | `Alloc,IO,Mut` | Copy `src` onto `dst`, answering `(Ok bytes)` or `(Err e)`. `dst` is created or truncated. |
+| `copyFile` | value | `(-> String String (Result Int Error))` | `Alloc,IO,Mut` | Copy `src` onto `dst`, answering `(Ok bytes)` or `(Err e)`. `dst` is created or truncated, and left alone when `src` can't be read. |
 | `fileExists` | value | `(-> String Bool)` | `Alloc,IO,Mut` | True when `path` names something that can be opened for reading - a directory included. `isDir` separates them. |
 | `isDir` | value | `(-> String Bool)` | `Alloc,IO,Mut` | True when `path` names a directory: one that opens and whose read answers EISDIR. An empty file answers false. |
 | `fileSize` | value | `(-> String (Result Int Error))` | `Alloc,IO,Mut` | The size of `path` in bytes, or `(Err …)` carrying the errno. It seeks to the end, which is what the size is. |
-| `readErrno` | value | `(-> String Int)` | `Alloc,IO,Mut` | 0 when `path` can be read as a file, otherwise the errno saying why not: 2 missing, 13 not permitted, 21 a directory. |
 | `makeDir` | value | `(-> String (Result Int Error))` | `Alloc,IO,Mut` | Create the directory `path`, mode 0755. Answers `(Ok 0)`, or `(Err …)` carrying the errno - `EEXIST` when it is already there. |
 | `makeDirMode` | value | `(-> String Int (Result Int Error))` | `Alloc,IO,Mut` | Create the directory `path` with the permission bits `mode`, such as 448 (0700) for a directory only its owner may enter. Answers `(Ok 0)`, or `(Err e)`. |
 | `makeDirAll` | value | `(-> String (Result Int Error))` | `Alloc,IO,Mut` | Create `path` and every missing directory above it. Answers `(Ok 0)`, or `(Err …)` carrying the errno of the first component that could not be made. |
 | `removeDir` | value | `(-> String (Result Int Error))` | `Alloc,IO,Mut` | Remove the empty directory `path`. Answers `(Ok 0)`, or `(Err …)` - `ENOTEMPTY` when it still holds entries. Nothing here removes a tree: that is a loop over `listDir`, and it is the caller's to write. |
-| `listDir` | value | `(-> String (Vec String))` | `Alloc,IO,Mut` | The entries of the directory `path`, as a Vec of `Str` - sorted by byte, with `.` and `..` removed. |
+| `listDir` | value | `(-> String (Result (Vec String) Error))` | `Alloc,IO,Mut` | The entries of the directory `path`, sorted by byte, with `.` and `..` removed: `(Ok names)`, or `(Err e)` whose code is the errno. A missing path is ENOENT, 2, and a file is ENOTDIR, 20. |
 | `cwd` | value | `(Result String Error)` | `Alloc,IO,Mut` | The process's working directory as an absolute path: `(Ok path)`, or `(Err e)` whose code is the errno. |
 | `exit` | value | `(-> Int Int)` | `IO` | End the process with status `code`, running no further code. |
 | `die` | value | `(-> String Int Int)` | `Alloc,IO,Mut` | Print `s` to standard error and exit with `code`. Never returns. |

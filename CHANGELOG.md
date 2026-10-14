@@ -30,6 +30,17 @@ its changelog too.
   vector of anything else is now a type error; drop its casts.
   Tested by `tests/stdlib/405-vec-sort.ax`.
 
+- `readFile` and `listDir` answer a `Result`. A missing file, a
+  directory and an empty file were all `""` to `readFile`, and every
+  failure was an empty vector to `listDir`; now the `Err` carries the
+  errno, and `(readFile path)?` reads a file or passes the failure on.
+  `readErrno`, which existed to tell those cases apart, is gone, and
+  `copyFile` is `(writeFile dst (readFile src)?)`. The compiler reads
+  its input once, so its own read-then-probe workaround goes too.
+  **BREAKING**: `compat/BREAKING` names all three. Tested by
+  `tests/stdlib/055-filesystem.ax` and
+  `tests/selfhost/994-directory-listing.ax`.
+
 - The prelude's `when` and `unless` are removed: an `if` without an
   else does their job. Write `(if test body)` for `(when test body)`
   and `(if (! test) body)` for `(unless test body)`. `Pre` keeps its

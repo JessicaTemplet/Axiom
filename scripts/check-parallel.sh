@@ -1404,7 +1404,7 @@ if [[ "$(uname -s)" == Linux ]]; then
 (fn (main)
   {
     (println (loop 0 0))
-    (println (readFile "/proc/self/status"))
+    (println (unwrapOr (readFile "/proc/self/status") ""))
     0
   })
 CHURN
@@ -1493,10 +1493,10 @@ cat > "$work/orphan.ax" <<'ORPHAN'
   )
     {
       (while (&&
-        (== (region r (strLen (readFile path))) 0)
+        (== (region r (strLen (unwrapOr (readFile path) ""))) 0)
         (< (- (nowUs buf) start) 5000000))
         0)
-      (> (strLen (readFile path)) 0)
+      (> (strLen (unwrapOr (readFile path) "")) 0)
     }))
 
 ; Join the failing child while its sibling is live. A parallel form

@@ -24,7 +24,7 @@
 ;      count would not see it; checking that a name from the FIRST
 ;      pass survived is what does.
 ;
-;   3. NOT-A-DIRECTORY ANSWERS EMPTY. `open` succeeds on a regular
+;   3. NOT-A-DIRECTORY IS AN ERROR. `open` succeeds on a regular
 ;      file, so the refusal has to come from the `getdents` itself.
 (import IO)
 (import Err)
@@ -94,7 +94,7 @@
   )
     {
       (unwrapOr (makeDir d) 0)
-      (let ((v (listDir d)))
+      (let ((v (unwrapOr (listDir d) vecNew)))
         {
           (if (== (vecLen v) 0)
             (set n (+ n 1)))
@@ -106,7 +106,7 @@
       ; --- what is in it shows up -------------------------------------
       (unwrapOr (writeFile f "x") 0)
       (unwrapOr (makeDir "ax994/sub") 0)
-      (let ((v (listDir d)))
+      (let ((v (unwrapOr (listDir d) vecNew)))
         {
           (if (== (vecLen v) 2)
             (set n (+ n 1)))
@@ -121,16 +121,16 @@
             (set n (+ n 1)))
         })
       ; --- what is not a directory ------------------------------------
-      ; `open` succeeds on both of these; the emptiness has to come
-      ; from further in.
-      (if (== (vecLen (listDir f)) 0)
+      ; `open` succeeds on a file, so its error has to come from
+      ; further in; a missing name fails at the open.
+      (if (isErr (listDir f))
         (set n (+ n 1)))
-      (if (== (vecLen (listDir "ax994/nope")) 0)
+      (if (isErr (listDir "ax994/nope"))
         (set n (+ n 1)))
       ; --- more than one buffer ---------------------------------------
       (unwrapOr (makeDir big) 0)
       (fill 0)
-      (let ((v (listDir big)))
+      (let ((v (unwrapOr (listDir big) vecNew)))
         {
           (if (== (vecLen v) bigCount)
             (set n (+ n 1)))

@@ -379,24 +379,26 @@
 ; ------------------------------------------------------------------
 ; Reading
 ; ------------------------------------------------------------------
-;; The whole contents of the file at `path`, or "" if it cannot be read.
+;; The whole contents of the file at `path`: `(Ok text)`, or `(Err e)`
+;; whose code is the errno, its message `readFile: PATH: errno N`. A
+;; missing file is ENOENT, 2, and a directory is EISDIR, 21. An empty
+;; file is `(Ok "")`.
 ;
-; "" is also an empty file, a directory and a file you may not read.
-; `readErrno` separates those. The read starts at 64 KiB and doubles, so
-; a file of any size arrives whole.
-(pub :: readFile (-> String String))
+; The read starts at 64 KiB and doubles, so a file of any size arrives
+; whole. A directory opens on Darwin and Linux alike and fails at the
+; first `read`, which is where its EISDIR comes from.
+(pub :: readFile (-> String (Result String Error)))
 ;@axiom:effect(io)
 (pub fn (readFile path)
   (let ((fd (ioOpen (ioPath path) oRdonly)))
     (if (< fd 0)
-      ""
-      (let ((s
-        (match (ioReadAllFd fd)
-          ((Ok got) got)
-          ((Err _) ""))))
+      (Err (ioPathError "readFile" path (- 0 fd)))
+      (let ((r (ioReadAllFd fd)))
         {
           (ioCloseQuiet fd)
-          s
+          (match r
+            ((Ok text) (Ok text))
+            ((Err e) (Err (ioPathError "readFile" path (errCode e)))))
         }))))
 
 ; Read `fd` to end of input into `buf`, doubling the buffer whenever it
@@ -495,12 +497,18 @@
 ;   - `makeDirAll` creates the parents, which is what a build writing
 ;     `build/obj/x.o` means by "make the directory".
 ; ------------------------------------------------------------------
+; The error for `errno` from `op` on `path`: `op: path: errno N`, its
+; code the errno.
+(:: ioPathError (-> String String Int Error))
+(fn (ioPathError op path errno)
+  (mkError errno (concat (concat (concat op ": ") (concat path ": errno ")) (fmtInt errno))))
+
 ; A raw answer re-wrapped with the path: `op: path: errno N`. The code
 ; is the errno, unchanged.
 (:: ioResult (-> String String Int (Result Int Error)))
 (fn (ioResult op path n)
   (if (< n 0)
-    (Err (mkError (- 0 n) (concat (concat (concat op ": ") (concat path ": errno ")) (fmtInt (- 0 n)))))
+    (Err (ioPathError op path (- 0 n)))
     (Ok n)))
 
 ; Write all of `s` to the file at `cpath`, opened with `flags`: the bytes
@@ -585,18 +593,13 @@
     ((Err e) (Err e))))
 
 ;; Copy `src` onto `dst`, answering `(Ok bytes)` or `(Err e)`. `dst` is
-;; created or truncated.
+;; created or truncated, and left alone when `src` can't be read.
 ;
-; The whole file goes through memory. The read is checked first, because
-; `readFile` answers "" for a missing file and copying that would report
-; success having emptied `dst`.
+; The whole file goes through memory.
 (pub :: copyFile (-> String String (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (copyFile src dst)
-  (let ((e (readErrno src)))
-    (if (!= e 0)
-      (Err (mkError e (concat (concat "copyFile: " src) ": unreadable")))
-      (writeFile dst (readFile src)))))
+  (writeFile dst (readFile src)?))
 
 ;; True when `path` names something that can be opened for reading -
 ;; a directory included. `isDir` separates them.
@@ -616,7 +619,7 @@
 (pub :: isDir (-> String Bool))
 ;@axiom:effect(io)
 (pub fn (isDir path)
-  (== (readErrno path) eIsDir))
+  (== (ioReadErrno path) eIsDir))
 
 ;; The size of `path` in bytes, or `(Err …)` carrying the errno. It
 ;; seeks to the end, which is what the size is.
@@ -639,15 +642,14 @@
             n
           })))))
 
-;; 0 when `path` can be read as a file, otherwise the errno saying why
-;; not: 2 missing, 13 not permitted, 21 a directory.
-;
-; The three-way answer `readFile` cannot give. Opening separates "not
-; there" from "not allowed"; a one-byte read separates a directory,
-; because Darwin and Linux both open one and defer EISDIR to `read`.
-(pub :: readErrno (-> String Int))
+; 0 when `path` can be read as a file, otherwise the errno saying why
+; not: 2 missing, 13 not permitted, 21 a directory. Opening separates
+; "not there" from "not allowed"; a one-byte read separates a
+; directory, because Darwin and Linux both open one and defer EISDIR to
+; `read`.
+(:: ioReadErrno (-> String Int))
 ;@axiom:effect(io)
-(pub fn (readErrno path)
+(fn (ioReadErrno path)
   (let ((fd (ioOpen (ioPath path) oRdonly)))
     (if (< fd 0)
       (- 0 fd)
@@ -767,33 +769,37 @@
   32768)
 
 ; Every name in the directory `path`, `.` and `..` included, in the
-; filesystem's order. Empty means failure, since a directory always
-; holds `.` and `..`. The names are copied: the syscall's buffer is
-; reused by the next pass.
-(:: ioReadDir (-> String (Vec String)))
+; filesystem's order, or the errno of the open or the read that failed.
+; The open asks for a directory, so a file fails there with ENOTDIR on
+; every target; Darwin's `getdirentries` would answer EINVAL instead.
+; The names are copied: the syscall's buffer is reused by the next pass.
+(:: ioReadDir (-> String (Result (Vec String) Error)))
 ;@axiom:effect(io)
 (fn (ioReadDir path)
-  (let ((out vecNew))
-    (let ((fd (ioOpen (ioPath path) oRdonly)))
-      (if (< fd 0)
-        out
-        ; Darwin's fourth argument is an in/out scan cookie the kernel
-        ; starts from; zero is the beginning. Linux keeps the position
-        ; on the descriptor and never reads it.
-        (let (
-          (buf (memAlloc ioDirBufBytes))
-          (pos (memAlloc 8))
-        )
-          {
-            (memSetWord pos 0 0)
-            (ioReadDirLoop fd buf pos out)
-            (ioCloseQuiet fd)
-            out
-          })))))
+  (let ((fd (ioOpen (ioPath path) (| oRdonly oDirectory))))
+    (if (< fd 0)
+      (Err (ioPathError "listDir" path (- 0 fd)))
+      ; Darwin's fourth argument is an in/out scan cookie the kernel
+      ; starts from; zero is the beginning. Linux keeps the position
+      ; on the descriptor and never reads it.
+      (let (
+        (out vecNew)
+        (buf (memAlloc ioDirBufBytes))
+        (pos (memAlloc 8))
+      )
+        {
+          (memSetWord pos 0 0)
+          (let ((n (ioReadDirLoop fd buf pos out)))
+            {
+              (ioCloseQuiet fd)
+              (if (< n 0)
+                (Err (ioPathError "listDir" path (- 0 n)))
+                (Ok out))
+            })
+        }))))
 
 ; One `getdents` per pass until the directory is exhausted (0) or the
-; kernel refuses (negative). A refusal mid-way keeps the names already
-; decoded.
+; kernel refuses (negative), answering that last result.
 (:: ioReadDirLoop (-> Int Int Int (Vec String) Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
@@ -836,29 +842,28 @@
             (ioReadDirDecode buf (+ off reclen) n out)
           })))))
 
-;; The entries of the directory `path`, as a Vec of `Str` - sorted by
-;; byte, with `.` and `..` removed.
+;; The entries of the directory `path`, sorted by byte, with `.` and
+;; `..` removed: `(Ok names)`, or `(Err e)` whose code is the errno. A
+;; missing path is ENOENT, 2, and a file is ENOTDIR, 20.
 ;
-; An empty Vec means an empty directory or a path that is not a
-; readable directory; `isDir` separates them. `.` and `..` are dropped
-; because a caller that walks a directory and forgets to skip `..`
-; walks the whole filesystem.
+; `.` and `..` are dropped because a caller that walks a directory and
+; forgets to skip `..` walks the whole filesystem.
 ;
 ; Sorted, because `readdir` order is the filesystem's and is not stable
 ; across machines, so a program that lists a directory and prints,
 ; hashes or compiles what it finds is not reproducible unless something
 ; sorts. The sort is an insertion sort: one pass for an already-ordered
 ; listing, and no scratch allocation.
-(pub :: listDir (-> String (Vec String)))
+(pub :: listDir (-> String (Result (Vec String) Error)))
 ;@axiom:effect(io)
 (pub fn (listDir path)
   (let (
-    (raw (ioReadDir path))
+    (raw (ioReadDir path)?)
     (out vecNew)
   )
     {
       (listDirKeep raw 0 out)
-      out
+      (Ok out)
     }))
 
 ; `Vec::vecLen` is qualified in the two functions below, where every
@@ -1001,8 +1006,7 @@
 ;
 ; The readers take a `File` - `(readLine stdin)`, or a file `openPath`
 ; answered - and answer `Result` with end of input inside the `Ok`: a
-; read that fails is not an input that ended, and a stream cannot be
-; asked `readErrno` afterwards.
+; read that fails is not an input that ended.
 ;
 ; The line reader makes one `read(2)` per byte, so the descriptor is
 ; left at exactly the next unread byte - a child handed it, or a

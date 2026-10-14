@@ -10,7 +10,7 @@
 ; Only these two. `IO` also exports `die`, and `main.ax` declares its
 ; own - a whole-module import would make the name ambiguous in the
 ; one file that uses it most.
-(import IO (listDir isDir fileExists makeDir readErrno readFile removeFile renamePath stderr writeFile writeStr))
+(import IO (listDir isDir fileExists makeDir readFile removeFile renamePath stderr writeFile writeStr))
 (import lexer)
 (import lexicon)
 (import nolint)
@@ -247,50 +247,17 @@
         "Is a directory"
         (concat "errno " (fmtInt e))))))
 
-; 0 when `fileName` can be read, otherwise the errno explaining why not.
-;
-; `sysReadFile` answers "" for a missing file, an EMPTY file, and a
-; DIRECTORY alike - three different facts collapsed into one, which is
-; why an empty file used to be reported as unreadable (a statement about
-; the filesystem, and a false one) and a directory as missing.
-;
-; The probe that separates them is `Sys.sysReadErrno` now. It was
-; written here, because this was the program that needed it, and it is
-; a question every program reading a path has: opening separates
-; ENOENT and EACCES, and a one-byte read separates EISDIR, because
-; both Darwin and Linux open a directory happily and defer it to
-; `read` (probed, 2026-08-08). What is left here is the `Str`-taking
-; spelling, which is this file's convention.
-(pub :: sourceReadErrno (-> String Int))
-;@axiom:effect(io)
-(pub fn (sourceReadErrno fileName)
-  (readErrno fileName))
-
-; The errno behind an EMPTY read, or 0 - asked AFTER `sysReadFile`
-; answered, and only when it answered "". Every front door below reads
-; the source first and calls this second.
-;
-; It was the other way round until 2026-08-29: probe first, read
-; second. The probe is a one-byte `read` (`sysReadErrno`'s EISDIR
-; test), and on a regular file the second open reads that byte again -
-; but a PIPE hands a byte out once. Measured:
-;
-;     printf '(fn (main) 0)\n' | axiom check /dev/stdin
-;     E AX2001 /dev/stdin:1:1-3 unexpected-token "expected (, found `fn`"
-;
-; while the same bytes in a file checked OK. The compiler was judging a
-; program whose first byte it had thrown away, and every consumer of
-; `/dev/stdin` had learned to prepend a newline. A read that answered
-; bytes needs no explanation; an empty one costs the probe, and a pipe
-; that answered nothing has nothing left to lose. `check-driver.sh`
-; pins a pipe and a file reporting the same diagnostic at the same
-; column.
-(pub :: sourceReadErrnoFor (-> String String Int))
-;@axiom:effect(io)
-(pub fn (sourceReadErrnoFor fileName src)
-  (if (> (strLen src) 0)
-    0
-    (sourceReadErrno fileName)))
+; The errno behind a failed read of a source file, or 0 when it read.
+; An empty file reads, as `(Ok "")`, and lexes to no tokens; a
+; directory fails at its first `read` with EISDIR. The read is the
+; only one, so a pipe such as `/dev/stdin` loses no byte to a probe
+; (`check-driver.sh` pins a pipe and a file reporting the same
+; diagnostic at the same column).
+(pub :: sourceReadErrno (-> (Result String Error) Int))
+(pub fn (sourceReadErrno r)
+  (match r
+    ((Ok _) 0)
+    ((Err e) (errCode e))))
 
 ; One spelling of the read failure, everywhere: `error: could not
 ; read file 'F': <reason>`, lowercase with the `error:` prefix every
@@ -514,8 +481,9 @@
   ; before any module is read, which is the property every refusal
   ; in this group shares.
   (let (
-    (src (readFile fileName))
-    (rerr (sourceReadErrnoFor fileName src))
+    (got (readFile fileName))
+    (src (unwrapOr got ""))
+    (rerr (sourceReadErrno got))
     (_gone (if (== transient 1)
       (unwrapOr (removeFile fileName) 0)
       0))
@@ -1218,8 +1186,9 @@
 ;@axiom:effect(entropy)
 (pub fn (testRunFile file filter)
   (let (
-    (src (readFile file))
-    (rerr (sourceReadErrnoFor file src))
+    (got (readFile file))
+    (src (unwrapOr got ""))
+    (rerr (sourceReadErrno got))
   )
     (if (!= rerr 0)
       {
@@ -1228,9 +1197,6 @@
       }
       ; The check comes first so a diagnostic names the file the
       ; author wrote. It exits on any error, exactly as `check` does.
-      ; (The bytes were read above, before the check, so that the
-      ; errno probe runs after the read like every other front door;
-      ; a real file reads the same twice.)
       (let ((_chk (compileFile file (targetArg hostTarget) 0 0)))
         (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
           (if (== (memGetWord pr 0) 0)
@@ -1460,8 +1426,8 @@
             (let ((f (vecGetStr files i)))
               {
                 (replOut (concat "== " (concat f " ==\n")))
-                (replOut (readFile (testCapName f "out" i)))
-                (writeStr stderr (readFile (testCapName f "err" i)))
+                (replOut (unwrapOr (readFile (testCapName f "out" i)) ""))
+                (writeStr stderr (unwrapOr (readFile (testCapName f "err" i)) ""))
                 (unwrapOr (removeFile (testCapName f "out" i)) 0)
                 (unwrapOr (removeFile (testCapName f "err" i)) 0)
                 (if (!= (vecGet results i) 0)
@@ -1481,7 +1447,7 @@
 ;@axiom:effect(unsafe)
 (pub fn (testFilesIn dir)
   (let (
-    (entries (listDir dir))
+    (entries (unwrapOr (listDir dir) vecNew))
     (out vecNew)
     (n (vecLen entries))
     (mut i 0)
@@ -1597,7 +1563,7 @@
       (if (fileExists mf)
         (die (concat (concat "error: `" name) "` already holds an Axiom project (`axiom.pkg` exists)\n") 1)
         (if (isDir name)
-          (if (> (vecLen (listDir name)) 0)
+          (if (> (vecLen (unwrapOr (listDir name) vecNew)) 0)
             (die (concat (concat "error: `" name) "` exists and is not empty\n") 1)
             (newProjectWrite name mf mainf))
           (if (isErr (makeDir name))
@@ -1670,7 +1636,7 @@
       (let ((mf (pkgFindManifest "")))
         (if (== (strLen mf) 0)
           (die "error: no axiom.pkg at or above the working directory\n" 1)
-          (let ((text (readFile mf)))
+          (let ((text (unwrapOr (readFile mf) "")))
             {
               (pkgCheckLines text mf)
               (fetchUrls (pkgFetchUrls text) (pathDir mf) 0)
@@ -1997,15 +1963,13 @@
               ; The input is found by a scan that knows `--check` takes no
               ; value: the general positional walk treats any `--flag` as
               ; consuming its neighbour, which would swallow the file in
-              ; `fmt --check FILE`. And the empty-versus-missing distinction
-              ; needs the errno probe AFTER the read answered "",
-              ; because `sysReadFile` answers "" for both: an empty
-              ; file formats to an empty file with exit 0.
+              ; `fmt --check FILE`. An empty file formats to an empty
+              ; file with exit 0.
               (let ((f (fmtInputArg 0)))
                 (if (== (strLen f) 0)
                   (die "error: fmt needs an input file\n" 1)
-                  (let ((src (readFile f)))
-                    (let ((rerr (sourceReadErrnoFor f src)))
+                  (let ((got (readFile f)))
+                    (let ((src (unwrapOr got "")) (rerr (sourceReadErrno got)))
                       (if (!= rerr 0)
                         (die (readFailMsg f rerr) 1)
                         {
@@ -2042,8 +2006,8 @@
                 )
                   (if (== (strLen f) 0)
                     (die "error: symbols needs an input file\n" 1)
-                    (let ((src (readFile f)))
-                      (let ((rerr (sourceReadErrnoFor f src)))
+                    (let ((got (readFile f)))
+                      (let ((src (unwrapOr got "")) (rerr (sourceReadErrno got)))
                         (if (!= rerr 0)
                           (die (readFailMsg f rerr) 1)
                           ; An AXIR record file re-emits and exits here;

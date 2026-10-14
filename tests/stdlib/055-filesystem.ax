@@ -1,5 +1,4 @@
-; The filesystem surface `IO` grew when `readFile` stopped being the
-; only thing in it.
+; The filesystem surface `IO` offers above the descriptor layer.
 ;
 ; `050-file-io` covers the descriptor layer - open, write, close,
 ; reopen, read to EOF. This covers the layer above it, where a path is
@@ -101,7 +100,7 @@
 ; were the same Int, so a test compared against `(- 0 2)` and a test
 ; for a SIZE of 2 would have been written identically. Here the two
 ; live in different arms.
-(:: codeOf (-> (Result Int Error) Int))
+(:: codeOf (-> (Result a Error) Int))
 (fn (codeOf r)
   (match r
     ((Ok v) 0)
@@ -136,34 +135,33 @@
       ; second existed, adding a line meant reading the file, joining,
       ; and writing the whole thing back.
       (set bad (+ bad (eqInt "writeFile bytes" (unwrapOr (writeFile f "one\n") (- 0 1)) 4)))
-      (set bad (+ bad (eq "readFile" (readFile f) "one\n")))
+      (set bad (+ bad (eq "readFile" (unwrapOr (readFile f) "") "one\n")))
       (set bad (+ bad (eqInt "appendFile bytes" (unwrapOr (appendFile f "two\n") (- 0 1)) 4)))
-      (set bad (+ bad (eq "append accumulates" (readFile f) "one\ntwo\n")))
+      (set bad (+ bad (eq "append accumulates" (unwrapOr (readFile f) "") "one\ntwo\n")))
       (set bad (+ bad (eqInt "fileSize" (unwrapOr (fileSize f) (- 0 1)) 8)))
       (set bad (+ bad (eqInt "writeFile truncates" (unwrapOr (writeFile f "1") (- 0 1)) 1)))
-      (set bad (+ bad (eq "truncated contents" (readFile f) "1")))
+      (set bad (+ bad (eq "truncated contents" (unwrapOr (readFile f) "") "1")))
       ; Appending to a path that is not there CREATES it, which is what
       ; makes an append-only log usable without a setup step.
       (set bad (+ bad (eqInt "append creates" (unwrapOr (appendFile g "made\n") (- 0 1)) 5)))
-      (set bad (+ bad (eq "created by append" (readFile g) "made\n")))
+      (set bad (+ bad (eq "created by append" (unwrapOr (readFile g) "") "made\n")))
       (set n (+ n 9))
-      ; --- the three facts `readFile` collapses -----------------------
-      ; It answers "" for a missing file, an EMPTY file and a DIRECTORY
-      ; alike. `readErrno` is the discriminator, and these four lines
-      ; are the whole reason it exists.
-      (set bad (+ bad (eqInt "readErrno on a file" (readErrno f) 0)))
-      (set bad (+ bad (eqInt "readErrno on a directory" (readErrno d) 21)))
-      (set bad (+ bad (eqInt "readErrno on nothing" (readErrno "fs055/nope") 2)))
+      ; --- what `readFile` reports -----------------------------------
+      ; A missing file, a directory and an empty file are three answers:
+      ; ENOENT, EISDIR and `(Ok "")`.
+      (set bad (+ bad (eqInt "readFile of a file" (codeOf (readFile f)) 0)))
+      (set bad (+ bad (eqInt "readFile of a directory is EISDIR" (codeOf (readFile d)) 21)))
+      (set bad (+ bad (eqInt "readFile of nothing is ENOENT" (codeOf (readFile "fs055/nope")) 2)))
       (set bad (+
         bad
         (eqInt
           "empty file is readable"
           {
             (unwrapOr (writeFile "fs055/empty" "") 0)
-            (readErrno "fs055/empty")
+            (codeOf (readFile "fs055/empty"))
           }
           0)))
-      (set bad (+ bad (eq "empty file reads empty" (readFile "fs055/empty") "")))
+      (set bad (+ bad (eq "empty file reads empty" (unwrapOr (readFile "fs055/empty") "x") "")))
       ; and the distinction `fileExists` cannot make on its own
       (set bad (+ bad (yes "file exists" (fileExists f))))
       (set bad (+ bad (no "file is not a dir" (isDir f))))
@@ -174,27 +172,27 @@
       ; `renamePath` MOVES: the destination gains the bytes and the
       ; source stops existing. Copy leaves both.
       (set bad (+ bad (eqInt "copyFile bytes" (unwrapOr (copyFile g "fs055/copy.txt") (- 0 1)) 5)))
-      (set bad (+ bad (eq "copy has the bytes" (readFile "fs055/copy.txt") "made\n")))
+      (set bad (+ bad (eq "copy has the bytes" (unwrapOr (readFile "fs055/copy.txt") "") "made\n")))
       (set bad (+ bad (yes "source survives a copy" (fileExists g))))
       ; A copy whose SOURCE is missing must refuse before it opens the
       ; destination. Reporting success would be bad; truncating an
       ; existing destination on behalf of a file that does not exist is
-      ; worse, and is what `(writeFile dst (readFile src))` does.
+      ; worse.
       (set bad (+ bad (eqInt "copy from nothing refuses" (codeOf (copyFile "fs055/nope" "fs055/copy.txt")) 2)))
-      (set bad (+ bad (eq "destination untouched" (readFile "fs055/copy.txt") "made\n")))
+      (set bad (+ bad (eq "destination untouched" (unwrapOr (readFile "fs055/copy.txt") "") "made\n")))
       (set bad (+ bad (eqInt "renamePath" (unwrapOr (renamePath "fs055/copy.txt" "fs055/moved.txt") (- 0 1)) 0)))
       (set bad (+ bad (no "old name is gone" (fileExists "fs055/copy.txt"))))
-      (set bad (+ bad (eq "new name has the bytes" (readFile "fs055/moved.txt") "made\n")))
+      (set bad (+ bad (eq "new name has the bytes" (unwrapOr (readFile "fs055/moved.txt") "") "made\n")))
       (set n (+ n 8))
       ; --- listing ----------------------------------------------------
       ; Sorted, and without `.` and `..`. The sort is what makes this
       ; check writable at all: in filesystem order the answer differs
       ; between machines, and a fixture could only have counted the
       ; entries.
-      (set bad (+ bad (eq "listDir is sorted, without . and .." (joined (listDir d) 0 "") "a,empty,moved.txt,one.txt,two.txt")))
-      (set bad (+ bad (eq "listDir of a leaf directory" (joined (listDir "fs055/a/b") 0 "") "c")))
-      (set bad (+ bad (eqInt "listDir of a file is empty" (vecLen (listDir f)) 0)))
-      (set bad (+ bad (eqInt "listDir of nothing is empty" (vecLen (listDir "fs055/nope")) 0)))
+      (set bad (+ bad (eq "listDir is sorted, without . and .." (joined (unwrapOr (listDir d) vecNew) 0 "") "a,empty,moved.txt,one.txt,two.txt")))
+      (set bad (+ bad (eq "listDir of a leaf directory" (joined (unwrapOr (listDir "fs055/a/b") vecNew) 0 "") "c")))
+      (set bad (+ bad (eqInt "listDir of a file is ENOTDIR" (codeOf (listDir f)) 20)))
+      (set bad (+ bad (eqInt "listDir of nothing is ENOENT" (codeOf (listDir "fs055/nope")) 2)))
       (set n (+ n 4))
       ; --- the working directory --------------------------------------
       ; Its value is the machine's, so what is checked is its SHAPE:

@@ -25,6 +25,14 @@
     ((Ok v) 0)
     ((Err e) (errCode e))))
 
+; The errno behind a failed read, or 0 when it read.
+(:: readCode (-> String Int))
+;@axiom:effect(io)
+(fn (readCode p)
+  (match (readFile p)
+    ((Ok _) 0)
+    ((Err e) (errCode e))))
+
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
@@ -49,7 +57,7 @@
         (set n (+ n 1)))
       (if (== (unwrapOr (fileSize f) 0) 8)
         (set n (+ n 1)))
-      (if (strEq (readFile f) "one\ntwo\n")
+      (if (strEq (unwrapOr (readFile f) "") "one\ntwo\n")
         (set n (+ n 1)))
       ; and the contrast that makes the pair worth having
       (if (== (unwrapOr (writeFile f "1") 0) 1)
@@ -63,7 +71,7 @@
         (set n (+ n 1)))
       (if (! (fileExists f))
         (set n (+ n 1)))
-      (if (strEq (readFile g) "1")
+      (if (strEq (unwrapOr (readFile g) "") "1")
         (set n (+ n 1)))
       ; A missing source is refused rather than silently creating an
       ; empty destination. ENOENT is `Error.code` now, not a negated
@@ -72,26 +80,21 @@
         (set n (+ n 1)))
       (if (! (fileExists f))
         (set n (+ n 1)))
-      ; --- the three facts a read collapses ---------------------------
-      ; `readFile` answers "" for a missing file, an EMPTY file and
-      ; a DIRECTORY alike. These six lines are the whole reason
-      ; `readErrno` exists, and they are checked against a directory
-      ; and an empty file that this fixture makes, so the answers do
-      ; not depend on where it was run from.
+      ; --- what a read reports ----------------------------------------
+      ; A file, a directory, a missing name and an empty file, made here
+      ; so the answers do not depend on where the fixture runs.
       (unwrapOr (makeDir d) 0)
       (unwrapOr (writeFile f "") 0)
-      (if (== (readErrno g) 0)
+      (if (isOk (readFile g))
         (set n (+ n 1)))
-      (if (== (readErrno d) 21)
+      (if (== (readCode d) 21)
         (set n (+ n 1)))
-      (if (== (readErrno gone) 2)
+      (if (== (readCode gone) 2)
         (set n (+ n 1)))
-      ; an EMPTY file is readable - it reads back "" like the other two
-      ; and is not an error, which is the case that used to be reported
-      ; as a missing file
-      (if (== (readErrno f) 0)
+      ; an empty file is readable, and reads back ""
+      (if (isOk (readFile f))
         (set n (+ n 1)))
-      (if (== (strLen (readFile f)) 0)
+      (if (== (strLen (unwrapOr (readFile f) "x")) 0)
         (set n (+ n 1)))
       ; `unwrapOr ... 0` here would count a FAILURE as a success: the
       ; expected size is 0 and the fallback is 0, so the two become

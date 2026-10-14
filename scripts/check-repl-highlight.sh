@@ -192,7 +192,7 @@ cat > "$work/reconcile.ax" <<'AXEOF'
 ;@axiom:effect(io)
 (fn (sweepFile path)
   (let (
-    (src (readFile path))
+    (src (unwrapOr (readFile path) ""))
     (n (strLen src))
     (mut i 0)
     (mut cmp 0)
