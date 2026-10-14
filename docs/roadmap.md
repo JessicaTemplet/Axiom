@@ -134,7 +134,7 @@ integrator would still need.
 | An assembler error inside an `asm` template is reported at the form | Done |
 | `asm` takes floating-point, vector and memory operands | Not started |
 | The restricted profile requires `nostack` of an allowed `asm` block, or counts what it pushes | Not started |
-| The test runner runs tests in parallel | Not started |
+| The test runner runs tests in parallel | Done |
 | The language server answers inside macro invocations | Not started |
 | Packages can pin a version | Not started |
 | A published performance profile | Not started |

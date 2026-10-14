@@ -371,6 +371,28 @@ else
   bad "directory run: exit $rc"; printf '%s\n' "$dout" | sed 's/^/     /'
 fi
 
+# A parallel run of the same directory reports the same files in the
+# same order with the same summary: --jobs changes when files run,
+# not what is reported.
+set +e
+pout="$( ( cd "$work" && "$axc" test dir --jobs 4 ) 2>&1 )"; prc=$?
+set -e
+if (( prc == rc )) && [[ "$pout" == "$dout" ]]; then
+  ok "--jobs 4 reports the directory exactly as the sequential run does"
+else
+  bad "parallel directory run: exit $prc, output differs"; diff <(printf '%s\n' "$dout") <(printf '%s\n' "$pout") | head -10 | sed 's/^/     /'
+fi
+
+# A --jobs that is not a positive number is refused, not ignored.
+set +e
+jout="$( ( cd "$work" && "$axc" test dir --jobs 0 ) 2>&1 )"; jrc=$?
+set -e
+if (( jrc == 2 )) && printf '%s\n' "$jout" | grep -q -- "--jobs needs a positive number"; then
+  ok "--jobs 0 exits 2 naming the flag"
+else
+  bad "--jobs 0: exit $jrc"; printf '%s\n' "$jout" | sed 's/^/     /'
+fi
+
 # --------------------------------------------------------------------
 echo
 echo '== the Assert tag is load-bearing =='

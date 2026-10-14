@@ -1806,7 +1806,9 @@ with `test`. Assertions take a label first:
 ```
 
 Run `axiom test tests.ax`. A directory runs its immediate `.ax` files
-in name order; `--filter TEXT` selects names. No tests or no matching
+in name order; `--filter TEXT` selects names, and `--jobs N` runs up
+to N of the directory's files at once in child processes and reports
+them in name order. No tests or no matching
 tests is a failure. `setup` and `teardown` run around each test.
 
 A failed assertion or trap fails that test and the runner continues.

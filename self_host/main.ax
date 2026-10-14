@@ -1311,6 +1311,192 @@
                                             }))
                                       })))))))))))))))))))
 
+; The value of `--jobs`: how many files a directory run may test at
+; once. 1, the sequential run, when the flag is absent.
+(pub :: testJobs Int)
+;@axiom:effect(io)
+(pub fn (testJobs)
+  (let ((v (flagValue "--jobs" 1)))
+    (if (== (strLen v) 0)
+      1
+      (match (strParseInt v)
+        ((Some n)
+          (if (< n 1)
+            {
+              (die "error: --jobs needs a positive number\n" 2)
+              1
+            }
+            n))
+        ((None)
+          {
+            (die "error: --jobs needs a positive number\n" 2)
+            1
+          })))))
+
+; Where one file's captured output waits while a parallel run finishes
+; the others: beside the file, named with this process's pid, so two
+; concurrent runs cannot collide, and unlinked once it is printed.
+(pub :: testCapName (-> String String Int String))
+;@axiom:effect(io)
+(pub fn (testCapName file kind i)
+  (let ((base (concat ".axiom-test-cap." (concat (fmtInt sysPid) (concat "." (concat (fmtInt i) (concat "." kind)))))))
+    (pathJoin (pathDir file) base)))
+
+; argv for one child of a parallel run: this executable, `test`, the
+; file, and the flags that change what a file's run means. `--jobs`
+; is not forwarded: the child's target is a file, which runs in
+; process either way.
+(pub :: testChildArgv (-> String String String Int))
+;@axiom:effect(io)
+(pub fn (testChildArgv self file filter)
+  (let ((words vecNew))
+    {
+      (vecPushStr words self)
+      (vecPushStr words "test")
+      (vecPushStr words file)
+      (if (> (strLen filter) 0)
+        {
+          (vecPushStr words "--filter")
+          (vecPushStr words filter)
+          0
+        }
+        0)
+      (let ((opt (flagValue "--opt" 1)))
+        (if (> (strLen opt) 0)
+          {
+            (vecPushStr words "--opt")
+            (vecPushStr words opt)
+            0
+          }
+          0))
+      (let ((fmt (flagValue "--diagnostic-format" 1)))
+        (if (> (strLen fmt) 0)
+          {
+            (vecPushStr words "--diagnostic-format")
+            (vecPushStr words fmt)
+            0
+          }
+          0))
+      (let (
+        (v (memAlloc (* (+ (vecLen words) 1) 8)))
+        (mut i 0)
+      )
+        {
+          (while (< i (vecLen words))
+            {
+              (memSetWord v i (strCStr (strDup (vecGetStr words i))))
+              (set i (+ i 1))
+            })
+          (memSetWord v (vecLen words) 0)
+          v
+        })
+    }))
+
+; Wait for `pid` and answer 0 when it exited 0, 1 otherwise, as
+; `sysRun` reads a status.
+(pub :: testWaitOne (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(pub fn (testWaitOne pid)
+  (match (sysWaitPid pid)
+    ((Err _) 1)
+    ((Ok st)
+      (if (!= (sysTermSignal st) 0)
+        1
+        (if (== (sysExitCode st) 0)
+          0
+          1)))))
+
+; This executable's own path, for spawning a child of it: argv[0]
+; as written when it contains a slash, and found on `PATH`
+; otherwise - `pathOfCommand` answers the directory a name came
+; from, not the path itself.
+(pub :: testSelfPath String)
+;@axiom:effect(io)
+(pub fn (testSelfPath)
+  (let ((a0 (sysArg 0)))
+    (match (strFindByte a0 47 0)
+      ((Some _) a0)
+      ((None)
+        (let ((dir (pathOfCommand a0)))
+          (if (> (strLen dir) 0)
+            (concat dir a0)
+            a0))))))
+
+; Run every file in `files` with at most `jobs` children at once, and
+; answer how many files failed. Each file is run by a child of this
+; executable, because compiling a file is this process's own work and
+; two compilations cannot share it. The children's output is
+; captured per file and printed in name order once all have
+; finished, so a parallel run reports exactly what a sequential one
+; does, in the same order.
+(pub :: testRunFilesParallel (-> (Vec Int) String Int Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (testRunFilesParallel files filter jobs)
+  (let (
+    (n (vecLen files))
+    (self (testSelfPath))
+    (results vecNew)
+    (pids vecNew)
+    (idxs vecNew)
+    (mut next 0)
+    (mut head 0)
+    (mut done 0)
+  )
+    {
+      (while (< (vecLen results) n)
+        (vecPush results 1))
+      (while (< done n)
+        {
+          (while (&& (< next n) (< (- next head) jobs))
+            (let ((f (vecGetStr files next)))
+              {
+                (match (sysSpawnOutErrTo (strCStr (strDup self)) (testChildArgv self f filter) sysEnvp (testCapName f "out" next) (testCapName f "err" next))
+                  ((Ok pid)
+                    {
+                      (vecPush pids pid)
+                      (vecPush idxs next)
+                      0
+                    })
+                  ((Err _)
+                    {
+                      (set done (+ done 1))
+                      0
+                    }))
+                (set next (+ next 1))
+              }))
+          (if (< head (vecLen pids))
+            {
+              (vecSet results (vecGet idxs head) (testWaitOne (vecGet pids head)))
+              (set head (+ head 1))
+              (set done (+ done 1))
+            }
+            0)
+        })
+      (let (
+        (mut i 0)
+        (mut bad 0)
+      )
+        {
+          (while (< i n)
+            (let ((f (vecGetStr files i)))
+              {
+                (replOut (concat "== " (concat f " ==\n")))
+                (replOut (readFile (testCapName f "out" i)))
+                (writeStr stderr (readFile (testCapName f "err" i)))
+                (unwrapOr (removeFile (testCapName f "out" i)) 0)
+                (unwrapOr (removeFile (testCapName f "err" i)) 0)
+                (if (!= (vecGet results i) 0)
+                  (set bad (+ bad 1))
+                  0)
+                (set i (+ i 1))
+              }))
+          bad
+        })
+    }))
+
 ; Every `.ax` file directly inside `dir`, in `listDir`'s order, which
 ; is sorted - so a directory run reports the same order everywhere,
 ; and the generated drivers a previous run left behind are skipped by
@@ -1363,19 +1549,22 @@
             (die (concat "error: no `.ax` file in " (concat target "\n")) 1)
             (let (
               (n (vecLen files))
+              (jobs (testJobs))
               (mut i 0)
               (mut bad 0)
             )
               {
-                (while (< i n)
-                  (let ((f (vecGetStr files i)))
-                    {
-                      (replOut (concat "== " (concat f " ==\n")))
-                      (if (!= (testRunFile f filter) 0)
-                        (set bad (+ bad 1))
-                        0)
-                      (set i (+ i 1))
-                    }))
+                (if (|| (<= jobs 1) (== n 1))
+                  (while (< i n)
+                    (let ((f (vecGetStr files i)))
+                      {
+                        (replOut (concat "== " (concat f " ==\n")))
+                        (if (!= (testRunFile f filter) 0)
+                          (set bad (+ bad 1))
+                          0)
+                        (set i (+ i 1))
+                      }))
+                  (set bad (testRunFilesParallel files filter jobs)))
                 (replOut (concat "\n" (concat (fmtInt n) (concat " file(s), " (concat (fmtInt bad) (concat " with a failing test" "\n"))))))
                 (if (> bad 0)
                   1
