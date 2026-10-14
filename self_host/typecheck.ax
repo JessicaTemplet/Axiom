@@ -10054,8 +10054,23 @@
     (checkCondBool tc (nodeA e))
     ; Branches must agree; the report anchors at the ELSE with
     ; the then-branch as the expectation - stage0's shape.
-    (let ((thenTy (checkExprH tc (nodeB e) 0)))
-      (let ((elseTy (checkExprH tc (nodeC e) 0)))
+    ;
+    ; A branch's value is dropped when the `if`'s is, and when the
+    ; other branch is the unit value (an `if` written without an
+    ; else), so the branch is checked with the discard flag set and an
+    ; `if` or `match` nested in it may have branches that disagree.
+    (let ((thenTy {
+      (tcSetDiscard tc (if (|| (== disc 1) (isUnitLit (nodeC e)))
+        1
+        0))
+      (checkExprH tc (nodeB e) 0)
+    }))
+      (let ((elseTy {
+        (tcSetDiscard tc (if (|| (== disc 1) (isUnitLit (nodeB e)))
+          1
+          0))
+        (checkExprH tc (nodeC e) 0)
+      }))
         ; A `()` branch makes the `if` answer `()`, and the other
         ; branch's value is dropped: `(if t b)` is `(if t b ())`. So
         ; does a dropped `if` whose branches disagree: nobody reads
@@ -20587,7 +20602,11 @@
           {
             (recordCoverage (nodeA arm) covered catchall)
             (checkPatternTyped tc (nodeA arm) scrutTy fitTy)
-            (let ((t (checkExprH tc (nodeB arm) 0)))
+            ; An arm's value is dropped when the match's is.
+            (let ((t {
+              (tcSetDiscard tc disc)
+              (checkExprH tc (nodeB arm) 0)
+            }))
               {
                 (scopeTrunc (tcScopeVec tc) mark)
                 (vecPush tys t)

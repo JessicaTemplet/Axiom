@@ -16,6 +16,12 @@ its changelog too.
 
 ## Unreleased
 
+- A dropped branch's own branches are dropped too: an `if` or `match`
+  nested in the branch of a dropped `if`, or in the branch of an `if`
+  written without an else, may have branches that disagree, as one at
+  the top of a block may. Tested by
+  `tests/stdlib/892-dropped-branches.ax`.
+
 - An `if` or `match` whose value is thrown away answers `()` whatever
   its branches answer. A branch that is there for what it does no
   longer needs a filler `0` to agree with the others, and the tests and
