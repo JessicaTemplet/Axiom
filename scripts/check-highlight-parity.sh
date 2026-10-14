@@ -7,7 +7,8 @@
 # its own highlighter answers with `tree-sitter-axiom/queries/`. The
 # comparison (`scripts/lib/highlight-parity/compare.mjs`) reduces both to
 # one role per character and compares every character of the corpus:
-# the standard library, the examples and the language server fixtures.
+# the standard library, the examples, the language server fixtures and
+# the grammar's highlighting regressions.
 #
 # It holds three things:
 #
@@ -20,8 +21,9 @@
 #   2. One capture per node. Neovim takes the last of two patterns on a
 #      node and Helix the first, so the queries never capture a node twice.
 #   3. That the comparison can fail. A copy of the grammar with the
-#      operator rule taken out must disagree outside the allowed pairs,
-#      and one with a second catch-all must capture nodes twice.
+#      operator rule or `in` keyword taken out must disagree outside the
+#      allowed pairs, and one with a second catch-all must capture nodes
+#      twice.
 #
 # Needs the compiler (for the server), `node`, the tree-sitter CLI that
 # `npm ci --prefix tree-sitter-axiom` installs, and the TextMate engine
@@ -60,6 +62,7 @@ allowed=(
 cd "$repo_root"
 LC_ALL=C find stdlib examples -name '*.ax' | LC_ALL=C sort > "$work/corpus"
 LC_ALL=C ls tests/lsp/*.ax >> "$work/corpus"
+LC_ALL=C find tree-sitter-axiom/test/highlight -name '*.ax' | LC_ALL=C sort >> "$work/corpus"
 files=$(wc -l < "$work/corpus" | tr -d ' ')
 
 # Tree-sitter's highlighter names a capture only if the theme does, so
@@ -111,8 +114,8 @@ while read -r _ tsr vsr n ex; do
 done < <(grep '^PAIR ' "$work/report")
 
 echo "== the comparison can fail =="
-sample="stdlib/Vec.ax stdlib/Err.ax tests/lsp/060-outline.ax"
-for kind in operator overlap; do
+sample="stdlib/Vec.ax stdlib/Err.ax tests/lsp/060-outline.ax tree-sitter-axiom/test/highlight/loops.ax"
+for kind in operator keyword overlap; do
   copy="$work/grammar-$kind"
   mkdir -p "$copy"
   cp -R tree-sitter-axiom/grammar.js tree-sitter-axiom/tree-sitter.json tree-sitter-axiom/package.json tree-sitter-axiom/src tree-sitter-axiom/queries "$copy/"
@@ -124,6 +127,14 @@ old = '((identifier) @operator\n  (#match? @operator "^([-+*/%<>=!&|^~]+|[.][.][
 assert s.count(old) == 1, "the operator rule moved; update this ablation"
 open(p, "w").write(s.replace(old, "", 1))
 PY
+  elif [[ "$kind" == keyword ]]; then
+    python3 - "$copy/queries/highlights.scm" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = '  "in"\n'
+assert s.count(old) == 1, "the in keyword moved; update this ablation"
+open(p, "w").write(s.replace(old, "", 1))
+PY
   else
     printf '\n(identifier) @variable\n' >> "$copy/queries/highlights.scm"
   fi
@@ -131,6 +142,9 @@ PY
   if [[ "$kind" == operator ]]; then
     if grep -q '^PAIR [a-z.]* operator ' "$work/ablate-$kind"; then ok "without the operator rule, operators disagree"
     else fail "a grammar without its operator rule agreed with VS Code, so the comparison cannot see a dropped rule"; fi
+  elif [[ "$kind" == keyword ]]; then
+    if grep -q '^PAIR plain keyword ' "$work/ablate-$kind"; then ok "without the in capture, loop keywords disagree"
+    else fail "a grammar without its in capture agreed with VS Code, so the comparison cannot see an uncoloured loop keyword"; fi
   else
     if grep -q '^OVERLAP [1-9]' "$work/ablate-$kind"; then ok "a second catch-all is caught capturing nodes twice"
     else fail "a second catch-all went unnoticed, so the overlap check cannot fail"; fi

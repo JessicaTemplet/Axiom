@@ -12,6 +12,7 @@ tree-sitter-axiom/
 ├── queries/locals.scm       scopes and bindings, so a parameter's uses take its colour
 ├── queries/rainbows.scm     bracket pairs by nesting depth (Helix `rainbow-brackets`, rainbow-delimiters.nvim)
 ├── test/corpus/             tree-shape tests
+├── test/highlight/          highlighting assertions, including loop keywords
 └── tree-sitter.json         CLI configuration
 ```
 
@@ -37,7 +38,9 @@ It runs these checks in order:
 3. `tree-sitter test` runs the corpus in `test/corpus/`, which pins the
    tree *shape* of each construct. A change that still parses
    everything but reorganises the tree would silently break every
-   query. This catches it.
+   query. This catches it. The highlighting assertions in
+   `test/highlight/` also check the captures, including `for`, `in`,
+   `by` and `set`.
 4. Every `.ax` file in the repository must parse with no `ERROR` node.
    This check matters most. Whoever changes the grammar writes the
    corpus, but `stdlib/` and `self_host/` get new language forms first,
