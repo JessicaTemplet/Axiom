@@ -22889,7 +22889,7 @@
         (_dis (pairSetSlot cg 1 0))
         (_mtc (memSetWord cg 30 0))
       )
-        (let ((argStrCg (emitArgsRegs args cg argRegs 0 fnName)))
+        (let ((argStrCg (emitArgsRegs args cg argRegs 0 fnName (borrowedFromOwnedClass cg snode))))
           (let (
             (argStrT (strDup (memGetWordStr argStrCg 9)))
             (full (mangledForCg argStrCg fnName))
@@ -23030,10 +23030,16 @@
 ; owned temporary's; where the callee keeps the argument, the share
 ; stays with it. At this function's own type variable (`lendClass`
 ; `2+k`) both are conditional on bit k of the evidence word, as a
-; `let`'s are.
-(pub :: emitArgsRegs (-> (Vec Int) Int (Vec Int) Int String Int))
+; `let`'s are. A callee whose type-variable result may be the argument
+; itself (`borrowedFromOwnedArg`) gets the same share, and the result
+; keeps it rather than the call handing it back. `bc` is the call's
+; `borrowedFromOwnedClass`, asked before its arguments: the share is
+; taken only where `releaseBorrowedFrom` will hand it back, so a call
+; whose result is a word, or a type variable at an uncounted type,
+; takes none.
+(pub :: emitArgsRegs (-> (Vec Int) Int (Vec Int) Int String Int Int))
 ;@axiom:effect(io)
-(pub fn (emitArgsRegs args cg regs i fnName)
+(pub fn (emitArgsRegs args cg regs i fnName bc)
   (if (>= i (vecLen args))
     {
       (memSetWord cg 2 "")
@@ -23051,12 +23057,12 @@
               (if (!= l 0)
                 l
                 (fieldArgClass cg1 node)))))
-              (if (&& (!= lent 0) (== (argOwnedRelease cg1 fnName args i) 1))
+              (if (&& (!= lent 0) (|| (== (argOwnedRelease cg1 fnName args i) 1) (&& (!= bc 0) (== (borrowedFromOwnedArg cg1 fnName args i) 1))))
                 (if (== lent 1)
                   (emitRetainOf cg1 reg)
                   (emitRetainIfEvBit cg1 reg (- lent 2)))
                 cg1))
-            (let ((restCg (emitArgsRegs args cg1 regs (+ i 1) fnName)))
+            (let ((restCg (emitArgsRegs args cg1 regs (+ i 1) fnName bc)))
               (let (
                 (rest (memGetWordStr restCg 2))
                 (restT (memGetWordStr restCg 9))
@@ -23164,7 +23170,10 @@
       (let ((a (vecGet args i)) (reg (cast String (vecGet regs i))))
         (let ((lent (let ((l (lendClass cg a)))
           (if (== l 0)
-            (transferClass cg a)
+            (let ((t (transferClass cg a)))
+              (if (== t 0)
+                (fieldArgClass cg a)
+                t))
             l))))
           (releaseBorrowedFrom
             (if (>= lent 2)
@@ -23188,10 +23197,16 @@
 ; of it either (`fnConsumeMask`: a share the callee ends is not the
 ; caller's to hand back) - and an immediate (`Nil`) or a static
 ; literal has nothing to give back.
+;
+; A callee whose result is a type variable gets this only for a LENT
+; argument the result is not taken from: the share is the caller's
+; own, taken at evaluation, so handing it back after the call is
+; exact. An owned temporary there keeps its leak, and one the result
+; may be taken from is `borrowedFromOwnedArg`'s.
 (pub :: argOwnedRelease (-> Int String (Vec Int) Int Int))
 (pub fn (argOwnedRelease cg fnName args i)
   (let ((cls (fnResultClass cg fnName)))
-    (if (|| (== cls 0) (== cls 2))
+    (if (|| (== cls 0) (|| (== cls 2) (&& (== cls 1) (|| (!= (lendClass cg (vecGet args i)) 0) (!= (fieldArgClass cg (vecGet args i)) 0)))))
       (if (&& (|| (== (valueOwnedRef cg (vecGet args i)) 1) (|| (!= (lendClass cg (vecGet args i)) 0) (|| (!= (transferClass cg (vecGet args i)) 0) (!= (fieldArgClass cg (vecGet args i)) 0)))) (&& (== (isStaticSentinelNode cg (vecGet args i)) 0) (&& (== (isNullaryConNode cg (vecGet args i)) 0) (&& (== (& (fnCallStashMask cg fnName args) (| (paramBit i) (ownerBit i))) 0) (&& (== (& (fnConsumeMask cg fnName) (| (paramBit i) (ownerBit i))) 0) (|| (== cls 2) (== (& (fnRetMask cg fnName) (anyBit i)) 0)))))))
         1
         0)
@@ -24604,7 +24619,7 @@
     (args (spineArgVec e vecNew))
     (argRegs vecNew)
   )
-    (let ((cgA (emitArgsRegs args cg argRegs 0 name)))
+    (let ((cgA (emitArgsRegs args cg argRegs 0 name 0)))
       (let (
         (argStrT (strDup (memGetWordStr cgA 9)))
         (full (mangledForCg cgA name))
@@ -25273,15 +25288,23 @@
 
 ; Whether argument `i` of a call to `fnName` is one the result may be
 ; borrowed from (the callee's return mask names it), is an owned
-; temporary or a transferred value here, and is neither parked nor
-; consumed by the callee - so the caller may hand its share back once
-; the result has taken a share of its own.
+; temporary, a transferred value or a lent one here, and is neither
+; parked nor consumed by the callee - so the caller may hand its share
+; back once the result has taken a share of its own.
+;
+; A LENT argument - `(vecGet v 0)`, or a counted field read - brings no
+; share, so `emitArgsRegs` takes one when it is evaluated. Without it,
+; `(f v (vecGet v 0))` where `f` overwrites slot 0 and answers its
+; type-variable parameter answered the block the overwrite freed:
+; measured, the caller's `println` of the result printed its own
+; format buffer, which had been allocated over it. The result keeps the
+; share instead, and is transferred from the call on.
 (pub :: borrowedFromOwnedArg (-> Int String (Vec Int) Int Int))
 (pub fn (borrowedFromOwnedArg cg fnName args i)
   (let ((a (vecGet args i)))
     ; A string literal is static: it owns nothing to hand back, and
     ; `(unwrapOr cwd "")` released its `""` (check-static-release).
-    (if (&& (== (isStaticSentinelNode cg a) 0) (&& (&& (!= (& (fnRetMask cg fnName) (anyBit i)) 0) (|| (== (valueOwnedRef cg a) 1) (!= (transferClass cg a) 0))) (&& (== (& (fnCallStashMask cg fnName args) (| (paramBit i) (ownerBit i))) 0) (== (& (fnConsumeMask cg fnName) (| (paramBit i) (ownerBit i))) 0))))
+    (if (&& (== (isStaticSentinelNode cg a) 0) (&& (&& (!= (& (fnRetMask cg fnName) (anyBit i)) 0) (|| (== (valueOwnedRef cg a) 1) (|| (!= (transferClass cg a) 0) (|| (!= (lendClass cg a) 0) (!= (fieldArgClass cg a) 0))))) (&& (== (& (fnCallStashMask cg fnName args) (| (paramBit i) (ownerBit i))) 0) (== (& (fnConsumeMask cg fnName) (| (paramBit i) (ownerBit i))) 0))))
       1
       0)))
 

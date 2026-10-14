@@ -4854,8 +4854,12 @@ returns, as an owned temporary does (`MM-LIFE-2c`). So `f` can
 overwrite slot 0 and still read its parameter. Inside a polymorphic
 function, where the element's type is the function's own type
 variable, both steps follow that variable's evidence bit
-(`tests/stdlib/778-vec-lent-argument.ax`). An element passed to a
-call whose own result is a type variable gets no such share. A
+(`tests/stdlib/778-vec-lent-argument.ax`). A call whose own result is
+a type variable takes the same share. When its result may be the
+element itself, as in `(f v (vecGet v 0))` where `f` overwrites slot 0
+and answers its parameter, the result keeps the share and the caller
+hands it back wherever the result goes
+(`tests/stdlib/900-lent-arg-tyvar-result.ax`). A
 struct field passed beside its struct, as in `(f b b.name)`, takes
 the same share on the same terms, so a store to the field in `f`
 cannot free the value its parameter still reads

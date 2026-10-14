@@ -1,0 +1,174 @@
+; A lent value passed to a function whose result is a type variable
+; keeps a share for as long as anything reads it (MM-LIFE-2m). Each line
+; must read `true`.
+;
+;   1  `(giveAfterReplace v (vecGet v 0))`: the callee overwrites slot 0
+;      and answers its parameter; the answer still reads the element
+;   2  the same when the callee clears the whole vector
+;   3  the same for a struct field passed beside its struct, which the
+;      callee overwrites before answering it
+;   4  a callee whose answer is another argument overwrites slot 0 and
+;      then reads the element it was handed
+;   5  the same as 1 inside a polymorphic function, at its own type
+;      variable
+;   6  the shares are handed back: 5,000 calls hold what 1,000 hold
+;
+; Without the share, the answer in 1, 2, 3 and 5 is a block the
+; overwrite freed, and the churn reads it back as another string.
+(import IO)
+(import Vec)
+(import Str)
+(import Fmt)
+(import Mem)
+
+(struct Tag
+  (mut name : String))
+
+(:: churn Int)
+(fn (churn)
+  (let (
+    (mut i 0)
+    (mut acc 0)
+  )
+    {
+      (while (< i 20000)
+        {
+          (let ((s (concat "zz-" (fmtInt i))))
+            (set acc (+ acc (strLen s))))
+          (set i (+ i 1))
+        })
+      acc
+    }))
+
+(:: fresh (-> Int (Vec String)))
+(fn (fresh k)
+  (let ((v vecNew))
+    {
+      (vecPush v (concat "item-" (fmtInt k)))
+      v
+    }))
+
+(:: giveAfterReplace (-> (Vec String) a a))
+(fn (giveAfterReplace v x)
+  {
+    (vecSet v 0 (concat "other-" (fmtInt 9)))
+    x
+  })
+
+(:: giveAfterClear (-> (Vec String) a a))
+(fn (giveAfterClear v x)
+  {
+    (vecClear v)
+    x
+  })
+
+(:: giveAfterRename (-> Tag a a))
+(fn (giveAfterRename t x)
+  {
+    (set t.name (concat "renamed-" (fmtInt 9)))
+    x
+  })
+
+(:: readAfterReplace (-> (Vec String) String a a a))
+(fn (readAfterReplace v s yes no)
+  {
+    (vecSet v 0 (concat "other-" (fmtInt 9)))
+    churn
+    (if (strEq s "item-4")
+      yes
+      no)
+  })
+
+(:: rotate (-> (Vec a) a a))
+(fn (rotate v y)
+  (giveAfterSet v (vecGet v 0) y))
+
+(:: giveAfterSet (-> (Vec a) a a a))
+(fn (giveAfterSet v x y)
+  {
+    (vecSet v 0 y)
+    x
+  })
+
+(:: held Int)
+(fn (held)
+  (let ((s memStats))
+    s.heldBytes))
+
+(:: calls (-> Int Int))
+(fn (calls n)
+  (let (
+    (v (fresh 1))
+    (mut k 0)
+    (mut ok 0)
+  )
+    {
+      (while (< k n)
+        {
+          (vecSet v 0 (concat "item-" (fmtInt (+ 1000 (% k 1000)))))
+          (set ok (+ ok (strLen (giveAfterReplace v (vecGet v 0)))))
+          (set k (+ k 1))
+        })
+      ok
+    }))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (let ((v (fresh 1)))
+      (let ((a (giveAfterReplace v (vecGet v 0))))
+        {
+          churn
+          (println
+            (if (strEq a "item-1")
+              "true"
+              "false"))
+        }))
+    (let ((v (fresh 2)))
+      (let ((a (giveAfterClear v (vecGet v 0))))
+        {
+          churn
+          (println
+            (if (strEq a "item-2")
+              "true"
+              "false"))
+        }))
+    (let ((t (Tag (concat "item-" (fmtInt 3)))))
+      (let ((a (giveAfterRename t t.name)))
+        {
+          churn
+          (println
+            (if (strEq a "item-3")
+              "true"
+              "false"))
+        }))
+    (let ((v (fresh 4)))
+      (println (readAfterReplace v (vecGet v 0) "true" "false")))
+    (let ((v (fresh 5)))
+      (let ((a (rotate v (concat "new-" (fmtInt 5)))))
+        {
+          churn
+          (println
+            (if (&& (strEq a "item-5") (strEq (vecGet v 0) "new-5"))
+              "true"
+              "false"))
+        }))
+    (calls 1000)
+    (let ((a held))
+      {
+        (calls 1000)
+        (let (
+          (d1 (- held a))
+          (b held)
+        )
+          {
+            (calls 5000)
+            (println
+              (if (== (- held b) d1)
+                "true"
+                "false"))
+          })
+      })
+    0
+  })

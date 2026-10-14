@@ -43,6 +43,14 @@ its changelog too.
   `vecFree` left the library. Tested by
   `tests/stdlib/895-scalar-element-read.ax` and `scripts/check-task.sh`.
 
+- An element handed to a function whose result is a type variable keeps
+  a share for as long as anything reads it. `(f v (vecGet v 0))`, where
+  `f` overwrites slot 0 and answers its parameter, answered a freed
+  block; now the element takes a share when it is evaluated, and the
+  result keeps it. A field passed beside its struct gets the same, and
+  so does a callee that answers another argument and only reads the
+  element. Tested by `tests/stdlib/900-lent-arg-tyvar-result.ax`.
+
 - A program's `main` is declared `(:: main ())`: it runs for what it
   does and the program exits 0. The tests, examples, docs, website
   samples, `explain` pages, the VS Code snippet, the REPL and
