@@ -111,9 +111,8 @@
     (memGetWord v 1)
     0))
 
-;; The integer value of a number, 0 for anything else. 0 is a real
-;; number, so a caller that must distinguish absence tests `jsonTag`
-;; first - the same contract `Utf8`'s -1 sentinel documents.
+;; The integer value of a number, and 0 for any other value. Test
+;; `jsonTag` first when 0 must mean the number.
 (pub :: jsonInt (-> Int Int))
 (pub fn (jsonInt v)
   (if (== (jsonTag v) JNUM)
@@ -181,12 +180,11 @@
     0
     (vecGet (memGetWordVec v 2) i)))
 
-;; The ONLY writer of the two parallel vecs, so they cannot desync. A
-;; repeated key appends rather than replacing, which is what a JSON
-;; reader that preserves what it was sent should do; `jsonGet` answers
-;; the first, matching the usual last-writer-loses reading being avoided
-;; here deliberately - LSP never sends duplicates, and inventing a
-;; replacement policy would be inventing behaviour no test can pin.
+;; Add the member `key` with value `x` to a JSON object. A repeated key
+;; is appended, not replaced, and `jsonGet` answers the first.
+;
+; This is the only writer of the two parallel vectors, so they cannot
+; fall out of step.
 (pub :: jsonObjPut (-> Int String Int Int))
 (pub fn (jsonObjPut v k x)
   {
@@ -198,14 +196,9 @@
     v
   })
 
-;; The value for `key`, or 0 when there is none. 0 is not a valid value
-;; pointer, so it is an unambiguous absence marker AT THIS LAYER - but
-;; `jsonTag` reports 0 as `JNULL`, so `jsonIsNull` cannot tell an absent
-;; member from one explicitly set to null. A caller that must
-;; distinguish the two tests against 0 directly, which is what
-;; `lsp.ax`'s dispatch does to tell a request from a notification: an
-;; absent `id` means notification, and a null `id` is a different thing
-;; the protocol does not let you answer the same way.
+;; The value under `key` in a JSON object, or 0 when there is none.
+;; `jsonIsNull` answers true for both, so compare against 0 to tell an
+;; absent member from one set to `null`.
 (pub :: jsonGet (-> Int String Int))
 (pub fn (jsonGet v key)
   (jsonGetFrom v key 0))

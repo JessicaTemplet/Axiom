@@ -154,9 +154,8 @@
 ; adversary would have to be the source file the user asked to compile.
 ; It is the same trade rustc makes by using FxHash.
 ; ------------------------------------------------------------------
-;; 2^31 - 1, a Mersenne prime. No longer used by `mapHash` itself; kept
-;; because `Intern`'s polynomial string hash reduces modulo it, and a
-;; prime modulus is what makes that polynomial hash sound.
+;; 2^31 - 1, a Mersenne prime: the modulus `Intern`'s polynomial string
+;; hash reduces by.
 (pub :: mapHashPrime Int)
 (pub fn (mapHashPrime)
   2147483647)
@@ -371,9 +370,8 @@
 (pub fn (mapCap m)
   m.cap)
 
-;; Slots that are live or tombstoned. Exposed because it is the number
-;; that explains a rehash, and a test that could not see it would have to
-;; infer growth from timing.
+;; How many slots are live or hold a removed entry's marker: the number
+;; that decides when the map rehashes.
 (pub :: mapUsed (-> Map Int))
 (pub fn (mapUsed m)
   m.used)
@@ -395,16 +393,20 @@
       })
     0))
 
-;; Whether this table holds a share of every value - word 6 is 1. It is
-;; read from the header, not from the value array's shape word: see
-;; `mapAllocTable`.
+;; Whether the map holds a share of every value, which it does when its
+;; values are a counted type.
+;
+; Read from the header (word 6 is 1), not from the value array's shape
+; word: see `mapAllocTable`.
 (pub :: mapOwnsVals (-> Map Bool))
 (pub fn (mapOwnsVals m)
   (== m.refs 1))
 
-;; Read the key, or the value, out of slot `i`.
+;; The key in slot `i`, for a slot `mapLiveFrom` answered. A slot
+;; outside `0 .. (mapCap m) - 1` stops the program with status 77, as
+;; `vecGet`'s does.
 ;
-; `pub` since 2026-09-03, and `mapStateAt` below deliberately is NOT.
+; `mapStateAt` below is not public.
 ; These two are the whole of what iterating a table needs to READ; the
 ; state byte is how it decides WHICH slots to read, and that question
 ; is answered by `mapLiveFrom` instead. Exporting the state array as
@@ -425,8 +427,8 @@
       __indexTrap
       (memGetWord m.keys i))))
 
-;; The value in slot `i`. See `mapKeyAt` above for the bounds rule
-;; and why `mapStateAt` is not exported beside these two.
+;; The value in slot `i`, for a slot `mapLiveFrom` answered. A slot
+;; outside `0 .. (mapCap m) - 1` stops the program with status 77.
 (pub :: mapValAt (-> Map Int Int))
 (pub fn (mapValAt m i)
   (if (< i 0)
@@ -912,8 +914,7 @@
       0)
   })
 
-;; Delete `key`. Answers 0; see `mapInsert` for why no mutator here
-;; answers the handle.
+;; Remove `key` and its value, if present. Answers 0.
 ;
 ; The slot becomes a tombstone, not empty: emptying it would truncate
 ; every probe run passing through it and orphan the entries after it.
@@ -1135,9 +1136,8 @@
       (Some i)
       (mapLiveFrom m (+ i 1)))))
 
-;; Every live key, and every live value, in one shared slot order: the
-;; `j`th key and the `j`th value came out of the same slot, so the two
-;; vectors zip. Both are freshly allocated and the caller owns them.
+;; Every key, in slot order: the `j`th key and the `j`th element of
+;; `mapValues` came out of the same slot, so the two vectors zip.
 ;
 ; These allocate where the cursor does not, and both are here rather
 ; than only one of them because a caller that wants pairs otherwise
@@ -1196,8 +1196,7 @@
         (+ acc (mapValAt m i))
         acc))))
 
-;; The sum of every live key. Together with `mapSumVals` and `mapLen`
-;; this pins down a small map's contents well enough to test with.
+;; The sum of every key.
 (pub :: mapSumKeys (-> Map Int))
 (pub fn (mapSumKeys m)
   (mapSumKeysFrom m 0 0))

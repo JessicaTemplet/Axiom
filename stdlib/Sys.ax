@@ -109,8 +109,7 @@
 (fn (sysCloseFd fd)
   (sysResult "sysCloseFd" (__syscall1 sysCloseNum fd)))
 
-;; Terminate the process. Never returns; the `0` afterwards exists only
-;; because every Axiom expression has a value.
+;; End the process with status `code`. Never returns.
 (pub :: sysExitWith (-> Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
@@ -713,9 +712,8 @@
                     })
                 }))))))))
 
-;; The calling process's own id - the per-session suffix scratch
-;; files need so two concurrent processes cannot collide. The
-;; syscall takes no arguments; the unused ones are simply zero.
+;; The calling process's own id, such as a suffix that keeps two
+;; processes' scratch files apart.
 (pub :: sysPid Int)
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
@@ -911,8 +909,7 @@
 ; A function below that reads a socket address takes the raw address
 ; of one `netAddr4` or `netAddr6` wrote, or of one the kernel answered.
 ; ------------------------------------------------------------------
-;; How many bytes an address of each family occupies, and how big a
-;; buffer that must take either has to be.
+;; The size of an IPv4 socket address block, 16 bytes.
 ;
 ; THESE ARE SIZES, NOT PLATFORM NUMBERS. `sockaddr_in` is 16 and
 ; `sockaddr_in6` is 28 on every target, and they agree for a reason
@@ -1341,7 +1338,7 @@
   (sysResult "sysKill" (__syscall3 sysKillNum pid signo 0)))
 
 ; ------------------------------------------------------------------
-;; Duplicating this process
+; Duplicating this process
 ;
 ; `sysSpawn` starts a DIFFERENT program; this starts another copy of
 ; THIS one, which is what a pre-forked server needs and what `Job`'s
@@ -1365,6 +1362,8 @@
 ; size-class heads, argc/argv, and one evidence slot per effect - is
 ; private after a fork. A worker inherits the parent's heap as it stood
 ; and can never corrupt a sibling's.
+;; Start another copy of this process: 0 in the child, the child's pid
+;; in the parent, or a negative errno when no child was made.
 (pub :: sysForkProcess Int)
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
@@ -1412,8 +1411,8 @@
     (- 0 1)
     0)))
 
-;; `addr` and `len` must name a whole mapping `sysMapShared` answered,
-;; and nothing may touch it afterwards.
+;; Unmap a mapping `sysMapShared` answered. `addr` and `len` must name
+;; the whole mapping, and nothing may touch it afterwards.
 (pub :: sysUnmapShared (-> Int Int (Result Int Error)))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
@@ -1447,8 +1446,8 @@
       sysNoCall
       (__syscall6 sysMmapNum 0 len 3 mapPrivateAnon (- 0 1) 0))))
 
-;; `addr` and `len` must name a whole mapping `sysMapPrivate` answered,
-;; and nothing may touch it afterwards.
+;; Unmap a mapping `sysMapPrivate` answered. `addr` and `len` must name
+;; the whole mapping, and nothing may touch it afterwards.
 (pub :: sysUnmapPrivate (-> Int Int (Result Int Error)))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
@@ -1596,14 +1595,15 @@
 ; these. Everything here is the seed's language - no atomic, no new
 ; primitive - because this file is compiled by the committed seed.
 ; ------------------------------------------------------------------
-;; The `Error` code every timed operation in the concurrency modules
-;; answers when its time ran out: `chanRecvTimeout`, `chanSendTimeout`,
-;; `mutexLockTimeout`, a task past its deadline. NOT an errno: ETIMEDOUT
-;; is 60 on Darwin and FreeBSD and 110 on Linux, so a code borrowed from
-;; the kernel would need one comparison and one fixture per target. It
-;; is above 255 so that it can never be mistaken for a wait status,
-;; which is what `Task.ax` puts in the same field for a task that
-;; trapped.
+;; The `Error` code a timed operation answers when its time ran out:
+;; `chanRecvTimeout`, `chanSendTimeout`, `mutexLockTimeout`, and a task
+;; past its deadline.
+;
+; Not an errno: ETIMEDOUT is 60 on Darwin and FreeBSD and 110 on Linux,
+; so a code borrowed from the kernel would need one comparison per
+; target. It is above 255 so that it can never be mistaken for a wait
+; status, which is what `Task.ax` puts in the same field for a task
+; that trapped.
 (pub :: sysTimedOut Int)
 (pub fn (sysTimedOut)
   1001)

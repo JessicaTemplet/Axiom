@@ -564,7 +564,7 @@ docs/memory-model.md MM-PAR-10).
 | `chanRecv` | value | `(-> Chan (Option Int))` | `Alloc,Block,IO,Mut` | Receive the oldest word, waiting while the ring is empty and open. `None` once the channel is closed AND drained - the end of the stream - or poisoned (`chanPoisoned`). |
 | `chanSendTimeout` | value | `(-> Chan Int Int (Result Bool Error))` | `Alloc,Block,IO,Mut` | `chanSend`, waiting at most `nanos` nanoseconds - for the lock and for room. `Ok True` once `v` is in the ring; `Ok False` if the channel is closed; `Err` with code `sysTimedOut` when the time ran out first, and `Err` with code `syncOwnerDead` when the channel is poisoned - and in each of those `v` was not sent. The ring is looked at once more after the last wait, so a slot that opened as the time ran out is taken rather than refused. A non-positive `nanos` is one look, like `chanTrySend`, that says which it was. |
 | `chanRecvTimeout` | value | `(-> Chan Int (Result (Option Int) Error))` | `Alloc,Block,IO,Mut` | `chanRecv`, waiting at most `nanos` nanoseconds - for the lock and for a word. `Ok (Some w)` the oldest word; `Ok None` the end of the stream (closed and drained); `Err` with code `sysTimedOut` when the time ran out first - the defined answer on timeout, which takes nothing out of the ring - and `Err` with code `syncOwnerDead` when the channel is poisoned. A non-positive `nanos` is one look. |
-| `chanTrySend` | value | `(-> Chan Int Bool)` | `Alloc,Block,IO,Mut` | Send without waiting for room: `True` if `v` went into the ring, `False` if it did not - full, closed or poisoned, which `chanClosed` and `chanPoisoned` tell apart, as they do for `chanTryRecv`. A `Bool` rather than a three-way `Int`: a -1 for "closed" is the sentinel convention the error model is migrating away from (`tests/compat/verify-compat.py`). |
+| `chanTrySend` | value | `(-> Chan Int Bool)` | `Alloc,Block,IO,Mut` | Send without waiting for room: `True` if `v` went into the ring, `False` if it did not because the ring is full, closed or poisoned. `chanClosed` and `chanPoisoned` tell those apart. |
 | `chanTryRecv` | value | `(-> Chan (Option Int))` | `Alloc,Block,IO,Mut` | Receive without waiting for a word: the oldest word, or `None` when there is none right now - empty, whether or not it is closed, or poisoned; `chanClosed` and `chanPoisoned` tell them apart. |
 | `chanClose` | value | `(-> Chan Int)` | `Alloc,Block,IO,Mut` | End the stream. Idempotent. Every waiter wakes: a sender to be refused, a receiver to drain and then see `None`. A poisoned channel has ended already, and this changes nothing. |
 | `chanClosed` | value | `(-> Chan Bool)` | `Alloc,Block,IO,Mut` | Whether the stream has ended: closed, or poisoned. |
@@ -1402,8 +1402,8 @@ Crypto.X25519 - Diffie-Hellman key agreement over Curve25519
 
 `stdlib/Err.ax` — 37 public names
 
-Err — Axiom's failure type, its error record, and the propagation
-form that binds one.
+Err — Axiom's failure type, its error record, the combinators that
+work on them, and checked integer arithmetic.
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
@@ -1412,37 +1412,37 @@ form that binds one.
 | `errDivideByZero` | value | `Int` |  | A zero divisor, from `divChecked` and `remChecked`. |
 | `errOverflow` | value | `Int` |  | A result the 64-bit integer cannot hold. |
 | `errShiftTooWide` | value | `Int` |  | A shift amount below 0, or of 64 or more. |
-| `errShortWrite` | value | `Int` |  | A descriptor accepted some bytes and then accepted none, without an errno to say why. It is NOT a syscall error - `write` returned 0, which is a legal answer - so it cannot borrow an errno, and it is not success either, which is exactly why `IO`'s write loop could not express it while it answered an Int. `ERR-REC-3` calls a short write a failure and not an absence: the bytes were meant to go and did not. |
+| `errShortWrite` | value | `Int` |  | A descriptor accepted some bytes and then accepted none, without an errno to say why: `write` answered 0, which the kernel doesn't count as an error, but the bytes were meant to go and did not (`ERR-REC-3`). |
 | `errUnexpectedEof` | value | `Int` |  | The input ended before the bytes a reader was asked for, as when a peer closes in the middle of `Net.tcpReadExact`. |
 | `errInvalidData` | value | `Int` |  | Bytes arrived that break the shape the reader expects, as when a line runs past the limit `Net.tcpReadLine` was given. |
 | `mkError` | value | `(-> Int String Error)` | `Alloc` | An `Error` with `code` and `message` and no context yet. |
 | `errCode` | value | `(-> Error Int)` |  | The error's numeric code, one of the `err*` constants. |
 | `errMessage` | value | `(-> Error String)` |  | The error's message. |
 | `errContext` | value | `(-> Error String)` |  | The context callers added with `withContext`, or empty. |
-| `errorText` | value | `(-> Error String)` | `Alloc,Mut` | The rendering `main` writes to fd 2 (ERR-REC-4), and the one a program builds a longer report out of. A plain function rather than a format hole: a rendering is chosen from a concrete type, so a value reached through a type variable is AX3025, and every caller here has a concrete `Error` in hand anyway. |
+| `errorText` | value | `(-> Error String)` | `Alloc,Mut` | The error as one line of text: what `main` writes to standard error when it answers `Err` (ERR-REC-4), and what a longer report is built from. |
 | `isOk` | value | `(-> (Result a e) Bool)` |  | Whether the result is `Ok`. |
 | `isErr` | value | `(-> (Result a e) Bool)` |  | Whether the result is `Err`. |
 | `unwrapOr` | value | `(-> (Result a e) a a)` |  | The `Ok` value, or `fallback` when the result is `Err`. |
 | `mapOk` | value | `(-> (Result a e) (-> a b) (Result b e))` | `Alloc` | Apply `f` to the `Ok` value; an `Err` passes through unchanged. |
 | `mapErr` | value | `(-> (Result a e) (-> e f) (Result a f))` | `Alloc` | Apply `f` to the `Err` value; an `Ok` passes through unchanged. |
 | `andThen` | value | `(-> (Result a e) (-> a (Result b e)) (Result b e))` | `Alloc` | Chain a fallible step: apply `f` to the `Ok` value and answer its result; an `Err` passes through unchanged. |
-| `errContextOf` | value | `(-> Error String Error)` | `Alloc` | Attach what the caller was doing to an error in flight, passing `Ok` through untouched. It needs no binder, so it is a function and not a form. |
-| `withContext` | value | `(-> (Result a Error) String (Result a Error))` | `Alloc` | Add `ctx` to the error's context, so a caller up the stack can say what it was doing. An `Ok` passes through unchanged. |
+| `errContextOf` | value | `(-> Error String Error)` | `Alloc` | `e` with its context set to `ctx`, so a caller up the stack can say what it was doing when the error arrived: `(errContextOf e "axqOpen")`. `withContext` does the same to the error inside a `Result`. |
+| `withContext` | value | `(-> (Result a Error) String (Result a Error))` | `Alloc` | Set the context of the error inside `r` to `ctx`, so a caller up the stack can say what it was doing. An `Ok` passes through unchanged. |
 | `okOr` | value | `(-> (Option a) e (Result a e))` | `Alloc` | Turn an `Option` into a `Result`: `Some` becomes `Ok`, and `None` becomes `Err e`. |
 | `toOption` | value | `(-> (Result a e) (Option a))` | `Alloc` | Turn a `Result` into an `Option`: `Ok` becomes `Some`, and `Err` becomes `None`, dropping the error. |
 | `isSome` | value | `(-> (Option a) Bool)` |  | Whether the `Option` holds a value. The `Option` half of `isOk`. |
-| `isNone` | value | `(-> (Option a) Bool)` |  | Whether the `Option` is empty. Exactly `isSome` negated, spelled out because a caller reads for the case it cares about. |
-| `optUnwrapOr` | value | `(-> (Option a) a a)` |  | The value, or `fallback` when there is none. The one combinator that ends the `Option` rather than passing it on, and the reason most call sites need no `match` at all. |
+| `isNone` | value | `(-> (Option a) Bool)` |  | Whether the `Option` is empty: `isSome` negated. |
+| `optUnwrapOr` | value | `(-> (Option a) a a)` |  | The value, or `fallback` when there is none. |
 | `optMap` | value | `(-> (Option a) (-> a b) (Option b))` | `Alloc` | Apply `f` to the value if there is one, leaving an absence alone. The result type is `f`'s, so this is how an `(Option Int)` becomes an `(Option String)`. |
 | `optAndThen` | value | `(-> (Option a) (-> a (Option b)) (Option b))` |  | Chain a step that may itself be absent, without nesting two `Option`s. `optMap` with a function answering `(Option b)` would give `(Option (Option b))`; this is that flattened. |
-| `optOr` | value | `(-> (Option a) (Option a) (Option a))` | `Alloc` | The first of two that is present. `alt` is EVALUATED at the call, so this is not a short-circuit: a caller whose alternative is expensive should write the `match`. Said here because the name is borrowed from languages where it is lazy. |
+| `optOr` | value | `(-> (Option a) (Option a) (Option a))` | `Alloc` | The first of two that is present. `alt` is evaluated at the call, even when `o` holds a value, so a caller whose alternative is expensive should write the `match`. |
 | `intMin` | value | `Int` |  | The smallest `Int`, -9223372036854775808. |
-| `addChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | The three that WRAP. |
+| `addChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | `a + b`, or `Err` with `errOverflow` when the sum does not fit an `Int`. |
 | `subChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | `a - b`, or `Err` with `errOverflow` when the difference does not fit an `Int`. |
 | `mulChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | `a * b`, or `Err` with `errOverflow` when the product does not fit an `Int`. |
 | `divChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | `a / b` truncated toward zero, or `Err` with `errDivideByZero` for a zero divisor and `errOverflow` for `intMin / -1`. |
 | `remChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | The remainder of `a / b`, or `Err` with `errDivideByZero` for a zero divisor. |
-| `shlChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | A shift amount of 64 or more, and a negative one, trap (exit 84, MM-VAL-3b) - `(<< 1 100)` used to answer 68719476736 at `--opt 0` and 1 at `--opt 1`, and no masking is emitted either way. |
+| `shlChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | `a << n`, or `Err` with `errShiftTooWide` when `n` is negative or 64 or more, where the `<<` operator traps (exit 84, MM-VAL-3b). |
 | `shrChecked` | value | `(-> Int Int (Result Int Error))` | `Alloc` | `a >> n`, or `Err` with `errShiftTooWide` when `n` is negative or 64 or more. |
 
 ## `Fallible`
@@ -1458,8 +1458,8 @@ malformed record, and the handlers that answer it without unwinding.
 | `fallibleSkipped` | value | `Int` |  | The value a handler answers to mean "skip this record": the most negative `Int`. A loop compares the value it got against this, or asks `fallibleIsSkipped`. |
 | `fallibleIsSkipped` | value | `(-> Int Bool)` |  | Whether a value is the skip sentinel. The comparison a batch loop makes once per record; it allocates nothing. |
 | `fallibleSkip` | value | `(-> String Int)` |  | Skip every malformed record: answer `fallibleSkipped`, whatever the message. A one-parameter top-level function is a value, so it is passed bare. |
-| `fallibleDefault` | value | `(-> Int String Int)` |  | Use `d` in place of every malformed record. Built ONCE, at the `handle`, which is why the fallback is here and not an argument of the operation: the closure holding `d` is allocated when the handler is installed, not when a record is bad. One parameter, answering the handler - the type is spelled flat because every function type is curried and that is the formatter's normal form; `mkAdder` in `280-function-application.ax` is the precedent. |
-| `FallibleTally` | struct |  |  | How many records were malformed. A struct rather than a bare `Int` because the handler has to write it from inside a closure, and a field store is the one mutation visible through every holder of the value (reference.md, Built-in Effects: `Mut`). |
+| `fallibleDefault` | value | `(-> Int String Int)` |  | Use `d` in place of every malformed record: `(fallibleDefault 0)` is the handler. |
+| `FallibleTally` | struct |  |  | How many records were malformed, as `fallibleCounting` counts them. |
 | `fallibleTally` | value | `FallibleTally` | `Alloc` | A fresh tally at zero. |
 | `fallibleCount` | value | `(-> FallibleTally Int)` |  | What a tally holds. |
 | `fallibleCounting` | value | `(-> FallibleTally (-> String Int) String Int)` | `Mut` | Count every malformed record in `tally`, then answer as `next` would: `(fallibleCounting t fallibleSkip)` skips and counts, `(fallibleCounting t (fallibleDefault 0))` substitutes and counts. The `handle` installing it lists `Mut` beside `Fallible`, because a handler's own effects count at the site that installs it. |
@@ -1528,9 +1528,9 @@ Fmt - number formatting, in Axiom.
 | `fmtHex` | value | `(-> Int String)` | `Alloc,Mut` | `n` in lowercase hexadecimal with no prefix, such as `ff` for 255. A negative number is written as its two's-complement 64-bit word. |
 | `fmtPadLeft` | value | `(-> String Int String)` | `Alloc,Mut` | `s` padded on the left with spaces to at least `width` bytes. |
 | `fmtPadRight` | value | `(-> String Int String)` | `Alloc,Mut` | `s` padded on the right with spaces to at least `width` bytes. |
-| `fmtPadCenter` | value | `(-> String Int String)` | `Alloc,Mut` | `s` centred in `width` bytes. An odd remainder goes to the RIGHT, which is the convention Rust's `{:^}` uses and the one that makes a column of centred labels line up with a left-aligned header. |
-| `fmtPadZerosLeft` | value | `(-> String Int String)` | `Alloc,Mut,Unsafe` | `s` padded on the left with ZEROS to at least `width` bytes, with a leading sign kept in front of them: `-7` at width 4 is `-007` and not `00-7`. That is the whole reason this is not `fmtPadLeft` with a different byte, and it is why the format specifier `{n:04}` can be one call rather than a sign test at every call site. |
-| `fmtHexUpper` | value | `(-> Int String)` | `Alloc,Mut` | Uppercase hexadecimal, for the `{n:X}` specifier. Same digits as `fmtHex`, and deliberately a separate function rather than a flag: the specifier picks one at expansion time, so a branch would be a runtime test of a compile-time constant. |
+| `fmtPadCenter` | value | `(-> String Int String)` | `Alloc,Mut` | `s` centred in `width` bytes, with an odd remainder on the right, as Rust's `{:^}` does. |
+| `fmtPadZerosLeft` | value | `(-> String Int String)` | `Alloc,Mut,Unsafe` | `s` padded on the left with zeros to at least `width` bytes, keeping a leading sign in front of them: `-7` at width 4 is `-007`. This is the `{n:04}` specifier. |
+| `fmtHexUpper` | value | `(-> Int String)` | `Alloc,Mut` | `n` in uppercase hexadecimal with no prefix, such as `FF` for 255: the `{n:X}` specifier. |
 | `fmtFloat` | value | `(-> Float String)` | `Alloc,Mut` | `x` with six decimal places. |
 | `fmtFloatPrec` | value | `(-> Float Int String)` | `Alloc,Mut` | `x` with `places` decimal places, rounded half away from zero. |
 
@@ -1543,7 +1543,7 @@ IO - files, standard streams, terminals, readiness and sockets.
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
 | `File` | struct |  |  | An open file, socket or standard stream. Aliases share it; the last share closes the descriptor, and `fileClose` closes it early for every alias. |
-| `stdin` | value | `File` | `Alloc,IO,Unsafe` | Standard input, output and error. Each is a `File` that never closes its descriptor: `fileClose stdout` retires that one value and leaves the process's stream open. |
+| `stdin` | value | `File` | `Alloc,IO,Unsafe` | The process's standard input as a `File`. Like `stdout` and `stderr`, it never closes its descriptor: `fileClose stdin` retires that one value and leaves the process's stream open. |
 | `stdout` | value | `File` | `Alloc,IO,Unsafe` | The process's standard output as a `File`, for `fileWrite` and friends. One shared owner: it is never closed by scope. |
 | `stderr` | value | `File` | `Alloc,IO,Unsafe` | The process's standard error as a `File`. One shared owner: it is never closed by scope. |
 | `fileClose` | value | `(-> File (Result Int Error))` | `Alloc,IO,Unsafe` | Close early, once: `(Ok 0)`, or `(Err e)` carrying the errno of the close - on a written file, where a deferred write error surfaces. Aliases observe the close, and any later use of one traps 85. The descriptor is retired before the close and the close is never retried. Closing a standard stream retires that value only. |
@@ -1626,7 +1626,7 @@ Intern - a string interner, in Axiom.
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
 | `internSlotOf` | value | `(-> String Int Int)` |  | The slot `s` probes first, in [0, cap). |
-| `internNew` | value | `Int` | `Alloc,Mut` | `internDefaultCap` is a *slot* count, so it is passed straight to `internAllocTable` and not through `internWithCapacity`, which takes a *string* count and doubles it. Routing it through the latter would make a fresh interner 128 slots while its own documentation said 64. |
+| `internNew` | value | `Int` | `Alloc,Mut` | An empty interner with `internDefaultCap` slots. |
 | `internWithCapacity` | value | `(-> Int Int)` | `Alloc,Mut` | An interner sized so `want` distinct strings fit without rehashing. |
 | `internFree` | value | `(-> Int Int)` | `Unsafe` | Hand `it` back: the slot table, the `Vec`, and one share of every string in it. Answers 0. `it` must be a live interner owning this share. Its raw Int handle and any unretained views into it must not be used after release. |
 | `internCap` | value | `(-> Int Int)` |  | How many strings the table can hold before it grows. |
@@ -1654,15 +1654,15 @@ Raw consumers require live Cereal handles; new code uses typed values.
 | `jsonObj` | value | `Int` | `Alloc,Mut` | An empty JSON object; add to it with `jsonObjPut`. |
 | `jsonIsNull` | value | `(-> Int Bool)` |  | Whether the value is JSON `null`. |
 | `jsonBoolVal` | value | `(-> Int Int)` |  | A JSON boolean as 1 or 0, and 0 for any other value. |
-| `jsonInt` | value | `(-> Int Int)` |  | The integer value of a number, 0 for anything else. 0 is a real number, so a caller that must distinguish absence tests `jsonTag` first - the same contract `Utf8`'s -1 sentinel documents. |
+| `jsonInt` | value | `(-> Int Int)` |  | The integer value of a number, and 0 for any other value. Test `jsonTag` first when 0 must mean the number. |
 | `jsonNumText` | value | `(-> Int String)` |  | A JSON number as the text it was written with, and empty for any other value. |
 | `jsonStrVal` | value | `(-> Int String)` |  | A JSON string's text, and empty for any other value. |
 | `jsonArrLen` | value | `(-> Int Int)` |  | How many elements a JSON array holds, and 0 for any other value. |
 | `jsonArrGet` | value | `(-> Int Int Int)` |  | Element `i` of a JSON array, or JSON `null` when `v` is not an array or `i` is out of range. |
 | `jsonArrPush` | value | `(-> Int Int Int)` | `Alloc,Mut` | Append `x` to a JSON array. Any other value is left alone. Answers `v`. |
 | `jsonObjLen` | value | `(-> Int Int)` |  | How many members a JSON object holds, and 0 for any other value. |
-| `jsonObjPut` | value | `(-> Int String Int Int)` | `Alloc,Mut` | The ONLY writer of the two parallel vecs, so they cannot desync. A repeated key appends rather than replacing, which is what a JSON reader that preserves what it was sent should do; `jsonGet` answers the first, matching the usual last-writer-loses reading being avoided here deliberately - LSP never sends duplicates, and inventing a replacement policy would be inventing behaviour no test can pin. |
-| `jsonGet` | value | `(-> Int String Int)` |  | The value for `key`, or 0 when there is none. 0 is not a valid value pointer, so it is an unambiguous absence marker AT THIS LAYER - but `jsonTag` reports 0 as `JNULL`, so `jsonIsNull` cannot tell an absent member from one explicitly set to null. A caller that must distinguish the two tests against 0 directly, which is what `lsp.ax`'s dispatch does to tell a request from a notification: an absent `id` means notification, and a null `id` is a different thing the protocol does not let you answer the same way. |
+| `jsonObjPut` | value | `(-> Int String Int Int)` | `Alloc,Mut` | Add the member `key` with value `x` to a JSON object. A repeated key is appended, not replaced, and `jsonGet` answers the first. |
+| `jsonGet` | value | `(-> Int String Int)` |  | The value under `key` in a JSON object, or 0 when there is none. `jsonIsNull` answers true for both, so compare against 0 to tell an absent member from one set to `null`. |
 | `jsonGetInt` | value | `(-> Int String Int)` |  | The integer under `key` in a JSON object, or 0 when the key is absent or not a number. |
 | `jsonGetStr` | value | `(-> Int String String)` |  | The string under `key` in a JSON object, or empty when the key is absent or not a string. |
 | `jsonWrite` | value | `(-> Int String)` | `Alloc,Mut` | The value as JSON text, on one line with no spaces, strings escaped as JSON requires. |
@@ -1705,7 +1705,7 @@ Axiom.
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `mapHashPrime` | value | `Int` |  | 2^31 - 1, a Mersenne prime. No longer used by `mapHash` itself; kept because `Intern`'s polynomial string hash reduces modulo it, and a prime modulus is what makes that polynomial hash sound. |
+| `mapHashPrime` | value | `Int` |  | 2^31 - 1, a Mersenne prime: the modulus `Intern`'s polynomial string hash reduces by. |
 | `mapHash` | value | `(-> Int Int)` |  | Hash `key` to a value in [0, 2^63). |
 | `mapSlotOf` | value | `(-> Int Int Int)` |  | The slot `key` probes first, in [0, cap). |
 | `mapNew` | value | `Map` | `Alloc,Mut` | An empty `Map` with `mapDefaultCap` slots. |
@@ -1713,45 +1713,46 @@ Axiom.
 | `mapRoundUpPow2` | value | `(-> Int Int)` |  | `n` rounded up to a power of two, at least `mapDefaultCap`. |
 | `mapLen` | value | `(-> Map Int)` |  | How many keys the map holds. |
 | `mapCap` | value | `(-> Map Int)` |  | How many slots the map has before it grows. |
-| `mapUsed` | value | `(-> Map Int)` |  | Slots that are live or tombstoned. Exposed because it is the number that explains a rehash, and a test that could not see it would have to infer growth from timing. |
-| `mapOwnsVals` | value | `(-> Map Bool)` |  | Whether this table holds a share of every value - word 6 is 1. It is read from the header, not from the value array's shape word: see `mapAllocTable`. |
-| `mapKeyAt` | value | `(-> Map Int Int)` |  | Read the key, or the value, out of slot `i`. |
-| `mapValAt` | value | `(-> Map Int Int)` |  | The value in slot `i`. See `mapKeyAt` above for the bounds rule and why `mapStateAt` is not exported beside these two. |
+| `mapUsed` | value | `(-> Map Int)` |  | How many slots are live or hold a removed entry's marker: the number that decides when the map rehashes. |
+| `mapOwnsVals` | value | `(-> Map Bool)` |  | Whether the map holds a share of every value, which it does when its values are a counted type. |
+| `mapKeyAt` | value | `(-> Map Int Int)` |  | The key in slot `i`, for a slot `mapLiveFrom` answered. A slot outside `0 .. (mapCap m) - 1` stops the program with status 77, as `vecGet`'s does. |
+| `mapValAt` | value | `(-> Map Int Int)` |  | The value in slot `i`, for a slot `mapLiveFrom` answered. A slot outside `0 .. (mapCap m) - 1` stops the program with status 77. |
 | `mapNextSlot` | value | `(-> Int Int Int)` |  | The next slot after `i`. |
 | `mapHas` | value | `(-> Map Int Bool)` |  | Whether `key` is in the map. |
 | `mapGet` | value | `(-> Map Int Int Int)` |  | The value for `key`, or `dflt` if `key` is absent. |
 | `mapGetStr` | value | `(-> Map Int String String)` | `Unsafe` | The value for `key` read as a `String`, or `dflt` if `key` is absent. |
 | `mapInsert` | value | `(-> Map Int a Int)` | `Alloc,Mut` | Insert or overwrite, growing first if the load factor demands it. |
-| `mapRemove` | value | `(-> Map Int Int)` | `Mut` | Delete `key`. Answers 0; see `mapInsert` for why no mutator here answers the handle. |
+| `mapRemove` | value | `(-> Map Int Int)` | `Mut` | Remove `key` and its value, if present. Answers 0. |
 | `mapLiveFrom` | value | `(-> Map Int (Option Int))` | `Alloc` | The first live slot at or after `i`, or `None` when the table has no live slot from there on. `(mapLiveFrom m 0)` starts an iteration; `(mapLiveFrom m (+ prev 1))` continues one. |
-| `mapKeys` | value | `(-> Map (Vec Int))` | `Alloc,Mut` | Every live key, and every live value, in one shared slot order: the `j`th key and the `j`th value came out of the same slot, so the two vectors zip. Both are freshly allocated and the caller owns them. |
+| `mapKeys` | value | `(-> Map (Vec Int))` | `Alloc,Mut` | Every key, in slot order: the `j`th key and the `j`th element of `mapValues` came out of the same slot, so the two vectors zip. |
 | `mapValues` | value | `(-> Map (Vec Int))` | `Alloc,Mut` | Every live value, in the same slot order `mapKeys` uses, so the two vectors zip element for element. |
 | `mapSumVals` | value | `(-> Map Int)` |  | The sum of every live value. |
-| `mapSumKeys` | value | `(-> Map Int)` |  | The sum of every live key. Together with `mapSumVals` and `mapLen` this pins down a small map's contents well enough to test with. |
+| `mapSumKeys` | value | `(-> Map Int)` |  | The sum of every key. |
 
 ## `Mem`
 
 `stdlib/Mem.ax` — 19 public names
 
-Mem - raw memory operations, in Axiom.
+Mem - raw memory: allocation, byte and word access, copying, and
+the typed `Addr` for comparing values by identity.
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
 | `memAlloc` | value | `(-> Int Int)` | `Alloc,Unsafe` | Allocate `bytes` bytes of zeroed memory and return its address. |
-| `memAllocMapped` | value | `(-> Int Int Int)` | `Alloc,Mut,Unsafe` | The same allocation, declaring which of the block's words hold REFERENCES: bit i of `map` says payload word i is a handle to another counted block, so releasing this block releases that one too (docs/memory-model.md MM-LIFE-2d, the record form). |
-| `memMarkArray` | value | `(-> Int Int Int)` | `Mut,Unsafe` | The ARRAY FORM: payload words 0..n-1 of this block are handles to other counted blocks, so releasing it releases all of them, and `n` is the caller's ELEMENT count (docs/memory-model.md MM-LIFE-2d names the two forms; the array form landed 2026-08-24 and took its own length 2026-09-03). |
-| `memMarkLeaf` | value | `(-> Int Int)` | `Mut,Unsafe` | The inverse, and it is not symmetry for its own sake: it is what a container's GROWTH needs. Doubling a buffer copies the elements to a new block WITHOUT retaining them - the shares move - so releasing the old block while it still reads as an array would spend every share twice. Clearing the bit first makes the old block a leaf, and its release then reclaims the block and touches nothing it used to hold. |
-| `memCopy` | value | `(-> Int Int Int Int)` | `Mut` | THERE IS NO `memIsArray`, AND THE REASON IS A MEASURED CRASH. |
+| `memAllocMapped` | value | `(-> Int Int Int)` | `Alloc,Mut,Unsafe` | Allocate `bytes` bytes as `memAlloc` does, declaring which words hold references: bit i of `map` says payload word i is a handle to another counted block, so releasing this block releases that one too (docs/memory-model.md MM-LIFE-2d, the record form). |
+| `memMarkArray` | value | `(-> Int Int Int)` | `Mut,Unsafe` | Mark the block at `h` as an array of `n` handles: payload words 0..n-1 are handles to other counted blocks, so releasing it releases all of them (docs/memory-model.md MM-LIFE-2d, the array form). Answers `h`. |
+| `memMarkLeaf` | value | `(-> Int Int)` | `Mut,Unsafe` | Mark the block at `h` as a leaf, holding no handles, so releasing it releases nothing it used to point at. Answers `h`. |
+| `memCopy` | value | `(-> Int Int Int Int)` | `Mut` | Copy `count` bytes from `src` to `dst`. Returns `dst`. |
 | `memSet` | value | `(-> Int Int Int Int)` | `Mut` | Set `count` bytes at `addr` to `value` (low 8 bits). Returns `addr`. `addr` must name `count` live writable bytes. |
 | `memCmp` | value | `(-> Int Int Int Int)` |  | Compare `count` bytes. 0 if equal, otherwise the signed difference of the first differing byte pair (so the result orders like `memcmp`). `a` and `b` must each name `count` live bytes. |
-| `memGetWord` | value | `(-> Int Int Int)` | `Unsafe` | The word at `index`. A word is what it is: an integer, or a handle, or a reference whose type this layer does not know. It answers `Int` because that is the truth about a machine word - it used to answer a type variable, which let the CALLER name any type at all and get it, including a reference, which then dereferenced. See `AX3040`. `addr` must name a live block of at least `index` + 1 words. |
-| `memGetWordStr` | value | `(-> Int Int String)` | `Unsafe` | The String view, for the typed accessors built on this layer - `tokenLexeme`, `diagCode`, and the several dozen others whose own signature says `String` and whose body is one word read. |
-| `memGetWordVec` | value | `(-> Int Int (Vec a))` | `Unsafe` | The `Vec` view of the word at `index`. A `Vec` is a handle - one word, exactly what `memGetWord` answers - so this reinterprets and converts nothing. The cast is HERE, at a return inside a signature that carries the type, for the reason `memGetWordStr` gives: a cast at an argument root classifies that value's evidence 0 and drops its retain or its release (docs/memory-model.md MM-VAL-22, measured). `addr` must name a live block of at least `index` + 1 words, and that word must hold a live `Vec` of the element type the caller names. |
-| `memSetWord` | value | `(-> Int Int a Int)` | `Mut,Unsafe` | Storing a word here is the moment a value can leave the type system's sight: `(cast Int value)` erases whatever `value` was, and the machine word that lands in `addr` is indistinguishable from an integer forever after. That is the whole of MM-LIFE-2c's co-ownership blocker, and the fix is one line - the store takes a SHARE of what it is about to hide. |
-| `memGetByte` | value | `(-> Int Int Int)` | `Unsafe` | `addr` must name at least `index` + 1 live bytes. |
-| `memPutByte` | value | `(-> Int Int Int Int)` | `Mut,Unsafe` | `addr` must name at least `index` + 1 live writable bytes. |
+| `memGetWord` | value | `(-> Int Int Int)` | `Unsafe` | The 8-byte word at word offset `index` from `addr`. `addr` must name a live block of at least `index` + 1 words. |
+| `memGetWordStr` | value | `(-> Int Int String)` | `Unsafe` | The word at `index` read as a `String`. `addr` must name a live block of at least `index` + 1 words, and that word must hold a live `String`. |
+| `memGetWordVec` | value | `(-> Int Int (Vec a))` | `Unsafe` | The word at `index` read as a `Vec`. `addr` must name a live block of at least `index` + 1 words, and that word must hold a live `Vec` of the element type the caller names. |
+| `memSetWord` | value | `(-> Int Int a Int)` | `Mut,Unsafe` | Store `value` as the 8-byte word at word offset `index` from `addr`, taking a share of it when it is a reference. Answers `addr`. `addr` must name a live block of at least `index` + 1 words, and the word must be read back only at a type `value` has. |
+| `memGetByte` | value | `(-> Int Int Int)` | `Unsafe` | The byte at offset `index` from `addr`, 0 to 255. `addr` must name at least `index` + 1 live bytes. |
+| `memPutByte` | value | `(-> Int Int Int Int)` | `Mut,Unsafe` | Store the low 8 bits of `value` at offset `index` from `addr`. Answers `addr`, which must name at least `index` + 1 live writable bytes. |
 | `MemoryStats` | struct |  |  | Allocator counts for the calling binding's arena, in bytes. `heldBytes` includes live values, reusable blocks, cycles and chunk overhead. `filedBytes` is reusable storage; `backlogBytes` is held less filed, not a live-object or leak count. `mappedBytes` includes active and cached chunks. Threads have separate arenas. |
-| `memStats` | value | `MemoryStats` | `Alloc` | Read the counters before allocating the result, so this snapshot excludes its own record. All fields describe the calling arena only. |
+| `memStats` | value | `MemoryStats` | `Alloc` | The allocator's counts for the calling binding's arena. The counters are read before the record is allocated, so the snapshot leaves its own record out. |
 | `Addr` | struct |  |  | Where a value lives, as one sealed word. Make one with `addrOf`; compare with `addrEq`; hash with `addrHash`. An `Addr` takes no share and keeps nothing alive, and nothing turns it back into the value. Compare two only while both values are live, because a freed block's address is handed out again. An immediate value - an `Int`, a `Char`, a nullary constructor - is its own word, so its `Addr` is that word. |
 | `addrOf` | value | `(-> a Addr)` |  | The address of `x`. The same value always answers the same `Addr`; two values answer equal ones only if they are one value, or are equal immediates. |
 | `addrEq` | value | `(-> Addr Addr Bool)` |  | Whether `a` and `b` are the address of one value. |
@@ -1876,8 +1877,8 @@ Path - taking a filesystem path apart and putting one together.
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `pathLastSlash` | value | `(-> String (Option Int))` |  | The last `/` in `p`, or `None`. Everything below is a decision about this one index. `compat/SENTINELS`'s direction rule is "absence wants `Option`", and this is the primitive every caller in this file goes through - `pathExtIndex` is the one exception, and it goes straight to the raw `-1` helper below because it needs the sentinel back in arithmetic (`(+ slash 1)` is 0, correctly, when there is no slash at all), not a value to branch on. |
-| `pathDir` | value | `(-> String String)` | `Alloc,Mut` | Everything up to and INCLUDING the last `/`, or "" when `p` names something in the working directory. |
+| `pathLastSlash` | value | `(-> String (Option Int))` |  | The index of the last `/` in `p`, or `None`. |
+| `pathDir` | value | `(-> String String)` | `Alloc,Mut` | Everything up to and including the last `/`, or "" when `p` names something in the working directory. |
 | `pathBase` | value | `(-> String String)` | `Alloc,Mut` | Everything after the last `/` - the file name on its own, or `p` entire when there is no separator. |
 | `pathWithSlash` | value | `(-> String String)` | `Alloc,Mut` | A directory name that ends in `/`, so concatenation forms a path. |
 | `pathJoin` | value | `(-> String String String)` | `Alloc,Mut` | `dir` and `name` as one path, with exactly one `/` between them. |
@@ -1886,7 +1887,7 @@ Path - taking a filesystem path apart and putting one together.
 | `pathStem` | value | `(-> String String)` | `Alloc,Mut` | The base name with its extension removed: `"src/main.ax"` is `"main"`. What a driver names an output after. |
 | `pathReplaceExt` | value | `(-> String String String)` | `Alloc,Mut` | `p` with its extension replaced by `ext`, which carries its own dot. `(pathReplaceExt "build/main.ax" ".ll")` is `"build/main.ll"`, and a path with no extension simply gains one. |
 | `pathIsAbsolute` | value | `(-> String Bool)` |  | True when `p` starts at the root. A relative path is resolved against the working directory, which is why `Sys.sysGetCwd` exists. |
-| `pathClean` | value | `(-> String String)` | `Alloc,Mut` | `p`, lexically simplified to the shortest path naming the same location: doubled `/`s collapse, a `.` segment is dropped, and a real segment is cancelled by the `..` that immediately follows it. Nothing here touches the filesystem - a symlink component is resolved exactly as if it were an ordinary name, which is what makes this a STRING operation and not a `Sys` one. Same rules as Go's `path.Clean` or Python's `posixpath.normpath`. |
+| `pathClean` | value | `(-> String String)` | `Alloc,Mut` | `p`, lexically simplified to the shortest path naming the same location: doubled `/`s collapse, a `.` segment is dropped, and a real segment is cancelled by the `..` that immediately follows it. It never touches the filesystem, so a symlink is treated as an ordinary name. The rules are Go's `path.Clean` and Python's `posixpath.normpath`. |
 
 ## `Pre`
 
@@ -1927,7 +1928,7 @@ Str - length-prefixed strings, in Axiom.
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
 | `strWrap` | value | `(-> Int Int String)` | `Alloc,Mut` | Wrap `len` bytes at `bytes` as a `Str` without copying. |
-| `strWrapOwned` | value | `(-> Int Int Int String)` | `Alloc,Mut,Unsafe` | The same, naming the block that OWNS the bytes (MM-LIFE-2d's `Str` half): word 2 holds the handle whose death should free them, or 0 when no such block exists - a literal's bytes are loader-resident, a syscall's are the kernel's, and an interior wrap over an arena keep block belongs to the arena. A slice inherits its parent's owner rather than naming the parent, so the chain is one hop deep however many times a slice is sliced, and the address counted is never interior. |
+| `strWrapOwned` | value | `(-> Int Int Int String)` | `Alloc,Mut,Unsafe` | Wrap `len` bytes at `bytes` as `strWrap` does, naming `owner`, the block whose release frees them, or 0 when no block owns them. |
 | `strAlloc` | value | `(-> Int String)` | `Alloc,Mut,Unsafe` | A `Str` over freshly allocated, zeroed space for `len` bytes. A negative `len` stops the program with status 77, as a bad index does. |
 | `strFromLit` | value | `(-> Int String)` | `Alloc,Mut` | A `Str` sharing the bytes at a NUL-terminated address. |
 | `cstrLen` | value | `(-> Int Int Int)` | `Unsafe` | Length of NUL-terminated bytes at `addr`, scanning from `i`. |
@@ -1938,7 +1939,7 @@ Str - length-prefixed strings, in Axiom.
 | `strCStr` | value | `(-> String Int)` | `Alloc,Mut` | The bytes of `s` as a NUL-terminated address, for a syscall: free when a NUL follows `s`, and a fresh copy for a short slice. |
 | `strIsEmpty` | value | `(-> String Bool)` |  | Whether `s` has no bytes. |
 | `strCmp` | value | `(-> String String Int)` |  | 0 when equal; otherwise negative if `a` sorts before `b`, positive if after - lexicographic by unsigned byte, with a shorter prefix sorting first. |
-| `strEq` | value | `(-> String String Bool)` |  | Equality, which is NOT `strCmp a b == 0` even though it answers the same thing. `strCmp` must produce an ORDERING, so it memcmps the shared prefix before it ever looks at the lengths - and equality does not need the ordering. Two strings of different lengths are unequal whatever their bytes say, so checking the length first turns the commonest case, a miss, into two word loads and a compare. |
+| `strEq` | value | `(-> String String Bool)` |  | Whether `a` and `b` hold the same bytes. |
 | `strSlice` | value | `(-> String Int Int String)` | `Alloc,Mut,Unsafe` | The `count` bytes of `s` starting at `start`, sharing `s`'s storage. |
 | `strDup` | value | `(-> String String)` | `Alloc,Mut` | An owned, NUL-terminated copy of `s`. |
 | `concat` | value | `(-> String String String)` | `Alloc,Mut` | `a` followed by `b`, as a new string. |
@@ -1946,15 +1947,15 @@ Str - length-prefixed strings, in Axiom.
 | `strStartsWith` | value | `(-> String String Bool)` |  | Whether `s` begins with `prefix`. |
 | `strIsDigit` | value | `(-> Int Bool)` |  | Whether the byte is an ASCII digit, `0` to `9`. |
 | `strIsAlpha` | value | `(-> Int Bool)` |  | Whether the byte is an ASCII letter. |
-| `strIsSpace` | value | `(-> Int Bool)` |  | Space, tab, LF, CR - and nothing else. Not `char::is_whitespace`: VT and FF are AX1001 to this language's lexer, and a formatter that skipped them turned a refused file into an accepted one. |
-| `strHexVal` | value | `(-> Int (Option Int))` |  | The value of a hex digit, or `None`. Stated as the VALUE and not as a predicate because the value is what every caller needed: the JSON parser's `\uXXXX` escape and the language server's percent-decoding each carried a byte-identical copy of this ladder under its own name, while the predicate here had no caller at all. |
+| `strIsSpace` | value | `(-> Int Bool)` |  | Whether the byte is a space, tab, line feed or carriage return. |
+| `strHexVal` | value | `(-> Int (Option Int))` |  | The value of a hexadecimal digit byte, 0 to 15, or `None` for any other byte. |
 | `strIsHexDigit` | value | `(-> Int Bool)` |  | Whether the byte is a hexadecimal digit, `0` to `9`, `a` to `f` or `A` to `F`. |
-| `strSplit` | value | `(-> String Int (Vec String))` | `Alloc,Mut` | Every segment of `s` between occurrences of `byte`, in order, as a `(Vec String)`. Empty segments are KEPT: a `PATH` entry of "" means the working directory, and a caller that wants them dropped can drop them, while a caller that needs them cannot get them back. `strSplit "" 58` answers one empty segment, and `strSplit "a:" 58` answers two - the same rule as splitting on a separator anywhere else, and the one that makes the segment count equal the separator count plus one. |
+| `strSplit` | value | `(-> String Int (Vec String))` | `Alloc,Mut` | Every segment of `s` between occurrences of `byte`, in order. Empty segments are kept, so there is always one more segment than there are separators: `(strSplit "a:" 58)` answers `"a"` and `""`. |
 | `strSplitFrom` | value | `(-> String Int Int (Vec String) Int)` | `Alloc,Mut` | Split `s` on `byte` starting at index `from`, pushing each piece onto `out`. Answers how many pieces were pushed. |
-| `strFromByte` | value | `(-> Byte String)` | `Alloc,Mut,Unsafe` | A one-byte `Str` holding `b`. The compiler driver and the JSON encoder each had this three-line allocate-and-store under a private name; it is a `Str` constructor, so it lives with the others. |
-| `strLower` | value | `(-> String String)` | `Alloc,Mut,Unsafe` | `s` with every ASCII upper-case byte lowered, or `s` itself when it has none - so a header name already in the form a table wants is not copied. Bytes above 127 pass through untouched: this is the ASCII fold a case-insensitive header table needs, not a Unicode case mapping. |
-| `strFind` | value | `(-> String String Int (Option Int))` |  | The index of the first occurrence of `needle` in `s` at or after `from`, or `None`. An empty needle is found at `from` whenever `from` is inside `s` or at its end, which is the rule that makes `(strFind s "" (strLen s))` answer `(Some (strLen s))` rather than nothing. `no-alloc` came off on 2026-08-31: the `(Some found)` answer allocates. Accepted until then because a constructor contributed nothing to the effect row (`MM-EXEC-9a`). `no-io` and `no-foreign` are unchanged. |
-| `strTrim` | value | `(-> String String)` | `Alloc,Mut` | `s` without the `strIsSpace` bytes at either end, as a SLICE that shares `s`'s storage - so it is not NUL-terminated unless it ends where `s` does, exactly as `strSlice` says. A string that is all space trims to "". |
+| `strFromByte` | value | `(-> Byte String)` | `Alloc,Mut,Unsafe` | A one-byte `String` holding `b`. |
+| `strLower` | value | `(-> String String)` | `Alloc,Mut,Unsafe` | `s` with every ASCII upper-case letter lowered, or `s` itself when it has none. Bytes above 127 pass through untouched: this is an ASCII fold, not a Unicode case mapping. |
+| `strFind` | value | `(-> String String Int (Option Int))` |  | The index of the first occurrence of `needle` in `s` at or after `from`, or `None`. An empty needle is found at `from` whenever `from` is inside `s` or at its end, which is the rule that makes `(strFind s "" (strLen s))` answer `(Some (strLen s))` rather than nothing. |
+| `strTrim` | value | `(-> String String)` | `Alloc,Mut` | `s` without the `strIsSpace` bytes at either end. The result is a slice sharing `s`'s storage, so it is not NUL-terminated unless it ends where `s` does. A string that is all space trims to "". |
 | `strParseInt` | value | `(-> String (Option Int))` |  | The decimal integer `s` spells - an optional `-`, then one or more ASCII digits and nothing else - or `None`: for an empty string, a sign alone, any other byte, and any value outside the 64-bit range. |
 | `format` | macro |  |  | `format` — a String, built at compile time from a literal's runs and holes, or the hole lowering applied to anything else. |
 
@@ -1986,7 +1987,7 @@ Sys - portable syscall wrappers.
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
 | `sysResult` | value | `(-> String Int (Result Int Error))` | `Alloc` | The errno behind a failed result, or 0 if it did not fail. |
-| `sysExitWith` | value | `(-> Int Int)` | `IO,Unsafe` | Terminate the process. Never returns; the `0` afterwards exists only because every Axiom expression has a value. |
+| `sysExitWith` | value | `(-> Int Int)` | `IO,Unsafe` | End the process with status `code`. Never returns. |
 | `sysArgc` | value | `Int` | `IO` | How many arguments the process received, including the program name. |
 | `sysArg` | value | `(-> Int String)` | `Alloc,IO,Mut` | The i-th argument as a Str (0 is the program name), or "" when `i` is out of range. The bytes are the process's own argv storage - NUL-terminated, alive for the whole run, never freed or moved - so wrapping them without copying is sound. |
 | `sysEnv` | value | `(-> String String)` | `Alloc,IO,Mut` | The value of the environment variable `name`, or "" when it is unset. |
@@ -1999,13 +2000,13 @@ Sys - portable syscall wrappers.
 | `sysRunPath` | value | `(-> String Int Int (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn` | Run `name`, searching `PATH` for it when it contains no slash. |
 | `sysRunPathErrTo` | value | `(-> String Int Int String (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn,Unsafe` | Run `name` as `sysRunPath` does, with the child's standard error written to the file at `errPath`, created or truncated, rather than to this process's. `(Ok code)` is the child's answer and `(Err e)` a child that never ran, as `sysRunPath` answers; a file that can't be opened is `(Err e)` too, and then nothing runs. A target with no syscall ABI runs the child with standard error where it was. |
 | `sysSpawnOutErrTo` | value | `(-> Int Int Int String String (Result Int Error))` | `Alloc,IO,Mut,Spawn,Unsafe` | Spawn `path` as `sysSpawn` does, with the child's standard output written to the file at `outPath` and its standard error to the file at `errPath`, each created or truncated. Answers the child's pid, as `sysSpawn` does; a file that can't be opened is `(Err e)` and then nothing runs. The swap is the one `sysRunPathErrTo` makes, done for both descriptors and undone as soon as the child exists, because a spawned child keeps the descriptors it was born with. For as long as the spawn itself takes, this process's own output and error are the files too. A target with no syscall ABI runs the child with its output where it was. |
-| `sysPid` | value | `Int` | `IO,Unsafe` | The calling process's own id - the per-session suffix scratch files need so two concurrent processes cannot collide. The syscall takes no arguments; the unused ones are simply zero. |
+| `sysPid` | value | `Int` | `IO,Unsafe` | The calling process's own id, such as a suffix that keeps two processes' scratch files apart. |
 | `sysNowMicros` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Unsafe` | Microseconds now, from the platform's cheapest correct clock: Darwin answers gettimeofday's timeval (realtime; Darwin's syscall table has no clock_gettime), Linux and FreeBSD answer CLOCK_MONOTONIC via clock_gettime - under the id `clockMonotonicId` names, because the id is not portable: 1 on Linux, and on FreeBSD 4, where 1 is CLOCK_VIRTUAL, the process's CPU time. That one was a literal here until 2026-08-29, and a clock that measures CPU time never runs backwards either, so nothing would have caught it. |
 | `sysHasMonotonic` | value | `Bool` | `Mut` | Whether this target has a monotonic clock, so that `sysNowMonotonic`, `sysNowMonotonicNanos` and `sysSleepNanos` answer `Ok`. Linux, FreeBSD and darwin-aarch64 have one; Windows, bare metal and darwin-x86_64 don't. |
 | `sysNowMonotonicNanos` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Mut,Unsafe` | Nanoseconds from a clock that never steps backwards, counted from an unspecified start, or `Err` 78 when this target has none (`sysHasMonotonic`). Linux and FreeBSD read `clock_gettime`'s monotonic clock and darwin-aarch64 the arm64 counter. The 16-byte buffer is the caller's, as above, so a timing loop allocates nothing on the path that answers. |
 | `sysNowMonotonic` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Mut` | Microseconds from a clock that NEVER steps backwards, or `Err` when this platform has none. The 16-byte buffer is the caller's, as above, so a timing loop allocates nothing on the path that answers. |
 | `sysNowRealtimeNanos` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Unsafe` | Nanoseconds since 1970-01-01T00:00:00Z from the realtime clock, the wall clock `Chrono.datetimeNowUtc` reads. The system may step it, so two readings do not measure a duration: that is `sysNowMonotonic`'s job. Darwin answers gettimeofday's microseconds times 1000; Linux and FreeBSD answer clock_gettime(CLOCK_REALTIME). A target with no clock call (`sysClockNum` 0: Windows and bare metal) answers `Err` 78, as `sysNowMonotonic` does. An Int of nanoseconds reaches 2262-04-11, and a reading beyond that answers `Err` `errOverflow` rather than wrap. The 16-byte buffer is the caller's, as above. |
-| `netAddr4Bytes` | value | `Int` |  | How many bytes an address of each family occupies, and how big a buffer that must take either has to be. |
+| `netAddr4Bytes` | value | `Int` |  | The size of an IPv4 socket address block, 16 bytes. |
 | `netAddr6Bytes` | value | `Int` |  | The size of an IPv6 socket address block, 28 bytes. |
 | `netAddrMaxBytes` | value | `Int` |  | The size of a buffer that takes either family, which is the larger of the two: a caller does not get to know a peer's family until it has the peer. |
 | `netAddr4` | value | `(-> Int Int Int Int Int Int Int)` | `Mut` | Write an IPv4 `sockaddr_in` into `buf`, which must hold 16 bytes, and answer `buf`. The four octets are given in reading order, so 127.0.0.1 is `127 0 0 1`. |
@@ -2020,17 +2021,17 @@ Sys - portable syscall wrappers.
 | `sysSigBit` | value | `(-> Int Int)` |  | The `sigset_t` bit for a signal. SIGNAL N IS BIT N-1, an off-by-one that is easy to write the other way and yields the neighbouring signal's mask rather than an error. |
 | `sysSignalBlock` | value | `(-> Int Int (Result Int Error))` | `Alloc,IO,Mut,Unsafe` | Block the signals in `mask` so they become observable instead of fatal. `setbuf` is caller scratch of at least 16 bytes: the mask is written as one 64-bit word, and the kernel then copies ITS OWN `sigset_t` width out of the buffer - `sigsetBytes`, which is 4 on Darwin, 8 on Linux and 16 on FreeBSD. Sixteen covers every target, and the bytes between the word and that width are zeroed here rather than left to whatever the caller's buffer held, because on FreeBSD they are signals 65 through 128 and a stale byte there blocks one. Answers `(Result Int Error)`; `Ok 0` on success. Runs once, before a server forks, so that every worker inherits the mask. |
 | `sysKill` | value | `(-> Int Int (Result Int Error))` | `Alloc,IO,Unsafe` | Send a signal, which is how a test raises one against itself. |
-| `sysForkProcess` | value | `Int` | `IO,Spawn,Unsafe` | Duplicating this process |
+| `sysForkProcess` | value | `Int` | `IO,Spawn,Unsafe` | Start another copy of this process: 0 in the child, the child's pid in the parent, or a negative errno when no child was made. |
 | `sysMapShared` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Unsafe` | Map `len` bytes, readable and writable (PROT_READ\|PROT_WRITE = 3), shared with every binding spawned after this call; answers the address, page-aligned and zeroed. Unmap it with `sysUnmapShared` once no binding can still touch it - a program obligation, as a handle's single join is (MM-PAR-8). |
-| `sysUnmapShared` | value | `(-> Int Int (Result Int Error))` | `Alloc,IO,Unsafe` | `addr` and `len` must name a whole mapping `sysMapShared` answered, and nothing may touch it afterwards. |
+| `sysUnmapShared` | value | `(-> Int Int (Result Int Error))` | `Alloc,IO,Unsafe` | Unmap a mapping `sysMapShared` answered. `addr` and `len` must name the whole mapping, and nothing may touch it afterwards. |
 | `sysMapPrivate` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Unsafe` | Map `len` zeroed bytes, readable and writable, private to this process: a fork gets a copy, as it does of the arena. Answers the page-aligned address. |
-| `sysUnmapPrivate` | value | `(-> Int Int (Result Int Error))` | `Alloc,IO,Unsafe` | `addr` and `len` must name a whole mapping `sysMapPrivate` answered, and nothing may touch it afterwards. |
+| `sysUnmapPrivate` | value | `(-> Int Int (Result Int Error))` | `Alloc,IO,Unsafe` | Unmap a mapping `sysMapPrivate` answered. `addr` and `len` must name the whole mapping, and nothing may touch it afterwards. |
 | `sysMlock` | value | `(-> Int Int (Result Int Error))` | `Alloc,IO,Unsafe` | Lock `len` bytes at `addr` into memory, so the kernel never writes them to swap. The kernel may refuse: `RLIMIT_MEMLOCK` caps how much an unprivileged process may lock, and on Linux the default cap is a few megabytes. A refusal is an `Err` the caller decides about. |
 | `sysMunlock` | value | `(-> Int Int (Result Int Error))` | `Alloc,IO,Unsafe` | Let the `len` bytes at `addr` be paged out again, undoing `sysMlock`. |
 | `sysExcludeFromCore` | value | `(-> Int Int (Result Int Error))` | `Alloc,IO,Unsafe` | Keep `len` bytes at `addr` out of a core file (`MADV_DONTDUMP` on Linux, `MADV_NOCORE` on FreeBSD). Darwin has no such advice, and answers the unsupported sentinel. `addr` and `len` must name a whole mapping `sysMapPrivate` answered. |
 | `sysWaitWord` | value | `(-> Int Int Int)` | `Block,IO` | Block while the word at byte address `addr` - 8-aligned, inside a `sysMapShared` mapping - still holds `expected`. It returns when woken, when the word already differs on entry, or spuriously, so the caller re-checks its own condition every time. That is what makes a lost wake impossible: a waker changes the word BEFORE it wakes, so a waiter that read the old value either sees the new one on entry or is already in the queue the wake empties - with one caveat on Linux, which compares only the word's low 32 bits (FUTEX_WAIT, not PRIVATE: the key is the shared page): a waiter preempted across exactly a multiple of 2^32 changes would sleep through them. Darwin compares all 64 (UL_COMPARE_AND_WAIT64_SHARED = 6). Where `waitWordKind` is 0 it returns at once and the caller spins, which is correct and costs a core. No timeout here: `sysWaitWordTimeout` below is the timed form, and it pays for the timespec this one does not need. |
 | `sysWakeWord` | value | `(-> Int Int)` | `IO` | Wake every binding blocked in `sysWaitWord` on `addr`: FUTEX_WAKE (1) for INT_MAX waiters, or `__ulock_wake` with UL_COMPARE_AND_WAIT64_SHARED \| ULF_WAKE_ALL (6 \| 0x100). Answers 0 for `sysWaitWord`'s reason: a wake with nobody waiting is not an error anyone can act on. |
-| `sysTimedOut` | value | `Int` |  | The `Error` code every timed operation in the concurrency modules answers when its time ran out: `chanRecvTimeout`, `chanSendTimeout`, `mutexLockTimeout`, a task past its deadline. NOT an errno: ETIMEDOUT is 60 on Darwin and FreeBSD and 110 on Linux, so a code borrowed from the kernel would need one comparison and one fixture per target. It is above 255 so that it can never be mistaken for a wait status, which is what `Task.ax` puts in the same field for a task that trapped. |
+| `sysTimedOut` | value | `Int` |  | The `Error` code a timed operation answers when its time ran out: `chanRecvTimeout`, `chanSendTimeout`, `mutexLockTimeout`, and a task past its deadline. |
 | `sysWaitWordTimeout` | value | `(-> Int Int Int Int)` | `Alloc,Block,IO,Mut` | Block while the word at `addr` still holds `expected`, for at most `nanos` nanoseconds. `sysWaitWord`'s contract - an 8-aligned word in a `sysMapShared` mapping, and every answer means "re-check your own condition" - plus a bound, and an answer that says why it returned: |
 | `sysTimeoutMicros` | value | `(-> Int Int)` | `Alloc,IO,Mut` | Microseconds from the clock a timeout is measured on: the monotonic one where the target has it (`sysHasMonotonic`), and the realtime clock where it doesn't (darwin-x86_64). The timed loops above this file add only non-negative steps of this clock, each clamped to the slice the kernel was asked to wait, so a step of a realtime clock moves a wait by at most one slice; MM-PAR-12 states the bound. `buf` is 16 bytes of caller scratch. A clock that cannot be read answers 0, which a caller reads as no time having passed: its wait then ends on the kernel's own timeout rather than early. |
 | `sysSleepUntilNanos` | value | `(-> Int (Result Int Error))` | `Alloc,Block,IO,Mut` | Sleep until the monotonic clock reads at least `deadline` nanoseconds (`sysNowMonotonicNanos`): `Ok 0` once it does, at once for a deadline already past, or `Err` 78 on a target with no monotonic clock, where nothing could tell when to wake. A wake that comes early, from a signal or the kernel's 71-minute cap on one wait on Darwin, sleeps again for what is left, so the sleep never ends short. A clock that fails mid-sleep answers its `Err`. The thread blocks in the kernel; on FreeBSD, which has no blocking timed wait here, it spins as every timed wait there does. |
@@ -2066,7 +2067,7 @@ target being compiled for (this one is `darwin`).
 | `spawnUsesPosixSpawn` | value | `Int` |  | Starting a child process. |
 | `sysPosixSpawnNum` | value | `Int` | `Spawn` | posix_spawn - BSD 244. |
 | `sysWait4Num` | value | `Int` | `Block` | wait4(pid, status, options, rusage) - BSD 7. |
-| `sysForkNum` | value | `Int` | `Spawn` | fork() - BSD 2. `sysSpawn` does not reach it, because `spawnUsesPosixSpawn` selects `posix_spawn` here - but `sysForkProcess` does, and this used to be a placeholder 0 for that reason. |
+| `sysForkNum` | value | `Int` | `Spawn` | The syscall number of `fork`, BSD 2, which `sysForkProcess` makes. `sysSpawn` uses `posix_spawn` here instead (`spawnUsesPosixSpawn`). |
 | `sysForkArg` | value | `Int` |  | The argument the platform's fork syscall takes: 0 where `fork` takes none, the `clone` flags where it is `clone`. |
 | `sysExecveNum` | value | `Int` |  | The `execve` syscall number, or 0 where the platform runs a child through its own path. |
 | `sysUnlinkNum` | value | `Int` |  | unlink(path) - BSD 10. |
@@ -2085,7 +2086,7 @@ target being compiled for (this one is `darwin`).
 | `sysClockNum` | value | `Int` |  | gettimeofday(tv, tz) - BSD 116. Writes {tv_sec i64, tv_usec i32+pad} to its 16-byte buffer; the register-return interpretation was probed WRONG on arm64 (x0 is 0 on success, never seconds). Verified against the shell clock, 400,000 reads, zero backwards steps, ~200ns/call. |
 | `clockIsGettimeofday` | value | `Int` |  | 1 where wall-clock time comes from `gettimeofday`, 0 where it comes from `clock_gettime`. |
 | `clockHasMonotonic` | value | `Int` |  | Whether this platform can answer a MONOTONIC clock - one that never steps backwards - through a syscall. Darwin cannot: its monotonic clock is the arm64 counter below. |
-| `clockMonotonicId` | value | `Int` |  | The id `clock_gettime` is asked for the monotonic clock, where there is one. Unused here - `clockIsGettimeofday` sends both readers to `gettimeofday`, and `clockHasMonotonic` above says why - and 0 so that nobody reads a Linux number out of this file. The constant exists because the id is NOT portable: 1 is CLOCK_MONOTONIC on Linux and CLOCK_VIRTUAL, process CPU time, on FreeBSD, and `Sys.ax` carried the 1 as a literal until 2026-08-29. |
+| `clockMonotonicId` | value | `Int` |  | The id `clock_gettime` takes for the monotonic clock: 0, unused here, since `clockIsGettimeofday` sends both clock readers to `gettimeofday`. |
 | `clockHasCounter` | value | `Int` |  | Whether `Sys.ax` reads the arm64 counter for its monotonic clock: 1. It is `CNTVCT_EL0`, the counter `mach_absolute_time` reads, which never steps backwards and is the same on every core. darwin-x86_64 has no such register; there `sysCounterHz` answers 0, and Darwin has no monotonic clock. |
 | `sysSocketNum` | value | `Int` |  | socket(domain, type, protocol) - BSD 97. |
 | `sysBindNum` | value | `Int` |  | bind(fd, addr, addrlen) - BSD 104. THE ADDRLEN IS EXACT: 0, 4, 8, 12, 20, 24 and 28 were each probed and every one answered -22 EINVAL; only 16 - the size of `sockaddr_in` - returned 0. |
@@ -2256,12 +2257,12 @@ Test - assertions, and the effect an assertion failure raises.
 |---|---|---|---|---|
 | `Assert` | effect |  |  | The effect a failed assertion performs. |
 | `assertEq` | value | `(-> String Int Int Int)` | `Alloc,Assert,IO,Mut` | Two `Int`s are equal. |
-| `assertNe` | value | `(-> String Int Int Int)` | `Alloc,Assert,IO,Mut` | Two `Int`s are not equal - for the property that a value CHANGED, where naming what it changed to would pin something the test does not mean to pin. |
+| `assertNe` | value | `(-> String Int Int Int)` | `Alloc,Assert,IO,Mut` | Two `Int`s are not equal: for a value that should have changed, when naming what it changed to would pin more than the test means to. |
 | `assertStrEq` | value | `(-> String String String Int)` | `Alloc,Assert,IO,Mut` | Two `String`s are equal, by bytes. |
 | `assertTrue` | value | `(-> String Bool Int)` | `Alloc,Assert,IO,Mut` | A `Bool` is true. |
-| `assertFalse` | value | `(-> String Bool Int)` | `Alloc,Assert,IO,Mut` | A `Bool` is false. Not `(assertTrue label (! b))`, because Axiom has no `!` and `(== b false)` at the call site is what this exists to keep out of the test. |
-| `assertFloatNear` | value | `(-> String Float Float Float Int)` | `Alloc,Assert,IO,Mut` | Two `Float`s are equal within `epsilon` - the tolerance none of the assertions above need, because comparing a COMPUTED float against an exact literal is comparing against rounding error, not against the answer: `(assertEq "" 3 (+ 1 2))`'s `Int` analogue would never be wrong this way, and a `Float` one routinely is. `epsilon` is the caller's to choose rather than a default picked here, because how near is near enough depends on the computation, not on this module. |
-| `testFail` | value | `(-> String Int)` | `Alloc,Assert,IO,Mut` | Fail unconditionally: the branch that must not be reached, and the case a test has not written yet. `(testFail "todo: the empty input")` reads as a failure rather than as a passing test with nothing in it, which is what an empty test body is. |
+| `assertFalse` | value | `(-> String Bool Int)` | `Alloc,Assert,IO,Mut` | A `Bool` is false. |
+| `assertFloatNear` | value | `(-> String Float Float Float Int)` | `Alloc,Assert,IO,Mut` | Two `Float`s are equal within `epsilon`. A computed float rarely equals an exact literal, so choose an `epsilon` that suits the computation. |
+| `testFail` | value | `(-> String Int)` | `Alloc,Assert,IO,Mut` | Fail unconditionally: for the branch that must not be reached, and for a case not written yet, as `(testFail "todo: the empty input")`. |
 
 ## `Tui.Edit`
 
@@ -2421,10 +2422,10 @@ Utf8 - the character layer over `Str`'s bytes.
 | `utf8IsCont` | value | `(-> Int Bool)` |  | Is `b` a continuation byte, `10xxxxxx`? |
 | `utf8SeqLen` | value | `(-> Int Int)` |  | How many bytes the sequence beginning with lead byte `b` occupies. |
 | `utf8DecodeAt` | value | `(-> String Int (Option Int))` |  | The code point whose encoding begins at byte offset `i`, or `None` when there is none there. |
-| `utf8Next` | value | `(-> String Int Int)` |  | The byte offset of the character after the one beginning at `i`, clamped to the byte length - `utf8Offset` clamps, and two stepping functions that disagree about the end of a string is a trap. |
+| `utf8Next` | value | `(-> String Int Int)` |  | The byte offset of the character after the one beginning at `i`, clamped to the byte length as `utf8Offset` is. |
 | `utf8Len` | value | `(-> String Int)` |  | The number of code points in `s`. |
 | `utf8Offset` | value | `(-> String Int Int)` |  | The byte offset at which character `n` begins, or the byte length of `s` when there are fewer than `n` characters. |
-| `utf8CharAt` | value | `(-> String Int (Option Int))` |  | Character `n` of `s`, counting from 0. `None` past the end, the same answer `utf8DecodeAt` gives a byte it cannot decode and for the same reason. The tail call FORWARDS `utf8DecodeAt`'s two registers as they arrive (`pairFwdOK`), so this keeps `no-alloc` on the same terms. |
+| `utf8CharAt` | value | `(-> String Int (Option Int))` |  | Character `n` of `s`, counting from 0, or `None` past the end or at a byte that is not well-formed UTF-8. |
 | `utf8Slice` | value | `(-> String Int Int String)` | `Alloc,Mut` | `count` characters of `s` beginning at character `start`, as a `Str` sharing the original's bytes - the character-indexed counterpart of `strSlice`. |
 | `utf8Replacement` | value | `Int` |  | U+FFFD REPLACEMENT CHARACTER, what a code point that cannot be encoded becomes. |
 | `utf8Width` | value | `(-> Int Int)` |  | How many bytes code point `cp` occupies when encoded - counting what `utf8FromChar` will actually write, so the two never disagree. |
@@ -2442,22 +2443,22 @@ Vec - a growable array of machine words, in Axiom.
 |---|---|---|---|---|
 | `vecNew` | value | `(Vec a)` | `Alloc,Mut` | An empty `Vec` with `vecDefaultCap` capacity. |
 | `vecWithCapacity` | value | `(-> Int (Vec a))` | `Alloc,Mut` | An empty `Vec` that can hold at least `cap` elements without growing. |
-| `vecOwnsRefs` | value | `(-> (Vec a) Bool)` |  | Whether this vector holds a share of every element - kind 1 in the module comment. It reads word 3 of the header, not the data block's shape word: see `vecBuild`. |
+| `vecOwnsRefs` | value | `(-> (Vec a) Bool)` |  | Whether the vector holds a share of every element, which it does when its elements are a counted type (kind 1 in the module comment). |
 | `vecLen` | value | `(-> (Vec a) Int)` |  | How many elements the vector holds. |
 | `vecCap` | value | `(-> (Vec a) Int)` |  | How many elements the vector can hold before it grows. |
 | `vecGet` | value | `(-> (Vec a) Int a)` | `Unsafe` | The element at `i`. REFUSES an index outside `0 .. (vecLen v) - 1`. |
 | `vecTry` | value | `(-> (Vec a) Int (Option a))` | `Alloc,Unsafe` | The element at `i`, or `None` when there is no element at `i`. |
 | `vecGetStr` | value | `(-> (Vec a) Int String)` | `Unsafe` | Element `i` as a `String`, for a vector that holds strings. Out of range traps, as `vecGet` does. |
 | `vecGetVec` | value | `(-> (Vec a) Int (Vec b))` | `Unsafe` | The element at `i` read back as a CONTAINER. |
-| `vecPushStr` | value | `(-> (Vec a) String (Vec a))` | `Alloc,Mut,Unsafe` | Append a `String` to a vector of WORDS, keeping the share. |
-| `vecPushVec` | value | `(-> (Vec a) (Vec b) (Vec a))` | `Alloc,Mut,Unsafe` | The same for a nested container. A `Vec` handle is a counted block too, so it needs the same explicit share for the same reason. |
+| `vecPushStr` | value | `(-> (Vec a) String (Vec a))` | `Alloc,Mut,Unsafe` | Append a `String` to a vector of words, taking a share of it. |
+| `vecPushVec` | value | `(-> (Vec a) (Vec b) (Vec a))` | `Alloc,Mut,Unsafe` | Append a `Vec` to a vector of words, taking a share of it. |
 | `vecSet` | value | `(-> (Vec a) Int a (Vec a))` | `Mut` | Overwrite the element at `i`. Returns the handle. |
-| `vecPush` | value | `(-> (Vec a) a (Vec a))` | `Alloc,Mut` | Append `x`. Returns the handle - the same one, with this representation; see the module comment for why it is returned anyway. |
+| `vecPush` | value | `(-> (Vec a) a (Vec a))` | `Alloc,Mut` | Append `x`, growing the vector if it is full. Answers `v`. |
 | `vecPop` | value | `(-> (Vec a) a)` | `Mut,Unsafe` | Remove and return the last element. REFUSES an empty vector. |
 | `vecLast` | value | `(-> (Vec a) a)` |  | The last element without removing it. REFUSES an empty vector. |
 | `vecClear` | value | `(-> (Vec a) (Vec a))` | `Mut` | Drop every element, keeping the capacity. Returns the handle. |
 | `vecSum` | value | `(-> (Vec Int) Int)` |  | The sum of every element. |
 | `vecHash` | value | `(-> (Vec Int) Int)` |  | A position-sensitive digest of the whole vector. |
 | `vecSort` | value | `(-> (Vec Int) (Vec Int))` | `Mut` | Sort a vector of `Int` ascending, in place. Answers the vector. |
-| `vecSortBy` | value | `(-> (Vec a) (-> Int Int Int) (Vec a))` | `Mut` | The same, ordered by a caller's comparison rather than by the word. |
+| `vecSortBy` | value | `(-> (Vec a) (-> Int Int Int) (Vec a))` | `Mut` | Sort `v` in place by `cmp`, which answers negative, zero or positive the way `strCmp` does. Answers the vector. |
 
