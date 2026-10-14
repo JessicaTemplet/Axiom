@@ -725,9 +725,10 @@
       v
     }))
 
-(:: vecSiftDownBy (-> Int Int Int (-> Int Int Int) Int))
-(fn (vecSiftDownBy d root n cmp)
+(:: vecSiftDownBy (-> (Vec a) Int Int (-> a a Int) Int))
+(fn (vecSiftDownBy v root n cmp)
   (let (
+    (d (vecData v))
     (mut r root)
     (mut go 1)
   )
@@ -739,9 +740,9 @@
             (let ((mut k c))
               {
                 (if (< (+ c 1) n)
-                  (if (> (cmp (memGetWord d (+ c 1)) (memGetWord d c)) 0)
+                  (if (> (cmp (vecGet v (+ c 1)) (vecGet v c)) 0)
                     (set k (+ c 1))))
-                (if (>= (cmp (memGetWord d r) (memGetWord d k)) 0)
+                (if (>= (cmp (vecGet v r) (vecGet v k)) 0)
                   (set go 0)
                   {
                     (vecSwapWords d r k)
@@ -751,22 +752,15 @@
       0
     }))
 
-;; Sort `v` in place by `cmp`, which answers negative, zero or positive
-;; the way `strCmp` does. Answers the vector.
+;; Sort `v` in place by `cmp`, which takes two elements and answers
+;; negative, zero or positive the way `strCmp` does. Answers the vector.
+;; `(vecSortBy names (lambda (a b) (strCmp a b)))` orders strings by
+;; their bytes.
 ;
-; `cmp` answers negative, zero or positive the way `strCmp` does, and
-; it takes the WORDS the vector holds, because a `Vec` carries no
-; element type. Ordering a vector of `String` by its bytes - which is
-; what `vecSort` cannot do, since the word it holds for a `String` is
-; an address - is therefore:
-;
-;   (vecSortBy v (lambda (a b) (strCmp (cast String a) (cast String b))))
-;
-; and not `(vecSortBy v strCmp)`: a top-level function is not a value
+; `cmp` takes the elements at their own type, read with `vecGet`. It is
+; a lambda and not `strCmp` itself: a top-level function is not a value
 ; in this language, because a partial application has no closure record
-; to hold the arguments it was not given (`AX3013`). The `cast` is the
-; caller saying what the word is, which is the same claim `vecGetStr`
-; makes at the same boundary.
+; to hold the arguments it was not given (`AX3013`).
 ;
 ; SPELLED OUT RATHER THAN SHARED WITH `vecSort`. The two differ in one
 ; expression each, and folding them together means either `vecSort`
@@ -775,7 +769,7 @@
 ; it is. The duplication is thirty lines that say the same thing twice
 ; and never diverge in behaviour, because the fixture below sorts one
 ; input both ways and requires the same answer.
-(pub :: vecSortBy (-> (Vec a) (-> Int Int Int) (Vec a)))
+(pub :: vecSortBy (-> (Vec a) (-> a a Int) (Vec a)))
 (pub fn (vecSortBy v cmp)
   (let (
     (n (vecLen v))
@@ -798,14 +792,14 @@
         (let ((mut i (- (/ n 2) 1)))
           (while (>= i 0)
             {
-              (vecSiftDownBy d i n guarded)
+              (vecSiftDownBy v i n guarded)
               (set i (- i 1))
             }))
         (let ((mut e (- n 1)))
           (while (> e 0)
             {
               (vecSwapWords d 0 e)
-              (vecSiftDownBy d 0 e guarded)
+              (vecSiftDownBy v 0 e guarded)
               (set e (- e 1))
             }))
         v

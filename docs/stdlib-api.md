@@ -2460,5 +2460,5 @@ Vec - a growable array of machine words, in Axiom.
 | `vecSum` | value | `(-> (Vec Int) Int)` |  | The sum of every element. |
 | `vecHash` | value | `(-> (Vec Int) Int)` |  | A position-sensitive digest of the whole vector. |
 | `vecSort` | value | `(-> (Vec Int) (Vec Int))` | `Mut` | Sort a vector of `Int` ascending, in place. Answers the vector. |
-| `vecSortBy` | value | `(-> (Vec a) (-> Int Int Int) (Vec a))` | `Mut` | Sort `v` in place by `cmp`, which answers negative, zero or positive the way `strCmp` does. Answers the vector. |
+| `vecSortBy` | value | `(-> (Vec a) (-> a a Int) (Vec a))` | `Mut` | Sort `v` in place by `cmp`, which takes two elements and answers negative, zero or positive the way `strCmp` does. Answers the vector. `(vecSortBy names (lambda (a b) (strCmp a b)))` orders strings by their bytes. |
 

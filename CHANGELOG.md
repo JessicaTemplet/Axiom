@@ -16,6 +16,12 @@ its changelog too.
 
 ## Unreleased
 
+- `vecSortBy`'s comparator takes the elements at their own type:
+  `(vecSortBy names (lambda (a b) (strCmp a b)))` sorts strings with no
+  casts. **BREAKING**: a comparator written over `Int` words for a
+  vector of anything else is now a type error; drop its casts.
+  Tested by `tests/stdlib/405-vec-sort.ax`.
+
 - The prelude's `when` and `unless` are removed: an `if` without an
   else does their job. Write `(if test body)` for `(when test body)`
   and `(if (! test) body)` for `(unless test body)`. `Pre` keeps its
