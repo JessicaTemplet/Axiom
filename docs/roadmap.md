@@ -124,7 +124,9 @@ integrator would still need.
 | The VS Code extension is published to the marketplace | Not started |
 | `axiom doc` renders the documentation and the library reference locally and opens them in your browser | Done |
 | Debug information (DWARF), a message on SIGSEGV, and inlined frames in backtraces | Not started |
-| An assembler error inside an `asm` template is reported at the form | Not started |
+| An assembler error inside an `asm` template is reported at the form | Done |
+| `asm` takes floating-point, vector and memory operands | Not started |
+| The restricted profile requires `nostack` of an allowed `asm` block, or counts what it pushes | Not started |
 | The test runner runs tests in parallel | Not started |
 | The language server answers inside macro invocations | Not started |
 | Packages can pin a version | Not started |

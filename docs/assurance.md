@@ -65,6 +65,7 @@ memory model's *Assurance evidence* table.
 | R-A7 | A released block's free-list link can't be released as a count | `MM-LIFE-2k` | `tests/stdlib/521-release-filed.ax` |
 | R-A9 | A count that would overflow traps with status 70 before the write | `MM-LIFE-2l` | `tests/stdlib/527-retain-overflow.ax` |
 | R-A10 | An unused declaration changes no other declaration's meaning | none | `scripts/check-metamorphic.sh` |
+| R-A11 | A malformed `asm` form is refused at the part that is wrong before any assembler runs, and a template line the assembler rejects is reported at that line | `MM-FFI-9` | `scripts/check-embedded.sh` (A15), `tests/diagnostics/1280-inline-asm-forms.ax` |
 
 Runtime traps exit with statuses 70 to 85, each with one meaning, at
 every optimisation level (`scripts/check-trap-statuses.sh`; the table

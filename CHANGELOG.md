@@ -78,6 +78,29 @@ its changelog too.
   `tests/diagnostics/1259-result-claim.ax` and
   `scripts/check-container-reclaim.sh`.
 
+- Bring inline assembly up to Rust's `asm!`. An `asm` arm now takes
+  `lateout` and `inlateout`, more than one output (each beyond the
+  answered one stored `into` a `mut` binding), `const` and `sym`
+  operands, `clobber_abi("C")`, and the options `pure`, `nomem`,
+  `readonly`, `preserves_flags`, `noreturn`, `nostack`, `att_syntax`
+  and `intel_syntax`, each lowered as Rust lowers it. A template line
+  the assembler rejects is now `AX3117` at that line, with status 1,
+  where it was llc's text and `AX4003` with no position. Before any
+  assembler runs, the compiler refuses an operand the template never
+  names (`AX3118`), options that contradict each other (`AX3119`), and
+  a template that defines a named label, which the optimiser would
+  duplicate (`AX3091`). Tested by
+  `tests/stdlib/870-inline-asm-operands.ax` and
+  `scripts/check-embedded.sh` (A15).
+
+- Change two `asm` defaults to the safe ones Rust has. `inout` is
+  early-clobber (`=&r`), so its register is no other input's; the old
+  meaning is `inlateout`. A block without `nostack` may now push to
+  the stack: the compiler aligns the stack pointer and keeps nothing
+  in a red zone below it. On x86-64 a `call` in a template used to
+  overwrite a local LLVM had kept there. Add `nostack` to a block
+  that uses no stack. Tested by `tests/stdlib/870-inline-asm-operands.ax`.
+
 - Refuse a reference cast into a field declared `Int`. `AX3043` was a
   warning on the grounds that the cast was deliberate, but the leak is
   certain either way: the release walk follows declared types and
