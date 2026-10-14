@@ -72,7 +72,7 @@ integrator would still need.
 | A statically certain defect or a refuted claim is an error, not a warning | Done | `tests/diagnostics/severity.policy` |
 | Retired and never-assigned codes are recorded and never reused | Done | `ERR-DIAG-2` |
 | A check after an error is poisoned, not cascaded | Planned | `ERR-DIAG-3` |
-| A cast to a spawn handle counts as forging | Not started | |
+| A cast to a spawn handle counts as forging | Done | `MM-PAR-8`, `tests/diagnostics/1260-spawn-forging-cast.ax` |
 | Two signatures for one name are refused, instead of the later one winning | Done | `tests/diagnostics/1255-duplicate-signature.ax` |
 
 ## One way to do each thing

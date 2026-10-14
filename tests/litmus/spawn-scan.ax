@@ -1,0 +1,65 @@
+; A guessed word is not a live spawn handle (docs/memory-model.md
+; MM-PAR-8). One child runs; a trusted declaration casts every word
+; from 0 to `n` to `Spawn` and asks the table for its pid inside a
+; recovery point, which answers 85 for a word that names no live slot.
+; `scripts/check-handles.sh` section 9 requires the scan to find
+; nothing but the child's own word, and the child's owner to join it
+; afterwards with its answer, 42.
+;
+; Before a slot's first generation was drawn from a salt, every program
+; made the word 65,536 first: this scan found it, and could join the
+; child and take its answer from under the owner.
+;
+; Usage: spawn-scan N
+(import IO)
+(import Str)
+(import Sys)
+(import Fmt)
+
+; The cast the unsafe layer may write and safe code may not.
+(:: forge (-> Int Spawn))
+;@axiom:effect(unsafe)
+(fn (forge w)
+  (cast Spawn w))
+
+; 1 when the table answers a pid for word `w`, 0 when it traps 85.
+(:: names (-> Int Int))
+(fn (names w)
+  (let ((st (__axiom_recover
+    __axiom_arena_mark
+    (lambda (x)
+      {
+        (__spawn_pid (forge w))
+        0
+      }))))
+    (if (== st 0)
+      1
+      0)))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  (let (
+    (n (match (strParseInt (sysArg 1))
+      ((Some v) v)
+      ((None) 200000)))
+    (h (__proc_spawn
+      (lambda (x) (+ x 1))
+      41))
+    (mut found 0)
+    (mut own 0)
+  )
+    {
+      (for w in 0..n
+        (if (== (names w) 1)
+          (if (== w (cast Int h))
+            (set own 1)
+            (set found (+ found 1)))
+          0))
+      (println (concat "scanned " (concat (fmtInt n) (concat " found " (fmtInt found)))))
+      (println (concat "own word in range " (fmtInt own)))
+      (println (concat "joined " (fmtInt (__proc_join h))))
+      0
+    }))

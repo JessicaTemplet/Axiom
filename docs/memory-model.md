@@ -647,7 +647,8 @@ operations:
   `x` isn't already a `T`. The reference types are `String`, `Vec`,
   `Handle`, a struct, a `data` type with a field, a function, a
   non-empty tuple, and a type variable, which a caller may instantiate
-  at any of them.
+  at any of them. A spawn handle, `Spawn`, counts as one too: only a
+  spawn makes one (`MM-PAR-8`).
 
 An untagged operation is `AX3073`, even when the declaration claims
 another effect, such as `effect(io)`. Under `effect(pure)` it is
@@ -717,7 +718,8 @@ address. Those are review obligations, and the trusted set is the list
 to review ([assurance.md](assurance.md#using-axiom-in-a-safety-related-system)).
 
 Tested by `tests/diagnostics/1040-forging-cast.ax` to
-`tests/diagnostics/1043-precondition-removed.ax` and by
+`tests/diagnostics/1043-precondition-removed.ax`,
+`tests/diagnostics/1260-spawn-forging-cast.ax` and
 `tests/stdlib/707-library-pre.ax`. The accepted wrapper in
 `tests/selfhost/1010-trusted-wrapper.ax` and the ordinary workload in
 `tests/stdlib/545-no-unsafe-practical.ax`, which claims
@@ -5376,11 +5378,17 @@ and its output is byte for byte what it would be without the registry.
 **MM-PAR-8 (H). A spawn handle SHALL be a value the type system
 tracks, joined exactly once.** A spawn primitive answers a `Spawn`,
 and only a join, a checked join and `__spawn_pid` take one. `Spawn` is
-a builtin word type that nothing but the runtime can build or open, so
-an `Int` joined, a handle used as an `Int` and a function declared
+a builtin word type that safe code can't build: only a spawn primitive
+makes one, and only a join or `__spawn_pid` reads the page it names.
+So an `Int` joined, a handle used as an `Int` and a function declared
 `Int` that answers one are `AX3004`. A concurrent binding may not
 capture one (`AX3064`), because a join belongs to the binding that
 spawned it (`MM-PAR-7`'s 78).
+
+A `cast` that makes a `Spawn` out of any other word, directly or
+through an alias, is a forging cast (`MM-EXEC-9d`). A declaration that
+writes one says `;@axiom:effect(unsafe)`, or draws `AX3073` at the
+cast.
 
 The handle is a slot in the runtime's handle table, and the table says
 whether the slot is live. A join asks the table for the binding's page
@@ -5415,24 +5423,47 @@ mapped on first use and lock-free. A module that names no handle or
 spawn primitive emits none of it. §10.7 records why liveness lives in
 a table.
 
+A slot's first generation is 1 to 2^40, drawn from the table's salt
+(its own address mixed with the processor's counter when it is made)
+and the slot's index; each reuse moves to the next. So a word no spawn
+answered names a live slot with a chance near 2^-40, and a scan of
+guessed words finds none.
+
 *Limits.* A `__handle_free` that races another binding's use of the
 same handle is a data race (`MM-PAR-9`): the table catches every use
 ordered after the free, not one already in flight, and the unsafe
-layer that calls it answers for the order. A `cast` to a handle type
-forges one, which is the unsafe layer's (`MM-VAL-22`). At most 65,536
-handles are live at once: a spawn beyond that is refused as a refused
-fork is (78).
+layer that calls it answers for the order. At most 65,536 handles are
+live at once: a spawn beyond that is refused as a refused fork is (78).
 
-*Evidence.* `tests/stdlib/571-handle-table.ax` and
-`tests/stdlib/572-spawn-joined-twice.ax`, at every `--opt`;
+A trusted declaration that forges a spawn handle vouches for the word
+it casts. The table traps 85 on a word that names no live slot, and the
+page's owner check traps 78 on a live handle another binding spawned.
+A copy of a live handle's word, in the binding that spawned it, still
+joins that child. The salt defends against a wrong word, not one read
+out of memory, and the unsafe layer can read the table.
+
+*Evidence.* `tests/stdlib/571-handle-table.ax`,
+`tests/stdlib/572-spawn-joined-twice.ax` and
+`tests/stdlib/850-spawn-cast-trusted.ax`, at every `--opt`;
 `tests/diagnostics/1060-handle-int-for-chan.ax` to
-`tests/diagnostics/1066-spawn-handle.ax`. The guard's refusals are
+`tests/diagnostics/1066-spawn-handle.ax`, and
+`tests/diagnostics/1260-spawn-forging-cast.ax` for the forging cast,
+and `tests/litmus/spawn-scan.ax`, whose scan of the words 0 to 400,000
+finds no live handle. The guard's refusals are
 `tests/diagnostics/1070-mutex-guard-int.ax` and
-`tests/diagnostics/1071-mutex-guard-sealed.ax`. `scripts/check-handles.sh`:
-both lowerings, 80,000 handles made and freed by four bindings at once,
-racing frees, both kinds of spawn handle, the capture rule under
-`build --threads`, a single-bit fault at each of a live handle's 64
-bits (`tests/litmus/handle-bitflip.ax`), and four ablations.
+`tests/diagnostics/1071-mutex-guard-sealed.ax`.
+
+`scripts/check-handles.sh` runs:
+
+- both lowerings, with 80,000 handles made and freed by four bindings
+  at once, and racing frees;
+- both kinds of spawn handle, and the capture rule under
+  `build --threads`;
+- a single-bit fault at each of a live handle's 64 bits
+  (`tests/litmus/handle-bitflip.ax`);
+- the forging cast's refusals and the scan;
+- six ablations, one of which starts every slot at generation 1 again
+  and lets the scan find the child.
 
 **MM-PAR-9 (H). What orders memory between bindings, what the atomics
 mean, and what a race is.** This rule says when one binding's write is
