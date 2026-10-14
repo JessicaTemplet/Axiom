@@ -2535,17 +2535,21 @@ six lines of plausible code.
 
 ### 10.1 What works today
 
-`stdlib/Pre.ax` exports `when` and `unless`:
+`stdlib/Pre.ax` exports two derivers, `deriveEq` and `deriveArity`:
 
 ```scheme
 ; from stdlib/Pre.ax
-(pub macro (when test body)   (if test body 0))
-(pub macro (unless test body) (if test 0 body))
+(pub macro deriveArity ((deriveArity T)
+   (pub :: (syntax/join arity T) (-> T Int))
+   (pub fn ((syntax/join arity T) v)
+     (match v
+       (syntax/for (C (syntax/constructors T))
+         ((C (syntax/binders C f)) (syntax/arity C)))))))
 ```
 
-It also exports `deriveEq` and `deriveArity`.
-Variadic branching needs no macro: `(if t1 b1 t2 b2 ... els)`
-is the nested chain, built by the parser.
+Branching needs no macro. `(if test body)` runs `body` when `test`
+holds and answers `()`, and `(if t1 b1 t2 b2 ... els)` is the nested
+chain, built by the parser.
 
 Here is hygiene at work. The template binds its own `v`, and the caller
 also has a `v`. Renaming keeps them apart, so the caller's `v` reaches

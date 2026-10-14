@@ -1890,16 +1890,14 @@ Path - taking a filesystem path apart and putting one together.
 
 ## `Pre`
 
-`stdlib/Pre.ax` — 4 public names
+`stdlib/Pre.ax` — 2 public names
 
-The standard prelude: small macros every program can use.
+The standard prelude: the derivers every program can use.
 
-Import with `(import Pre (when unless ...))`.
+Import with `(import Pre (deriveEq deriveArity))`.
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `when` | macro |  |  | Run `body` when `test` is true, and answer 0 otherwise. |
-| `unless` | macro |  |  | Run `body` when `test` is false, and answer 0 otherwise. |
 | `deriveEq` | macro |  |  | Derive structural equality for a `data` type with nullary constructors: `(deriveEq Colour)` declares `eqColour`, of type `(-> Colour Colour Bool)`, with one match arm per constructor. |
 | `deriveArity` | macro |  |  | Derive a function answering how many fields a value's constructor carries: `(deriveArity Shape)` declares `arityShape`, of type `(-> Shape Int)`. |
 

@@ -16,6 +16,12 @@ its changelog too.
 
 ## Unreleased
 
+- The prelude's `when` and `unless` are removed: an `if` without an
+  else does their job. Write `(if test body)` for `(when test body)`
+  and `(if (! test) body)` for `(unless test body)`. `Pre` keeps its
+  two derivers, `deriveEq` and `deriveArity`. **BREAKING**:
+  `compat/BREAKING` names both. Tested by `tests/stdlib/100-pre.ax`.
+
 - A macro whose template is `()` expands to the unit value, not to the
   integer 0: rebuilding a template's literal kept its value and lost
   the mark that makes it `()`, so `(macro (m x) ())` gave `main` a

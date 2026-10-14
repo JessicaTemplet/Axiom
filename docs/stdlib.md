@@ -154,8 +154,9 @@ Use `fmtInt`, `fmtHex`, `fmtFloatPrec` and padding functions when you
 want to call a formatter directly. `Float` supplies strict parsing,
 round-tripping text and bit conversions.
 
-`Pre` supplies `when`, `unless`, `deriveEq` and `deriveArity`. Import
-it before expanding those macros.
+`Pre` supplies two derivers: `deriveEq` writes structural equality
+for a type with nullary constructors, and `deriveArity` writes a
+function answering how many fields a value's constructor carries.
 
 API: [Fmt](stdlib-api.md#fmt), [Float](stdlib-api.md#float),
 [Pre](stdlib-api.md#pre). See [formatting syntax](reference.md#printing-and-formatting).

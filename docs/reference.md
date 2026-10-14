@@ -863,16 +863,21 @@ wrappers and native archives; see [calling Rust](ffi.md).
 ```scheme
 (import IO)
 
-(macro (when test body) (if test body 0))
-(macro (unless test body) (if test 0 body))
+(macro (clamp lo hi x) (if (< x lo) lo (> x hi) hi x))
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((n 40))
-    { (println (when (== n 40) 5))      ; becomes (if (== n 40) 5 0)
-      (println (unless (== n 40) 5))    ; becomes (if (== n 40) 0 5)
-      0 }))
+  {
+    (println (clamp 0 10 42))   ; becomes (if (< 42 0) 0 (> 42 10) 10 42)
+    (println (clamp 0 10 -3))
+    0
+  })
+```
+
+```text
+10
+0
 ```
 
 `(macro (name argument ...) template)` substitutes syntax before type
@@ -882,7 +887,8 @@ renamed hygienically.
 
 Macros can generate declarations and inspect syntactic type
 information. They do not execute arbitrary source code during
-compilation. Use `Pre`'s common macros, and read the
+compilation. `Pre` supplies two derivers, `deriveEq` and
+`deriveArity`. Read the
 [macro specification](macro-system.md) for declaration templates,
 `syntax` queries, pattern matching and expansion limits.
 

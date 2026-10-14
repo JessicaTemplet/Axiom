@@ -151,11 +151,17 @@ cat > "$work/nostd-probe.ax" <<'AX'
 (import Utf8)
 (import Err)
 
+(data Bit
+  (Lo)
+  (Hi))
+
+(deriveEq Bit)
+
 (:: main Int)
 (fn (main)
   (let ((v (vecPush vecNew 7)))
     {
-      (when true 0)
+      (if (eqBit Lo Hi) (vecPush v 8))
       (+ (vecLen v) (+ (mapLen mapNew) (+ (strLen (fmtInt 42)) (+ (utf8SeqLen 65) (+ (memAlloc 16) (+ errDivideByZero (if (isOk (divChecked 10 2)) 1 0)))))))
     }))
 AX
