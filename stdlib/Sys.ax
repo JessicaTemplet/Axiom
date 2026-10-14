@@ -660,6 +660,71 @@
         (Err (mkError (- 0 r) "sysNowMicros"))
         (Ok (+ (* (memGetWord buf 0) 1000000) (/ (memGetWord buf 1) 1000)))))))
 
+; The arm64 virtual counter and its frequency in hertz, which the
+; system sets at boot (24 MHz on Apple silicon). `isb` keeps the read
+; from being taken ahead of the instructions before it. Read only where
+; `clockHasCounter` says so; an x86_64 target answers 0 for both, which
+; is no counter.
+(:: sysCounterTicks Int)
+;@axiom:effect(unsafe)
+(fn (sysCounterTicks)
+  (asm
+    (aarch64 "isb\nmrs {t}, cntvct_el0" (out t))
+    (x86_64 "movq $0, {t}" (out t))))
+
+(:: sysCounterHz Int)
+;@axiom:effect(unsafe)
+(fn (sysCounterHz)
+  (asm
+    (aarch64 "mrs {t}, cntfrq_el0" (out t))
+    (x86_64 "movq $0, {t}" (out t))))
+
+; Which monotonic clock this target reads: 1 `clock_gettime`'s, 2 the
+; arm64 counter (Darwin, whose syscall table has no `clock_gettime`),
+; 0 none (Windows, bare metal and darwin-x86_64).
+(:: sysMonotonicKind Int)
+(fn (sysMonotonicKind)
+  (if (&& (== clockHasMonotonic 1) (!= sysClockNum 0))
+    1
+    (if (&& (== clockHasCounter 1) (> sysCounterHz 0))
+      2
+      0)))
+
+;; Whether this target has a monotonic clock, so that `sysNowMonotonic`,
+;; `sysNowMonotonicNanos` and `sysSleepNanos` answer `Ok`. Linux, FreeBSD
+;; and darwin-aarch64 have one; Windows, bare metal and darwin-x86_64
+;; don't.
+(pub :: sysHasMonotonic Bool)
+(pub fn (sysHasMonotonic)
+  (!= sysMonotonicKind 0))
+
+; Nanoseconds for `ticks` of a counter running at `hz`, split so that
+; neither product can wrap: the remainder is below `hz`, and `hz` is far
+; below 2^63 / 10^9.
+(:: sysCounterNanos (-> Int Int Int))
+(fn (sysCounterNanos ticks hz)
+  (+ (* (/ ticks hz) 1000000000) (/ (* (% ticks hz) 1000000000) hz)))
+
+;; Nanoseconds from a clock that never steps backwards, counted from an
+;; unspecified start, or `Err` 78 when this target has none
+;; (`sysHasMonotonic`). Linux and FreeBSD read `clock_gettime`'s
+;; monotonic clock and darwin-aarch64 the arm64 counter. The 16-byte
+;; buffer is the caller's, as above, so a timing loop allocates nothing
+;; on the path that answers.
+(pub :: sysNowMonotonicNanos (-> Int (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (sysNowMonotonicNanos buf)
+  (let ((k sysMonotonicKind))
+    (if (== k 2)
+      (Ok (sysCounterNanos sysCounterTicks sysCounterHz))
+      (if (== k 0)
+        (Err (mkError 78 "sysNowMonotonicNanos"))
+        (let ((r (__syscall3 sysClockNum clockMonotonicId buf 0)))
+          (if (< r 0)
+            (Err (mkError (- 0 r) "sysNowMonotonicNanos"))
+            (Ok (+ (* (memGetWord buf 0) 1000000000) (memGetWord buf 1)))))))))
+
 ;; Microseconds from a clock that NEVER steps backwards, or `Err` when
 ;; this platform has none. The 16-byte buffer is the caller's, as
 ;; above, so a timing loop allocates nothing on the path that answers.
@@ -669,25 +734,18 @@
 ; realtime clock and `ntpd` may step it, so a duration taken across the
 ; step is wrong and can be negative.
 ;
-; THE `Err` IS NOT AN ERROR TO RETRY - on Darwin it carries ENOSYS
-; and it is what this platform will answer every time, until the arm64
-; `CNTVCT_EL0` read that `Sys/Platform.darwin.ax` describes lands as a
-; codegen primitive. Ask `clockHasMonotonic` ONCE at startup rather than
-; per call, and let the program decide: refuse to start, fall back to
-; `sysNowMicros` with the hazard accepted deliberately, or run the
-; affected work only where the clock exists. What it must not do is
-; take the fallback silently, which is the bug this pair exists to make
-; impossible to write by accident.
+; THE `Err` IS NOT AN ERROR TO RETRY - where it carries 78 the target
+; has no monotonic clock and will answer so every time. Ask
+; `sysHasMonotonic` ONCE at startup rather than per call, and let the
+; program decide: refuse to start, fall back to `sysNowMicros` with the
+; hazard accepted deliberately, or run the affected work only where the
+; clock exists. What it must not do is take the fallback silently.
 (pub :: sysNowMonotonic (-> Int (Result Int Error)))
 ;@axiom:effect(io)
-;@axiom:effect(unsafe)
 (pub fn (sysNowMonotonic buf)
-  (if (== clockHasMonotonic 0)
-    (Err (mkError 78 "sysNowMonotonic"))
-    (let ((r (__syscall3 sysClockNum clockMonotonicId buf 0)))
-      (if (< r 0)
-        (Err (mkError (- 0 r) "sysNowMonotonic"))
-        (Ok (+ (* (memGetWord buf 0) 1000000) (/ (memGetWord buf 1) 1000)))))))
+  (match (sysNowMonotonicNanos buf)
+    ((Ok ns) (Ok (/ ns 1000)))
+    ((Err e) (Err (mkError (errCode e) "sysNowMonotonic")))))
 
 ;; Nanoseconds since 1970-01-01T00:00:00Z from the realtime clock, the
 ;; wall clock `Chrono.datetimeNowUtc` reads. The system may step it, so
@@ -1606,25 +1664,104 @@
       })))
 
 ;; Microseconds from the clock a timeout is measured on: the monotonic
-;; one where the platform has it and - DELIBERATELY, since nothing
-;; better is reachable without libSystem - the realtime clock on Darwin
-;; (`clockHasMonotonic` there says why). The timed loops above this file
-;; add only non-negative steps of this clock, each clamped to the slice
-;; the kernel was asked to wait, so a step of the realtime clock moves a
-;; wait by at most one slice; MM-PAR-12 states the bound. `buf` is 16
-;; bytes of caller scratch. A clock that cannot be read answers 0, which
-;; a caller reads as no time having passed: its wait then ends on the
-;; kernel's own timeout rather than early.
+;; one where the target has it (`sysHasMonotonic`), and the realtime
+;; clock where it doesn't (darwin-x86_64). The timed loops above this
+;; file add only non-negative steps of this clock, each clamped to the
+;; slice the kernel was asked to wait, so a step of a realtime clock
+;; moves a wait by at most one slice; MM-PAR-12 states the bound. `buf`
+;; is 16 bytes of caller scratch. A clock that cannot be read answers 0,
+;; which a caller reads as no time having passed: its wait then ends on
+;; the kernel's own timeout rather than early.
 (pub :: sysTimeoutMicros (-> Int Int))
 ;@axiom:effect(io)
 (pub fn (sysTimeoutMicros buf)
-  (if (== clockHasMonotonic 1)
+  (if sysHasMonotonic
     (match (sysNowMonotonic buf)
       ((Ok t) t)
       ((Err e) 0))
     (match (sysNowMicros buf)
       ((Ok t) t)
       ((Err e) 0))))
+
+; The sleep itself: `buf` is 24 bytes of scratch, 16 for the clock and
+; word 2 the word the wait sleeps on, which nothing ever changes, so
+; every wait ends at its timeout, a signal or a spurious wake, and the
+; loop reads the clock again.
+(:: sysSleepLoop (-> Int Int (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (sysSleepLoop buf deadline)
+  (let (
+    (mut state 0)
+    (mut failed 0)
+  )
+    {
+      (memSetWord buf 2 0)
+      (while (== state 0)
+        (match (sysNowMonotonicNanos buf)
+          ((Ok now)
+            (if (>= now deadline)
+              (set state 1)
+              {
+                (sysWaitWordTimeout (+ buf 16) 0 (- deadline now))
+                0
+              })
+          )
+          ((Err e)
+            {
+              (set failed (errCode e))
+              (set state 2)
+            })))
+      (if (== state 1)
+        (Ok 0)
+        (Err (mkError failed "sysSleepUntilNanos")))
+    }))
+
+;; Sleep until the monotonic clock reads at least `deadline` nanoseconds
+;; (`sysNowMonotonicNanos`): `Ok 0` once it does, at once for a deadline
+;; already past, or `Err` 78 on a target with no monotonic clock, where
+;; nothing could tell when to wake. A wake that comes early, from a
+;; signal or the kernel's 71-minute cap on one wait on Darwin, sleeps
+;; again for what is left, so the sleep never ends short. A clock that
+;; fails mid-sleep answers its `Err`. The thread blocks in the kernel;
+;; on FreeBSD, which has no blocking timed wait here, it spins as every
+;; timed wait there does.
+(pub :: sysSleepUntilNanos (-> Int (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(pub fn (sysSleepUntilNanos deadline)
+  (if sysHasMonotonic
+    (let ((buf (sysScratch 24)))
+      (let ((r (sysSleepLoop buf deadline)))
+        {
+          (sysScratchDone buf)
+          r
+        }))
+    (Err (mkError 78 "sysSleepUntilNanos"))))
+
+;; Sleep for at least `nanos` nanoseconds of the monotonic clock:
+;; `sysSleepUntilNanos` with a deadline `nanos` from now, saturating at
+;; the clock's end. A non-positive `nanos` answers `Ok 0` at once.
+(pub :: sysSleepNanos (-> Int (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(pub fn (sysSleepNanos nanos)
+  (if (<= nanos 0)
+    (Ok 0)
+    (let ((buf (sysScratch 16)))
+      (let ((now (sysNowMonotonicNanos buf)))
+        {
+          (sysScratchDone buf)
+          (match now
+            ((Ok t)
+              (sysSleepUntilNanos
+                (if (> nanos (- 9223372036854775807 t))
+                  9223372036854775807
+                  (+ t nanos)))
+            )
+            ((Err e) (Err (mkError (errCode e) "sysSleepNanos"))))
+        }))))
+
 
 ;; Bytes of caller scratch `sysChildExited` needs: a `siginfo_t` is 104
 ;; bytes on Darwin and 128 on Linux.

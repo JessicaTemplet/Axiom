@@ -93,7 +93,7 @@ integrator would still need.
 | Failure answers a `Result` or `Option`, never a sentinel | In progress | `ERR-ADOPT-1`, `compat/SENTINELS` |
 | `Map` is generic, and `vecSortBy` takes a typed comparator | Not started | |
 | `Par` folds into `Task` | Not started | |
-| Sleep and a monotonic clock | Not started | |
+| Sleep and a monotonic clock | Done | `MM-PAR-12`, `tests/stdlib/851-instant-sleep.ax` |
 | A would-block test for sockets: `errorKind` answers `WouldBlock` | Done | `tests/stdlib/840-error-kind.ax` |
 
 ## Concurrency and bounded execution

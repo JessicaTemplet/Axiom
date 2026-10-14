@@ -12,7 +12,7 @@ Import `Err` when working with `Result`, and use `try` to propagate errors.
 | numbers and formatting | [Fmt, Float, Pre](#fmt-float-and-pre) |
 | TCP connections | [Net](#net) |
 | structured data and messages | [Cereal](#cereal), [Rpc](#rpc) |
-| dates and durations | [Chrono](#chrono) |
+| dates, durations, a monotonic clock and sleep | [Chrono](#chrono) |
 | databases | [Axqlite](#axqlite) |
 | cryptography and embedded assets | [Crypto](#crypto) |
 | concurrency | [Task, Par, Chan, Sync](#task-par-chan-and-sync) |
@@ -530,8 +530,13 @@ and arithmetic return `Result` on invalid or out-of-range values.
 `datetimeParseUtc` reads an offset-bearing timestamp and normalises it
 to UTC; the resulting date-time has no offset field.
 
+An `Instant` reads the monotonic clock, which never steps backwards:
+`instantNow` and `instantElapsed` time your work. `sleepFor` and
+`sleepUntil` block until at least that much time has passed. Tested by
+`tests/stdlib/851-instant-sleep.ax`.
+
 See the [date/time guide](chrono.md) for calendar arithmetic, strict
-parsing and formatting. API: [Chrono](stdlib-api.md#chrono).
+parsing, formatting and sleeping. API: [Chrono](stdlib-api.md#chrono).
 
 ## Axqlite
 

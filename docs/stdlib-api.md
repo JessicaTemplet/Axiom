@@ -522,7 +522,7 @@ docs/memory-model.md MM-PAR-10).
 
 ## `Chrono`
 
-`stdlib/Chrono.ax` — 74 public names
+`stdlib/Chrono.ax` — 83 public names
 
 Chrono - dates, times of day and durations, with no time zones.
 
@@ -533,6 +533,8 @@ Chrono - dates, times of day and durations, with no time zones.
     (datetimeParseUtc "2024-03-10T02:30:00+05:30")
                                               ; (Ok 2024-03-09T21:00:00)
     (durationParse "PT90M")                   ; (Ok PT1H30M)
+    instantNow                                ; (Ok i), monotonic
+    (sleepFor d)                              ; (Ok 0) once d has passed
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
@@ -541,11 +543,12 @@ Chrono - dates, times of day and durations, with no time zones.
 | `chronoOutOfRange` | value | `Int` |  | A result outside the supported range: a date outside -9999-01-01 to 9999-12-31, a time pushed out of its day, or a duration past 2^63 - 1 nanoseconds. Every overflow answers this. |
 | `chronoParseFailed` | value | `Int` |  | Text that is not in the format a parser reads. |
 | `chronoInvalidFormat` | value | `Int` |  | A formatter pattern with an unknown directive or a `%` at its end. |
-| `chronoClockUnavailable` | value | `Int` |  | This target has no realtime clock, or reading it failed. |
+| `chronoClockUnavailable` | value | `Int` |  | This target has no realtime clock, or no monotonic one for an `Instant` or a sleep, or reading it failed. |
 | `Date` | struct |  |  | A day in the proleptic Gregorian calendar, -9999-01-01 to 9999-12-31. Make one with `dateNew` or `dateParse`. |
 | `Time` | struct |  |  | A time of day to the nanosecond, 00:00:00 to 23:59:59.999999999. Make one with `timeNew` or `timeParse`. |
 | `NaiveDateTime` | struct |  |  | A date and a time of day with no time zone or offset: a wall-clock reading. Build one with `datetimeNew` or by hand, and read its parts as `dt.date` and `dt.time`. |
 | `Duration` | struct |  |  | A signed length of time in nanoseconds, at most 2^63 - 1 either way. Make one with `durationFromSeconds` and its siblings or `durationParse`. |
+| `Instant` | struct |  |  | A reading of the monotonic clock, in nanoseconds from an unspecified start: 0 to 2^63 - 1. Only the difference between two means anything. Make one with `instantNow` or `instantAdd`. |
 | `dateIsLeapYear` | value | `(-> Int Bool)` |  | Whether `y` is a leap year in the proleptic Gregorian calendar: a multiple of 4, and of 400 when it is a multiple of 100. Year 0 is one, and so are -4 and -400. |
 | `dateDaysInMonth` | value | `(-> Int Int Int)` |  | The number of days in month `m` of year `y`: 28 to 31, or 0 when `m` is outside 1 to 12. |
 | `dateNew` | value | `(-> Int Int Int (Result Date Error))` | `Alloc` | The date `y`-`m`-`d`. A month outside 1 to 12, or a day the month does not have, answers `chronoInvalidDate`; a year outside -9999 to 9999 answers `chronoOutOfRange`. |
@@ -598,6 +601,14 @@ Chrono - dates, times of day and durations, with no time zones.
 | `datetimeFromUnix` | value | `(-> Int Int (Result NaiveDateTime Error))` | `Alloc` | The UTC date and time of the Unix instant `secs` seconds and `nanos` nanoseconds after 1970-01-01T00:00:00Z. `secs` may be negative; `nanos` is 0 to 999,999,999, counted forward from `secs`. |
 | `datetimeToUnixSeconds` | value | `(-> NaiveDateTime Int)` |  | The Unix seconds of `dt` read as UTC, rounded down to the second. `(timeNanosecond dt.time)` is the fraction that goes with it. |
 | `datetimeNowUtc` | value | `(Result NaiveDateTime Error)` | `Alloc,IO,Mut` | The current UTC date and time, from the system's realtime clock (`Sys.sysNowRealtimeNanos`). That clock is the wall clock: the system may step it, so subtracting two readings does not reliably measure elapsed time. A target with no realtime clock answers `chronoClockUnavailable`. |
+| `instantNow` | value | `(Result Instant Error)` | `Alloc,IO,Mut` | The monotonic clock now (`Sys.sysNowMonotonicNanos`). It never steps backwards, whatever happens to the time of day, so two readings measure the time between them. A target without one, such as Windows or bare metal, answers `chronoClockUnavailable`. |
+| `instantUntil` | value | `(-> Instant Instant Duration)` |  | The time from `a` to `b`: negative when `b` is the earlier. Two instants are each 0 to 2^63 - 1, so this always fits. |
+| `instantElapsed` | value | `(-> Instant (Result Duration Error))` | `Alloc,IO,Mut` | The time since `i`, read on the monotonic clock now. |
+| `instantAdd` | value | `(-> Instant Duration (Result Instant Error))` | `Alloc` | `i` moved by `d`, or `chronoOutOfRange` when the result would be below 0 or past 2^63 - 1 nanoseconds. A deadline is `(instantAdd now timeout)`. |
+| `instantCompare` | value | `(-> Instant Instant Int)` |  | -1, 0 or 1 as `a` is earlier than, the same as, or later than `b`. |
+| `instantEq` | value | `(-> Instant Instant Bool)` |  | Whether `a` and `b` are the same reading. |
+| `sleepUntil` | value | `(-> Instant (Result Int Error))` | `Alloc,Block,IO,Mut` | Block until the monotonic clock reaches `i`: `Ok 0` once it has, and at once for an instant already past. A wake that comes early sleeps again, so the sleep never ends short. A target without a monotonic clock answers `chronoClockUnavailable`. |
+| `sleepFor` | value | `(-> Duration (Result Int Error))` | `Alloc,Block,IO,Mut` | Block for at least `d`, measured on the monotonic clock: `Ok 0` once it has passed. Zero or a negative duration answers at once, and a duration past the clock's range sleeps until its end. A target without a monotonic clock answers `chronoClockUnavailable`. |
 | `dateToString` | value | `(-> Date String)` | `Alloc,Mut` | `d` in ISO 8601 extended format: `2024-02-29`, or `-000044-03-15` for a year outside 0 to 9999. |
 | `timeToString` | value | `(-> Time String)` | `Alloc,Mut` | `t` as `HH:MM:SS`, with a fraction only when it is not zero and without trailing zeros: `14:05:09`, `14:05:09.5`. |
 | `datetimeToString` | value | `(-> NaiveDateTime String)` | `Alloc,Mut` | `dt` as its date, `T` and its time: `2024-02-29T14:05:09.5`. |
@@ -1920,7 +1931,7 @@ A mutual-exclusion lock between `parallel` bindings, in both lowerings
 
 ## `Sys`
 
-`stdlib/Sys.ax` — 46 public names
+`stdlib/Sys.ax` — 50 public names
 
 Sys - portable syscall wrappers.
 
@@ -1940,7 +1951,9 @@ Sys - portable syscall wrappers.
 | `sysRunPath` | value | `(-> String Int Int (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn` | Run `name`, searching `PATH` for it when it contains no slash. |
 | `sysPid` | value | `Int` | `IO,Unsafe` | The calling process's own id - the per-session suffix scratch files need so two concurrent processes cannot collide. The syscall takes no arguments; the unused ones are simply zero. |
 | `sysNowMicros` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Unsafe` | Microseconds now, from the platform's cheapest correct clock: Darwin answers gettimeofday's timeval (realtime; Darwin's syscall table has no clock_gettime), Linux and FreeBSD answer CLOCK_MONOTONIC via clock_gettime - under the id `clockMonotonicId` names, because the id is not portable: 1 on Linux, and on FreeBSD 4, where 1 is CLOCK_VIRTUAL, the process's CPU time. That one was a literal here until 2026-08-29, and a clock that measures CPU time never runs backwards either, so nothing would have caught it. |
-| `sysNowMonotonic` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Unsafe` | Microseconds from a clock that NEVER steps backwards, or `Err` when this platform has none. The 16-byte buffer is the caller's, as above, so a timing loop allocates nothing on the path that answers. |
+| `sysHasMonotonic` | value | `Bool` | `Mut` | Whether this target has a monotonic clock, so that `sysNowMonotonic`, `sysNowMonotonicNanos` and `sysSleepNanos` answer `Ok`. Linux, FreeBSD and darwin-aarch64 have one; Windows, bare metal and darwin-x86_64 don't. |
+| `sysNowMonotonicNanos` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Mut,Unsafe` | Nanoseconds from a clock that never steps backwards, counted from an unspecified start, or `Err` 78 when this target has none (`sysHasMonotonic`). Linux and FreeBSD read `clock_gettime`'s monotonic clock and darwin-aarch64 the arm64 counter. The 16-byte buffer is the caller's, as above, so a timing loop allocates nothing on the path that answers. |
+| `sysNowMonotonic` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Mut` | Microseconds from a clock that NEVER steps backwards, or `Err` when this platform has none. The 16-byte buffer is the caller's, as above, so a timing loop allocates nothing on the path that answers. |
 | `sysNowRealtimeNanos` | value | `(-> Int (Result Int Error))` | `Alloc,IO,Unsafe` | Nanoseconds since 1970-01-01T00:00:00Z from the realtime clock, the wall clock `Chrono.datetimeNowUtc` reads. The system may step it, so two readings do not measure a duration: that is `sysNowMonotonic`'s job. Darwin answers gettimeofday's microseconds times 1000; Linux and FreeBSD answer clock_gettime(CLOCK_REALTIME). A target with no clock call (`sysClockNum` 0: Windows and bare metal) answers `Err` 78, as `sysNowMonotonic` does. An Int of nanoseconds reaches 2262-04-11, and a reading beyond that answers `Err` `errOverflow` rather than wrap. The 16-byte buffer is the caller's, as above. |
 | `netAddr4Bytes` | value | `Int` |  | How many bytes an address of each family occupies, and how big a buffer that must take either has to be. |
 | `netAddr6Bytes` | value | `Int` |  | The size of an IPv6 socket address block, 28 bytes. |
@@ -1969,13 +1982,15 @@ Sys - portable syscall wrappers.
 | `sysWakeWord` | value | `(-> Int Int)` | `IO` | Wake every binding blocked in `sysWaitWord` on `addr`: FUTEX_WAKE (1) for INT_MAX waiters, or `__ulock_wake` with UL_COMPARE_AND_WAIT64_SHARED \| ULF_WAKE_ALL (6 \| 0x100). Answers 0 for `sysWaitWord`'s reason: a wake with nobody waiting is not an error anyone can act on. |
 | `sysTimedOut` | value | `Int` |  | The `Error` code every timed operation in the concurrency modules answers when its time ran out: `chanRecvTimeout`, `chanSendTimeout`, `mutexLockTimeout`, a task past its deadline. NOT an errno: ETIMEDOUT is 60 on Darwin and FreeBSD and 110 on Linux, so a code borrowed from the kernel would need one comparison and one fixture per target. It is above 255 so that it can never be mistaken for a wait status, which is what `Task.ax` puts in the same field for a task that trapped. |
 | `sysWaitWordTimeout` | value | `(-> Int Int Int Int)` | `Alloc,Block,IO,Mut` | Block while the word at `addr` still holds `expected`, for at most `nanos` nanoseconds. `sysWaitWord`'s contract - an 8-aligned word in a `sysMapShared` mapping, and every answer means "re-check your own condition" - plus a bound, and an answer that says why it returned: |
-| `sysTimeoutMicros` | value | `(-> Int Int)` | `Alloc,IO` | Microseconds from the clock a timeout is measured on: the monotonic one where the platform has it and - DELIBERATELY, since nothing better is reachable without libSystem - the realtime clock on Darwin (`clockHasMonotonic` there says why). The timed loops above this file add only non-negative steps of this clock, each clamped to the slice the kernel was asked to wait, so a step of the realtime clock moves a wait by at most one slice; MM-PAR-12 states the bound. `buf` is 16 bytes of caller scratch. A clock that cannot be read answers 0, which a caller reads as no time having passed: its wait then ends on the kernel's own timeout rather than early. |
+| `sysTimeoutMicros` | value | `(-> Int Int)` | `Alloc,IO,Mut` | Microseconds from the clock a timeout is measured on: the monotonic one where the target has it (`sysHasMonotonic`), and the realtime clock where it doesn't (darwin-x86_64). The timed loops above this file add only non-negative steps of this clock, each clamped to the slice the kernel was asked to wait, so a step of a realtime clock moves a wait by at most one slice; MM-PAR-12 states the bound. `buf` is 16 bytes of caller scratch. A clock that cannot be read answers 0, which a caller reads as no time having passed: its wait then ends on the kernel's own timeout rather than early. |
+| `sysSleepUntilNanos` | value | `(-> Int (Result Int Error))` | `Alloc,Block,IO,Mut` | Sleep until the monotonic clock reads at least `deadline` nanoseconds (`sysNowMonotonicNanos`): `Ok 0` once it does, at once for a deadline already past, or `Err` 78 on a target with no monotonic clock, where nothing could tell when to wake. A wake that comes early, from a signal or the kernel's 71-minute cap on one wait on Darwin, sleeps again for what is left, so the sleep never ends short. A clock that fails mid-sleep answers its `Err`. The thread blocks in the kernel; on FreeBSD, which has no blocking timed wait here, it spins as every timed wait there does. |
+| `sysSleepNanos` | value | `(-> Int (Result Int Error))` | `Alloc,Block,IO,Mut` | Sleep for at least `nanos` nanoseconds of the monotonic clock: `sysSleepUntilNanos` with a deadline `nanos` from now, saturating at the clock's end. A non-positive `nanos` answers `Ok 0` at once. |
 | `sysChildPollBytes` | value | `Int` |  | Bytes of caller scratch `sysChildExited` needs: a `siginfo_t` is 104 bytes on Darwin and 128 on Linux. |
 | `sysChildExited` | value | `(-> Int Int (Result Bool Error))` | `Alloc,Block,IO,Mut,Unsafe` | Has the child `pid` ended? Without reaping it: `Ok True` means it has exited or been killed and is waiting to be reaped - so a join on it will not block - and it is STILL this process's child, still waitable, its pid not free for reuse. `Ok False` means it is running. |
 
 ## `Sys.Platform`
 
-`stdlib/Sys/Platform.darwin.ax` — 163 public names
+`stdlib/Sys/Platform.darwin.ax` — 164 public names
 
 Sys.Platform - the numbers this target's kernel uses: syscall
 numbers, open and socket flags, errno values, poll and signal
@@ -2019,8 +2034,9 @@ target being compiled for (this one is `darwin`).
 | `sysGetPidNum` | value | `Int` |  | getpid() - BSD 20 |
 | `sysClockNum` | value | `Int` |  | gettimeofday(tv, tz) - BSD 116. Writes {tv_sec i64, tv_usec i32+pad} to its 16-byte buffer; the register-return interpretation was probed WRONG on arm64 (x0 is 0 on success, never seconds). Verified against the shell clock, 400,000 reads, zero backwards steps, ~200ns/call. |
 | `clockIsGettimeofday` | value | `Int` |  | 1 where wall-clock time comes from `gettimeofday`, 0 where it comes from `clock_gettime`. |
-| `clockHasMonotonic` | value | `Int` |  | Whether this platform can answer a MONOTONIC clock - one that never steps backwards - through a syscall. Darwin cannot, and that is the whole reason this capability exists rather than being assumed. |
+| `clockHasMonotonic` | value | `Int` |  | Whether this platform can answer a MONOTONIC clock - one that never steps backwards - through a syscall. Darwin cannot: its monotonic clock is the arm64 counter below. |
 | `clockMonotonicId` | value | `Int` |  | The id `clock_gettime` is asked for the monotonic clock, where there is one. Unused here - `clockIsGettimeofday` sends both readers to `gettimeofday`, and `clockHasMonotonic` above says why - and 0 so that nobody reads a Linux number out of this file. The constant exists because the id is NOT portable: 1 is CLOCK_MONOTONIC on Linux and CLOCK_VIRTUAL, process CPU time, on FreeBSD, and `Sys.ax` carried the 1 as a literal until 2026-08-29. |
+| `clockHasCounter` | value | `Int` |  | Whether `Sys.ax` reads the arm64 counter for its monotonic clock: 1. It is `CNTVCT_EL0`, the counter `mach_absolute_time` reads, which never steps backwards and is the same on every core. darwin-x86_64 has no such register; there `sysCounterHz` answers 0, and Darwin has no monotonic clock. |
 | `sysSocketNum` | value | `Int` |  | socket(domain, type, protocol) - BSD 97. |
 | `sysBindNum` | value | `Int` |  | bind(fd, addr, addrlen) - BSD 104. THE ADDRLEN IS EXACT: 0, 4, 8, 12, 20, 24 and 28 were each probed and every one answered -22 EINVAL; only 16 - the size of `sockaddr_in` - returned 0. |
 | `sysListenNum` | value | `Int` |  | listen(fd, backlog) - BSD 106. |

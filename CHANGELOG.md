@@ -38,6 +38,16 @@ its changelog too.
   forms kept 960,000 bytes in either lowering. The name is bound to
   the word 0 now. Tested by `tests/litmus/par-forms.ax` in
   `scripts/check-parallel.sh`.
+- Add an `Instant` and a sleep to `Chrono`. `instantNow` reads the
+  monotonic clock, `instantElapsed`, `instantUntil`, `instantAdd`,
+  `instantCompare` and `instantEq` work with readings, and `sleepFor`
+  and `sleepUntil` block until at least that much time has passed. `Sys`
+  gains `sysNowMonotonicNanos`, `sysSleepNanos`, `sysSleepUntilNanos`
+  and `sysHasMonotonic`. darwin-aarch64 now has a monotonic clock, the
+  processor's counter, so its timed waits, task deadlines and
+  `sysNowMonotonic` no longer use the realtime clock. Repeated typed
+  readings release their scratch buffer. Tested by
+  `tests/stdlib/851-instant-sleep.ax` and `scripts/check-task.sh`.
 - Add `axiom doc`. It renders the documentation set, one page per
   standard library module from the `;;` doc comments, and the language
   index to HTML under `~/.cache/axiom/doc` (or `--out DIR`), then opens

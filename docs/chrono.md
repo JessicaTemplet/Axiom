@@ -2,8 +2,9 @@
 
 `Chrono` gives your program calendar dates, times of day, date-times
 and durations, with ISO 8601 text in and out and arithmetic that never
-wraps. It has no time zones, so every value means exactly what it
-says. This page shows how to use it and what it assumes.
+wraps, and a monotonic clock to time work and sleep by. It has no time
+zones, so every value means exactly what it says. This page shows how
+to use it and what it assumes.
 
 ```scheme
 (import IO)
@@ -39,7 +40,8 @@ Wednesday 31 January 2024, 09:30
 One month after 31 January is 29 February in 2024: the day of the
 month is clamped to the month's last day.
 
-## The four types
+<a id="the-four-types"></a>
+## The five types
 
 | Type | Holds | Range |
 |---|---|---|
@@ -47,9 +49,10 @@ month is clamped to the month's last day.
 | `Time` | a time of day, to the nanosecond | 00:00:00 to 23:59:59.999999999 |
 | `NaiveDateTime` | a date and a time, with no zone or offset | any supported date, at any time of day |
 | `Duration` | a signed length of time in nanoseconds | 2⁶³ − 1 ns either way, about 292 years |
+| `Instant` | a reading of the monotonic clock, in nanoseconds | 0 to 2⁶³ − 1 ns from an unspecified start |
 
-`Date`, `Time` and `Duration` are sealed: only `Chrono` can make one,
-and it checks every value first. So a `Date` is never 30 February and a
+`Date`, `Time`, `Duration` and `Instant` are sealed: only `Chrono` can
+make one, and it checks every value first. So a `Date` is never 30 February and a
 `Time` is never 25 o'clock. A `NaiveDateTime` is an ordinary struct
 with the fields `date` and `time`, and any date with any time is a
 valid one.
@@ -274,6 +277,67 @@ something took. On a target with no realtime clock it answers
 Tested by `tests/stdlib/666-chrono-utc.ax` and
 `tests/stdlib/667-chrono-now.ax`.
 
+## Time work and sleep
+
+An `Instant` is a reading of the monotonic clock, which never steps
+backwards, whatever happens to the time of day. Use it to measure how
+long something took and to set deadlines, and `sleepFor` or
+`sleepUntil` to wait:
+
+```scheme
+(import IO)
+(import Err)
+(import Chrono)
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (main)
+  (match instantNow
+    ((Err e) (die (errorText e) 1))
+    ((Ok start)
+      (let ((pause (unwrapOr (durationFromMillis 250) durationZero)))
+        {
+          (unwrapOr (sleepFor pause) 0)
+          (match (instantElapsed start)
+            ((Ok took)
+              (println (if (>= (durationCompare took pause) 0)
+                "slept at least 250 ms"
+                "woke early")))
+            ((Err e) (println (errorText e))))
+          0
+        }))))
+```
+
+```text
+slept at least 250 ms
+```
+
+A sleep blocks the binding that calls it, so a function that sleeps
+declares `effect(block)`. It never ends short: a wake that comes early,
+from a signal, sleeps again for what is left. A zero or negative
+duration, or an instant already past, answers at once.
+
+| Function | Answers |
+|---|---|
+| `instantNow` | `(Ok i)`, the clock now |
+| `instantElapsed i` | `(Ok d)`, the time since `i` |
+| `instantUntil a b` | the `Duration` from `a` to `b`, negative when `b` is earlier |
+| `instantAdd i d` | `(Ok i2)`, or `chronoOutOfRange` past the clock's range |
+| `instantCompare a b`, `instantEq a b` | -1, 0 or 1, and whether they're equal |
+| `sleepFor d` | `(Ok 0)` once at least `d` has passed |
+| `sleepUntil i` | `(Ok 0)` once the clock reaches `i` |
+
+Linux and FreeBSD read `clock_gettime`'s monotonic clock, and
+darwin-aarch64 reads the processor's counter, the one
+`mach_absolute_time` reads. A target without a monotonic clock
+answers `chronoClockUnavailable`. `Sys` has the same clock in
+nanoseconds, `sysNowMonotonicNanos`, and the raw sleep,
+`sysSleepNanos`.
+
+Tested by `tests/stdlib/851-instant-sleep.ax` and
+`scripts/check-task.sh`.
+
 ## What Chrono assumes
 
 ### No leap seconds
@@ -346,7 +410,7 @@ subtracted.
 | 1203 | `chronoOutOfRange` | a result outside the range, including every overflow |
 | 1204 | `chronoParseFailed` | text that isn't the format |
 | 1205 | `chronoInvalidFormat` | a pattern with an unknown directive or a `%` at its end |
-| 1206 | `chronoClockUnavailable` | no realtime clock, or reading it failed |
+| 1206 | `chronoClockUnavailable` | no realtime clock, or no monotonic clock for an instant or a sleep, or reading it failed |
 
 ## Limits
 
@@ -356,6 +420,10 @@ subtracted.
 - `datetimeNowUtc` answers `chronoClockUnavailable` on Windows
   (`windows-x86_64`, `windows-aarch64`) and bare metal, and after
   2262-04-11, where the clock's nanoseconds no longer fit an `Int`.
+- `instantNow` and the sleeps answer `chronoClockUnavailable` on
+  Windows, bare metal and darwin-x86_64, which have no monotonic clock
+  a program can read without the C library. On FreeBSD a sleep spins
+  on the clock instead of blocking in the kernel.
 
 ## See also
 
