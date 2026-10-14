@@ -3552,7 +3552,11 @@ and the escape walk treats such an argument as the binding escaping. A
 `(set k v)` makes the binding escape when `v` flows it or parks it,
 through a lambda capturing it, a constructor's word field or a callee
 that stashes. A `v` that is only a length computed from the binding
-does not. Retaining at every `cast` instead was measured and rejected:
+does not. A constructor's word field is judged the same way: a `match`
+arm such as `((Some a) (Some (strLen a)))` parks a length, so the
+scrutinee is still released after the merge
+(`tests/stdlib/902-match-arm-over-binder.ax`). Retaining at every
+`cast` instead was measured and rejected:
 `strLen` and `strData` are casts, and every string in the compiler grew
 a share per read.
 

@@ -1,0 +1,147 @@
+; A `match` arm that builds a value over its own binder lets the
+; scrutinee go when the value only holds a word computed from the
+; binder (MM-LIFE-2c event 3). Each line must read `true`.
+;
+;   1  `(match (mk n) ((Some a) (Some (strLen a))) ...)` bound by a
+;      `let` and dropped: 5,000 rounds hold what 1,000 hold
+;   2  the same match as a function's answer
+;   3  the same with the scrutinee bound by a `let` first
+;   4  the answers are right: the lengths add up
+;   5  the control: an arm that parks the address of the binder's
+;      bytes still keeps its scrutinee, so the bytes stay readable
+;
+; Before this, rounds 1 to 3 each kept the scrutinee's `Some` block and
+; its string: the arm's `(strLen a)` mentions `a`, and a mention in a
+; word field was read as the binder escaping.
+(import IO)
+(import Str)
+(import Fmt)
+(import Mem)
+
+(:: mk (-> Int (Option String)))
+(fn (mk n)
+  (Some (concat "payload-payload-payload-" (fmtInt n))))
+
+(:: dropped (-> Int Int))
+(fn (dropped n)
+  (let ((r 
+    (match (mk n)
+      ((Some a) (Some (strLen a)))
+      ((None) None))))
+    n))
+
+(:: answered (-> Int (Option Int)))
+(fn (answered n)
+  (match (mk n)
+    ((Some a) (Some (strLen a)))
+    ((None) None)))
+
+(:: viaAnswer (-> Int Int))
+(fn (viaAnswer n)
+  (match (answered n)
+    ((Some k) k)
+    ((None) 0)))
+
+(:: letFirst (-> Int (Option Int)))
+(fn (letFirst n)
+  (let ((o (mk n)))
+    (match o
+      ((Some a) (Some (strLen a)))
+      ((None) None))))
+
+(:: viaLetFirst (-> Int Int))
+(fn (viaLetFirst n)
+  (match (letFirst n)
+    ((Some k) k)
+    ((None) 0)))
+
+(:: parked (-> Int (Option Int)))
+(fn (parked n)
+  (match (mk n)
+    ((Some a) (Some (strData a)))
+    ((None) None)))
+
+(:: held Int)
+(fn (held)
+  (let ((s memStats))
+    s.heldBytes))
+
+(:: runDropped (-> Int Int Int))
+(fn (runDropped n acc)
+  (if (== n 0)
+    acc
+    (runDropped (- n 1) (+ acc (dropped n)))))
+
+(:: runAnswer (-> Int Int Int))
+(fn (runAnswer n acc)
+  (if (== n 0)
+    acc
+    (runAnswer (- n 1) (+ acc (viaAnswer n)))))
+
+(:: runLetFirst (-> Int Int Int))
+(fn (runLetFirst n acc)
+  (if (== n 0)
+    acc
+    (runLetFirst (- n 1) (+ acc (viaLetFirst n)))))
+
+; Does the shape at `which` hold no more after 5,000 rounds than after
+; 1,000?
+(:: steady (-> Int Bool))
+(fn (steady which)
+  (let ((go 
+    (lambda (n)
+      (if (== which 1)
+        (runDropped n 0)
+        (if (== which 2)
+          (runAnswer n 0)
+          (runLetFirst n 0)))
+    )))
+    {
+      (go 1000)
+      (let ((a held))
+        {
+          (go 1000)
+          (let (
+            (d1 (- held a))
+            (b held)
+          )
+            {
+              (go 5000)
+              (== (- held b) d1)
+            })
+        })
+    }))
+
+; A parked address still reads as the bytes it pointed at.
+(:: parkedReads Bool)
+(fn (parkedReads)
+  (match (parked 7)
+    ((Some w) (strEq (strWrap w 25) "payload-payload-payload-7"))
+    ((None) false)))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println
+      (if (steady 1)
+        "true"
+        "false"))
+    (println
+      (if (steady 2)
+        "true"
+        "false"))
+    (println
+      (if (steady 3)
+        "true"
+        "false"))
+    (println
+      (if (== (runAnswer 10 0) (+ (* 9 25) 26))
+        "true"
+        "false"))
+    (println
+      (if parkedReads
+        "true"
+        "false"))
+    0
+  })

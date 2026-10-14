@@ -26228,7 +26228,8 @@
                         name
                         e
                         n_
-                        0)
+                        0
+                        bound)
                       ; an effect operation, or a name nothing signed
                       (mentionsArgs name e n_ 0))))))))))))
 
@@ -26241,8 +26242,14 @@
       1
       0)))
 
-(pub :: ctorWordFieldsMention (-> Int Int String Int Int Int Int))
-(pub fn (ctorWordFieldsMention cg entry name e n_ i)
+; A word field parks what it is given, so the binding escapes there
+; when the word may be (part of) it (`wordArgAliases`). A mention alone
+; is not that: `((Some a) (Some (strLen a)))` parks a length, and
+; reading it as the binding kept every scrutinee's payload - 96 to 128
+; bytes an iteration, measured over a `match` whose arm built an
+; `Option Int` from a `String` binder.
+(pub :: ctorWordFieldsMention (-> Int Int String Int Int Int Int Int))
+(pub fn (ctorWordFieldsMention cg entry name e n_ i bound)
   (if (>= i n_)
     0
     (let ((tn (fieldTypeNode entry i)))
@@ -26251,7 +26258,7 @@
         entry
         e
         tn
-        i) 1) (== (mentions name (spineArgAt e i)) 1))
+        i) 1) (== (wordArgAliases cg name (spineArgAt e i) bound) 1))
         1
         (ctorWordFieldsMention
           cg
@@ -26259,7 +26266,42 @@
           name
           e
           n_
-          (+ i 1))))))
+          (+ i 1)
+          bound)))))
+
+; May the word `arg` answers be (part of) `name`? A `cast`, `__addr`,
+; `strData` or `strOwner` of it is; arithmetic and loads answer a word
+; of what their operands may be; a call answers one only as its flow
+; masks say (`callEscapesArg` in value position), so `(strLen a)` is a
+; length; a scalar field is a number; any other shape that mentions
+; the name may be it.
+(pub :: wordArgAliases (-> Int String Int Int Int))
+(pub fn (wordArgAliases cg name arg bound)
+  (if (== (mentions name arg) 0)
+    0
+    (if (== (nodeTag arg) TAG_E_APP)
+      (let ((hd (spineHead arg)))
+        (if (== (wordTakingHead hd) 1)
+          1
+          (if (== (passesValueHead hd) 1)
+            (let (
+              (mut i 0)
+              (mut hit 0)
+            )
+              {
+                (while (&& (== hit 0) (< i (spineArity arg)))
+                  {
+                    (set hit (wordArgAliases cg name (spineArgAt arg i) bound))
+                    (set i (+ i 1))
+                  })
+                hit
+              })
+            (callEscapesArg cg arg name 1 bound))))
+      (if (== (nodeTag arg) TAG_E_FIELD)
+        (if (== (fieldReadIsScalar cg arg) 1)
+          0
+          1)
+        1))))
 
 ; Does field i of this construction PARK what it is given - take no
 ; share? A word field does; so does a type-variable field at a site

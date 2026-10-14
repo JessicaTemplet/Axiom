@@ -43,6 +43,16 @@ its changelog too.
   `vecFree` left the library. Tested by
   `tests/stdlib/895-scalar-element-read.ax` and `scripts/check-task.sh`.
 
+- A `match` arm that builds a value from its own binder no longer keeps
+  the scrutinee. `((Some a) (Some (strLen a)))` stores a length, but
+  the escape walk read the mention of `a` as the string escaping, so
+  the scrutinee's `Some` block and its string stayed allocated, 96
+  bytes a round in the measured loop. A word field now holds the binder
+  only when the word can be part of it: a `cast`, `strData` or
+  `strOwner` of it, arithmetic or a load over one, or a call whose flow
+  masks say it answers one. Tested by
+  `tests/stdlib/902-match-arm-over-binder.ax`.
+
 - A `match` over a field or a vector element holds the scrutinee while
   its arms run. `(match o.f ((Some x) { (set o.f None) (use x) }))`
   freed the `Some` block, and `x` with it, before `use` read it; the
