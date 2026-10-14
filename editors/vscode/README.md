@@ -1,7 +1,11 @@
 # Axiom for VS Code
 
+![The Axiom mark: a lime split A on graphite](icon.png)
+
 The extension gives VS Code everything the language server answers,
-and colour for `.ax` files from the moment you open one.
+and colour for `.ax` files from the moment you open one. The Axiom
+mark is the extension's icon, and the same tile marks every `.ax`
+file in the explorer and in tabs.
 
 ## Install from source
 
@@ -35,14 +39,21 @@ Changing `axiom.serverPath` restarts the server.
 
 ## Commands
 
-All four are in the command palette under *Axiom*.
+All four are in the command palette under *Axiom*. Run and Expand
+macro are also in the editor title bar and the editor menu on an
+Axiom file, Run is in the explorer menu on a `.ax` file, and the
+status bar shows whether the server is running. Select it to restart
+the server.
 
 | Command | What it does |
 |---|---|
-| Axiom: Run file | Runs `axiom run` on the current file in a terminal. The code lens above `main` runs the same command. |
+| Axiom: Run file | Runs `axiom run` on the current file in a terminal, saving it first. The code lens above `main` runs the same command. |
 | Axiom: Expand macro at cursor | Opens the expansion of the macro invocation at the cursor in a new tab. The code lens above an invocation does the same. |
 | Axiom: Open the documentation | Runs `axiom doc` in a terminal. |
 | Axiom: Restart the language server | Stops and restarts `axiom lsp`. |
+
+Snippets cover the shapes you write most: type `fn`, `main`, `let`,
+`match`, `data` or `import` in a `.ax` file and press Tab.
 
 ## Where each feature comes from
 

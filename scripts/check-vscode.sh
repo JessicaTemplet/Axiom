@@ -61,7 +61,7 @@ node="$(command -v node || true)"
 
 # --------------------------------------------------------------------
 echo "--- the files parse ---"
-for f in package.json language-configuration.json syntaxes/axiom.tmLanguage.json; do
+for f in package.json language-configuration.json syntaxes/axiom.tmLanguage.json snippets/axiom.json; do
   if [[ ! -f "$ext/$f" ]]; then
     bad "$f is missing"
   elif "$node" -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$ext/$f" 2>"$work/json.err"; then
@@ -77,9 +77,37 @@ else
   bad "extension.js: $(head -1 "$work/js.err")"
 fi
 
-for f in README.md .vscodeignore scripts/sync-keywords.mjs; do
+for f in README.md .vscodeignore scripts/sync-keywords.mjs icon.png icons/axiom.svg snippets/axiom.json; do
   [[ -f "$ext/$f" ]] && ok "$f is present" || bad "$f is missing"
 done
+
+# --------------------------------------------------------------------
+echo "--- the Axiom icon is on the extension and on the file ---"
+# The marketplace icon is a square PNG of at least 128px (the brand
+# avatar in assets/logo, resized), named by package.json's `icon`.
+# The file icon is the brand tile as SVG, named for both themes by the
+# language contribution, so a `.ax` file carries the mark in the
+# explorer and in tabs.
+if "$node" -e '
+  const fs = require("fs");
+  const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const must = (c, m) => { if (!c) { console.error(m); process.exit(1); } };
+  must(p.icon === "icon.png", "package.json icon is not icon.png");
+  const lang = (p.contributes.languages || []).find((l) => l.id === "axiom");
+  must(lang && lang.icon && lang.icon.light === "./icons/axiom.svg" && lang.icon.dark === "./icons/axiom.svg",
+    "language axiom does not name ./icons/axiom.svg for both themes");
+  const png = fs.readFileSync(process.argv[2]);
+  must(png.length > 8 && png.readUInt32BE(0) === 0x89504e47, "icon.png is not a PNG");
+  const w = png.readUInt32BE(16), h = png.readUInt32BE(20);
+  must(w === h && w >= 128, `icon.png is ${w}x${h}, not a square of at least 128`);
+  const svg = fs.readFileSync(process.argv[3], "utf8");
+  must(svg.includes("<svg") && svg.includes("#0b0d0c") && svg.includes("#c3f36b"),
+    "icons/axiom.svg is not the graphite and lime brand tile");
+' "$ext/package.json" "$ext/icon.png" "$ext/icons/axiom.svg" 2>"$work/icon.err"; then
+  ok "icon.png is a square PNG of at least 128px and icons/axiom.svg is the brand tile, for both themes"
+else
+  bad "the icon: $(cat "$work/icon.err")"
+fi
 
 # --------------------------------------------------------------------
 echo "--- package.json states VERSION ---"
