@@ -85,7 +85,7 @@ integrator would still need.
 | Literal identifiers in macro patterns compare by binding, not spelling | Planned | `MAC-HYG-9`, `MAC-LANG-14a` |
 | `macro` and `emacro` become one form | Not started | [macro-system.md](macro-system.md) |
 | Errors propagate with a postfix `?`, and the `try` macro is removed | Done | `ERR-SUGAR-4`, `tests/stdlib/847-try-operator.ax`, `tests/diagnostics/1303-try-removed.axbad` |
-| A unit type with a value, `()`, so an `if` without an else, a dropped branch and a procedure need no filler `0` | In progress: the library and compiler drop theirs after the next reseed | `tests/stdlib/890-unit-and-if.ax`, `tests/stdlib/892-dropped-branches.ax` |
+| A unit type with a value, `()`, so an `if` without an else, a dropped branch and a procedure need no filler `0` | Done | `tests/stdlib/890-unit-and-if.ax`, `tests/stdlib/892-dropped-branches.ax` |
 | Functional piping as a structural form: a pipe the tree, the language server and agents see stage by stage, with an explicit `_` hole for where the value goes | Not started | |
 | One code-generation route: the MIR route is finished or removed | Not started | |
 

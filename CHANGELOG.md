@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- The standard library and the compiler drop their filler `0`s too:
+  2,299 of them across 69 files, the same shapes the tests and
+  examples lost. Possible now that the seed knows an `if`'s branches
+  are dropped when the `if` is.
+
 - A dropped branch's own branches are dropped too: an `if` or `match`
   nested in the branch of a dropped `if`, or in the branch of an `if`
   written without an else, may have branches that disagree, as one at
