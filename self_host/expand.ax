@@ -4351,6 +4351,18 @@
                         ; name lives in word b as a bare string, and rewriting it
                         ; against params would change what existing templates mean.
                         ; That silence is AX3074's (MAC-EXP-14b), warned below.
+                        (if (== tag TAG_E_TRY)
+                          (mkNodeAt
+                            TAG_E_TRY
+                            (substTpl
+                              (nodeA tpl)
+                              params
+                              args
+                              env
+                              isp)
+                            0
+                            0
+                            isp)
                         (if (== tag TAG_E_FIELD)
                           {
                             (expWarnNamePos params (nodeBName tpl) 1 env isp "a field name" "rename the parameter to mean the literal field, or bind the field name with an enclosing `syntax/for`")
@@ -4454,7 +4466,7 @@
                                       "rewrite the template without this form, or add a case for it to `substTpl` in self_host/expand.ax"
                                       "the expansion was refused rather than emitted, because substituting nothing here would silently leave the template's own identifiers in the generated code"))
                                     (mkEInt 0)
-                                  }))))))))))))))))
+                                  })))))))))))))))))
 
 ; A lambda's parameter list is a Vec of NAMES. Each is a binder the
 ; template introduces and is renamed - unless it is a MACRO parameter,
@@ -5189,7 +5201,7 @@
                   (let ((mark (vecLen bs)))
                     {
                       (expPushNames (nodeAVec e) bs 0)
-                      (let ((body (expandExpr (nodeB e) env bs)))
+                      (let ((body (qmBody env (expandExpr (nodeB e) env bs))))
                         {
                           (expTrunc bs mark)
                           (mkNodeAt
@@ -5235,6 +5247,13 @@
                             (nodeB e)
                             0
                             sp)
+                          (if (== tag TAG_E_TRY)
+                            (mkNodeAt
+                              TAG_E_TRY
+                              (expandExpr (nodeA e) env bs)
+                              0
+                              0
+                              sp)
                           (if (== tag TAG_E_SETF)
                             (mkNodeAt
                               TAG_E_SETF
@@ -5262,7 +5281,7 @@
                                   ; parameter references, so passing it through is safe.
                                   ; (`cond` is AX2004: the parser builds
                                   ; none, so no arm walks one.)
-                                  e))))))))))))))))
+                                  e)))))))))))))))))
 
 (pub :: expPushNames (-> (Vec Int) (Vec Int) Int Int))
 (pub fn (expPushNames ns bs i)
@@ -6592,6 +6611,545 @@
 ; invocation, against that invocation's arguments; expanding it in
 ; place would rewrite it against no arguments at all.
 ; ------------------------------------------------------------------
+; ------------------------------------------------------------------
+; `?`: propagate an error
+;
+; `e?` answers the `Ok` payload of the Result `e`; when `e` is an `Err`,
+; the enclosing function or lambda answers that `Err` instead
+; (docs/reference.md, "Propagate an error with `?`"). Axiom has no
+; early return, so the expander produces the shape the `try` macro
+; did: a `match` whose `Ok` arm holds the rest of the body. Each body
+; is rewritten once its macros have expanded (`qmBody`, called from
+; `expandDecl` and the lambda arm of `expandExprInner`):
+;
+;   * in TAIL position - a body, a `let`'s body, a block's last
+;     element, an `if`'s branch, a `match` arm - the walk goes on, so
+;     the propagated `Err` is always the body's own answer;
+;   * anywhere else the FIRST `?` in evaluation order is lifted out of
+;     the expression around it (`qmLift`), and each sibling evaluated
+;     before it is bound to a fresh `try.N` first, so effects keep
+;     their order: `(f (g) (h)?)` still runs `(g)` before `(h)`;
+;   * a `?` in a branch, a `let` body, a loop, a region or a handler
+;     whose value an expression around it still uses has no tail to
+;     propagate to, and is AX3123. The node is left in place, and the
+;     checker reads a leftover `?` as poison, so nothing cascades.
+;
+; A lambda is its own body: its `?`s answer the lambda, and the walk
+; here never looks inside one (`qmHas`).
+; ------------------------------------------------------------------
+(pub struct QmSt
+  (mut names : (Vec String))
+  (mut vals : (Vec Int))
+  (mut scrut : Int)
+  (mut tname : String)
+  (mut tsp : Int)
+  (mut failed : Bool))
+
+;; Does `e` hold a `?` outside any lambda?
+(pub :: qmHas (-> Int Bool))
+(pub fn (qmHas e)
+  (if (== e 0)
+    false
+    (let ((tag (nodeTag e)))
+      (if (== tag TAG_E_TRY) true
+        (== tag TAG_E_APP) (|| (qmHas (nodeA e)) (qmHas (nodeB e)))
+        (== tag TAG_E_IF) (|| (qmHas (nodeA e)) (|| (qmHas (nodeB e)) (qmHas (nodeC e))))
+        (|| (== tag TAG_E_LET) (== tag TAG_E_LETM)) (|| (qmHas (nodeB e)) (qmHas (nodeC e)))
+        (== tag TAG_E_BEGIN) (qmHasVec (nodeAVec e) 0)
+        (== tag TAG_E_WHILE) (|| (qmHas (nodeA e)) (qmHasVec (nodeBVec e) 0))
+        (== tag TAG_E_REGION) (qmHas (nodeB e))
+        (== tag TAG_E_SET) (qmHas (nodeB e))
+        (== tag TAG_E_FIELD) (qmHas (nodeA e))
+        (== tag TAG_E_SETF) (|| (qmHas (nodeA e)) (qmHas (nodeC e)))
+        (== tag TAG_E_HANDLE) (|| (qmHas (nodeA e)) (qmHas (nodeC e)))
+        (== tag TAG_E_MATCH) (|| (qmHas (nodeA e)) (qmHasArms (nodeBVec e) 0))
+        false))))
+
+(pub :: qmHasVec (-> (Vec Int) Int Bool))
+(pub fn (qmHasVec xs i)
+  (if (>= i (vecLen xs))
+    false
+    (if (qmHas (vecGet xs i))
+      true
+      (qmHasVec xs (+ i 1)))))
+
+(pub :: qmHasArms (-> (Vec Int) Int Bool))
+(pub fn (qmHasArms arms i)
+  (if (>= i (vecLen arms))
+    false
+    (if (qmHas (nodeB (vecGet arms i)))
+      true
+      (qmHasArms arms (+ i 1)))))
+
+;; Rewrite every `?` in a body; a body with none comes back unchanged.
+(pub :: qmBody (-> Int Int Int))
+(pub fn (qmBody env e)
+  (if (qmHas e)
+    (qmRw env e)
+    e))
+
+; `e` is in tail position.
+(pub :: qmRw (-> Int Int Int))
+(pub fn (qmRw env e)
+  (if (! (qmHas e))
+    e
+    (let (
+      (tag (nodeTag e))
+      (sp (nodeSpan e))
+    )
+      (if (&& (|| (== tag TAG_E_LET) (== tag TAG_E_LETM)) (! (qmHas (nodeB e))))
+        (mkNodeAt
+          tag
+          (nodeA e)
+          (nodeB e)
+          (qmRw env (nodeC e))
+          sp)
+        (&& (== tag TAG_E_IF) (! (qmHas (nodeA e))))
+        (mkNodeAt
+          TAG_E_IF
+          (nodeA e)
+          (qmRw env (nodeB e))
+          (qmRw env (nodeC e))
+          sp)
+        (&& (== tag TAG_E_MATCH) (! (qmHas (nodeA e))))
+        (mkNodeAt
+          TAG_E_MATCH
+          (nodeA e)
+          (qmRwArms env (nodeBVec e) vecNew 0)
+          0
+          sp)
+        (&& (== tag TAG_E_BEGIN) (qmOnlyLast (nodeAVec e)))
+        (mkNodeAt
+          TAG_E_BEGIN
+          (qmRwLast env (nodeAVec e))
+          0
+          0
+          sp)
+        (qmLift env e)))))
+
+(pub :: qmRwArms (-> Int (Vec Int) (Vec Int) Int (Vec Int)))
+(pub fn (qmRwArms env arms acc i)
+  (if (>= i (vecLen arms))
+    acc
+    (let ((arm (vecGet arms i)))
+      (qmRwArms
+        env
+        arms
+        (vecPush acc (mkNodeAt
+          TAG_M_ARM
+          (nodeA arm)
+          (qmRw env (nodeB arm))
+          0
+          (nodeSpan arm)))
+        (+ i 1)))))
+
+; Only the last element of a block holds a `?`.
+(pub :: qmOnlyLast (-> (Vec Int) Bool))
+(pub fn (qmOnlyLast xs)
+  (let ((n (vecLen xs)))
+    (if (== n 0)
+      false
+      (let (
+        (mut i 0)
+        (mut ok true)
+      )
+        {
+          (while (< i (- n 1))
+            {
+              (if (qmHas (vecGet xs i))
+                {
+                  (set ok false)
+                  0
+                }
+                0)
+              (set i (+ i 1))
+            })
+          ok
+        }))))
+
+(pub :: qmRwLast (-> Int (Vec Int) (Vec Int)))
+(pub fn (qmRwLast env xs)
+  (let (
+    (out vecNew)
+    (n (vecLen xs))
+    (mut i 0)
+  )
+    {
+      (while (< i n)
+        {
+          (vecPush out (if (== i (- n 1))
+            (qmRw env (vecGet xs i))
+            (vecGet xs i)))
+          (set i (+ i 1))
+        })
+      out
+    }))
+
+; Lift the first `?` in evaluation order out of `e`, which is in tail
+; position: the bindings of what ran before it, then a `match` on its
+; operand whose `Ok` arm continues the rewritten rest.
+(pub :: qmLift (-> Int Int Int))
+(pub fn (qmLift env e)
+  (let ((st (QmSt vecNew vecNew 0 "" 0 false)))
+    (let ((hole (qmExtract env st e)))
+      (if (|| st.failed (== st.scrut 0))
+        e
+        (qmWrap
+          st
+          0
+          (mkNodeAt
+            TAG_E_MATCH
+            st.scrut
+            (qmArms (expFresh env "try") st.tname (qmRw env hole) st.tsp)
+            0
+            st.tsp))))))
+
+; The two arms: `((Err er) (Err er))` and `((Ok t) rest)`. The `Err`
+; arm carries the `?`'s span, so a body whose declared result is not a
+; `Result` is reported at the `?`.
+(pub :: qmArms (-> String String Int Int (Vec Int)))
+(pub fn (qmArms er t rest sp)
+  (let ((arms vecNew))
+    {
+      (vecPush arms (mkNodeAt
+        TAG_M_ARM
+        (mkNodeAt
+          TAG_E_APP
+          (mkEVarAt "Err" sp)
+          (mkEVarAt er sp)
+          0
+          sp)
+        (mkNodeAt
+          TAG_E_APP
+          (mkEVarAt "Err" sp)
+          (mkEVarAt er sp)
+          0
+          sp)
+        0
+        sp))
+      (vecPush arms (mkNodeAt
+        TAG_M_ARM
+        (mkNodeAt
+          TAG_E_APP
+          (mkEVarAt "Ok" sp)
+          (mkEVarAt t sp)
+          0
+          sp)
+        rest
+        0
+        sp))
+      arms
+    }))
+
+; The recorded bindings around `inner`, outermost first: a named one is
+; a `let`, an unnamed one a statement run for its effect.
+(pub :: qmWrap (-> QmSt Int Int Int))
+(pub fn (qmWrap st i inner)
+  (if (>= i (vecLen st.names))
+    inner
+    (let (
+      (name (vecGetStr st.names i))
+      (v (vecGet st.vals i))
+    )
+      (if (== (strLen name) 0)
+        (let ((xs vecNew))
+          {
+            (vecPush xs v)
+            (vecPush xs (qmWrap st (+ i 1) inner))
+            (mkNodeAt
+              TAG_E_BEGIN
+              xs
+              0
+              0
+              (nodeSpan v))
+          })
+        (mkELetAt name v (qmWrap st (+ i 1) inner) (nodeSpan v))))))
+
+; A value evaluated before the `?`: a literal stays where it is, and
+; anything else is bound to a fresh name so it still runs first.
+(pub :: qmBindBefore (-> Int QmSt Int Int))
+(pub fn (qmBindBefore env st x)
+  (let ((tag (nodeTag x)))
+    (if (|| (== tag TAG_E_INT) (|| (== tag TAG_E_STR) (|| (== tag TAG_E_FLT) (== tag TAG_E_CHAR))))
+      x
+      (let ((n (expFresh env "try")))
+        {
+          (vecPush st.names n)
+          (vecPush st.vals x)
+          (mkEVarAt n (nodeSpan x))
+        }))))
+
+; A statement evaluated before the `?`, for its effect only.
+(pub :: qmRunBefore (-> QmSt Int Int))
+(pub fn (qmRunBefore st x)
+  {
+    (vecPush st.names "")
+    (vecPush st.vals x)
+    0
+  })
+
+; The first `?` under `e`, for the refusal's span.
+(pub :: qmFirstSpan (-> Int Int))
+(pub fn (qmFirstSpan e)
+  (if (== e 0)
+    0
+    (let ((tag (nodeTag e)))
+      (if (== tag TAG_E_TRY) (nodeSpan e)
+        (== tag TAG_E_APP) (qmSpanOr (qmFirstSpan (nodeA e)) (nodeB e))
+        (== tag TAG_E_IF) (qmSpanOr (qmFirstSpan (nodeA e)) (nodeB e))
+        (|| (== tag TAG_E_LET) (== tag TAG_E_LETM)) (qmSpanOr (qmFirstSpan (nodeB e)) (nodeC e))
+        (== tag TAG_E_BEGIN) (qmFirstSpanVec (nodeAVec e) 0)
+        (== tag TAG_E_WHILE) (qmSpanOr (qmFirstSpan (nodeA e)) (mkNodeAt TAG_E_BEGIN (nodeBVec e) 0 0 0))
+        (|| (== tag TAG_E_REGION) (== tag TAG_E_SET)) (qmFirstSpan (nodeB e))
+        (== tag TAG_E_FIELD) (qmFirstSpan (nodeA e))
+        (|| (== tag TAG_E_SETF) (== tag TAG_E_HANDLE)) (qmSpanOr (qmFirstSpan (nodeA e)) (nodeC e))
+        (== tag TAG_E_MATCH) (qmSpanOr (qmFirstSpan (nodeA e)) (qmArmBodies (nodeBVec e)))
+        0))))
+
+(pub :: qmSpanOr (-> Int Int Int))
+(pub fn (qmSpanOr sp e)
+  (if (!= sp 0)
+    sp
+    (qmFirstSpan e)))
+
+(pub :: qmFirstSpanVec (-> (Vec Int) Int Int))
+(pub fn (qmFirstSpanVec xs i)
+  (if (>= i (vecLen xs))
+    0
+    (qmSpanOr (qmFirstSpan (vecGet xs i)) (if (< (+ i 1) (vecLen xs))
+      (mkNodeAt TAG_E_BEGIN (qmTail xs (+ i 1)) 0 0 0)
+      0))))
+
+(pub :: qmTail (-> (Vec Int) Int (Vec Int)))
+(pub fn (qmTail xs i)
+  (let (
+    (out vecNew)
+    (mut k i)
+  )
+    {
+      (while (< k (vecLen xs))
+        {
+          (vecPush out (vecGet xs k))
+          (set k (+ k 1))
+        })
+      out
+    }))
+
+(pub :: qmArmBodies (-> (Vec Int) Int))
+(pub fn (qmArmBodies arms)
+  (let (
+    (out vecNew)
+    (mut k 0)
+  )
+    {
+      (while (< k (vecLen arms))
+        {
+          (vecPush out (nodeB (vecGet arms k)))
+          (set k (+ k 1))
+        })
+      (mkNodeAt TAG_E_BEGIN out 0 0 0)
+    }))
+
+; AX3123: a `?` with no tail to propagate to.
+(pub :: qmRefuse (-> Int QmSt Int String Int))
+(pub fn (qmRefuse env st e place)
+  {
+    (set st.failed true)
+    (expEmit env (diagSetLabel (mkDiagNote
+      SEV_ERROR
+      "AX3123"
+      "try-position"
+      (qmFirstSpan e)
+      (concat (concat "this `?` sits in " place) ", so it has no tail to propagate to")
+      0
+      0
+      "bind the value with `let` so the `?` is in the body's tail or in an argument on the way there, or take the `Result` apart with `match`"
+      "Axiom has no early return: `?` answers the enclosing body's `Err` by making the rest of the body its `Ok` arm, which is possible from the body's tail and from anything evaluated on the way there, and not from inside a branch, a `let` body, a loop, a region or a handler") "no tail to propagate to"))
+    e
+  })
+
+; Find the first `?` under `e` in evaluation order, record it and what
+; ran before it in `st`, and answer `e` with that `?` replaced by the
+; name its `Ok` payload will be bound to. `e` holds a `?`.
+(pub :: qmExtract (-> Int QmSt Int Int))
+(pub fn (qmExtract env st e)
+  (let (
+    (tag (nodeTag e))
+    (sp (nodeSpan e))
+  )
+    (if (== tag TAG_E_TRY)
+      (if (qmHas (nodeA e))
+        (mkNodeAt
+          TAG_E_TRY
+          (qmExtract env st (nodeA e))
+          0
+          0
+          sp)
+        (let ((t (expFresh env "try")))
+          {
+            (set st.scrut (nodeA e))
+            (set st.tname t)
+            (set st.tsp sp)
+            (mkEVarAt t sp)
+          }))
+      (== tag TAG_E_APP)
+      (qmExtractApp env st e)
+      (|| (== tag TAG_E_LET) (== tag TAG_E_LETM))
+      (if (qmHas (nodeB e))
+        (mkNodeAt
+          tag
+          (nodeA e)
+          (qmExtract env st (nodeB e))
+          (nodeC e)
+          sp)
+        (qmRefuse env st e "a `let` body whose value the expression around it still uses"))
+      (== tag TAG_E_IF)
+      (if (qmHas (nodeA e))
+        (mkNodeAt
+          TAG_E_IF
+          (qmExtract env st (nodeA e))
+          (nodeB e)
+          (nodeC e)
+          sp)
+        (qmRefuse env st e "an `if` branch whose value the expression around it still uses"))
+      (== tag TAG_E_MATCH)
+      (if (qmHas (nodeA e))
+        (mkNodeAt
+          TAG_E_MATCH
+          (qmExtract env st (nodeA e))
+          (nodeB e)
+          0
+          sp)
+        (qmRefuse env st e "a `match` arm whose value the expression around it still uses"))
+      (== tag TAG_E_BEGIN)
+      (qmExtractBlock env st e)
+      (== tag TAG_E_SET)
+      (mkNodeAt
+        TAG_E_SET
+        (nodeA e)
+        (qmExtract env st (nodeB e))
+        0
+        sp)
+      (== tag TAG_E_FIELD)
+      (mkNodeAt
+        TAG_E_FIELD
+        (qmExtract env st (nodeA e))
+        (nodeB e)
+        0
+        sp)
+      (== tag TAG_E_SETF)
+      (if (qmHas (nodeA e))
+        (mkNodeAt
+          TAG_E_SETF
+          (qmExtract env st (nodeA e))
+          (nodeB e)
+          (nodeC e)
+          sp)
+        (let ((base (qmBindBefore env st (nodeA e))))
+          (mkNodeAt
+            TAG_E_SETF
+            base
+            (nodeB e)
+            (qmExtract env st (nodeC e))
+            sp)))
+      (== tag TAG_E_WHILE)
+      (qmRefuse env st e "a loop")
+      (== tag TAG_E_REGION)
+      (qmRefuse env st e "a `region`")
+      (== tag TAG_E_HANDLE)
+      (qmRefuse env st e "a `handle`")
+      (qmRefuse env st e "a form"))))
+
+; An application, read as its spine: the head, then each argument, in
+; the order they run. Everything before the child that holds the `?`
+; is bound first; a head that is a plain name is never bound, since
+; naming a function evaluates nothing.
+(pub :: qmExtractApp (-> Int QmSt Int Int))
+(pub fn (qmExtractApp env st e)
+  (let ((args vecNew))
+    (let ((hd (qmSpine e args)))
+      (if (qmHas hd)
+        (qmRebuild (qmExtract env st hd) args 0)
+        (let (
+          (k (qmFirstWith args 0))
+          (h2 (if (== (nodeTag hd) TAG_E_VAR)
+            hd
+            (qmBindBefore env st hd)))
+          (out vecNew)
+          (mut i 0)
+        )
+          {
+            (while (< i (vecLen args))
+              {
+                (vecPush out (if (< i k)
+                  (qmBindBefore env st (vecGet args i))
+                  (if (== i k)
+                    (qmExtract env st (vecGet args i))
+                    (vecGet args i))))
+                (set i (+ i 1))
+              })
+            (qmRebuild h2 out 0)
+          })))))
+
+; The head of `e`'s application spine, with its arguments pushed onto
+; `args` in order.
+(pub :: qmSpine (-> Int (Vec Int) Int))
+(pub fn (qmSpine e args)
+  (if (== (nodeTag e) TAG_E_APP)
+    (let ((hd (qmSpine (nodeA e) args)))
+      {
+        (vecPush args (nodeB e))
+        hd
+      })
+    e))
+
+(pub :: qmRebuild (-> Int (Vec Int) Int Int))
+(pub fn (qmRebuild f args i)
+  (if (>= i (vecLen args))
+    f
+    (qmRebuild (mkEApp f (vecGet args i)) args (+ i 1))))
+
+(pub :: qmFirstWith (-> (Vec Int) Int Int))
+(pub fn (qmFirstWith xs i)
+  (if (>= i (vecLen xs))
+    i
+    (if (qmHas (vecGet xs i))
+      i
+      (qmFirstWith xs (+ i 1)))))
+
+; A block: the statements before the one that holds the `?` run first,
+; and the rest stays a block in the `Ok` arm.
+(pub :: qmExtractBlock (-> Int QmSt Int Int))
+(pub fn (qmExtractBlock env st e)
+  (let (
+    (xs (nodeAVec e))
+    (out vecNew)
+    (mut i 0)
+  )
+    (let ((k (qmFirstWith xs 0)))
+      {
+        (while (< i (vecLen xs))
+          {
+            (if (< i k)
+              (qmRunBefore st (vecGet xs i))
+              {
+                (vecPush out (if (== i k)
+                  (qmExtract env st (vecGet xs i))
+                  (vecGet xs i)))
+                0
+              })
+            (set i (+ i 1))
+          })
+        (if (== (vecLen out) 1)
+          (vecGet out 0)
+          (mkNodeAt
+            TAG_E_BEGIN
+            out
+            0
+            0
+            (nodeSpan e)))
+      })))
+
 (pub :: expandDecl (-> Int Int Int))
 (pub fn (expandDecl d env)
   (if (== d 0)
@@ -6600,7 +7158,7 @@
       (let ((bs vecNew))
         {
           (expPushNames (nodeBVec d) bs 0)
-          (memSetWord d 3 (expandExpr (nodeC d) env bs))
+          (memSetWord d 3 (qmBody env (expandExpr (nodeC d) env bs)))
           0
         })
       ; An `impl` method's expression and a `trait` method's DEFAULT
@@ -8605,7 +9163,7 @@
                       (tplExprHasRepeat (nodeB e))
                       (if (== tag TAG_E_SET)
                         (tplExprHasRepeat (nodeB e))
-                        (if (== tag TAG_E_FIELD)
+                        (if (|| (== tag TAG_E_FIELD) (== tag TAG_E_TRY))
                           (tplExprHasRepeat (nodeA e))
                           (if (== tag TAG_E_SETF)
                             (if (== (tplExprHasRepeat (nodeA e)) 1)

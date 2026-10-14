@@ -83,6 +83,9 @@ integrator would still need.
 | Macro hygiene has one implementation | Done | `MAC-HYG-10` |
 | Literal identifiers in macro patterns compare by binding, not spelling | Planned | `MAC-HYG-9`, `MAC-LANG-14a` |
 | `macro` and `emacro` become one form | Not started | [macro-system.md](macro-system.md) |
+| Errors propagate with a postfix `?`, and the `try` macro is removed | In progress | `ERR-SUGAR-4`, `tests/stdlib/847-try-operator.ax` |
+| A unit type with a value, `()`, so an `if` without an else and a procedure need no filler `0` | In progress | `tests/stdlib/890-unit-and-if.ax` |
+| Functional piping as a structural form: a pipe the tree, the language server and agents see stage by stage, with an explicit hole for where the value goes | Not started | |
 | One code-generation route: the MIR route is finished or removed | Not started | |
 
 ## Standard library

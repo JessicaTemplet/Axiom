@@ -37,7 +37,9 @@
 
 // Characters the lexer treats as operator constituents.
 // Source: `isIdentStart`/`isIdentChar` in self_host/lexer.ax.
-const OPERATOR_CHAR = /[+\-*\/%^=<>!&|.?~@]/;
+// `?` is not an operator character: it is the postfix that propagates
+// an error (`try_expression`), its own token, as the compiler lexes it.
+const OPERATOR_CHAR = /[+\-*\/%^=<>!&|.~@]/;
 
 // Built-in type names, which the lexer tokenises as distinct keywords
 // rather than identifiers. They are listed so an editor can highlight
@@ -905,6 +907,7 @@ module.exports = grammar({
       $.block,
       $.list_literal,
       $.removed_form,
+      $.try_expression,
       // Application is last so that every special form gets first refusal
       // on the token after `(`. A head that is not a keyword falls through
       // to here, which is what makes `(+ 1 2)` and `(f x)` the same shape.
@@ -1153,6 +1156,13 @@ module.exports = grammar({
       '(', repeat(field('operand', $._expression)), ')',
     ),
 
+    // `e?`: propagate the error of `e`. The `?` touches what it follows,
+    // as the compiler requires, and stacks: `(f x)??`.
+    try_expression: $ => prec.left(3, seq(
+      field('operand', $._expression),
+      token.immediate('?'),
+    )),
+
     // -----------------------------------------------------------------
     // Literals and identifiers
     // -----------------------------------------------------------------
@@ -1220,7 +1230,7 @@ module.exports = grammar({
     // The name alternative starts on the lexer's full start set,
     // operators included, for the reason above.
     identifier: _ => token(choice(
-      /[A-Za-z_+*/%<>=!&|^~-][A-Za-z0-9_']*([+\-*\/%^=<>!&|?~@]+[A-Za-z0-9_']*|\.[A-Za-z0-9_'+\-*\/%^=<>!&|?~@][A-Za-z0-9_']*)*/,
+      /[A-Za-z_+*/%<>=!&|^~-][A-Za-z0-9_']*([+\-*\/%^=<>!&|~@]+[A-Za-z0-9_']*|\.[A-Za-z0-9_'+\-*\/%^=<>!&|~@][A-Za-z0-9_']*)*/,
       new RegExp(OPERATOR_CHAR.source + '+'),
     )),
   },

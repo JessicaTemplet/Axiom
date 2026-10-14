@@ -258,6 +258,9 @@
 ; ---------------------------------------------------------------
 
 ".." @operator
+
+; The postfix that propagates an error.
+(try_expression "?" @operator)
 (ellipsis) @punctuation.special
 
 [

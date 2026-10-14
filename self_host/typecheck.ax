@@ -9738,7 +9738,9 @@
     mkUnitTy
     (let ((tag (nodeTag e)))
       (if (== tag TAG_E_INT)
-        mkIntTy
+        (if (isUnitLit e)
+          mkUnitTy
+          mkIntTy)
         (if (== tag TAG_E_FLT)
           mkFloatTy
           (if (== tag TAG_E_CHAR)
@@ -9824,7 +9826,16 @@
                                                 tt
                                                 mkSilentWild))
                                           }
-                                          mkSilentWild))))))))))))))))))))
+                                          ; A `?` the expander could not rewrite
+                                          ; (AX3123, already reported): its operand
+                                          ; is still checked, and the form answers
+                                          ; poison, so nothing cascades from it.
+                                          (if (== tag TAG_E_TRY)
+                                            {
+                                              (checkExprH tc (nodeA e) 0)
+                                              mkTErr
+                                            }
+                                            mkSilentWild)))))))))))))))))))))
 
 (pub :: checkExprSeq (-> Int (Vec Int) Int Int Int))
 (pub fn (checkExprSeq tc v i last)
@@ -9921,6 +9932,73 @@
       cty
     }))
 
+; ------------------------------------------------------------------
+; The unit type `()`, the empty tuple, and its one value `()`.
+;
+; A branch, an arm or a body whose type is `()` makes the form around
+; it answer `()`, and the values of the others are dropped: an `if`
+; with one `()` branch (which is every `if` written without an else,
+; `parseIfTail`), a `match` with one `()` arm, and a function declared
+; to answer `()`. Dropping is a rewrite of the dropped expression into
+; `{ e () }` (`discardToUnit`), so the code generator meets a block it
+; already handles: the value is released where it was a reference
+; (`emitSeq`), and the whole answers the unit word 0.
+; ------------------------------------------------------------------
+(pub :: tyIsUnit (-> Int Bool))
+(pub fn (tyIsUnit t)
+  (let ((r (tyResolve t)))
+    (if (== r 0)
+      false
+      (&& (== (nodeTag r) TAG_T_TUP) (== (vecLen (nodeAVec r)) 0)))))
+
+; Rewrite `e`, whose type is `t`, in place into `{ e () }`. The node
+; keeps its identity, so whatever holds it now holds the block; the
+; expression moves to a copy. A `Result` dropped this way is AX3046
+; and a pending lambda is flushed, as for any statement
+; (`checkExprSeq`).
+(pub :: discardToUnit (-> Int Int Int Int))
+(pub fn (discardToUnit tc e t)
+  (if (|| (== e 0) (tyIsUnit t))
+    0
+    {
+      (if (== (isDiscardedResultTy t) 1)
+        (emitDiscardedResult tc e)
+        0)
+      (flushPending tc t (spanOf e))
+      (let (
+        (copy (mkNodeAt (nodeTag e) (nodeA e) (nodeB e) (nodeC e) (nodeSpan e)))
+        (xs vecNew)
+        (mut k 5)
+      )
+        {
+          (while (< k 12)
+            {
+              (memSetWord copy k (memGetWord e k))
+              (set k (+ k 1))
+            })
+          (vecPush xs copy)
+          (vecPush xs (mkEUnitAt (nodeSpan e)))
+          ; Built as a node first, so the block holds its share of
+          ; `xs`; `e` then takes the block's words. AST nodes are never
+          ; released, so neither the copy's words nor the block's lose
+          ; an owner.
+          (let ((blk (mkNodeAt TAG_E_BEGIN xs 0 0 (nodeSpan e))))
+            {
+              (memSetWord e 0 TAG_E_BEGIN)
+              (memSetWord e 1 (memGetWord blk 1))
+              (memSetWord e 2 0)
+              (memSetWord e 3 0)
+              (memSetWord e 5 0)
+              (memSetWord e 6 0)
+              (memSetWord e 7 0)
+              (memSetWord e 9 0)
+              (memSetWord e 10 0)
+              (memSetWord e 11 0)
+              0
+            })
+        })
+    }))
+
 (pub :: checkIf (-> Int Int Int))
 (pub fn (checkIf tc e)
   {
@@ -9929,14 +10007,22 @@
     ; the then-branch as the expectation - stage0's shape.
     (let ((thenTy (checkExprH tc (nodeB e) 0)))
       (let ((elseTy (checkExprH tc (nodeC e) 0)))
-        {
-          (if (&& (== (tyIsErr thenTy) 0) (&& (== (tyIsErr elseTy) 0) (== (tyCompat tc thenTy elseTy) 0)))
-            (emitMismatchTy tc thenTy elseTy (spanOf (nodeC e)))
-            0)
-          (if (== (tyIsErr thenTy) 1)
-            elseTy
-            thenTy)
-        }))
+        ; A `()` branch makes the `if` answer `()`, and the other
+        ; branch's value is dropped: `(if t b)` is `(if t b ())`.
+        (if (|| (tyIsUnit thenTy) (tyIsUnit elseTy))
+          {
+            (discardToUnit tc (nodeB e) thenTy)
+            (discardToUnit tc (nodeC e) elseTy)
+            mkUnitTy
+          }
+          {
+            (if (&& (== (tyIsErr thenTy) 0) (&& (== (tyIsErr elseTy) 0) (== (tyCompat tc thenTy elseTy) 0)))
+              (emitMismatchTy tc thenTy elseTy (spanOf (nodeC e)))
+              0)
+            (if (== (tyIsErr thenTy) 1)
+              elseTy
+              thenTy)
+          })))
   })
 
 ; `cond` is AX2004: no arm checks one. A variadic `if` reaches
@@ -20201,7 +20287,9 @@
           (if (&& (== (nodeTag scrutTy) TAG_T_VAR) (== (tyIsSrcVar scrutTy) 0))
             (armsCtorTy tc (nodeBVec e) 0)
             0))))
-        (let ((resTy 
+        (let (
+          (tys vecNew)
+          (resTy0
           (checkArms
             tc
             (nodeBVec e)
@@ -20213,7 +20301,18 @@
             (if (== exhTy 0)
               scrutTy
               exhTy)
-            0)))
+            0
+            tys))
+        )
+        ; A `()` arm makes the `match` answer `()`, and the other arms'
+        ; values are dropped (`armJoin` accepts the mix).
+        (let ((resTy
+          (if (matchArmsUnit tys 0)
+            {
+              (discardArms tc (nodeBVec e) tys 0)
+              mkUnitTy
+            }
+            resTy0)))
           {
             (let ((ctorChecked 
               (if (&& (== (memGetWord catchall 0) 0) (!= exhTy 0))
@@ -20238,7 +20337,7 @@
                   "a match no arm matched used to answer 0 silently at exit 0 - the result cell's zeroed contents, indistinguishable from a real answer (docs/memory-model.md MM-VAL-9b)") "no arm catches a non-matching value"))
                 0))
             resTy
-          }))
+          })))
     }))
 
 ; The declared result type of the first constructor the arms name -
@@ -20338,8 +20437,8 @@
 ; `((Red) 1) ((Big) 2)` over a lambda parameter refuses `Big` instead
 ; of checking exhaustiveness over whichever type came first. Binders
 ; still bind at `scrutTy`.
-(pub :: checkArms (-> Int (Vec Int) Int (Vec Int) Int Int Int Int Int Int))
-(pub fn (checkArms tc arms i covered catchall resTy scrutTy fitTy joinTy)
+(pub :: checkArms (-> Int (Vec Int) Int (Vec Int) Int Int Int Int Int (Vec Int) Int))
+(pub fn (checkArms tc arms i covered catchall resTy scrutTy fitTy joinTy tys)
   (if (>= i (vecLen arms))
     resTy
     (let ((arm (vecGet arms i)))
@@ -20364,6 +20463,7 @@
             0
             "iteration is an expansion-time facility: move the match into a declaration macro's template, or write the arms by hand"
             "the query vocabulary is CLOSED and compiler-implemented (macro-system.md MAC-CAP-5/6): every query is answered from the declaration list at expansion time"))
+          (vecPush tys 0)
           (checkArms
             tc
             arms
@@ -20373,7 +20473,8 @@
             resTy
             scrutTy
             fitTy
-            joinTy)
+            joinTy
+            tys)
         }
         (let ((mark (vecLen (tcScopeVec tc))))
           {
@@ -20382,6 +20483,7 @@
             (let ((t (checkExprH tc (nodeB arm) 0)))
               {
                 (scopeTrunc (tcScopeVec tc) mark)
+                (vecPush tys t)
                 (checkArms
                   tc
                   arms
@@ -20391,7 +20493,8 @@
                   t
                   scrutTy
                   fitTy
-                  (armJoin tc joinTy t (nodeB arm)))
+                  (armJoin tc joinTy t (nodeB arm))
+                  tys)
               })
           })))))
 
@@ -20407,12 +20510,35 @@
     joinTy
     (if (== joinTy 0)
       t
-      {
-        (if (== (tyCompat tc joinTy t) 0)
-          (emitMismatchTy tc joinTy t (armTailSpan body))
-          0)
-        joinTy
-      })))
+      (if (|| (tyIsUnit joinTy) (tyIsUnit t))
+        mkUnitTy
+        {
+          (if (== (tyCompat tc joinTy t) 0)
+            (emitMismatchTy tc joinTy t (armTailSpan body))
+            0)
+          joinTy
+        }))))
+
+(pub :: matchArmsUnit (-> (Vec Int) Int Bool))
+(pub fn (matchArmsUnit tys i)
+  (if (>= i (vecLen tys))
+    false
+    (if (if (== (vecGet tys i) 0)
+      false
+      (tyIsUnit (vecGet tys i)))
+      true
+      (matchArmsUnit tys (+ i 1)))))
+
+(pub :: discardArms (-> Int (Vec Int) (Vec Int) Int Int))
+(pub fn (discardArms tc arms tys i)
+  (if (>= i (vecLen arms))
+    0
+    {
+      (if (&& (< i (vecLen tys)) (!= (vecGet tys i) 0))
+        (discardToUnit tc (nodeB (vecGet arms i)) (vecGet tys i))
+        0)
+      (discardArms tc arms tys (+ i 1))
+    }))
 
 ; Where an arm's value comes from: the last expression of a block or
 ; a `let` body, which is what a reader has to change.
@@ -27308,6 +27434,10 @@
     0
     (if (== got 0)
       0
+    ; A function declared to answer `()` drops its body's value: a
+    ; procedure ends where its work does, with no value written out.
+    (if (&& (tyIsUnit want) (&& (! (tyIsUnit got)) (&& (== (tyIsErr got) 0) (== (isPendingNode got) 0))))
+      (discardToUnit tc (nodeC d) got)
       ; `got` is all but never pending here - the tail infers a
       ; pending body standalone before this runs - but a path that
       ; bypassed the tail must still judge it: where an arrow or a
@@ -27348,7 +27478,7 @@
                   (emitMismatchTy tc want got (spanOf (nodeC d))))
                 (if (== (declResultCompat tc want got) 1)
                   0
-                  (emitMismatchTy tc want got (spanOf (nodeC d)))))))))))))
+                  (emitMismatchTy tc want got (spanOf (nodeC d))))))))))))))
 
 ; 1 when a body of type `got` may stand where the signature declares
 ; `want`. Two arrows meet part by part, so a closure's parameters and

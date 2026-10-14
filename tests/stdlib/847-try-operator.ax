@@ -1,0 +1,124 @@
+; `e?` answers the `Ok` payload of `e`, and when `e` is an `Err` the
+; enclosing body answers that `Err` (docs/reference.md, "Propagate an
+; error with `?`"). Each shape below runs once with every step
+; succeeding and once with a step failing, and prints what it answered;
+; `trace` records the order the steps ran in, so a rewrite that moved
+; an effect past the `?`, or ran one after the error, shows in the
+; output.
+(import IO)
+(import Str)
+(import Fmt)
+(import Vec)
+
+(:: step (-> (Vec String) String Bool (Result Int String)))
+(fn (step trace name ok)
+  {
+    (vecPush trace name)
+    (if ok
+      (Ok (strLen name))
+      (Err (concat name " failed")))
+  })
+
+; A chain of `let`s, the shape `try` used to spell.
+(:: chain (-> (Vec String) Bool (Result Int String)))
+(fn (chain trace ok)
+  (let (
+    (a (step trace "a" true)?)
+    (b (step trace "bb" ok)?)
+  )
+    (Ok (+ a b))))
+
+; `?` in an argument: the arguments before it still run first, and the
+; ones after it never run when it fails.
+(:: args (-> (Vec String) Bool (Result Int String)))
+(fn (args trace ok)
+  (Ok (+ (+ (step trace "x" true)? (step trace "yy" ok)?) (step trace "zzz" true)?)))
+
+; A statement in a block, and an `if` test.
+(:: block (-> (Vec String) Bool (Result Int String)))
+(fn (block trace ok)
+  {
+    (step trace "first" true)?
+    (if (> (step trace "test" ok)? 0)
+      (Ok 1)
+      (Ok 2))
+  })
+
+; In tail position, through an `if` branch and a `match` arm.
+(:: branches (-> (Vec String) Int (Result Int String)))
+(fn (branches trace n)
+  (if (> n 0)
+    (let ((v (step trace "pos" (> n 1))?)) (Ok (* v 10)))
+    (match n
+      (0 (Ok 0))
+      (_ (let ((w (step trace "neg" false)?)) (Ok w))))))
+
+; Stacked: the inner `?` runs first, then the outer one.
+(:: nested (-> (Vec String) Bool (Result Int String)))
+(fn (nested trace ok)
+  (let ((r (wrap trace ok)??))
+    (Ok r)))
+
+(:: wrap (-> (Vec String) Bool (Result (Result Int String) String)))
+(fn (wrap trace ok)
+  {
+    (vecPush trace "wrap")
+    (Ok (step trace "inner" ok))
+  })
+
+; A lambda is its own body: its `?` answers the lambda.
+(:: viaLambda (-> (Vec String) Bool (Result Int String)))
+(fn (viaLambda trace ok)
+  (let ((f (lambda (n) (Ok (+ n (step trace "lam" ok)?)))))
+    (f 100)))
+
+(:: joined (-> (Vec String) String))
+(fn (joined xs)
+  (let (
+    (mut out "")
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen xs))
+        {
+          (set out (if (== i 0)
+            (vecGet xs i)
+            (concat (concat out ",") (vecGet xs i))))
+          (set i (+ i 1))
+        })
+      (if (== (vecLen xs) 0) "(none)" out)
+    }))
+
+(:: show (-> String (Vec String) (Result Int String) Int))
+;@axiom:effect(io)
+(fn (show name trace r)
+  (let ((steps (joined trace)))
+    {
+      (match r
+        ((Ok v) (println "{name}: Ok {v} after {steps}"))
+        ((Err e) (println "{name}: Err {e} after {steps}")))
+      (vecClear trace)
+      0
+    }))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let ((t vecNew))
+    {
+      (show "chain" t (chain t true))
+      (show "chain" t (chain t false))
+      (show "args" t (args t true))
+      (show "args" t (args t false))
+      (show "block" t (block t true))
+      (show "block" t (block t false))
+      (show "branches" t (branches t 2))
+      (show "branches" t (branches t 1))
+      (show "branches" t (branches t 0))
+      (show "branches" t (branches t -1))
+      (show "nested" t (nested t true))
+      (show "nested" t (nested t false))
+      (show "lambda" t (viaLambda t true))
+      (show "lambda" t (viaLambda t false))
+      0
+    }))
