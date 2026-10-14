@@ -16,6 +16,15 @@ its changelog too.
 
 ## Unreleased
 
+- An `if` or `match` whose value is thrown away answers `()` whatever
+  its branches answer. A branch that is there for what it does no
+  longer needs a filler `0` to agree with the others, and the tests and
+  examples drop 2,800 of them: an `if` without an else where the else
+  was `0`, `(if (! c) ...)` where the then-branch was, and blocks that
+  end where their work does. Where the value is read the branches must
+  still agree. Tested by `tests/stdlib/892-dropped-branches.ax` and
+  `tests/diagnostics/1304-branches-read.ax`.
+
 - `try` is removed; `?` is how an error propagates. Every `try` in the
   standard library, the tests and the examples is now a `?`: a chain of
   them is one `let` with a binding per step, and the 46 whose value an

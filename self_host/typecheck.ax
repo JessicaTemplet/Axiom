@@ -3343,7 +3343,8 @@
   (eraseCounts : (Vec Int))
   (fieldVals : (Vec FieldStore))
   (mayCalls : Int)
-  (walkCtx : (Vec BCtx)))
+  (walkCtx : (Vec BCtx))
+  (mut discard : Int))
 
 ; One evidence witness kept for `evSettle`: a call is checked in program
 ; order, and the pin that decides its witness may come later in the
@@ -4340,7 +4341,7 @@
           vecNew
           vecNew
           (countWordStructs allDecls 0 0)
-          (UState 0 0 vecNew vecNew 0 0 vecNew 0 vecNew vecNew 0 (bsCtxOf vecNew vecNew 0 vecNew))
+          (UState 0 0 vecNew vecNew 0 0 vecNew 0 vecNew vecNew 0 (bsCtxOf vecNew vecNew 0 vecNew) 0)
           vecNew
           vecNew))))
         {
@@ -9748,7 +9749,11 @@
 (pub fn (checkExprHCore tc e inHead)
   (if (== e 0)
     mkUnitTy
-    (let ((tag (nodeTag e)))
+    (let (
+      (tag (nodeTag e))
+      (disc (tcDiscard tc))
+      (_cleared (tcSetDiscard tc 0))
+    )
       (if (== tag TAG_E_INT)
         (if (isUnitLit e)
           mkUnitTy
@@ -9787,7 +9792,10 @@
                                 0)
                               (nodeSpan e)
                               initTy)
-                            (let ((bodyTy (checkExprH tc (nodeC e) 0)))
+                            (let ((bodyTy {
+                              (tcSetDiscard tc disc)
+                              (checkExprH tc (nodeC e) 0)
+                            }))
                               {
                                 (flushScopePending tc mark)
                                 (scopeTrunc (tcScopeVec tc) mark)
@@ -9795,14 +9803,14 @@
                               })
                           }))
                       (if (== tag TAG_E_IF)
-                        (checkIf tc e)
+                        (checkIf tc e disc)
                         ; `cond` is AX2004 (see `checkIf`: the variadic
                         ; `if` desugars before this pass), so no arm
                         ; checks one.
                         (if (== tag TAG_E_BEGIN)
-                          (checkExprSeq tc (nodeAVec e) 0 mkUnitTy)
+                          (checkExprSeq tc (nodeAVec e) 0 mkUnitTy disc)
                           (if (== tag TAG_E_MATCH)
-                            (checkMatch tc e)
+                            (checkMatch tc e disc)
                             (if (|| (== tag TAG_E_WHILE) (== tag TAG_E_REGION))
                               (if (== tag TAG_E_REGION)
                                 (checkRegion tc e)
@@ -9812,7 +9820,7 @@
                                   ; tail included, so a pending lambda
                                   ; there is flushed like any statement's.
                                   (let ((body (nodeBVec e)))
-                                    (let ((t (checkExprSeq tc body 0 mkUnitTy)))
+                                    (let ((t (checkExprSeq tc body 0 mkUnitTy 1)))
                                       (if (> (vecLen body) 0)
                                         (flushPending tc t (spanOf (vecGet body (- (vecLen body) 1))))
                                         0)))
@@ -9849,11 +9857,40 @@
                                             }
                                             mkSilentWild)))))))))))))))))))))
 
-(pub :: checkExprSeq (-> Int (Vec Int) Int Int Int))
-(pub fn (checkExprSeq tc v i last)
+; ------------------------------------------------------------------
+; The discard flag: is the value of the expression about to be
+; checked thrown away? Set by the one who knows - a block for every
+; statement but its last, a loop for its whole body - and read once,
+; at `checkExprHCore`'s entry, which clears it so nothing inside the
+; expression inherits it. A block's last expression and a `let`'s body
+; inherit the block's or the `let`'s own flag.
+;
+; An `if` or a `match` whose value is dropped answers `()` whatever
+; its branches answer: they need not agree, and none needs a filler
+; `0` to agree with the others (`checkIf`, `checkMatch`). Each branch
+; is dropped as a statement is, so a `Result` there is still AX3046.
+; ------------------------------------------------------------------
+(pub :: tcDiscard (-> Int Int))
+(pub fn (tcDiscard tc)
+  (memGetWord (memGetWord tc 44) 12))
+
+(pub :: tcSetDiscard (-> Int Int Int))
+(pub fn (tcSetDiscard tc v)
+  {
+    (memSetWord (memGetWord tc 44) 12 v)
+    0
+  })
+
+(pub :: checkExprSeq (-> Int (Vec Int) Int Int Int Int))
+(pub fn (checkExprSeq tc v i last disc)
   (if (>= i (vecLen v))
     last
-    (let ((t (checkExprH tc (vecGet v i) 0)))
+    (let ((t {
+      (tcSetDiscard tc (if (< i (- (vecLen v) 1))
+        1
+        disc))
+      (checkExprH tc (vecGet v i) 0)
+    }))
       {
         ; ERR-DIAG-2: a `Result` answered where no one reads it. Every
         ; arm after this one runs whatever this one answered - which,
@@ -9872,7 +9909,7 @@
         (if (< i (- (vecLen v) 1))
           (flushPending tc t (spanOf (vecGet v i)))
           0)
-        (checkExprSeq tc v (+ i 1) t)
+        (checkExprSeq tc v (+ i 1) t disc)
       })))
 
 ; A type that is nominally a `Result` and known - not a poisoned
@@ -10011,8 +10048,8 @@
         })
     }))
 
-(pub :: checkIf (-> Int Int Int))
-(pub fn (checkIf tc e)
+(pub :: checkIf (-> Int Int Int Int))
+(pub fn (checkIf tc e disc)
   {
     (checkCondBool tc (nodeA e))
     ; Branches must agree; the report anchors at the ELSE with
@@ -10020,8 +10057,10 @@
     (let ((thenTy (checkExprH tc (nodeB e) 0)))
       (let ((elseTy (checkExprH tc (nodeC e) 0)))
         ; A `()` branch makes the `if` answer `()`, and the other
-        ; branch's value is dropped: `(if t b)` is `(if t b ())`.
-        (if (|| (tyIsUnit thenTy) (tyIsUnit elseTy))
+        ; branch's value is dropped: `(if t b)` is `(if t b ())`. So
+        ; does a dropped `if` whose branches disagree: nobody reads
+        ; the value, so neither branch owes the other a type.
+        (if (|| (tyIsUnit thenTy) (|| (tyIsUnit elseTy) (&& (== disc 1) (&& (== (tyIsErr thenTy) 0) (&& (== (tyIsErr elseTy) 0) (== (tyCompat tc thenTy elseTy) 0))))))
           {
             (discardToUnit tc (nodeB e) thenTy)
             (discardToUnit tc (nodeC e) elseTy)
@@ -20148,7 +20187,7 @@
 ; SCRUTINEE. Pattern errors therefore precede body errors, and AX3005
 ; comes after everything in its match - probed order.
 ; ------------------------------------------------------------------
-(pub :: checkMatch (-> Int Int Int))
+(pub :: checkMatch (-> Int Int Int Int))
 ; ERR-PROP-4: a self-recursive call in the scrutinee of a `match`.
 ; Evaluating the scrutinee runs before any arm, so the call is never
 ; in tail position: every nesting level holds a frame, and deep inputs
@@ -20312,7 +20351,7 @@
                   ""
                   "bind the scrutinee in a `let` and answer the recursive call from a match arm, where the self call is a tail call and the loop conversion fires") (concat (concat "recursive call to `" (bareOf name)) "`")))))))))))
 
-(pub fn (checkMatch tc e)
+(pub fn (checkMatch tc e disc)
   (let (
     (errsBefore (countErrorDiags (tcOutVec tc)))
     (scrutTy (checkExprH tc (nodeA e) 0))
@@ -20367,12 +20406,14 @@
               scrutTy
               exhTy)
             0
-            tys))
+            tys
+            disc))
         )
         ; A `()` arm makes the `match` answer `()`, and the other arms'
-        ; values are dropped (`armJoin` accepts the mix).
+        ; values are dropped (`armJoin` accepts the mix); so does a
+        ; dropped `match` whose arms disagree.
         (let ((resTy
-          (if (matchArmsUnit tys 0)
+          (if (|| (matchArmsUnit tys 0) (&& (== disc 1) (! (matchArmsAgree tc tys 0 0))))
             {
               (discardArms tc (nodeBVec e) tys 0)
               mkUnitTy
@@ -20502,8 +20543,8 @@
 ; `((Red) 1) ((Big) 2)` over a lambda parameter refuses `Big` instead
 ; of checking exhaustiveness over whichever type came first. Binders
 ; still bind at `scrutTy`.
-(pub :: checkArms (-> Int (Vec Int) Int (Vec Int) Int Int Int Int Int (Vec Int) Int))
-(pub fn (checkArms tc arms i covered catchall resTy scrutTy fitTy joinTy tys)
+(pub :: checkArms (-> Int (Vec Int) Int (Vec Int) Int Int Int Int Int (Vec Int) Int Int))
+(pub fn (checkArms tc arms i covered catchall resTy scrutTy fitTy joinTy tys disc)
   (if (>= i (vecLen arms))
     resTy
     (let ((arm (vecGet arms i)))
@@ -20539,7 +20580,8 @@
             scrutTy
             fitTy
             joinTy
-            tys)
+            tys
+            disc)
         }
         (let ((mark (vecLen (tcScopeVec tc))))
           {
@@ -20558,8 +20600,9 @@
                   t
                   scrutTy
                   fitTy
-                  (armJoin tc joinTy t (nodeB arm))
-                  tys)
+                  (armJoin tc joinTy t (nodeB arm) disc)
+                  tys
+                  disc)
               })
           })))))
 
@@ -20569,8 +20612,8 @@
 ; diverging call answer. Each later arm is held to it, and the report
 ; anchors at the arm that disagrees. The match still answers its last
 ; arm's type, so a program that already checked types the same way.
-(pub :: armJoin (-> Int Int Int Int Int))
-(pub fn (armJoin tc joinTy t body)
+(pub :: armJoin (-> Int Int Int Int Int Int))
+(pub fn (armJoin tc joinTy t body disc)
   (if (armTyOpen t)
     joinTy
     (if (== joinTy 0)
@@ -20578,11 +20621,26 @@
       (if (|| (tyIsUnit joinTy) (tyIsUnit t))
         mkUnitTy
         {
-          (if (== (tyCompat tc joinTy t) 0)
+          ; A dropped match's arms need not agree (`checkMatch`).
+          (if (&& (== disc 0) (== (tyCompat tc joinTy t) 0))
             (emitMismatchTy tc joinTy t (armTailSpan body))
             0)
           joinTy
         }))))
+
+; Do the arms' types agree with the first one that says something?
+(pub :: matchArmsAgree (-> Int (Vec Int) Int Int Bool))
+(pub fn (matchArmsAgree tc tys i first)
+  (if (>= i (vecLen tys))
+    true
+    (let ((t (vecGet tys i)))
+      (if (|| (== t 0) (armTyOpen t))
+        (matchArmsAgree tc tys (+ i 1) first)
+        (if (== first 0)
+          (matchArmsAgree tc tys (+ i 1) t)
+          (if (== (tyCompat tc first t) 0)
+            false
+            (matchArmsAgree tc tys (+ i 1) first)))))))
 
 (pub :: matchArmsUnit (-> (Vec Int) Int Bool))
 (pub fn (matchArmsUnit tys i)

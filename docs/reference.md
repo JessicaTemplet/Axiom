@@ -373,6 +373,36 @@ are dropped. Reading that `()` where a value is wanted is a type error,
 `expected Int, found ()`. Tested by `tests/stdlib/890-unit-and-if.ax`
 and `tests/diagnostics/1302-unit-value-used.ax`.
 
+An `if` or `match` whose value nobody reads, a statement in a block or
+a loop body, answers `()` whatever its branches answer, so branches
+that are there for what they do need not agree:
+
+```scheme
+(import IO)
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let ((mut hits 0) (mut seen false))
+    {
+      (for n in 0..5
+        (if (== (% n 2) 0)
+          (set hits (+ hits 1))
+          (set seen true)))
+      (println "{hits} {seen}")
+      0
+    }))
+```
+
+```text
+3 true
+```
+
+Where the value is read, a `let`'s value or a function's tail, the
+branches must agree as before. Tested by
+`tests/stdlib/892-dropped-branches.ax` and
+`tests/diagnostics/1304-branches-read.ax`.
+
 ### while loops
 
 `while` repeats its body while its `Bool` condition is true. There is
