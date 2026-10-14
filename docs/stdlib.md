@@ -467,14 +467,13 @@ API: [Cereal](stdlib-api.md#cereal). Tested by
 ## Rpc
 
 `Rpc` reads and writes `Content-Length` framed messages over a descriptor.
-Create a reader with `rdNew`, read with `rpcReadMsg`, and send with
+Create a reader with `rdNew`, read with `rpcRead`, and send with
 `rpcWrite`. Decode the body separately with `Cereal`.
 
 Keep one reader per stream: it retains unread bytes across fragmented
-reads and consecutive frames. `rpcReadMsg` returns `Some` for every
+reads and consecutive frames. `rpcRead` returns `Some` for every
 complete frame, including an empty one. It returns `None` on EOF, a read
-failure or invalid framing; `rpcRead` answers an empty string in those
-cases and for an empty frame. Missing, invalid or oversized lengths
+failure or invalid framing. Missing, invalid or oversized lengths
 are refused; the body limit is 64 MiB.
 
 Returned bodies are copied, so later reads preserve them. Reader-buffer

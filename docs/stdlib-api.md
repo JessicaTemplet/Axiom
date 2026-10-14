@@ -1903,7 +1903,7 @@ Import with `(import Pre (deriveEq deriveArity))`.
 
 ## `Rpc`
 
-`stdlib/Rpc.ax` — 8 public names
+`stdlib/Rpc.ax` — 7 public names
 
 Rpc.ax — the LSP base protocol's framing, over a file descriptor.
 
@@ -1914,8 +1914,7 @@ Rpc.ax — the LSP base protocol's framing, over a file descriptor.
 | `rdFilled` | value | `(-> Int Int)` |  | How many bytes of the reader's buffer hold data. |
 | `rdConsumed` | value | `(-> Int Int)` |  | How many bytes of the reader's buffer have been handed out. |
 | `rdReseat` | value | `(-> Int Int Int Int)` | `Alloc,Mut` | Re-seat a reader on freshly allocated storage, carrying `u` bytes of not-yet-consumed input from `addr`. |
-| `rpcReadMsg` | value | `(-> Int (Option String))` | `Alloc,IO,Mut` | Read one whole message: `Some` its body, or `None` when the stream ended or broke - the caller stops, which is what an LSP does when its client goes away without saying `exit`. |
-| `rpcRead` | value | `(-> Int String)` | `Alloc,IO,Mut` | Read one whole message and answer its body, or "" when the stream ended or broke. A zero-length message answers "" too, so a caller that must tell the two apart reads with `rpcReadMsg`. |
+| `rpcRead` | value | `(-> Int (Option String))` | `Alloc,IO,Mut` | Read one whole message: `Some` its body, or `None` when the stream ended or broke - the caller stops, which is what an LSP does when its client goes away without saying `exit`. |
 | `rpcWrite` | value | `(-> File String Int)` | `Alloc,IO,Mut` | Frame `body` and write it to `f`. |
 
 ## `Str`

@@ -21,6 +21,13 @@ its changelog too.
   user file forged a map header in safe code, and is AX3073 now. Tested
   by `tests/diagnostics/1381-private-struct-forge.ax`.
 
+- `Rpc` has one reader: `rpcRead` answers `(Option String)`, `Some` the
+  body of every whole frame, an empty one included, and `None` when the
+  stream ended or broke. The `rpcRead` that answered `""` for both is
+  gone, and `rpcReadMsg` is its name now. **BREAKING**:
+  `compat/BREAKING` records both. Tested by
+  `tests/stdlib/623-rpc-empty-frame.ax`.
+
 - A program's `main` is declared `(:: main ())`: it runs for what it
   does and the program exits 0. The tests, examples, docs, website
   samples, `explain` pages, the VS Code snippet, the REPL and

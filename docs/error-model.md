@@ -149,7 +149,7 @@ sentinel:
 
 | What the line does | Hits | Where |
 |---|---|---|
-| Seeds a loop accumulator, such as `(mut found (- 0 1))`; never an answer | 4 | `Str.strFind` (which already answers `(Option Int)`), `rdFindHeaderEnd`, `rdContentLength`, `rpcReadMsg` |
+| Seeds a loop accumulator, such as `(mut found (- 0 1))`; never an answer | 4 | `Str.strFind` (which already answers `(Option Int)`), `rdFindHeaderEnd`, `rdContentLength`, `rpcRead` |
 | A private helper below a wrapper that already answers `Option`, keeping `-1` on the recursion (§10's rule for `internFindFrom`) | 4 | `internFindFrom` (twice), `pathLastSlashFrom`, `pathLastDotFrom` |
 | `Map.ax`'s private probe walk below `mapGet`, whose absent-key answer is a caller-supplied default and not a sentinel | 4 | `mapFindSlot`, `mapFindLoop` (twice), `mapInsertNoGrow` |
 | Passes `-1` as an argument, or sets a local to it, in `stdlib/Sys.ax` | 3 | `netAddrText`'s zero-run seed, `sysSignalOpenRaw`'s syscall slot, `sysRandomBytes`' `(set rc (- 0 1))` |

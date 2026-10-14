@@ -254,7 +254,7 @@
 ; relative, for the reason above.
 ;
 ; The three refusals answer the SAME -1 on purpose. `rpcRead` turns -1
-; into "" and the server treats "" as the client having gone away; if
+; into `None` and the server treats that as the client having gone away; if
 ; an over-long header answered anything else, a peer could tell the
 ; ceiling from a typo and probe for it.
 (:: rdContentLength (-> Int Int Int))
@@ -317,13 +317,11 @@
 ;
 ; A body may be EMPTY. `Content-Length: 0` is a whole frame, and its
 ; body is the empty string, which the caller refuses the way it refuses
-; any other body that is not JSON. `rpcRead` below answered "" for both
-; that frame and the end of the stream, so the server read a peer's
-; zero-length message as the peer hanging up and exited with every
-; request behind it unanswered (found by `scripts/lib/lspfuzz.py`).
-(pub :: rpcReadMsg (-> Int (Option String)))
+; any other body that is not JSON; it is `(Some "")`, never the end of
+; the stream (`tests/fuzz/lsp/empty-body.lspfuzz`).
+(pub :: rpcRead (-> Int (Option String)))
 ;@axiom:effect(io)
-(pub fn (rpcReadMsg r)
+(pub fn (rpcRead r)
   ; 1. A complete header block.
   (let (
     (mut hdr (- 0 1))
@@ -392,16 +390,6 @@
                     }))
               }))))
     }))
-
-;; Read one whole message and answer its body, or "" when the stream
-;; ended or broke. A zero-length message answers "" too, so a caller
-;; that must tell the two apart reads with `rpcReadMsg`.
-(pub :: rpcRead (-> Int String))
-;@axiom:effect(io)
-(pub fn (rpcRead r)
-  (match (rpcReadMsg r)
-    ((Some body) body)
-    ((None) "")))
 
 ; Write all of `s`. The short-write loop - a single `write` may
 ; transfer fewer bytes than asked, and treating that as success is how
