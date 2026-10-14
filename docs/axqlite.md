@@ -192,8 +192,9 @@ Each `ColumnInfo` carries the column's `name`, its `columnType`
 `IndexInfo` carries an index's `name`, whether it is `unique`, and its
 `columns`.
 
-Not yet: dropping or renaming a column; see the
-[roadmap](roadmap.md#standard-library).
+`ALTER TABLE t DROP COLUMN c` removes a column and its values, and
+`ALTER TABLE t RENAME COLUMN c TO d` renames one. [axql.md](axql.md#alter-table)
+spells out what each refuses.
 
 ## Write statements
 

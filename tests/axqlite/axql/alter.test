@@ -101,5 +101,88 @@ ALTER TABLE members RENAME TO squads
 statement error axqSchema no such table: nope
 ALTER TABLE nope RENAME TO other
 
-statement error axqSyntax expected ADD COLUMN or RENAME TO
+statement error axqSyntax expected ADD COLUMN, DROP COLUMN or RENAME
+ALTER TABLE members FROB nick
+
+statement ok
 ALTER TABLE members DROP COLUMN nick
+
+query
+SELECT id, name, goals FROM members ORDER BY id
+----
+1,'ann',0
+2,'bo',0
+3,'cy',0
+4,'dee',0
+5,'eve',0
+
+statement error axqSchema no such column: nick
+SELECT nick FROM members
+
+statement error axqSchema it is the PRIMARY KEY
+ALTER TABLE members DROP COLUMN id
+
+statement error axqSchema has no column named nope
+ALTER TABLE members DROP COLUMN nope
+
+statement error axqSchema index playersByName covers it
+ALTER TABLE members DROP COLUMN name
+
+statement ok
+ALTER TABLE members ADD COLUMN cap INTEGER CHECK (cap <= goals)
+
+statement error axqSchema a DEFAULT or CHECK on cap names it
+ALTER TABLE members DROP COLUMN goals
+
+statement ok
+ALTER TABLE members DROP COLUMN cap
+
+statement ok
+ALTER TABLE members RENAME COLUMN name TO title
+
+query
+SELECT title FROM members WHERE title = 'bo'
+----
+'bo'
+
+statement error axqSchema no such column: name
+SELECT name FROM members
+
+statement error axqSchema already has a column named team
+ALTER TABLE members RENAME COLUMN title TO team
+
+statement error axqSchema has no column named nope
+ALTER TABLE members RENAME COLUMN nope TO x
+
+statement ok
+ALTER TABLE members RENAME COLUMN goals TO points
+
+statement error axqConstraint breaks the CHECK on points
+UPDATE members SET points = -1
+
+statement ok
+ALTER TABLE members DROP COLUMN team
+
+query
+SELECT title, points, captain.title FROM members ORDER BY id
+----
+'ann',0,'ann'
+'bo',0,'ann'
+'cy',0,'ann'
+'dee',0,'ann'
+'eve',0,'bo'
+
+statement ok
+DROP INDEX playersByName
+
+statement ok
+ALTER TABLE members DROP title
+
+query
+SELECT points FROM members ORDER BY id
+----
+0
+0
+0
+0
+0

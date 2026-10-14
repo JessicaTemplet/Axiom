@@ -4189,6 +4189,286 @@ oldRec)))
         ((None) (let ((_ (pagerBumpSchemaVersion ex.pager)?)) (Ok 0))))
     }))
 
+; Whether `e` names the column `name` anywhere.
+(:: exprNamesColumn (-> Expr String Bool))
+(fn (exprNamesColumn e name)
+  (match e
+    ((EName n _) (axqlNameEq n name))
+    (_
+      (let ((mut found false))
+        {
+          (for c in (axqlChildren e)
+            (if (exprNamesColumn c name)
+              {
+                (set found true)
+                0
+              }
+              0))
+          found
+        }))))
+
+(:: optNamesColumn (-> (Option Expr) String Bool))
+(fn (optNamesColumn e name)
+  (match e
+    ((Some x) (exprNamesColumn x name))
+    ((None) false)))
+
+; Give every row of `t` its values without column `drop`, checked as
+; table `t2` stores them.
+(:: narrowRows (-> Exec TableDef TableDef Rules (Vec RowRef) Int (Result Int Error)))
+;@axiom:effect(io)
+(fn (narrowRows ex t t2 rules rows drop)
+  (let ((mut failure None))
+    {
+      (for r in rows
+        (if (isSome failure)
+          0
+          (let ((values vecNew))
+            {
+              (for (v i) in r.values
+                (if (!= i drop)
+                  (vecPush values v)
+                  0))
+              (match (match (checkRules ex t2 rules values r.rowid)
+                       ((Err er3) (Err er3))
+                       ((Ok _)
+                         (match (checkLinks ex t2 values r.rowid)
+                           ((Err er2) (Err er2))
+                           ((Ok _)
+                             (match (axqlRowRecord t r.values)
+                               ((Err er1) (Err er1))
+                               ((Ok oldRec)
+                                 (match (axqlRowRecord t2 values)
+                                   ((Err er) (Err er))
+                                   ((Ok newRec)
+                                     (putOver
+           ex
+           t.root
+           (keyRowid r.rowid)
+           newRec
+           oldRec)))))))))
+                ((Ok _) 0)
+                ((Err err)
+                  {
+                    (set failure (Some err))
+                    0
+                  }
+                ))
+            })))
+      (match failure
+        ((Some err) (Err err))
+        ((None) (Ok 0)))
+    }))
+
+; ALTER TABLE t DROP COLUMN c: every row loses c. The PRIMARY KEY,
+; the only column, a column an index covers, and a column another
+; column's DEFAULT or CHECK names are refused: each has something
+; else pointing at it.
+(:: runAlterDrop (-> Exec Schema String String (Result Int Error)))
+;@axiom:effect(io)
+(fn (runAlterDrop ex schema table column)
+  (let ((t (axqlTableDef schema table)?))
+    (let ((drop (axqlColumnIndex t.cols column)))
+      (if (< drop 0)
+        (axqErr axqSchema (concat (concat "table " t.name) (concat " has no column named " column)) "axqlAlterTable")
+        (if (== drop t.pk)
+          (axqErr axqSchema (concat (concat "ALTER TABLE can't drop " column) ": it is the PRIMARY KEY") "axqlAlterTable")
+          (if (== (vecLen t.cols) 1)
+            (axqErr axqSchema (concat (concat "ALTER TABLE can't drop " column) ": it is the table's only column") "axqlAlterTable")
+            (let ((indexed (let ((mut who ""))
+              {
+                (for ix in t.indexes
+                  (for ci in ix.cols
+                    (if (== ci drop)
+                      (set who ix.name)
+                      0)))
+                who
+              })))
+              (if (! (strIsEmpty indexed))
+                (axqErr axqSchema (concat (concat (concat "ALTER TABLE can't drop " column) ": index ") (concat indexed " covers it; drop the index first")) "axqlAlterTable")
+                (let ((usedBy (let ((mut who ""))
+                  {
+                    (for (c i) in t.cols
+                      (if (&& (!= i drop) (|| (optNamesColumn c.check column) (optNamesColumn c.dflt column)))
+                        (set who c.name)
+                        0))
+                    who
+                  })))
+                  (if (! (strIsEmpty usedBy))
+                    (axqErr axqSchema (concat (concat (concat "ALTER TABLE can't drop " column) ": a DEFAULT or CHECK on ") (concat usedBy " names it")) "axqlAlterTable")
+                    (let ((cols vecNew) (links vecNew) (indexes vecNew))
+                      {
+                        (for (c i) in t.cols
+                          (if (!= i drop)
+                            (vecPush cols c)
+                            0))
+                        (for ld in t.links
+                          (if (!= ld.col drop)
+                            (vecPush links (LinkDef (if (> ld.col drop) (- ld.col 1) ld.col) ld.target))
+                            0))
+                        (for ix in t.indexes
+                          (let ((icols vecNew))
+                            {
+                              (for ci in ix.cols
+                                (vecPush icols (if (> ci drop) (- ci 1) ci)))
+                              (vecPush indexes (IndexDef ix.name ix.root ix.unique icols))
+                            }))
+                        (let ((t2 (TableDef t.name t.root cols (if (> t.pk drop) (- t.pk 1) t.pk) indexes links)))
+                          (let ((rules (prepareRules ex t2)?)
+                                (rows (collectMatches ex t None)?)
+                                (_ (narrowRows ex t t2 rules rows drop)?))
+                            (match (axqlFindEntry schema t.name)
+                              ((Some e)
+                                (let ((_ (replaceEntry ex e e.name e.table (tableText t.name (columnTexts cols)))?) (_ (pagerBumpSchemaVersion ex.pager)?)) (Ok 0))
+                              )
+                              ((None) (axqErr axqCorrupt "the table left the schema while it was altered" "axqlAlterTable")))))
+                      })))))))))))
+
+; The name inside the quoted name that spans `from` to `to` in `text`,
+; with `""` read as one quote.
+(:: quotedContent (-> String Int Int String))
+(fn (quotedContent text from to)
+  (let (
+    (mut i (+ from 1))
+    (mut out "")
+  )
+    {
+      (while (< i (- to 1))
+        (if (&& (== (strByte text i) 34) (== (strByte text (+ i 1)) 34))
+          {
+            (set out (concat out "\""))
+            (set i (+ i 2))
+          }
+          {
+            (set out (concat out (strSlice text i 1)))
+            (set i (+ i 1))
+          }))
+      out
+    }))
+
+; `text` with every identifier that names `old` rewritten to `new`:
+; the spelling a renamed column leaves in a CREATE TABLE or CREATE
+; INDEX text. Quoted names are rewritten too; string literals are
+; copied as they are.
+(:: renamedIdents (-> String String String String))
+(fn (renamedIdents text old new)
+  (let (
+    (n (strLen text))
+    (mut i 0)
+    (mut out "")
+  )
+    {
+      (while (< i n)
+        (let ((c (strByte text i)))
+          (if (== c 39)
+            (let ((mut j (+ i 1)))
+              {
+                (while (< j n)
+                  (if (== (strByte text j) 39)
+                    (set j (if (&& (< (+ j 1) n) (== (strByte text (+ j 1)) 39)) (+ j 2) (+ n 1)))
+                    (set j (+ j 1))))
+                (let ((end (if (> j n) n j)))
+                  {
+                    (set out (concat out (strSlice text i (- end i))))
+                    (set i end)
+                  })
+              })
+            (if (== c 34)
+              (let ((end (nameEnd text i)))
+                {
+                  (set out (concat
+                    out
+                    (if (axqlNameEq (quotedContent text i end) old)
+                      (quoteName new)
+                      (strSlice text i (- end i)))))
+                  (set i end)
+                })
+              (if (|| (strIsAlpha c) (== c 95))
+                (let ((end (nameEnd text i)))
+                  {
+                    (set out (concat
+                      out
+                      (if (axqlNameEq (strSlice text i (- end i)) old)
+                        (quoteName new)
+                        (strSlice text i (- end i)))))
+                    (set i end)
+                  })
+                {
+                  (set out (concat out (strSlice text i 1)))
+                  (set i (+ i 1))
+                })))))
+      out
+    }))
+
+; An index entry's CREATE INDEX text with column `old` renamed.
+(:: indexTextRenamed (-> SchemaEntry String String (Result String Error)))
+(fn (indexTextRenamed x old new)
+  (let ((p (axqlParse x.text)?))
+    (match p.stmt
+      ((SCreateIndex unique _ name _ cols)
+        (let ((mut out (concat (concat (concat (if unique "CREATE UNIQUE INDEX " "CREATE INDEX ") (quoteName name)) " ON ") (concat (quoteName x.table) " ("))))
+          {
+            (for (c i) in cols
+              (set out (concat
+                out
+                (concat
+                  (if (== i 0)
+                    ""
+                    ", ")
+                  (quoteName (if (axqlNameEq c old) new c))))))
+            (Ok (concat out ")"))
+          })
+      )
+      (_ (axqErr axqCorrupt (concat "an index's statement isn't CREATE INDEX: " x.name) "axqlAlterTable")))))
+
+; ALTER TABLE t RENAME COLUMN old TO new: the rows keep their values;
+; the column's name changes in the table's text, in any DEFAULT or
+; CHECK that names it, and in the indices that cover it.
+(:: runAlterRenameColumn (-> Exec Schema String String String (Result Int Error)))
+;@axiom:effect(io)
+(fn (runAlterRenameColumn ex schema table old new)
+  (let ((t (axqlTableDef schema table)?))
+    (let ((at (axqlColumnIndex t.cols old)) (taken (axqlColumnIndex t.cols new)))
+      (if (< at 0)
+        (axqErr axqSchema (concat (concat "table " t.name) (concat " has no column named " old)) "axqlAlterTable")
+        (if (&& (>= taken 0) (!= taken at))
+          (axqErr axqSchema (concat (concat t.name " already has a column named ") new) "axqlAlterTable")
+          (let ((cols vecNew) (mut failure None))
+            {
+              (for (c i) in t.cols
+                (vecPush cols (ColumnDef
+                  (if (== i at) new c.name)
+                  c.ctype
+                  c.notNull
+                  c.primaryKey
+                  c.link
+                  c.dflt
+                  c.check
+                  (renamedIdents c.text old new)
+                  c.linkAt)))
+              (for x in schema.entries
+                (if (isSome failure)
+                  0
+                  (if (&& (strEq x.kind kindIndex) (axqlNameEq x.table t.name))
+                    (match (match (indexTextRenamed x old new) ((Err er) (Err er)) ((Ok text) (replaceEntry ex x x.name x.table text)))
+                      ((Ok _) 0)
+                      ((Err err)
+                        {
+                          (set failure (Some err))
+                          0
+                        }
+                      ))
+                    0)))
+              (match failure
+                ((Some err) (Err err))
+                ((None)
+                  (match (axqlFindEntry schema t.name)
+                    ((Some e)
+                      (let ((_ (replaceEntry ex e e.name e.table (tableText t.name (columnTexts cols)))?) (_ (pagerBumpSchemaVersion ex.pager)?)) (Ok 0))
+                    )
+                    ((None) (axqErr axqCorrupt "the table left the schema while it was altered" "axqlAlterTable")))))
+            }))))))
+
 ; ALTER TABLE t RENAME TO new.
 (:: runAlterRename (-> Exec Schema String String (Result Int Error)))
 ;@axiom:effect(io)
@@ -4231,6 +4511,8 @@ oldRec)))
         rows))
       ((SAlterAdd table c) (runAlterAdd ex schema table c))
       ((SAlterRename table new) (runAlterRename ex schema table new))
+      ((SAlterDrop table column) (runAlterDrop ex schema table column))
+      ((SAlterRenameColumn table old new) (runAlterRenameColumn ex schema table old new))
       ((SUpdate table cols exprs w) (runUpdate
         ex
         schema

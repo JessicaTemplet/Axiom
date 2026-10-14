@@ -101,7 +101,7 @@ integrator would still need.
 | A would-block test for sockets: `errorKind` answers `WouldBlock` | Done | `tests/stdlib/840-error-kind.ax` |
 | AXQLite: links between tables, a dump that loads back, and messages that name the statement and say what to do | Done | `tests/axqlite/513-axql-links.ax`, `tests/axqlite/618-api-errors.ax` |
 | AXQLite: aggregates, `GROUP BY`, functions, `LIKE`, `IN`, `UPSERT`, `DEFAULT`, `CHECK` and `ALTER TABLE ADD COLUMN` | Done | `tests/axqlite/512-axql-aggregates.ax`, `tests/axqlite/514-axql-constraints.ax` |
-| AXQLite: `DROP COLUMN` and `RENAME COLUMN` | Not started | |
+| AXQLite: `DROP COLUMN` and `RENAME COLUMN` | Done | `tests/axqlite/516-axql-alter.ax` |
 | AXQLite: link paths of more than one step, and links followed backwards | Not started | |
 | AXQLite: a change feed a program can watch for a table's changes | Not started | |
 | AXQLite: compacting a database file in place | Not started | |

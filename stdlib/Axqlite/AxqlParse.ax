@@ -1879,7 +1879,9 @@ cols))))
         (SUpsert table cols rows)
         (SInsert table cols rows)))))
 
-; `ALTER TABLE t ADD [COLUMN] column` or `ALTER TABLE t RENAME TO name`.
+; `ALTER TABLE t ADD [COLUMN] column`, `ALTER TABLE t DROP [COLUMN]
+; column`, `ALTER TABLE t RENAME TO name` or
+; `ALTER TABLE t RENAME [COLUMN] old TO new`.
 (:: parseAlter (-> Ps (Result Stmt Error)))
 (fn (parseAlter p)
   (let ((_ (expect p kwTable "TABLE")?)
@@ -1895,12 +1897,39 @@ cols))))
           0)
         (let ((c (parseColumnDef p)?)) (Ok (SAlterAdd table c)))
       }
-      (if (atWord p "RENAME")
+      (if (== (peekKind p) kwDrop)
         {
           (advance p)
-          (let ((_ (expectWord p "TO")?) (name (parseName p "the table's new name")?)) (Ok (SAlterRename table name)))
+          (if (atWord p "COLUMN")
+            {
+              (advance p)
+              0
+            }
+            0)
+          (let ((name (parseName p "the column to drop")?)) (Ok (SAlterDrop table name)))
         }
-        (expected p "ADD COLUMN or RENAME TO")))))
+        (if (atWord p "RENAME")
+          {
+            (advance p)
+            (if (atWord p "TO")
+              {
+                (advance p)
+                (let ((name (parseName p "the table's new name")?)) (Ok (SAlterRename table name)))
+              }
+              {
+                (if (atWord p "COLUMN")
+                  {
+                    (advance p)
+                    0
+                  }
+                  0)
+                (let ((old (parseName p "the column to rename")?)
+                      (_ (expectWord p "TO")?)
+                      (name (parseName p "the column's new name")?))
+                  (Ok (SAlterRenameColumn table old name)))
+              })
+          }
+          (expected p "ADD COLUMN, DROP COLUMN or RENAME"))))))
 
 ; `(expr, ...) (, (expr, ...))*`, every row as long as the first.
 (:: parseRows (-> Ps (Vec (Vec Expr)) Int (Result (Vec (Vec Expr)) Error)))

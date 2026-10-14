@@ -330,7 +330,9 @@ as text.
 
 ```text
 ALTER TABLE name ADD [COLUMN] column
+ALTER TABLE name DROP [COLUMN] column
 ALTER TABLE name RENAME TO new
+ALTER TABLE name RENAME [COLUMN] old TO new
 ```
 
 `ADD COLUMN` adds a column after the others and gives every row its
@@ -339,12 +341,17 @@ ALTER TABLE name RENAME TO new
 table as it was. The new column can't be the `PRIMARY KEY`, and a
 `NOT NULL` one needs a `DEFAULT`.
 
+`DROP COLUMN` removes a column and its values from every row. It
+refuses the `PRIMARY KEY`, the table's only column, a column an index
+covers, and a column another column's `DEFAULT` or `CHECK` names:
+drop the index or change the other column first.
+
 `RENAME TO` renames the table. Its indices and every `LINK` that points
 at it follow the new name.
 
-Not yet: `DROP COLUMN` and `RENAME COLUMN`; see the
-[roadmap](roadmap.md#standard-library). Make a new table and copy the
-rows across with `INSERT` meanwhile.
+`RENAME COLUMN` renames a column. The rows keep their values, and the
+indices that cover the column and any `DEFAULT` or `CHECK` that names
+it follow the new name.
 
 ### `DROP TABLE`
 
@@ -722,9 +729,9 @@ Tested by `tests/axqlite/620-macro-text.ax` and `tests/axqlite/625-macro-forms.a
 AXQL reads one table per statement, with the rows its links point at.
 It has no joins, no subqueries, no views, triggers, window functions or
 virtual tables, no column-level `UNIQUE` (use a `UNIQUE` index) and no
-collations. Not yet: `DROP COLUMN`, `RENAME COLUMN`, link paths of more
-than one step, links followed backwards, a change feed, and compacting
-the file; see the [roadmap](roadmap.md#standard-library).
+collations. Not yet: link paths of more than one step, links followed
+backwards, a change feed, and compacting the file; see the
+[roadmap](roadmap.md#standard-library).
 
 Tested by the scripts in `tests/axqlite/axql/`, run by
 `tests/axqlite/500-axql-ddl.ax` and its neighbours.
