@@ -22889,7 +22889,7 @@
         (_dis (pairSetSlot cg 1 0))
         (_mtc (memSetWord cg 30 0))
       )
-        (let ((argStrCg (emitArgsRegs args cg argRegs 0 fnName (borrowedFromOwnedClass cg snode))))
+        (let ((bc0 (borrowedFromOwnedClass cg snode)) (argStrCg (emitArgsRegs args cg argRegs 0 fnName bc0)))
           (let (
             (argStrT (strDup (memGetWordStr argStrCg 9)))
             (full (mangledForCg argStrCg fnName))
@@ -23001,7 +23001,7 @@
                                   ; temporary is handed back: the result
                                   ; is transferred from here on
                                   ; (`borrowedFromOwnedClass`)
-                                  (let ((bc (borrowedFromOwnedClass cgE snode)))
+                                  (let ((bc bc0))
                                     (if (== bc 0)
                                       {
                                         (memSetWord cgE 2 r)
@@ -25295,18 +25295,70 @@
 ; A LENT argument - `(vecGet v 0)`, or a counted field read - brings no
 ; share, so `emitArgsRegs` takes one when it is evaluated. Without it,
 ; `(f v (vecGet v 0))` where `f` overwrites slot 0 and answers its
-; type-variable parameter answered the block the overwrite freed:
-; measured, the caller's `println` of the result printed its own
-; format buffer, which had been allocated over it. The result keeps the
-; share instead, and is transferred from the call on.
+; type-variable parameter answered the block the overwrite had freed:
+; measured, the caller's `println` of the result printed its own format
+; buffer, which had been allocated over it. The result keeps the share
+; instead, and is transferred from the call on.
+;
+; Only BESIDE its container (`lentBeside`): a callee can overwrite the
+; place a lent argument came from only if it can reach the container,
+; and the call that hands it over is the one this compiler can see.
+; `(vecGet (vecGet vv i) j)` and `(vecGet r.items k)` stay lent - the
+; accessor overwrites nothing - and transferring them cost a share and
+; a hand-back at every one of the compiler's own nested reads.
+;
+; Owned or transferred arguments are asked by `tyvarResultClass`, not
+; by `transferClass`: every transferred value is a counted
+; type-variable result, so the two answer alike here, and this one
+; does not walk the argument's own arguments again.
 (pub :: borrowedFromOwnedArg (-> Int String (Vec Int) Int Int))
 (pub fn (borrowedFromOwnedArg cg fnName args i)
   (let ((a (vecGet args i)))
     ; A string literal is static: it owns nothing to hand back, and
     ; `(unwrapOr cwd "")` released its `""` (check-static-release).
-    (if (&& (== (isStaticSentinelNode cg a) 0) (&& (&& (!= (& (fnRetMask cg fnName) (anyBit i)) 0) (|| (== (valueOwnedRef cg a) 1) (|| (!= (transferClass cg a) 0) (|| (!= (lendClass cg a) 0) (!= (fieldArgClass cg a) 0))))) (&& (== (& (fnCallStashMask cg fnName args) (| (paramBit i) (ownerBit i))) 0) (== (& (fnConsumeMask cg fnName) (| (paramBit i) (ownerBit i))) 0))))
+    (if (&& (== (isStaticSentinelNode cg a) 0) (&& (&& (!= (& (fnRetMask cg fnName) (anyBit i)) 0) (|| (== (valueOwnedRef cg a) 1) (if (!= (tyvarResultClass cg a) 0) (|| (== (lendClass cg a) 0) (== (lentBeside args i) 1)) (&& (!= (fieldArgClass cg a) 0) (== (lentBeside args i) 1))))) (&& (== (& (fnCallStashMask cg fnName args) (| (paramBit i) (ownerBit i))) 0) (== (& (fnConsumeMask cg fnName) (| (paramBit i) (ownerBit i))) 0))))
       1
       0)))
+
+; Does another argument of the call mention the variable argument `i`
+; is lent from - the root of a field read's base, or of a lending
+; call's first argument? `(f v (vecGet v 0))` and `(f b b.name)` are
+; beside; a root with no name answers 0.
+(pub :: lentBeside (-> (Vec Int) Int Int))
+(pub fn (lentBeside args i)
+  (let ((root (lentRoot (vecGet args i) 8)))
+    (if (== (strLen root) 0)
+      0
+      (let (
+        (mut j 0)
+        (mut hit 0)
+      )
+        {
+          (while (&& (== hit 0) (< j (vecLen args)))
+            {
+              (if (&& (!= j i) (== (mentions root (vecGet args j)) 1))
+                (set hit 1)
+                0)
+              (set j (+ j 1))
+            })
+          hit
+        }))))
+
+; The variable a lent value is read out of: a field read's base, or a
+; call's first argument, followed at most `n` levels; "" for anything
+; else.
+(pub :: lentRoot (-> Int Int String))
+(pub fn (lentRoot e n)
+  (if (|| (== e 0) (<= n 0))
+    ""
+    (let ((tg (nodeTag e)))
+      (if (== tg TAG_E_VAR)
+        (nodeAName e)
+        (if (== tg TAG_E_FIELD)
+          (lentRoot (nodeA e) (- n 1))
+          (if (&& (== tg TAG_E_APP) (>= (spineArity e) 1))
+            (lentRoot (spineArgAt e 0) (- n 1))
+            ""))))))
 
 ; Whether any argument of the call is such a temporary.
 (pub :: borrowedFromOwnedAny (-> Int String (Vec Int) Int Int))
@@ -25326,7 +25378,11 @@
 ; is not such a value.
 (pub :: borrowedFromOwnedClass (-> Int Int Int))
 (pub fn (borrowedFromOwnedClass cg valExpr)
-  (let ((cls (tyvarResultClass cg valExpr)))
+  (let ((cls (if (== (tyvarResultTransfers cg valExpr) 1)
+    ; `result(owned)` (`vecPop`) already hands the caller a share of
+    ; its own; retaining it again here kept every popped element
+    0
+    (tyvarResultClass cg valExpr))))
     (if (== cls 0)
       0
       (let ((args (spineArgVec valExpr vecNew)))

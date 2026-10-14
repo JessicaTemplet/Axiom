@@ -49,7 +49,10 @@ its changelog too.
   block; now the element takes a share when it is evaluated, and the
   result keeps it. A field passed beside its struct gets the same, and
   so does a callee that answers another argument and only reads the
-  element. Tested by `tests/stdlib/900-lent-arg-tyvar-result.ax`.
+  element. The share is taken where the container is passed beside the
+  element: `(vecGet (vecGet vv i) j)` stays lent, since nothing it calls
+  can reach the slot. Tested by
+  `tests/stdlib/900-lent-arg-tyvar-result.ax`.
 
 - A program's `main` is declared `(:: main ())`: it runs for what it
   does and the program exits 0. The tests, examples, docs, website

@@ -4854,13 +4854,18 @@ returns, as an owned temporary does (`MM-LIFE-2c`). So `f` can
 overwrite slot 0 and still read its parameter. Inside a polymorphic
 function, where the element's type is the function's own type
 variable, both steps follow that variable's evidence bit
-(`tests/stdlib/778-vec-lent-argument.ax`). A call whose own result is
-a type variable takes the same share. When its result may be the
-element itself, as in `(f v (vecGet v 0))` where `f` overwrites slot 0
+(`tests/stdlib/778-vec-lent-argument.ax`).
+
+A call whose own result is a type variable takes the same share. When
+its result may be the element itself and the element is passed beside
+its container, as in `(f v (vecGet v 0))` where `f` overwrites slot 0
 and answers its parameter, the result keeps the share and the caller
 hands it back wherever the result goes
-(`tests/stdlib/900-lent-arg-tyvar-result.ax`). A
-struct field passed beside its struct, as in `(f b b.name)`, takes
+(`tests/stdlib/900-lent-arg-tyvar-result.ax`).
+Without its container beside it, as in `(vecGet (vecGet vv i) j)`,
+the callee can't reach the slot and the result stays lent.
+
+A struct field passed beside its struct, as in `(f b b.name)`, takes
 the same share on the same terms, so a store to the field in `f`
 cannot free the value its parameter still reads
 (`tests/stdlib/894-field-beside-struct.ax`).
