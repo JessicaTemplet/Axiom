@@ -11,7 +11,7 @@
 # this gate puts them under load, against the clock, against ablated
 # copies of the library, and checks the processes the pool leaves.
 #
-# TWELVE SECTIONS.
+# THIRTEEN SECTIONS.
 #
 #   1. Mutual exclusion. tests/litmus/sync-load.ax: four bindings,
 #      released together, add 1 to one PLAIN shared word N times each
@@ -140,6 +140,24 @@
 #      two. Both lowerings. Ablation `shortsleep`: a sleep that stops
 #      after its first wait, a tenth of the time asked, must come back
 #      short.
+#  13. Budgets (MM-PAR-17), from tests/litmus/task-budget.ax, in both
+#      lowerings. `keep`: 500 and 5,000 tasks of 4 KiB answers under a
+#      64 KiB budget answer 16 Ok and the rest 1012 or 1002, and peak
+#      RSS differs by at most 2 MiB; the control with no budget must grow
+#      by 8 MiB. `memory`: under a 16 MiB budget a task of 1 MiB answers
+#      Ok and tasks of 256 MiB and of for ever answer 70, and the whole
+#      run's peak RSS stays under 64 MiB; the control without a budget
+#      answers Ok for the 256 MiB task and passes 200 MiB. Shutdown: 40
+#      tasks of 200 ms at width 4, cancelled at 300 ms with 50 ms of
+#      grace, answer 4 Ok and 36 cancelled in under 2 s, every recorded
+#      pid is gone, and the arena's live bytes are back where they were.
+#      A long run: 20 and 200 rounds of a pool over its budget hold the
+#      same peak RSS within 1 MiB and the same live arena bytes within
+#      4 KiB, and the control that keeps every round's answers must grow
+#      by 8 MiB. Ablations: `keepcut` (the budget never checked),
+#      `capcut` (the child never capped) and `spawnregion` (a region
+#      around each spawn again, whose reset loses what the pool gave
+#      back), each on a copy of the library.
 #
 # WHAT THE NUMBERS ARE. Peak RSS (`max_rss_kb`), in KiB, of the whole
 # program. Times are the programs' own `sysTimeoutMicros` readings -
@@ -533,7 +551,7 @@ cuts = {
   # A task is joined on its answer alone, as it first was.
   "exitjoin": [("Task.ax", "        ((Ok b)\n          (if b\n            1\n            (if answered\n              2\n              0))", "        ((Ok b)\n          (if (|| b answered)\n            1\n            0)")],
   # A refused spawn traps past the pool again: no recovery point.
-  "spawnrp": [("Task.ax", "  (region r\n    (__axiom_recover\n      __axiom_arena_mark\n      (lambda (x) (taskWordOf (__proc_spawn wrapper arg))))))", "  (taskWordOf (__proc_spawn wrapper arg)))")],
+  "spawnrp": [("Task.ax", ";@axiom:effect(unsafe)\n(fn (taskSpawn wrapper arg mark)\n  (if (== mark 0)\n    (region r\n      (__axiom_recover\n        __axiom_arena_mark\n        (lambda (x) (taskWordOf (__proc_spawn wrapper arg)))))\n    {\n      (__axiom_arena_mark_into mark)\n      (__axiom_recover\n        mark\n        (lambda (x) (taskWordOf (__proc_spawn wrapper arg))))\n    }))", "(fn (taskSpawn wrapper arg mark)\n  (taskWordOf (__proc_spawn wrapper arg)))")],
   # A refused spawn no longer cancels the pool.
   "refusecancel": [("Task.ax", "                  {\n                    (set cancelling 1)\n                    (set graceEnd (+ now graceUs))\n                  }\n                  0)", "                  0\n                  0)")],
   # The checked pool no longer kills its running slots on a refusal.
@@ -544,7 +562,14 @@ cuts = {
   # in the order it finds them ended, and not in submit order: the
   # completion-order fold MM-PAR-14 rules out.
   "completion": [("Task.ax", "                        {\n                          (set progress 1)\n                          (if (&& (== r 1) opts.failFast)", "                        {\n                          (taskDeliver sink scoped st s slab slotBytes)\n                          (set progress 1)\n                          (if (&& (== r 1) opts.failFast)"),
-                 ("Task.ax", "                (taskDeliver\n                  sink\n                  scoped\n                  st\n                  (% head w)\n                  slab\n                  slotBytes)\n", "                0\n")],
+                 ("Task.ax", "                (let ((k (taskDeliverKept\n                  sink\n                  scoped\n                  st\n                  (% head w)\n                  slab\n                  slotBytes\n                  keep\n                  kept)))", "                (let ((k kept))")],
+  # Section 13. The `keep` budget is never checked.
+  "keepcut": [("Task.ax", "  (if (|| (== keep 0) (!= scoped 0))\n", "  (if true\n")],
+  # Section 13. A map's spawn runs in a region again, whose reset
+  # empties the free lists at every spawn.
+  "spawnregion": [("Task.ax", "  (if (== mark 0)\n    (region r", "  (if true\n    (region r")],
+  # Section 13. The child never caps its arena.
+  "capcut": [("Task.ax", "      (taskCapArena memory)\n", "      0\n")],
   # Section 12. The sleep stops after its first wait, which is asked
   # for a tenth of the time: a sleep that ends short.
   "shortsleep": [("Sys.ax", "            (if (>= now deadline)\n              (set state 1)\n              {\n                (sysWaitWordTimeout (+ buf 16) 0 (- deadline now))\n                0\n              })", "            {\n              (sysWaitWordTimeout (+ buf 16) 0 (/ (- deadline now) 10))\n              (set state 1)\n            }")],
@@ -1247,6 +1272,100 @@ if run_ablation shortsleep "$sleeper" 30 "$work/abl-shortsleep/prog" sleep 200; 
   red shortsleep "$([[ "$mono" =~ ^[0-9]+$ ]] && (( mono >= 200000 )) && echo 1 || echo 0)"
 fi
 
+# ---------------------------------------------------------------------
+echo "== 13. budgets: kept answers, task memory, shutdown, a long run =="
+budget="$repo_root/tests/litmus/task-budget.ax"
+for lowering in processes threads; do
+  flags=(); [[ "$lowering" == threads ]] && flags=(--threads)
+  bin="$work/budget-$lowering"
+  if ! build "$bin" "$budget" ${flags[@]+"${flags[@]}"} --opt 2; then
+    bad "$lowering: task-budget did not build"; sed 's/^/    /' "$bin.build" | head -8; continue
+  fi
+  # keep: the answers past the budget are refused and the pool stops.
+  rc=0; out="$(gate_timeout 60 "$bin" keep 500 2>/dev/null)" || rc=$?
+  if [[ $rc -eq 0 && "$out" =~ ^ok\ 16\ over\ ([1-9][0-9]*)\ cancelled\ ([0-9]+)\ other\ 0$ ]] \
+     && (( BASH_REMATCH[1] + BASH_REMATCH[2] == 484 )); then
+    ok "$lowering keep: 500 tasks under a 64 KiB budget answer '$out'"
+  else
+    bad "$lowering keep: exit $rc, '$out' - wanted 16 Ok, the rest 1012 or 1002"
+  fi
+  small="$(max_rss_kb "$bin" keep 500)" || small=""
+  large="$(max_rss_kb "$bin" keep 5000)" || large=""
+  ctl="$(max_rss_kb "$bin" nokeep 5000)" || ctl=""
+  if [[ "$small" =~ ^[0-9]+$ && "$large" =~ ^[0-9]+$ && "$ctl" =~ ^[0-9]+$ ]]; then
+    if (( large - small <= 2048 )); then
+      ok "$lowering keep: peak RSS ${small} KiB at 500 tasks and ${large} KiB at 5,000"
+    else
+      bad "$lowering keep: peak RSS ${small} KiB at 500 tasks but ${large} KiB at 5,000 - the budget does not bound what is kept"
+    fi
+    if (( ctl - small >= 8192 )); then
+      ok "$lowering keep control: with no budget 5,000 answers peak at ${ctl} KiB - the measure sees kept answers"
+    else
+      bad "$lowering keep control: with no budget 5,000 answers reach only ${ctl} KiB against ${small}"
+    fi
+  else
+    bad "$lowering keep: RSS unreadable ('$small', '$large', '$ctl')"
+  fi
+  # memory: a task past its arena budget traps 70 in its own process.
+  want_hog='task 0: ok 1
+task 1: err 70 task out of memory
+task 2: err 70 task out of memory'
+  rc=0; out="$(gate_timeout 60 "$bin" hog 256 2>/dev/null)" || rc=$?
+  peak="$(max_rss_kb "$bin" hog 256)" || peak=""
+  if [[ $rc -eq 0 && "$out" == "$want_hog" && "$peak" =~ ^[0-9]+$ ]] && (( peak < 65536 )); then
+    ok "$lowering memory: under a 16 MiB budget the 256 MiB and the endless task answer 70, the 1 MiB one Ok, peak RSS ${peak} KiB"
+  else
+    bad "$lowering memory: exit $rc, peak '${peak}' KiB, '$(tr '\n' ';' <<<"$out")'"
+  fi
+  rc=0; out="$(gate_timeout 60 "$bin" nocap 256 2>/dev/null)" || rc=$?
+  peak="$(max_rss_kb "$bin" nocap 256)" || peak=""
+  if [[ $rc -eq 0 && "$(sed -n 2p <<<"$out")" == "task 1: ok 256" && "$peak" =~ ^[0-9]+$ ]] && (( peak >= 204800 )); then
+    ok "$lowering memory control: with no budget the 256 MiB task answers Ok at a peak of ${peak} KiB"
+  else
+    bad "$lowering memory control: exit $rc, peak '${peak}' KiB, '$(tr '\n' ';' <<<"$out")'"
+  fi
+  # Shutdown with work queued and running.
+  rc=0; out="$(gate_timeout 60 "$bin" shutdown 2>/dev/null)" || rc=$?
+  ms="$(field "$out" ms)"
+  grew="$(field "$out" backlog-grew)"
+  pids="$(awk '$1 == "pid" {print $2}' <<<"$out")"
+  if [[ $rc -eq 0 && "$(head -1 <<<"$out")" == "ok 4 over 0 cancelled 36 other 0" && "$ms" =~ ^[0-9]+$ ]] && (( ms < 2000 )) \
+     && [[ "$(wc -l <<<"$pids" | tr -d ' ')" == 8 ]] && gone $pids && [[ "$grew" =~ ^-?[0-9]+$ ]] && (( grew <= 4096 )); then
+    ok "$lowering shutdown: 4 done and 36 cancelled in ${ms} ms, all 8 started pids gone, the arena's live bytes moved by ${grew}"
+  else
+    bad "$lowering shutdown: exit $rc, '$(tr '\n' ';' <<<"$out")'"
+  fi
+  # A long run holds the same peak, and the keeping control grows. The
+  # arena's own count is held too: about 110 bytes a task lost there
+  # would stay under the RSS tolerance at these sizes.
+  live20="$(gate_timeout 120 "$bin" soak 20 2>/dev/null | sed -n 's/.* live //p')"
+  live200="$(gate_timeout 300 "$bin" soak 200 2>/dev/null | sed -n 's/.* live //p')"
+  if [[ "$live20" =~ ^[0-9]+$ && "$live200" =~ ^[0-9]+$ ]] && (( live200 - live20 <= 4096 )); then
+    ok "$lowering long run: the arena holds ${live20} live bytes after 20 rounds and ${live200} after 200"
+  else
+    bad "$lowering long run: the arena holds '${live20}' live bytes after 20 rounds but '${live200}' after 200"
+  fi
+  small="$(max_rss_kb "$bin" soak 20)" || small=""
+  large="$(max_rss_kb "$bin" soak 200)" || large=""
+  ctl="$(max_rss_kb "$bin" soakkeep 200)" || ctl=""
+  if [[ "$small" =~ ^[0-9]+$ && "$large" =~ ^[0-9]+$ && "$ctl" =~ ^[0-9]+$ ]] && (( large - small <= 1024 && ctl - small >= 8192 )); then
+    ok "$lowering long run: peak RSS ${small} KiB after 20 rounds and ${large} KiB after 200; keeping every round reaches ${ctl} KiB"
+  else
+    bad "$lowering long run: peak RSS '${small}' after 20 rounds, '${large}' after 200, control '${ctl}' KiB"
+  fi
+done
+if run_ablation keepcut "$budget" 60 "$work/abl-keepcut/prog" keep 500; then
+  red keepcut "$([[ "$rc" == 0 && "$out" == "ok 16 over "* ]] && echo 1 || echo 0)"
+fi
+if run_ablation spawnregion "$budget" 300 "$work/abl-spawnregion/prog" soak 200; then
+  live200="$(sed -n 's/.* live //p' <<<"$out")"
+  red spawnregion "$([[ "$live200" =~ ^[0-9]+$ && -n "$live20" ]] && (( live200 - live20 <= 4096 )) && echo 1 || echo 0)"
+fi
+if run_ablation capcut "$budget" 60 "$work/abl-capcut/prog" hog2 64; then
+  red capcut "$([[ "$rc" == 0 && "$(sed -n 2p <<<"$out")" == "task 1: err 70 task out of memory" ]] && echo 1 || echo 0)"
+  pkill -KILL -f "$work/abl-capcut/prog" 2>/dev/null || true
+fi
+
 echo
 if (( failed > 0 )); then
   echo "check-task: $failed failed, $checks passed"
@@ -1256,4 +1375,5 @@ echo "check-task: $checks checks - the mutex excludes in both lowerings, timed w
 echo "            keep time, every task failure is a value in its slot, no child"
 echo "            outlives the pool, memory is flat, ordered answers and float"
 echo "            reductions are the sequential bits, a sleep keeps time on a clock"
-echo "            that never steps back, and every ablation turns it red"
+echo "            that never steps back, kept answers and task arenas obey their budgets,"
+echo "            and every ablation turns it red"

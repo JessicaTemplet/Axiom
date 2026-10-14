@@ -75,7 +75,7 @@ is in [the memory model](memory-model.md)).
 | ID | Guarantee | Rule | Evidence |
 |---|---|---|---|
 | R-B1 | `vecGet` and `vecSet` trap with status 77 on a bad index before any read or write | `MM-MUT-5a` | `tests/stdlib/525-vec-set-bounds.ax` |
-| R-B2 | Task pools keep at most their width of workers and handles | `MM-PAR-13` | `tests/stdlib/523-par-pool-bounded.ax`, `scripts/check-task.sh` |
+| R-B2 | Task pools keep at most their width of workers and handles, their `keep` budget of answers and their `memory` budget per task, and running out of a budget is an answer in a slot | `MM-PAR-13`, `MM-PAR-17` | `tests/stdlib/523-par-pool-bounded.ax`, `tests/stdlib/852-task-budgets.ax`, `scripts/check-task.sh` |
 | R-B3 | A region-allocated value can't escape its region by store, return, capture or argument | `MM-RGN-1` to `MM-RGN-6` | `scripts/check-region-escape.sh` |
 | R-B7 | A dead chain of any depth is released without deep recursion, and no share is released twice | `MM-LIFE-2k` | `tests/stdlib/555-release-deep-chain.ax`, `scripts/check-reclaim-soak.sh` |
 | R-B8 | Reuse is bounded by the allocator's size classes, and held, reusable and mapped bytes are readable with `memStats` | `MM-ALLOC-24`, `MM-ALLOC-25` | `tests/stdlib/703-memory-stats.ax`, `scripts/check-reclaim-soak.sh` |
