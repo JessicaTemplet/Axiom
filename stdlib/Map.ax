@@ -275,12 +275,14 @@
 (pub :: mapWithCapacity (-> Int Map))
 (pub fn (mapWithCapacity want)
   (mapAllocTable
-    (mapRoundUpPow2
-      (*
-        (if (< want 1)
-          1
-          want)
-        2))))
+    (if (> want 288230376151711744)
+      (- 0 1)
+      (mapRoundUpPow2
+        (*
+          (if (< want 1)
+            1
+            want)
+          2)))))
 
 ;; `n` rounded up to a power of two, at least `mapDefaultCap`.
 ;
@@ -294,11 +296,18 @@
     mapDefaultCap
     (mapRoundUpPow2From mapDefaultCap n)))
 
+; Past 2^59 slots no table fits the 2^62 bytes an allocation can ask
+; for (MM-ALLOC-7a), and doubling on from there reached 2^63, wrapped
+; to 0 and never stopped: `(mapWithCapacity 2305843009213693953)` hung.
+; Such a size answers -1, which the allocator refuses with status 70
+; before any arithmetic, as `vecBytes` does for a vector.
 (:: mapRoundUpPow2From (-> Int Int Int))
 (fn (mapRoundUpPow2From cap n)
   (if (>= cap n)
     cap
-    (mapRoundUpPow2From (* cap 2) n)))
+    (if (> cap 576460752303423488)
+      (- 0 1)
+      (mapRoundUpPow2From (* cap 2) n))))
 
 ; A header over three freshly zeroed arrays: `cap` words of keys, `cap`
 ; words of values, `cap` *bytes* of states - plus `len`, `used` and the

@@ -800,19 +800,32 @@
     (n (vecLen v))
     (d (vecData v))
   )
-    {
-      (let ((mut i (- (/ n 2) 1)))
-        (while (>= i 0)
-          {
-            (vecSiftDownBy d i n cmp)
-            (set i (- i 1))
-          }))
-      (let ((mut e (- n 1)))
-        (while (> e 0)
-          {
-            (vecSwapWords d 0 e)
-            (vecSiftDownBy d 0 e cmp)
-            (set e (- e 1))
-          }))
-      v
-    }))
+    ; A comparator that grows, shrinks or replaces the vector it is
+    ; sorting would leave the sort swapping words in a block the
+    ; vector no longer owns - a block the allocator may already have
+    ; handed to someone else. Measured: a comparator that pushed one
+    ; element let the sort scramble an unrelated vector's contents.
+    ; So the vector is checked after every comparison, and a change
+    ; stops the program with status 77, the status a bad index has
+    ; (tests/stdlib/849-size-refusals.ax).
+    (let ((guarded (lambda (a b)
+      (let ((r (cmp a b)))
+        (if (|| (!= (vecData v) d) (!= (vecLen v) n))
+          __indexTrap
+          r)))))
+      {
+        (let ((mut i (- (/ n 2) 1)))
+          (while (>= i 0)
+            {
+              (vecSiftDownBy d i n guarded)
+              (set i (- i 1))
+            }))
+        (let ((mut e (- n 1)))
+          (while (> e 0)
+            {
+              (vecSwapWords d 0 e)
+              (vecSiftDownBy d 0 e guarded)
+              (set e (- e 1))
+            }))
+        v
+      })))

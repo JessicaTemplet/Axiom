@@ -16,6 +16,19 @@ its changelog too.
 
 ## Unreleased
 
+- Four defects a read-only audit found, fixed. `((vecGet v 0) 41)`
+  passed 41 to `vecGet` and printed an address: a call that supplies
+  more arguments than an imported callee declares now applies the rest
+  to the closure it answers, as a local callee's did. `(strAlloc -1)`
+  answered a `String` of length -1 and `(mapWithCapacity 2^61+1)` hung;
+  the first now stops with status 77 and the second with 70. A
+  `vecSortBy` comparator that grew the vector let the sort scramble a
+  block the vector had given back; the sort now stops with 77. And a
+  region value stored into a vector built with a bare `vecNew` was
+  never checked; it is `AX3060` now, in a `region` and in a recovery
+  point. Tested by `tests/stdlib/848-over-apply-imported.ax` and
+  `tests/stdlib/849-size-refusals.ax`.
+
 - Tree-sitter colours Axiom the way VS Code does. The queries now give
   each token the role the language server and the TextMate grammar give
   it: one keyword colour, operators wherever they stand, constructors

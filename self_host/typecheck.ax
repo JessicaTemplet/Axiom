@@ -28222,8 +28222,19 @@
 (pub fn (rgnVar rc e)
   (let ((idx (rgnEnvFind rc (nodeAName e))))
     (if (< idx 0)
-      ; a global: a function's name, a constructor, a builtin - static
-      0
+      ; A global: a function's name, a constructor, a builtin - static,
+      ; with one exception. A NULLARY function written bare, `vecNew`,
+      ; is a call, and its answer is fresh in the caller's region like
+      ; any call's. Read as static it carried no origin, so
+      ; `(let ((v vecNew)) (region r (vecPush v s)))` stored a region
+      ; value into a vector nothing checked, and reading it after the
+      ; region ended crashed (tests/diagnostics/1301-region-bare-nullary.ax).
+      (let ((ent (findFnEnt (rgnTc rc) (nodeAName e))))
+        (if (if (== ent 0)
+          false
+          (&& (== (memGetWord ent 2) 0) (&& (== (memGetWord ent 3) 0) (== (memGetWord ent 4) 0))))
+          (rgnApp rc e)
+          0))
       {
         ; A read below the innermost lambda's base is a CAPTURE, and
         ; the closure's origins grow by it.
