@@ -20,6 +20,12 @@
 ; `axqArithmetic`, and `/` truncates toward zero. REAL arithmetic is
 ; IEEE 754, except that dividing by zero and a NaN result answer
 ; `axqArithmetic` too. `%` takes INTEGER operands only.
+;
+; Functions (`axqlApply`) answer NULL for a NULL argument, but
+; `coalesce`, `nullif` and `typeOf`. `funType` gives each its static
+; type, so a wrong argument type is refused before a row is read.
+; `axqlLike` matches a LIKE pattern without recursion.
+(import Mem)
 (import Str)
 (import Vec)
 (import Err)
@@ -347,6 +353,427 @@
     (_ (axqErr axqType (concat "can't negate " (typeName (axqlValueType v))) "axqlNegate"))))
 
 ; ------------------------------------------------------------------
+; Text.
+; ------------------------------------------------------------------
+; `||` over two values: TEXT with TEXT or BLOB with BLOB, NULL giving
+; NULL.
+(:: concatValues (-> Value Value (Result Value Error)))
+(fn (concatValues a b)
+  (if (|| (isNull a) (isNull b))
+    (Ok VNull)
+    (match a
+      ((VText x)
+        (match b
+          ((VText y) (Ok (VText (concat x y))))
+          (_ (concatTypeErr a b)))
+      )
+      ((VBlob x)
+        (match b
+          ((VBlob y) (Ok (VBlob (concat x y))))
+          (_ (concatTypeErr a b)))
+      )
+      (_ (concatTypeErr a b)))))
+
+(:: concatTypeErr (-> Value Value (Result Value Error)))
+(fn (concatTypeErr a b)
+  (axqErr axqType (concat "|| joins TEXT with TEXT or BLOB with BLOB, not " (concat (typeName (axqlValueType a)) (concat " and " (typeName (axqlValueType b))))) "axqlEval"))
+
+; A LIKE pattern as tokens: -1 for `%`, -2 for `_`, else a byte. A
+; backslash makes the byte after it stand for itself.
+(:: likeTokens (-> String (Vec Int)))
+(fn (likeTokens p)
+  (let (
+    (out vecNew)
+    (m (strLen p))
+    (mut j 0)
+  )
+    {
+      (while (< j m)
+        (let ((c (strByte p j)))
+          (if (&& (== c 92) (< (+ j 1) m))
+            {
+              (vecPush out (strByte p (+ j 1)))
+              (set j (+ j 2))
+            }
+            {
+              (vecPush
+                out
+                (if (== c 37)
+                  -1
+                  (== c 95)
+                  -2
+                  c))
+              (set j (+ j 1))
+            })))
+      out
+    }))
+
+;; Whether TEXT `s` matches LIKE pattern `p`: `%` matches any run of
+;; bytes, `_` any one byte, `\` makes the next byte literal, and every
+;; other byte matches itself, case and all.
+(pub :: axqlLike (-> String String Bool))
+(pub fn (axqlLike s p)
+  (let (
+    (toks (likeTokens p))
+    (n (strLen s))
+    (m (vecLen toks))
+    (mut i 0)
+    (mut j 0)
+    (mut starJ -1)
+    (mut starI 0)
+    (mut failed false)
+  )
+    {
+      (while (&& (! failed) (< i n))
+        (let ((t
+          (if (< j m)
+            (vecGet toks j)
+            -3)))
+          (if (|| (== t -2) (== t (strByte s i)))
+            {
+              (set i (+ i 1))
+              (set j (+ j 1))
+            }
+            (if (== t -1)
+              {
+                (set starJ j)
+                (set starI i)
+                (set j (+ j 1))
+              }
+              (if (>= starJ 0)
+                {
+                  (set starI (+ starI 1))
+                  (set i starI)
+                  (set j (+ starJ 1))
+                }
+                {
+                  (set failed true)
+                  0
+                })))))
+      (while (&& (< j m) (== (if (< j m) (vecGet toks j) 0) -1))
+        (set j (+ j 1)))
+      (&& (! failed) (== j m))
+    }))
+
+; `s` with every ASCII lower-case letter raised.
+(:: upperText (-> String String))
+(fn (upperText s)
+  (let (
+    (n (strLen s))
+    (out (strAlloc n))
+    (d (strData out))
+  )
+    {
+      (for i in 0..n
+        (let ((c (strByte s i)))
+          (memPutByte
+            d
+            i
+            (if (&& (>= c 97) (<= c 122))
+              (- c 32)
+              c))))
+      out
+    }))
+
+; `s` with every `from` replaced by `to`, left to right.
+(:: replaceText (-> String String String String))
+(fn (replaceText s from to)
+  (if (strIsEmpty from)
+    s
+    (let (
+      (mut out "")
+      (mut at 0)
+      (mut going true)
+    )
+      {
+        (while going
+          (match (strFind s from at)
+            ((Some k)
+              {
+                (set out (concat out (concat (strSlice s at (- k at)) to)))
+                (set at (+ k (strLen from)))
+                0
+              }
+            )
+            ((None)
+              {
+                (set going false)
+                0
+              }
+            )))
+        (concat out (strSlice s at (- (strLen s) at)))
+      })))
+
+; ------------------------------------------------------------------
+; Functions.
+; ------------------------------------------------------------------
+(:: rangeErr (-> String (Result a Error)))
+(fn (rangeErr msg)
+  (axqErr axqArithmetic msg "axqlEval"))
+
+(:: valueBytes (-> Value String))
+(fn (valueBytes v)
+  (match v
+    ((VText x) x)
+    ((VBlob x) x)
+    (_ "")))
+
+; A value of the same kind as `like`: TEXT or BLOB.
+(:: sameKind (-> Value String Value))
+(fn (sameKind like bytes)
+  (match like
+    ((VBlob _) (VBlob bytes))
+    (_ (VText bytes))))
+
+(:: anyNull (-> (Vec Value) Bool))
+(fn (anyNull vs)
+  (let ((mut found false))
+    {
+      (for v in vs
+        (if (isNull v)
+          {
+            (set found true)
+            0
+          }
+          0))
+      found
+    }))
+
+; The REAL `x` truncated toward zero, when it fits in an INTEGER.
+(:: realToInt (-> Float String (Result Int Error)))
+(fn (realToInt x what)
+  (if (|| (>= x twoTo63) (< x (* -1.0 twoTo63)))
+    (rangeErr (concat (concat what " of ") (concat (floatToString x) " is outside the INTEGER range")))
+    (Ok (__floatToInt x))))
+
+; The INTEGER nearest `x`, halves away from zero.
+(:: roundReal (-> Float (Result Value Error)))
+(fn (roundReal x)
+  (try
+    t
+    (realToInt x "round")
+    (let ((frac (- x (__intToFloat t))))
+      (if (>= frac 0.5)
+        (if (== t 9223372036854775807)
+          (rangeErr "round of a value past the largest INTEGER")
+          (Ok (VInt (+ t 1))))
+        (if (<= frac -0.5)
+          (Ok (VInt (- t 1)))
+          (Ok (VInt t)))))))
+
+; A value's type in lower case, as `typeOf` answers it.
+(:: typeWord (-> Value String))
+(fn (typeWord v)
+  (match v
+    ((VNull) "null")
+    ((VInt _) "integer")
+    ((VReal _) "real")
+    ((VText _) "text")
+    ((VBlob _) "blob")))
+
+; `substr(s, start [, len])`, counting bytes from 1.
+(:: substrOf (-> (Vec Value) (Result Value Error)))
+(fn (substrOf vs)
+  (let (
+    (s (vecGet vs 0))
+    (bytes (valueBytes s))
+    (n (strLen bytes))
+  )
+    (match (vecGet vs 1)
+      ((VInt start)
+        (if (< start 1)
+          (rangeErr (concat "substr counts from 1, so its start can't be " (fmtInt start)))
+          (let ((len
+            (if (> (vecLen vs) 2)
+              (match (vecGet vs 2)
+                ((VInt k) k)
+                (_ 0))
+              n)))
+            (if (< len 0)
+              (rangeErr (concat "substr's length can't be negative: " (fmtInt len)))
+              (let (
+                (from (if (> (- start 1) n)
+                  n
+                  (- start 1)))
+                (take (if (> len (- n from))
+                  (- n from)
+                  len))
+              )
+                (Ok (sameKind s (strDup (strSlice bytes from take)))))))))
+      (_ (axqErr axqType "substr's start needs an INTEGER" "axqlEval")))))
+
+; `asInt(v)`: an INTEGER from a number or from TEXT spelling one.
+(:: asIntOf (-> Value (Result Value Error)))
+(fn (asIntOf v)
+  (match v
+    ((VInt _) (Ok v))
+    ((VReal x) (try n (realToInt x "asInt") (Ok (VInt n))))
+    ((VText s)
+      (match (strParseInt (strTrim s))
+        ((Some n) (Ok (VInt n)))
+        ((None) (axqErr axqType (concat (concat "asInt can't read " (axqlQuote s)) " as an INTEGER") "axqlEval")))
+    )
+    (_ (axqErr axqType (concat "asInt needs a number or TEXT, not " (typeName (axqlValueType v))) "axqlEval"))))
+
+; `asReal(v)`: a REAL from a number or from TEXT spelling one.
+(:: asRealOf (-> Value (Result Value Error)))
+(fn (asRealOf v)
+  (match v
+    ((VInt n) (Ok (VReal (__intToFloat n))))
+    ((VReal _) (Ok v))
+    ((VText s)
+      (match (floatParse (strTrim s))
+        ((Ok x)
+          (if (floatIsNan x)
+            (axqErr axqType (concat (concat "asReal can't read " (axqlQuote s)) " as a REAL: NaN can't be stored") "axqlEval")
+            (Ok (VReal x)))
+        )
+        ((Err _) (axqErr axqType (concat (concat "asReal can't read " (axqlQuote s)) " as a REAL") "axqlEval")))
+    )
+    (_ (axqErr axqType (concat "asReal needs a number or TEXT, not " (typeName (axqlValueType v))) "axqlEval"))))
+
+; `asText(v)`: a number written in decimal, or a BLOB's bytes as TEXT.
+(:: asTextOf (-> Value Value))
+(fn (asTextOf v)
+  (match v
+    ((VInt n) (VText (fmtInt n)))
+    ((VReal x) (VText (floatToString x)))
+    ((VBlob b) (VText b))
+    (_ v)))
+
+; `s` in single quotes for a message, cut at 40 bytes.
+(:: axqlQuote (-> String String))
+(fn (axqlQuote s)
+  (if (> (strLen s) 40)
+    (concat (concat "'" (strSlice s 0 40)) "...'")
+    (concat (concat "'" s) "'")))
+
+; `min` or `max` over two or more values: NULL when any is NULL.
+(:: extremeOf (-> Bool (Vec Value) (Result Value Error)))
+(fn (extremeOf wantMax vs)
+  (if (anyNull vs)
+    (Ok VNull)
+    (let (
+      (mut best (vecGet vs 0))
+      (mut failure None)
+    )
+      {
+        (for v in vs
+          (if (isNone failure)
+            (match (axqlCompare v best)
+              ((Ok c)
+                (if (if wantMax
+                  (> c 0)
+                  (< c 0))
+                  {
+                    (set best v)
+                    0
+                  }
+                  0)
+              )
+              ((Err e)
+                {
+                  (set failure (Some e))
+                  0
+                }
+              ))
+            0))
+        (match failure
+          ((Some e) (Err e))
+          ((None) (Ok best)))
+      })))
+
+(:: firstNonNull (-> (Vec Value) Value))
+(fn (firstNonNull vs)
+  (let ((mut found VNull))
+    {
+      (for v in vs
+        (if (&& (isNull found) (! (isNull v)))
+          {
+            (set found v)
+            0
+          }
+          0))
+      found
+    }))
+
+;; Function `name` (in lower case) applied to argument values `vs`,
+;; whose number the parser has checked. Every function but `coalesce`,
+;; `nullif` and `typeOf` answers NULL when an argument is NULL.
+(pub :: axqlApply (-> String (Vec Value) (Result Value Error)))
+(pub fn (axqlApply name vs)
+  (let ((a (vecGet vs 0)))
+    (if (strEq name "coalesce")
+      (Ok (firstNonNull vs))
+      (strEq name "typeof")
+      (Ok (VText (typeWord a)))
+      (strEq name "nullif")
+      (if (|| (isNull a) (isNull (vecGet vs 1)))
+        (Ok a)
+        (try
+          c
+          (axqlCompare a (vecGet vs 1))
+          (Ok
+            (if (== c 0)
+              VNull
+              a))))
+      (strEq name "min")
+      (extremeOf false vs)
+      (strEq name "max")
+      (extremeOf true vs)
+      (anyNull vs)
+      (Ok VNull)
+      (strEq name "length")
+      (Ok (VInt (strLen (valueBytes a))))
+      (strEq name "lower")
+      (Ok (VText (strLower (valueBytes a))))
+      (strEq name "upper")
+      (Ok (VText (upperText (valueBytes a))))
+      (strEq name "trim")
+      (Ok (VText (strDup (strTrim (valueBytes a)))))
+      (strEq name "replace")
+      (Ok (VText (replaceText (valueBytes a) (valueBytes (vecGet vs 1)) (valueBytes (vecGet vs 2)))))
+      (strEq name "instr")
+      (Ok
+        (VInt
+          (match (strFind (valueBytes a) (valueBytes (vecGet vs 1)) 0)
+            ((Some k) (+ k 1))
+            ((None) 0))))
+      (strEq name "substr")
+      (substrOf vs)
+      (strEq name "abs")
+      (match a
+        ((VInt n)
+          (if (== n intMin)
+            (rangeErr "integer overflow: abs(-9223372036854775808)")
+            (Ok
+              (VInt
+                (if (< n 0)
+                  (- 0 n)
+                  n))))
+        )
+        ((VReal x)
+          (Ok
+            (VReal
+              (if (< x 0.0)
+                (* -1.0 x)
+                x)))
+        )
+        (_ (axqErr axqType "abs needs a number" "axqlEval")))
+      (strEq name "round")
+      (match a
+        ((VInt _) (Ok a))
+        ((VReal x) (roundReal x))
+        (_ (axqErr axqType "round needs a number" "axqlEval")))
+      (strEq name "asint")
+      (asIntOf a)
+      (strEq name "asreal")
+      (asRealOf a)
+      (strEq name "astext")
+      (Ok (asTextOf a))
+      (axqErr axqSyntax (concat "no function named " name) "axqlEval"))))
+
+; ------------------------------------------------------------------
 ; Evaluation.
 ; ------------------------------------------------------------------
 ;; Evaluate `e` over one row: `row` holds the table's columns and `rowid`
@@ -425,8 +852,121 @@
               rb
               (if (opIsComparison op)
                 (axqlComparison op a b)
+                (== op opConcat)
+                (concatValues a b)
                 (axqlArith op a b))))))
-    )))
+    )
+    ((EFun name args _) (try vs (axqlEvalAll args row rowid params) (axqlApply name vs)))
+    ((ELike x pat negated _)
+      (let (
+        (rx (axqlEval x row rowid params))
+        (rp (axqlEval pat row rowid params))
+      )
+        (try
+          v
+          rx
+          (try
+            pv
+            rp
+            (if (|| (isNull v) (isNull pv))
+              (Ok VNull)
+              (let ((hit (axqlLike (valueBytes v) (valueBytes pv))))
+                (Ok
+                  (VInt
+                    (if (if negated
+                      (! hit)
+                      hit)
+                      1
+                      0))))))))
+    )
+    ((EIn x items negated _)
+      (let ((rx (axqlEval x row rowid params)))
+        (try
+          v
+          rx
+          (if (isNull v)
+            (Ok VNull)
+            (try
+              t
+              (inList v items row rowid params)
+              (Ok
+                (truthValue
+                  (if (|| (! negated) (== t tvNull))
+                    t
+                    (- 1 t))))))))
+    )
+    ((EAgg k _ _) (axqErr axqMisuse (concat (aggName k) " is an aggregate, worked out once per group") "axqlEval"))
+    ((ELink l c _) (axqErr axqSchema (concat (concat "the link path " l) (concat "." (concat c " wasn't resolved"))) "axqlEval"))))
+
+;; Every expression of `es` evaluated over one row, or the first
+;; failure.
+(pub :: axqlEvalAll (-> (Vec Expr) (Vec Value) Int (Vec Value) (Result (Vec Value) Error)))
+(pub fn (axqlEvalAll es row rowid params)
+  (let (
+    (out vecNew)
+    (mut failure None)
+  )
+    {
+      (for e in es
+        (if (isNone failure)
+          (match (axqlEval e row rowid params)
+            ((Ok v)
+              {
+                (vecPush out v)
+                0
+              }
+            )
+            ((Err err)
+              {
+                (set failure (Some err))
+                0
+              }
+            ))
+          0))
+      (match failure
+        ((Some err) (Err err))
+        ((None) (Ok out)))
+    }))
+
+; Whether `v` equals an item of `items`: TRUE when one is equal, else
+; NULL when an item is NULL, else FALSE.
+(:: inList (-> Value (Vec Expr) (Vec Value) Int (Vec Value) (Result Int Error)))
+(fn (inList v items row rowid params)
+  (try
+    vs
+    (axqlEvalAll items row rowid params)
+    (let (
+      (mut found tvFalse)
+      (mut failure None)
+    )
+      {
+        (for w in vs
+          (if (|| (== found tvTrue) (isSome failure))
+            0
+            (if (isNull w)
+              {
+                (set found tvNull)
+                0
+              }
+              (match (axqlCompare v w)
+                ((Ok c)
+                  (if (== c 0)
+                    {
+                      (set found tvTrue)
+                      0
+                    }
+                    0)
+                )
+                ((Err e)
+                  {
+                    (set failure (Some e))
+                    0
+                  }
+                )))))
+        (match failure
+          ((Some e) (Err e))
+          ((None) (Ok found)))
+      })))
 
 ; The truth of `e` over a row: TRUE, FALSE, NULL, or the failure.
 (:: evalTruth (-> Expr (Vec Value) Int (Vec Value) (Result Int Error)))
@@ -588,10 +1128,264 @@
           a
           b
           at))))
-    )))
+    )
+    ((EFun name args at) (try ts (typesOf src args colTypes params) (funType src name ts at)))
+    ((ELike x pat _ at)
+      (let (
+        (rx (axqlTypeOf src x colTypes params))
+        (rp (axqlTypeOf src pat colTypes params))
+      )
+        (try
+          a
+          rx
+          (try
+            b
+            rp
+            (if (&& (|| (== a typeNull) (== a typeText)) (|| (== b typeNull) (== b typeText)))
+              (Ok typeInteger)
+              (typeErrAt src at (concat "LIKE matches TEXT against a TEXT pattern, not " (pairText a b)))))))
+    )
+    ((EIn x items _ at)
+      (let ((rx (axqlTypeOf src x colTypes params)))
+        (try
+          a
+          rx
+          (try
+            ts
+            (typesOf src items colTypes params)
+          (let ((mut bad -1))
+            {
+              (for t in ts
+                (if (&& (< bad 0) (! (comparable a t)))
+                  (set bad t)
+                  0))
+              (if (< bad 0)
+                (Ok typeInteger)
+                (typeErrAt src at (concat "IN can't compare " (concat (typeName a) (concat " with " (typeName bad))))))
+            }))))
+    )
+    ((EAgg k arg at)
+      (match arg
+        ((None) (Ok typeInteger))
+        ((Some x)
+          (let ((rt (axqlTypeOf src x colTypes params)))
+            (try
+            t
+            rt
+            (if (== k aggCount)
+              (Ok typeInteger)
+              (|| (== k aggMin) (== k aggMax))
+              (Ok t)
+              (if (|| (== t typeNull) (isNumericType t))
+                (Ok
+                  (if (== k aggAvg)
+                    typeReal
+                    t))
+                (typeErrAt src at (concat (concat (aggName k) " needs numbers, not ") (typeName t)))))))
+        ))
+    )
+    ((ELink l c at) (axqErr axqSchema (concat (concat "the link path " l) (concat "." (concat c " wasn't resolved"))) "axqlTypeOf"))))
+
+; The static types of `es`.
+(:: typesOf (-> String (Vec Expr) (Vec Int) (Vec Value) (Result (Vec Int) Error)))
+(fn (typesOf src es colTypes params)
+  (let (
+    (out vecNew)
+    (mut failure None)
+  )
+    {
+      (for e in es
+        (if (isNone failure)
+          (match (axqlTypeOf src e colTypes params)
+            ((Ok t)
+              {
+                (vecPush out t)
+                0
+              }
+            )
+            ((Err err)
+              {
+                (set failure (Some err))
+                0
+              }
+            ))
+          0))
+      (match failure
+        ((Some err) (Err err))
+        ((None) (Ok out)))
+    }))
+
+; Whether two static types may be compared.
+(:: comparable (-> Int Int Bool))
+(fn (comparable a b)
+  (|| (== a typeNull) (|| (== b typeNull) (|| (== a b) (&& (isNumericType a) (isNumericType b))))))
+
+; The one type values of types `ts` share: NULL's is any, and INTEGER
+; with REAL is REAL. -1 when they share none.
+(:: unifyTypes (-> (Vec Int) Int))
+(fn (unifyTypes ts)
+  (let ((mut u typeNull))
+    {
+      (for t in ts
+        (if (< u 0)
+          0
+          (if (== t typeNull)
+            0
+            (if (== u typeNull)
+              (set u t)
+              (if (== u t)
+                0
+                (if (&& (isNumericType u) (isNumericType t))
+                  (set u typeReal)
+                  (set u -1)))))))
+      u
+    }))
+
+; Whether `t` is one of `ok`, or NULL's type.
+(:: typeIn (-> Int (Vec Int) Bool))
+(fn (typeIn t ok)
+  (let ((mut found (== t typeNull)))
+    {
+      (for k in ok
+        (if (== k t)
+          {
+            (set found true)
+            0
+          }
+          0))
+      found
+    }))
+
+(:: textTypes (Vec Int))
+(fn (textTypes)
+  (let ((v vecNew))
+    {
+      (vecPush v typeText)
+      v
+    }))
+
+(:: bytesTypes (Vec Int))
+(fn (bytesTypes)
+  (let ((v (textTypes)))
+    {
+      (vecPush v typeBlob)
+      v
+    }))
+
+(:: numberTypes (Vec Int))
+(fn (numberTypes)
+  (let ((v vecNew))
+    {
+      (vecPush v typeInteger)
+      (vecPush v typeReal)
+      v
+    }))
+
+(:: convertibleTypes (Vec Int))
+(fn (convertibleTypes)
+  (let ((v (numberTypes)))
+    {
+      (vecPush v typeText)
+      v
+    }))
+
+; The first argument of `ts` whose type isn't in `ok`, or -1.
+(:: firstOutside (-> (Vec Int) (Vec Int) Int))
+(fn (firstOutside ts ok)
+  (let ((mut bad -1))
+    {
+      (for (t i) in ts
+        (if (&& (< bad 0) (! (typeIn t ok)))
+          (set bad i)
+          0))
+      bad
+    }))
+
+; The refusal of argument `i` of function `name`, of type `t`.
+(:: argTypeErr (-> String String Int Int Int String (Result Int Error)))
+(fn (argTypeErr src name i t at want)
+  (typeErrAt
+    src
+    at
+    (concat
+      (concat (concat (concat name "'s argument ") (fmtInt (+ i 1))) (concat " needs " want))
+      (concat ", not " (typeName t)))))
+
+; The type of a call of function `name` with arguments of types `ts`.
+(:: funType (-> String String (Vec Int) Int (Result Int Error)))
+(fn (funType src name ts at)
+  (let ((t0 (vecGet ts 0)))
+    (if (|| (strEq name "coalesce") (|| (strEq name "min") (strEq name "max")))
+      (let ((u (unifyTypes ts)))
+        (if (< u 0)
+          (typeErrAt src at (concat name "'s arguments need one type, or INTEGER mixed with REAL"))
+          (Ok u)))
+      (strEq name "nullif")
+      (if (comparable t0 (vecGet ts 1))
+        (Ok t0)
+        (typeErrAt src at (concat "nullif can't compare " (pairText t0 (vecGet ts 1)))))
+      (strEq name "typeof")
+      (Ok typeText)
+      (strEq name "astext")
+      (Ok typeText)
+      (|| (strEq name "asint") (strEq name "asreal"))
+      (if (typeIn t0 convertibleTypes)
+        (Ok
+          (if (strEq name "asint")
+            typeInteger
+            typeReal))
+        (argTypeErr src name 0 t0 at "a number or TEXT"))
+      (|| (strEq name "abs") (strEq name "round"))
+      (if (typeIn t0 numberTypes)
+        (Ok
+          (if (strEq name "round")
+            typeInteger
+            t0))
+        (argTypeErr src name 0 t0 at "a number"))
+      (strEq name "length")
+      (if (typeIn t0 bytesTypes)
+        (Ok typeInteger)
+        (argTypeErr src name 0 t0 at "TEXT or BLOB"))
+      (|| (strEq name "lower") (|| (strEq name "upper") (|| (strEq name "trim") (strEq name "replace"))))
+      (let ((bad (firstOutside ts textTypes)))
+        (if (< bad 0)
+          (Ok typeText)
+          (argTypeErr src name bad (vecGet ts bad) at "TEXT")))
+      (strEq name "instr")
+      (if (&& (typeIn t0 bytesTypes) (comparable t0 (vecGet ts 1)))
+        (Ok typeInteger)
+        (typeErrAt src at (concat "instr looks for TEXT in TEXT or a BLOB in a BLOB, not " (pairText t0 (vecGet ts 1)))))
+      (strEq name "substr")
+      (if (! (typeIn t0 bytesTypes))
+        (argTypeErr src name 0 t0 at "TEXT or BLOB")
+        (let ((ints vecNew))
+          {
+            (vecPush ints typeInteger)
+            (let ((rest vecNew))
+              {
+                (for (t i) in ts
+                  (if (> i 0)
+                    (vecPush rest t)
+                    rest))
+                (let ((bad (firstOutside rest ints)))
+                  (if (< bad 0)
+                    (Ok t0)
+                    (argTypeErr src name (+ bad 1) (vecGet rest bad) at "an INTEGER")))
+              })
+          }))
+      (typeErrAt src at (concat "no function named " name)))))
 
 (:: binType (-> String Int Int Int Int (Result Int Error)))
 (fn (binType src op a b at)
+  (if (== op opConcat)
+    (if (&& (|| (== a typeNull) (== a typeText)) (|| (== b typeNull) (== b typeText)))
+      (Ok
+        (if (&& (== a typeNull) (== b typeNull))
+          typeNull
+          typeText))
+      (if (&& (|| (== a typeNull) (== a typeBlob)) (|| (== b typeNull) (== b typeBlob)))
+        (Ok typeBlob)
+        (typeErrAt src at (concat (concat "|| joins TEXT with TEXT or BLOB with BLOB, not " (pairText a b)) "; asText converts a number"))))
   (if (|| (== op opAnd) (== op opOr))
     (if (&& (|| (== a typeNull) (isNumericType a)) (|| (== b typeNull) (isNumericType b)))
       (Ok typeInteger)
@@ -614,7 +1408,7 @@
               (|| (== a typeReal) (== b typeReal))
               typeReal
               typeInteger))
-          (typeErrAt src at (concat (concat (concat "can't apply " (opText op)) " to ") (pairText a b))))))))
+          (typeErrAt src at (concat (concat (concat "can't apply " (opText op)) " to ") (pairText a b)))))))))
 
 (:: pairText (-> Int Int String))
 (fn (pairText a b)
@@ -630,6 +1424,11 @@
     ((EBin _ _ _ at) at)
     ((ENot x) (exprPos x))
     ((EIsNull x _) (exprPos x))
+    ((EFun _ _ at) at)
+    ((EAgg _ _ at) at)
+    ((ELike _ _ _ at) at)
+    ((EIn _ _ _ at) at)
+    ((ELink _ _ at) at)
     (_ -1)))
 
 (:: typeErrAt (-> String Int String (Result a Error)))
@@ -668,7 +1467,44 @@
     ((EBin op l r at)
       (let ((rl (axqlFold l params)))
         (try fl rl (try fr (axqlFold r params) (Ok (EBin op fl fr at)))))
-    )))
+    )
+    ((EFun name args at) (try fs (foldAll args params) (Ok (EFun name fs at))))
+    ((EAgg k arg at)
+      (match arg
+        ((None) (Ok e))
+        ((Some x) (try fx (axqlFold x params) (Ok (EAgg k (Some fx) at)))))
+    )
+    ((ELike x pat negated at) (try fx (axqlFold x params) (try fp (axqlFold pat params) (Ok (ELike fx fp negated at)))))
+    ((EIn x items negated at) (try fx (axqlFold x params) (try fs (foldAll items params) (Ok (EIn fx fs negated at)))))
+    ((ELink _ _ _) (Ok e))))
+
+(:: foldAll (-> (Vec Expr) (Vec Value) (Result (Vec Expr) Error)))
+(fn (foldAll es params)
+  (let (
+    (out vecNew)
+    (mut failure None)
+  )
+    {
+      (for e in es
+        (if (isNone failure)
+          (match (axqlFold e params)
+            ((Ok f)
+              {
+                (vecPush out f)
+                0
+              }
+            )
+            ((Err err)
+              {
+                (set failure (Some err))
+                0
+              }
+            ))
+          0))
+      (match failure
+        ((Some err) (Err err))
+        ((None) (Ok out)))
+    }))
 
 (:: isLit (-> Expr Bool))
 (fn (isLit e)
@@ -688,4 +1524,250 @@
     ((ENeg x _) (axqlIsConstant x))
     ((ENot x) (axqlIsConstant x))
     ((EIsNull x _) (axqlIsConstant x))
-    ((EBin _ l r _) (&& (axqlIsConstant l) (axqlIsConstant r)))))
+    ((EBin _ l r _) (&& (axqlIsConstant l) (axqlIsConstant r)))
+    ((EFun _ args _) (allConstant args))
+    ((EAgg _ _ _) false)
+    ((ELike x pat _ _) (&& (axqlIsConstant x) (axqlIsConstant pat)))
+    ((EIn x items _ _) (&& (axqlIsConstant x) (allConstant items)))
+    ((ELink _ _ _) false)))
+
+; ------------------------------------------------------------------
+; Walking expressions.
+; ------------------------------------------------------------------
+;; The expressions directly inside `e`, left to right.
+(pub :: axqlChildren (-> Expr (Vec Expr)))
+(pub fn (axqlChildren e)
+  (let ((out vecNew))
+    {
+      (match e
+        ((ENeg x _) (vecPush out x))
+        ((ENot x) (vecPush out x))
+        ((EIsNull x _) (vecPush out x))
+        ((EBin _ l r _)
+          {
+            (vecPush out l)
+            (vecPush out r)
+          }
+        )
+        ((EFun _ args _)
+          {
+            (for a in args
+              (vecPush out a))
+            out
+          }
+        )
+        ((EAgg _ arg _)
+          (match arg
+            ((Some x) (vecPush out x))
+            ((None) out))
+        )
+        ((ELike x pat _ _)
+          {
+            (vecPush out x)
+            (vecPush out pat)
+          }
+        )
+        ((EIn x items _ _)
+          {
+            (vecPush out x)
+            (for a in items
+              (vecPush out a))
+            out
+          }
+        )
+        (_ out))
+      out
+    }))
+
+;; Whether `e` holds an aggregate anywhere.
+(pub :: axqlHasAgg (-> Expr Bool))
+(pub fn (axqlHasAgg e)
+  (match e
+    ((EAgg _ _ _) true)
+    (_
+      (let ((mut found false))
+        {
+          (for c in (axqlChildren e)
+            (if (axqlHasAgg c)
+              {
+                (set found true)
+                0
+              }
+              0))
+          found
+        })
+    )))
+
+;; The offset of the first aggregate in `e`, or -1.
+(pub :: axqlAggPos (-> Expr Int))
+(pub fn (axqlAggPos e)
+  (match e
+    ((EAgg _ _ at) at)
+    (_
+      (let ((mut found -1))
+        {
+          (for c in (axqlChildren e)
+            (if (< found 0)
+              (set found (axqlAggPos c))
+              0))
+          found
+        })
+    )))
+
+;; Whether `e` holds a parameter or a link path anywhere: what a
+;; DEFAULT or CHECK stored in the schema can't hold.
+(pub :: axqlHasParamOrLink (-> Expr Bool))
+(pub fn (axqlHasParamOrLink e)
+  (match e
+    ((EParam _ _) true)
+    ((ELink _ _ _) true)
+    (_
+      (let ((mut found false))
+        {
+          (for c in (axqlChildren e)
+            (if (axqlHasParamOrLink c)
+              {
+                (set found true)
+                0
+              }
+              0))
+          found
+        })
+    )))
+
+;; Every column number a bound `e` reads, pushed onto `out`.
+(pub :: axqlColumnsRead (-> Expr (Vec Int) Int))
+(pub fn (axqlColumnsRead e out)
+  (match e
+    ((ECol i)
+      {
+        (vecPush out i)
+        0
+      }
+    )
+    (_
+      {
+        (for c in (axqlChildren e)
+          (axqlColumnsRead c out))
+        0
+      }
+    )))
+
+(:: valueEq (-> Value Value Bool))
+(fn (valueEq a b)
+  (match a
+    ((VNull) (isNull b))
+    ((VInt x)
+      (match b
+        ((VInt y) (== x y))
+        (_ false))
+    )
+    ((VReal x)
+      (match b
+        ((VReal y) (== x y))
+        (_ false))
+    )
+    ((VText x)
+      (match b
+        ((VText y) (strEq x y))
+        (_ false))
+    )
+    ((VBlob x)
+      (match b
+        ((VBlob y) (strEq x y))
+        (_ false))
+    )))
+
+;; Whether two bound expressions are written the same way.
+(pub :: axqlExprEq (-> Expr Expr Bool))
+(pub fn (axqlExprEq a b)
+  (let (
+    (same (match a
+      ((ELit v)
+        (match b
+          ((ELit w) (valueEq v w))
+          (_ false))
+      )
+      ((ECol i)
+        (match b
+          ((ECol j) (== i j))
+          (_ false))
+      )
+      ((EParam i _)
+        (match b
+          ((EParam j _) (== i j))
+          (_ false))
+      )
+      ((ENeg _ _)
+        (match b
+          ((ENeg _ _) true)
+          (_ false))
+      )
+      ((ENot _)
+        (match b
+          ((ENot _) true)
+          (_ false))
+      )
+      ((EIsNull _ n)
+        (match b
+          ((EIsNull _ m) (== (if n 1 0) (if m 1 0)))
+          (_ false))
+      )
+      ((EBin op _ _ _)
+        (match b
+          ((EBin op2 _ _ _) (== op op2))
+          (_ false))
+      )
+      ((EFun name _ _)
+        (match b
+          ((EFun name2 _ _) (strEq name name2))
+          (_ false))
+      )
+      ((EAgg k _ _)
+        (match b
+          ((EAgg k2 _ _) (== k k2))
+          (_ false))
+      )
+      ((ELike _ _ n _)
+        (match b
+          ((ELike _ _ m _) (== (if n 1 0) (if m 1 0)))
+          (_ false))
+      )
+      ((EIn _ _ n _)
+        (match b
+          ((EIn _ _ m _) (== (if n 1 0) (if m 1 0)))
+          (_ false))
+      )
+      (_ false)))
+  )
+    (if (! same)
+      false
+      (let (
+        (ca (axqlChildren a))
+        (cb (axqlChildren b))
+        (mut eq (== (vecLen ca) (vecLen cb)))
+      )
+        {
+          (for (x i) in ca
+            (if (&& eq (! (axqlExprEq x (vecGet cb i))))
+              {
+                (set eq false)
+                0
+              }
+              0))
+          eq
+        }))))
+
+(:: allConstant (-> (Vec Expr) Bool))
+(fn (allConstant es)
+  (let ((mut all true))
+    {
+      (for e in es
+        (if (axqlIsConstant e)
+          0
+          {
+            (set all false)
+            0
+          }))
+      all
+    }))

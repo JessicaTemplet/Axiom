@@ -1,0 +1,78 @@
+# DEFAULT and CHECK: a DEFAULT fills a column a write leaves out, a
+# CHECK refuses a row it finds FALSE, and CREATE TABLE refuses either
+# when it can't work. Expected results follow docs/axql.md.
+
+statement ok
+CREATE TABLE p (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT 'anon', age INTEGER CHECK (age >= 0 AND age < 150), score REAL DEFAULT 1 CHECK (score <= 10.0), tag TEXT DEFAULT NULL)
+
+statement ok
+INSERT INTO p (id) VALUES (1)
+
+statement ok
+INSERT INTO p (id, name, age) VALUES (2, 'Ada', 36)
+
+statement ok
+INSERT INTO p (id, age, score) VALUES (3, NULL, NULL)
+
+query
+SELECT id, name, age, score, tag FROM p ORDER BY id
+----
+1,'anon',NULL,1.0,NULL
+2,'Ada',36,1.0,NULL
+3,'anon',NULL,NULL,NULL
+
+statement error axqConstraint a row of p breaks the CHECK on age: age INTEGER CHECK (age >= 0 AND age < 150)
+INSERT INTO p (id, age) VALUES (4, -1)
+
+statement error axqConstraint a row of p breaks the CHECK on score
+UPDATE p SET score = 11 WHERE id = 2
+
+statement error axqConstraint a row of p breaks the CHECK on age
+UPDATE p SET age = age + 200
+
+query
+SELECT id, age FROM p ORDER BY id
+----
+1,NULL
+2,36
+3,NULL
+
+statement ok
+CREATE TABLE d (a INTEGER DEFAULT -5, b TEXT DEFAULT ('x' || 'y'), c REAL DEFAULT 2, e BLOB DEFAULT x'00', f INTEGER DEFAULT ((1 + 2) * 3), g TEXT DEFAULT upper('q'))
+
+statement ok
+INSERT INTO d (a) VALUES (0)
+
+query
+SELECT * FROM d
+----
+0,'xy',2.0,x'00',9,'Q'
+
+statement error axqType a is INTEGER, but its DEFAULT is TEXT
+CREATE TABLE x (a INTEGER DEFAULT 'one')
+
+statement error axqSchema a is NOT NULL, so its DEFAULT can't be NULL
+CREATE TABLE x (a INTEGER NOT NULL DEFAULT NULL)
+
+statement error axqSchema the DEFAULT of b must be a value
+CREATE TABLE x (a INTEGER, b INTEGER DEFAULT a)
+
+statement error axqSchema it can't have a DEFAULT
+CREATE TABLE x (id INTEGER PRIMARY KEY DEFAULT 1)
+
+statement error axqArithmetic integer division by zero
+CREATE TABLE x (a INTEGER DEFAULT (1 / 0))
+
+statement error axqType the CHECK of a needs a truth value, not TEXT
+CREATE TABLE x (a TEXT CHECK (a))
+
+statement error axqSchema no such column: b
+CREATE TABLE x (a INTEGER CHECK (b > 0))
+
+statement error axqSyntax an aggregate can't be used here; a CHECK looks at one row
+CREATE TABLE x (a INTEGER CHECK (count(*) > 0))
+
+query
+SELECT count(*) FROM d
+----
+1

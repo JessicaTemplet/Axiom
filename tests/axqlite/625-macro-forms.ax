@@ -1,0 +1,102 @@
+; The forms for functions, aggregates, grouping, LIKE, IN, BETWEEN, ||,
+; links, UPSERT and LINK columns spell exactly the AXQL text written by
+; hand beside them, with their parameters in order; and the typed
+; reads and writes axqlTable declares find, replace and delete rows by
+; rowid.
+(import IO)
+(import Str)
+(import Vec)
+(import Err)
+(import Axqlite)
+(import Axqlite.Value)
+(import AxqlKit)
+
+(axqlTable Book books (id RowId) (title String) (pages OptInt))
+
+(:: paramText (-> (Vec Value) String))
+(fn (paramText ps)
+  (let ((mut out "["))
+    {
+      (for (v i) in ps
+        (set out (concat
+          out
+          (concat
+            (if (== i 0)
+              ""
+              ", ")
+            (axqValueText v)))))
+      (concat out "]")
+    }))
+
+(:: same (-> Query String Int))
+;@axiom:effect(io)
+(fn (same q want)
+  (let (
+    (got q.text)
+    (ps (paramText q.params))
+  )
+    (if (strEq got want)
+      (println "same  {got}  {ps}")
+      (println "DIFF  got {got}\n      want {want}"))))
+
+(:: showBook (-> String (Result (Option Book) Error) Int))
+;@axiom:effect(io)
+(fn (showBook label r)
+  (match r
+    ((Ok (Some b))
+      (let (
+        (i b.id)
+        (t b.title)
+        (p (match b.pages
+          ((Some n) (fmtInt n))
+          ((None) "none")))
+      )
+        (println "{label}: {i} {t} {p}"))
+    )
+    ((Ok (None)) (println "{label}: no book"))
+    ((Err e) (println (kitErrText e)))))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let (
+    (who "Le Guin")
+    (low 100)
+    (high 400)
+  )
+    {
+      (same (axqlSelect books (author (as (count *) n) (as (sum pages) total)) (groupBy author) (having (> (count *) (int 1))) (orderBy (desc (count *)))) "SELECT author, count(*) AS n, sum(pages) AS total FROM books GROUP BY author HAVING count(*) > ? ORDER BY count(*) DESC")
+      (same (axqlSelect books (as (count *) n) (where (> pages (int low))) (groupBy author (lower title) (> pages (int high))) (limit 3)) "SELECT count(*) AS n FROM books WHERE pages > ? GROUP BY author, lower(title), pages > ? LIMIT ?")
+      (same (axqlSelect books * (groupBy author)) "SELECT * FROM books GROUP BY author")
+      (same (axqlSelect books (title (link author name)) (where (like title (text "%e%")))) "SELECT title, author.name FROM books WHERE title LIKE ?")
+      (same (axqlSelect books ((link author *) title) (where (isIn pages (int 1) (int 2) (int 3)))) "SELECT author.*, title FROM books WHERE pages IN (?, ?, ?)")
+      (same (axqlSelect books (link author name)) "SELECT author.name FROM books")
+      (same (axqlSelect books (as (upper title) t) (where (between pages (int low) (int high)))) "SELECT upper(title) AS t FROM books WHERE pages BETWEEN ? AND ?")
+      (same (axqlSelect books (as (concat title (text "!") (asText pages)) t) (where (notLike (lower title) (text "x%")))) "SELECT title || ? || asText(pages) AS t FROM books WHERE lower(title) NOT LIKE ?")
+      (same (axqlSelect books title (where (notIn (link author name) (text who)))) "SELECT title FROM books WHERE author.name NOT IN (?)")
+      (same (axqlSelect books (as (coalesce pages (int 0)) p) (where (= (substr title (int 1) (int 2)) (text "Du"))) (orderBy (desc (length title)))) "SELECT coalesce(pages, ?) AS p FROM books WHERE substr(title, ?, ?) = ? ORDER BY length(title) DESC")
+      (same (axqlSelect books (as (max pages (int 0)) p) (where (> (round (real 2.5)) (abs (neg (int 2)))))) "SELECT max(pages, ?) AS p FROM books WHERE round(?) > abs(-?)")
+      (same (axqlSelect books (as (min pages) least)) "SELECT min(pages) AS least FROM books")
+      (same (axqlUpsert books (id pages) (values (int 1) (int 999)) (values (int 2) null)) "UPSERT INTO books (id, pages) VALUES (?, ?), (?, NULL)")
+      (same (axqlUpsert books * (values (int 3) (text "Lathe") (int 184))) "UPSERT INTO books VALUES (?, ?, ?)")
+      (same (axqlCreateTable people (id INTEGER PRIMARY KEY) (boss LINK people) (team LINK teams NOT NULL)) "CREATE TABLE people (id INTEGER PRIMARY KEY, boss LINK people, team LINK teams NOT NULL)")
+      (let ((db (kitOpen "forms.db")))
+        {
+          (kitRun "create" (axqRunOn db createBookTable))
+          (kitRun "insert 1" (insertBook db (Book 1 "Dune" (Some 412))))
+          (kitRun "insert 2" (insertBook db (Book 2 "Earthsea" None)))
+          (showBook "get 2" (getBook db 2))
+          (kitRun "upsert 2" (upsertBook db (Book 2 "Earthsea" (Some 183))))
+          (kitRun "upsert 3" (upsertBook db (Book 3 "Lathe" (Some 184))))
+          (showBook "get 2" (getBook db 2))
+          (showBook "get 3" (getBook db 3))
+          (showBook "get 9" (getBook db 9))
+          (kitRun "delete 1" (deleteBook db 1))
+          (kitRun "delete 1 again" (deleteBook db 1))
+          (showBook "get 1" (getBook db 1))
+          (kitRun "count" (axqQueryInt db (axqlSelect books (as (count *) n))))
+          (kitRun "pages" (axqQueryInt db (axqlSelect books (as (sum pages) total) (where (like title (text "%a%"))))))
+          (kitRun "close" (axqClose db))
+        })
+      0
+    }))

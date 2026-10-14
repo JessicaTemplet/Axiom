@@ -46,7 +46,40 @@
           "(IS NULL ")
         (concat (axqlPrintExpr x) ")"))
     )
-    ((EBin op l r _) (concat (concat (concat "(" (opText op)) " ") (concat (concat (axqlPrintExpr l) " ") (concat (axqlPrintExpr r) ")"))))))
+    ((EBin op l r _) (concat (concat (concat "(" (opText op)) " ") (concat (concat (axqlPrintExpr l) " ") (concat (axqlPrintExpr r) ")"))))
+    ((EFun name args _) (concat (concat "(" name) (concat (printArgs args) ")")))
+    ((EAgg k arg _)
+      (concat
+        (concat "(" (aggName k))
+        (match arg
+          ((Some x) (concat (concat " " (axqlPrintExpr x)) ")"))
+          ((None) " *)")))
+    )
+    ((ELike x pat negated _)
+      (concat
+        (if negated
+          "(NOT LIKE "
+          "(LIKE ")
+        (concat (concat (axqlPrintExpr x) " ") (concat (axqlPrintExpr pat) ")")))
+    )
+    ((EIn x items negated _)
+      (concat
+        (if negated
+          "(NOT IN "
+          "(IN ")
+        (concat (axqlPrintExpr x) (concat (printArgs items) ")")))
+    )
+    ((ELink l c _) (concat (concat (axqlQuoteName l) ".") (if (strEq c "*") "*" (axqlQuoteName c))))))
+
+; Arguments, each after a space.
+(:: printArgs (-> (Vec Expr) String))
+(fn (printArgs es)
+  (let ((mut out ""))
+    {
+      (for e in es
+        (set out (concat out (concat " " (axqlPrintExpr e)))))
+      out
+    }))
 
 (:: printNames (-> (Vec String) String))
 (fn (printNames ns)
@@ -69,15 +102,29 @@
 (:: printColumn (-> ColumnDef String))
 (fn (printColumn c)
   (concat
-    (concat (concat "(" (axqlQuoteName c.name)) (concat " " (typeName c.ctype)))
+    (concat
+      (concat "(" (axqlQuoteName c.name))
+      (concat
+        " "
+        (if (strIsEmpty c.link)
+          (typeName c.ctype)
+          (concat "LINK " (axqlQuoteName c.link)))))
     (concat
       (concat
-        (if c.notNull
-          " NOT NULL"
-          "")
-        (if c.primaryKey
-          " PRIMARY KEY"
-          ""))
+        (concat
+          (if c.notNull
+            " NOT NULL"
+            "")
+          (if c.primaryKey
+            " PRIMARY KEY"
+            ""))
+        (concat
+          (match c.dflt
+            ((Some e) (concat " DEFAULT " (axqlPrintExpr e)))
+            ((None) ""))
+          (match c.check
+            ((Some e) (concat " CHECK " (axqlPrintExpr e)))
+            ((None) ""))))
       ")")))
 
 (:: printSelect (-> Select String))
@@ -90,12 +137,13 @@
           (vecPush parts "*")
           0
         }
-        (for item in s.items
-          (vecPush
-            parts
-            (if (strIsEmpty item.alias)
-              (axqlPrintExpr item.expr)
-              (concat (concat "(AS " (axqlPrintExpr item.expr)) (concat (concat " " (axqlQuoteName item.alias)) ")"))))))
+        0)
+      (for item in s.items
+        (vecPush
+          parts
+          (if (strIsEmpty item.alias)
+            (axqlPrintExpr item.expr)
+            (concat (concat "(AS " (axqlPrintExpr item.expr)) (concat (concat " " (axqlQuoteName item.alias)) ")")))))
       (if (strIsEmpty s.from)
         parts
         {
@@ -107,6 +155,20 @@
           {
             (vecPush parts "WHERE")
             (vecPush parts (axqlPrintExpr w))
+          }
+        )
+        ((None) parts))
+      (if (> (vecLen s.groupBy) 0)
+        {
+          (vecPush parts "GROUP BY")
+          (vecPush parts (printExprs s.groupBy))
+        }
+        parts)
+      (match s.having
+        ((Some h)
+          {
+            (vecPush parts "HAVING")
+            (vecPush parts (axqlPrintExpr h))
           }
         )
         ((None) parts))
@@ -140,6 +202,15 @@
         )
         ((None) parts))
       (concat "(" (concat (joinWith parts " ") ")"))
+    }))
+
+(:: printInsert (-> String String (Vec String) (Vec (Vec Expr)) String))
+(fn (printInsert head table cols rows)
+  (let ((rs vecNew))
+    {
+      (for r in rows
+        (vecPush rs (printExprs r)))
+      (concat (concat (concat head (axqlQuoteName table)) (concat " " (printNames cols))) (concat (concat " VALUES " (joinWith rs " ")) ")"))
     }))
 
 ; A statement as a tree.
@@ -189,14 +260,10 @@
           "(DROP INDEX ")
         (concat (axqlQuoteName name) ")"))
     )
-    ((SInsert table cols rows)
-      (let ((rs vecNew))
-        {
-          (for r in rows
-            (vecPush rs (printExprs r)))
-          (concat (concat (concat "(INSERT INTO " (axqlQuoteName table)) (concat " " (printNames cols))) (concat (concat " VALUES " (joinWith rs " ")) ")"))
-        })
-    )
+    ((SInsert table cols rows) (printInsert "(INSERT INTO " table cols rows))
+    ((SUpsert table cols rows) (printInsert "(UPSERT INTO " table cols rows))
+    ((SAlterAdd table c) (concat (concat (concat "(ALTER TABLE " (axqlQuoteName table)) " ADD ") (concat (printColumn c) ")")))
+    ((SAlterRename table new) (concat (concat (concat "(ALTER TABLE " (axqlQuoteName table)) " RENAME TO ") (concat (axqlQuoteName new) ")")))
     ((SUpdate table cols exprs w)
       (let ((sets vecNew))
         {

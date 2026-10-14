@@ -88,13 +88,21 @@
   (cols : (Vec Int)))
 
 ;; A table: its name as created, root page, columns, the number of its
-;; INTEGER PRIMARY KEY column (-1 when it has none), and its indices.
+;; INTEGER PRIMARY KEY column (-1 when it has none), its indices, and
+;; the tables its LINK columns point at.
 (pub struct TableDef
   (name : String)
   (root : Int)
   (cols : (Vec ColumnDef))
   (pk : Int)
-  (indexes : (Vec IndexDef)))
+  (indexes : (Vec IndexDef))
+  (links : (Vec LinkDef)))
+
+;; A LINK column: its number in the table, and the table it points at,
+;; whose own indices and links are left empty.
+(pub struct LinkDef
+  (col : Int)
+  (target : TableDef))
 
 ;; The kind of a table entry.
 (pub :: kindTable String)
@@ -261,21 +269,155 @@
       pk
     }))
 
-;; The table named `name` with its indices, or `axqSchema`.
+;; The names of every table, in the order they were created.
+(pub :: axqlTableNames (-> Schema (Vec String)))
+(pub fn (axqlTableNames s)
+  (let ((out vecNew))
+    {
+      (for e in s.entries
+        (if (strEq e.kind kindTable)
+          (vecPush out e.name)
+          out))
+      out
+    }))
+
+;; A hint naming what `name` might have meant among `names`, the kind
+;; of thing they are given by `what` ("tables", "columns"): the closest
+;; one within two edits (one, for a name of four bytes or fewer), else
+;; the list, else that there are none.
+(pub :: axqlHint (-> String (Vec String) String String))
+(pub fn (axqlHint name names what)
+  (let (
+    (mut best "")
+    (mut bestD 3)
+    (mut list "")
+  )
+    {
+      (for (n i) in names
+        (let ((d (axqlEditDistance name n)))
+          {
+            (if (< d bestD)
+              {
+                (set best n)
+                (set bestD d)
+                0
+              }
+              0)
+            (if (< i 12)
+              (set list (if (== i 0) n (concat list (concat ", " n))))
+              list)
+          }))
+      (if (> (vecLen names) 12)
+        (set list (concat list ", ..."))
+        list)
+      (if (&& (< bestD 3) (axqlNear name best))
+        (concat (concat "; did you mean " best) "?")
+        (== (vecLen names) 0)
+        (concat "; there are no " (concat what " yet"))
+        (concat (concat (concat "; the " what) " are ") list))
+    }))
+
+;; The table named `name` with its indices and links, or `axqSchema`.
 (pub :: axqlTableDef (-> Schema String (Result TableDef Error)))
 (pub fn (axqlTableDef s name)
   (match (axqlFindEntry s name)
-    ((None) (axqErr axqSchema (concat "no such table: " name) "axqlTableDef"))
+    ((None) (axqErr axqSchema (concat (concat "no such table: " name) (axqlHint name (axqlTableNames s) "tables")) "axqlTableDef"))
     ((Some e)
       (if (! (strEq e.kind kindTable))
         (axqErr axqSchema (concat (concat "no such table: " name) " (it names an index)") "axqlTableDef")
-        (try cols (tableColumns e.text) (try idx (tableIndexes s e.name cols) (Ok (TableDef
+        (try cols (tableColumns e.text) (try idx (tableIndexes s e.name cols) (try links (tableLinks s e cols) (Ok (TableDef
           e.name
           e.root
           cols
           (axqlPrimaryKey cols)
-          idx)))))
+          idx
+          links))))))
     )))
+
+;; The table named `name` without its indices or links: what a LINK
+;; reads.
+(pub :: axqlBareTableDef (-> Schema String (Result TableDef Error)))
+(pub fn (axqlBareTableDef s name)
+  (match (axqlFindEntry s name)
+    ((Some e)
+      (if (strEq e.kind kindTable)
+        (try cols (tableColumns e.text) (Ok (TableDef
+          e.name
+          e.root
+          cols
+          (axqlPrimaryKey cols)
+          vecNew
+          vecNew)))
+        (corrupt (concat "a link names an index: " name)))
+    )
+    ((None) (corrupt (concat "a link names a missing table: " name)))))
+
+; The LINK columns of the table `e` declares.
+(:: tableLinks (-> Schema SchemaEntry (Vec ColumnDef) (Result (Vec LinkDef) Error)))
+(fn (tableLinks s e cols)
+  (let (
+    (out vecNew)
+    (mut failure None)
+  )
+    {
+      (for (c i) in cols
+        (if (|| (isSome failure) (strIsEmpty c.link))
+          0
+          (match (axqlBareTableDef s c.link)
+            ((Ok t)
+              {
+                (vecPush out (LinkDef i t))
+                0
+              }
+            )
+            ((Err err)
+              {
+                (set failure (Some err))
+                0
+              }
+            ))))
+      (match failure
+        ((Some err) (Err err))
+        ((None) (Ok out)))
+    }))
+
+;; Every LINK column of another table that points at table `name`, as
+;; `table.column`.
+(pub :: axqlLinksTo (-> Schema String (Result (Vec String) Error)))
+(pub fn (axqlLinksTo s name)
+  (let (
+    (out vecNew)
+    (mut failure None)
+  )
+    {
+      (for e in s.entries
+        (if (|| (isSome failure) (|| (! (strEq e.kind kindTable)) (axqlNameEq e.name name)))
+          0
+          (match (tableColumns e.text)
+            ((Ok cols)
+              {
+                (for c in cols
+                  (if (&& (! (strIsEmpty c.link)) (axqlNameEq c.link name))
+                    (vecPush out (concat (concat e.name ".") c.name))
+                    out))
+                0
+              }
+            )
+            ((Err err)
+              {
+                (set failure (Some err))
+                0
+              }
+            ))))
+      (match failure
+        ((Some err) (Err err))
+        ((None) (Ok out)))
+    }))
+
+;; The columns a table's CREATE TABLE text declares.
+(pub :: axqlTableColumns (-> String (Result (Vec ColumnDef) Error)))
+(pub fn (axqlTableColumns text)
+  (tableColumns text))
 
 ; The indices of table `table`, in the order they were created.
 (:: tableIndexes (-> Schema String (Vec ColumnDef) (Result (Vec IndexDef) Error)))

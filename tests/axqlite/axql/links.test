@@ -1,0 +1,144 @@
+# LINK columns: a row's link names a row of another table, or of its
+# own, by rowid. Writes check the row exists; `link.column` reads the
+# linked row, `link.*` spreads it, and a link to no row reads as NULL.
+# Expected results follow docs/axql.md.
+
+statement ok
+CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL, born INTEGER)
+
+statement ok
+CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL, author LINK authors NOT NULL, editor LINK authors)
+
+statement ok
+INSERT INTO authors VALUES (1, 'Le Guin', 1929), (2, 'Herbert', 1920), (3, 'Banks', 1954)
+
+statement ok
+INSERT INTO books VALUES (10, 'Earthsea', 1, NULL), (11, 'Dune', 2, 1), (12, 'Excession', 3, 2), (13, 'Lathe', 1, 3)
+
+query
+SELECT title, author.name, editor.name FROM books ORDER BY id
+----
+'Earthsea','Le Guin',NULL
+'Dune','Herbert','Le Guin'
+'Excession','Banks','Herbert'
+'Lathe','Le Guin','Banks'
+
+query
+SELECT title, author.* FROM books WHERE id = 11
+----
+'Dune',2,'Herbert',1920
+
+query
+SELECT *, editor.* FROM books WHERE id = 12
+----
+12,'Excession',3,2,2,'Herbert',1920
+
+query
+SELECT title FROM books WHERE author.born < 1930 ORDER BY author.born DESC, title
+----
+'Earthsea'
+'Lathe'
+'Dune'
+
+query
+SELECT author.name, count(*) FROM books GROUP BY author.name
+----
+'Banks',1
+'Herbert',1
+'Le Guin',2
+
+query
+SELECT author.rowid, author.id, author FROM books WHERE id = 13
+----
+1,1,1
+
+statement error axqConstraint books.author is 9, but authors has no row 9
+INSERT INTO books VALUES (14, 'Nowhere', 9, NULL)
+
+statement error axqConstraint books.editor is 7, but authors has no row 7
+UPDATE books SET editor = 7 WHERE id = 10
+
+statement error axqType column author is INTEGER, not TEXT
+INSERT INTO books VALUES (14, 'Typo', 'Le Guin', NULL)
+
+query
+SELECT title FROM books WHERE id = 14
+----
+
+statement error axqSchema can't drop authors: books.author links to it; drop books first
+DROP TABLE authors
+
+statement ok
+DELETE FROM authors WHERE id = 3
+
+query
+SELECT title, author.name, editor.name FROM books WHERE id IN (12, 13) ORDER BY id
+----
+'Excession',NULL,'Herbert'
+'Lathe','Le Guin',NULL
+
+statement error axqSchema title isn't a LINK column, so title.x has no row to read
+SELECT title.x FROM books
+
+statement error axqSchema no such column: nope in authors
+SELECT author.nope FROM books
+
+statement error axqSchema no such column: writer
+SELECT writer.name FROM books
+
+statement error axqSchema SET can't read through a link
+UPDATE books SET title = author.name
+
+statement error axqSchema author.* belongs in a SELECT list
+SELECT title FROM books WHERE author.* = 1
+
+statement error axqSchema links to nowhere, which doesn't exist
+CREATE TABLE x (a LINK nowhere)
+
+statement error axqSchema can't be both a LINK and the PRIMARY KEY
+CREATE TABLE x (a LINK authors PRIMARY KEY)
+
+statement ok
+CREATE TABLE staff (id INTEGER PRIMARY KEY, name TEXT, boss LINK staff)
+
+statement ok
+INSERT INTO staff VALUES (1, 'ann', 3), (2, 'bo', 1), (3, 'cy', 3)
+
+query
+SELECT name, boss.name FROM staff ORDER BY id
+----
+'ann','cy'
+'bo','ann'
+'cy','cy'
+
+statement error axqConstraint staff.boss is 8, but staff has no row 8
+INSERT INTO staff VALUES (4, 'dee', 8)
+
+statement ok
+CREATE TABLE wrote (author LINK authors NOT NULL, book LINK books NOT NULL, year INTEGER)
+
+statement ok
+INSERT INTO wrote VALUES (1, 10, 1968), (1, 13, 1971), (2, 11, 1965)
+
+query
+SELECT author.name, book.title, year FROM wrote WHERE author.name = 'Le Guin' ORDER BY year
+----
+'Le Guin','Earthsea',1968
+'Le Guin','Lathe',1971
+
+query
+SELECT author.name, count(*) FROM wrote GROUP BY author.name HAVING count(*) > 1
+----
+'Le Guin',2
+
+statement ok
+DROP TABLE wrote
+
+statement ok
+DROP TABLE staff
+
+statement ok
+DROP TABLE books
+
+statement ok
+DROP TABLE authors

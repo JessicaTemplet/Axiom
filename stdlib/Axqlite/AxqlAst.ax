@@ -85,6 +85,11 @@
 (pub fn (opOr)
   13)
 
+;; `||`, text concatenation.
+(pub :: opConcat Int)
+(pub fn (opConcat)
+  14)
+
 ;; Whether `op` is one of the six comparisons.
 (pub :: opIsComparison (-> Int Bool))
 (pub fn (opIsComparison op)
@@ -122,7 +127,9 @@
     ">="
     (== op opAnd)
     "AND"
-    "OR"))
+    (== op opOr)
+    "OR"
+    "||"))
 
 ; ------------------------------------------------------------------
 ; Column types.
@@ -179,7 +186,12 @@
   (ENeg Expr Int)
   (ENot Expr)
   (EBin Int Expr Expr Int)
-  (EIsNull Expr Bool))
+  (EIsNull Expr Bool)
+  (EFun String (Vec Expr) Int)
+  (EAgg Int (Option Expr) Int)
+  (ELike Expr Expr Bool Int)
+  (EIn Expr (Vec Expr) Bool Int)
+  (ELink String String Int))
 
 ; A literal, or a folded constant.
 ; A column named in the statement, before binding: its spelling and
@@ -194,12 +206,195 @@
 ; ------------------------------------------------------------------
 ; Statements.
 ; ------------------------------------------------------------------
-;; One column of a `CREATE TABLE`.
+;; One column of a `CREATE TABLE`: its name, type, whether it is NOT
+;; NULL and whether it is the PRIMARY KEY, the table it links to (""
+;; for none), its DEFAULT and CHECK expressions, its text as the
+;; statement wrote it, and where in that text the linked table's name
+;; starts (-1 for none).
 (pub struct ColumnDef
   (name : String)
   (ctype : Int)
   (notNull : Bool)
-  (primaryKey : Bool))
+  (primaryKey : Bool)
+  (link : String)
+  (dflt : (Option Expr))
+  (check : (Option Expr))
+  (text : String)
+  (linkAt : Int))
+
+;; The aggregates: `count`, `sum`, `avg`, `min` and `max`.
+(pub :: aggCount Int)
+(pub fn (aggCount)
+  1)
+
+;; `sum(e)`.
+(pub :: aggSum Int)
+(pub fn (aggSum)
+  2)
+
+;; `avg(e)`.
+(pub :: aggAvg Int)
+(pub fn (aggAvg)
+  3)
+
+;; `min(e)`.
+(pub :: aggMin Int)
+(pub fn (aggMin)
+  4)
+
+;; `max(e)`.
+(pub :: aggMax Int)
+(pub fn (aggMax)
+  5)
+
+;; An aggregate's name as AXQL spells it.
+(pub :: aggName (-> Int String))
+(pub fn (aggName k)
+  (if (== k aggCount)
+    "count"
+    (== k aggSum)
+    "sum"
+    (== k aggAvg)
+    "avg"
+    (== k aggMin)
+    "min"
+    "max"))
+
+; ------------------------------------------------------------------
+; Names a message suggests.
+; ------------------------------------------------------------------
+; Byte `c` in lower case, for ASCII letters.
+(:: astLower (-> Int Int))
+(fn (astLower c)
+  (if (&& (>= c 65) (<= c 90))
+    (+ c 32)
+    c))
+
+; The smaller of two numbers.
+(:: least (-> Int Int Int))
+(fn (least a b)
+  (if (< a b)
+    a
+    b))
+
+;; How many single-byte edits, ignoring ASCII case, turn `a` into `b`,
+;; counted up to 3. An edit inserts, deletes or changes a byte, or swaps
+;; two neighbours.
+(pub :: axqlEditDistance (-> String String Int))
+(pub fn (axqlEditDistance a b)
+  (let (
+    (n (strLen a))
+    (m (strLen b))
+  )
+    (if (> (if (> n m) (- n m) (- m n)) 2)
+      3
+      (let (
+        (before vecNew)
+        (prev vecNew)
+        (cur vecNew)
+      )
+        {
+          (for j in 0..(+ m 1)
+            {
+              (vecPush before j)
+              (vecPush prev j)
+              (vecPush cur 0)
+            })
+          (for i in 1..(+ n 1)
+            {
+              (vecSet cur 0 i)
+              (for j in 1..(+ m 1)
+                (let (
+                  (ca (astLower (strByte a (- i 1))))
+                  (cb (astLower (strByte b (- j 1))))
+                  (cost (if (== ca cb)
+                    0
+                    1))
+                  (best (least (least (+ (vecGet prev j) 1) (+ (vecGet cur (- j 1)) 1)) (+ (vecGet prev (- j 1)) cost)))
+                )
+                  (vecSet
+                    cur
+                    j
+                    (if (&& (> i 1) (&& (> j 1) (&& (== ca (astLower (strByte b (- j 2)))) (== (astLower (strByte a (- i 2))) cb))))
+                      (least best (+ (vecGet before (- j 2)) 1))
+                      best))))
+              (for j in 0..(+ m 1)
+                {
+                  (vecSet before j (vecGet prev j))
+                  (vecSet prev j (vecGet cur j))
+                })
+            })
+          (least (vecGet prev m) 3)
+        }))))
+
+;; Whether `name` is near enough `other` to suggest it: within two
+;; edits, or one for a name of four bytes or fewer, and fewer edits
+;; than `name` has bytes.
+(pub :: axqlNear (-> String String Bool))
+(pub fn (axqlNear name other)
+  (let ((d (axqlEditDistance name other)))
+    (&& (< d (strLen name))
+      (< d
+        (if (> (strLen name) 4)
+          3
+          2)))))
+
+; ------------------------------------------------------------------
+; Functions.
+; ------------------------------------------------------------------
+;; The functions an expression may call, by their lower-case names, as
+;; one string for messages.
+(pub :: axqlFunctionNames String)
+(pub fn (axqlFunctionNames)
+  "abs, asInt, asReal, asText, coalesce, instr, length, lower, max, min, nullif, replace, round, substr, trim, typeOf, upper")
+
+;; The fewest arguments function `name` (in lower case) takes, or -1
+;; when there is no such function.
+(pub :: axqlFunMinArgs (-> String Int))
+(pub fn (axqlFunMinArgs name)
+  (if (isAny name "abs asint asreal astext length lower round trim typeof upper")
+    1
+    (isAny name "coalesce instr max min nullif substr")
+    2
+    (strEq name "replace")
+    3
+    -1))
+
+;; The most arguments function `name` takes, or -1 when there is no
+;; such function. `coalesce`, `min` and `max` take up to 32.
+(pub :: axqlFunMaxArgs (-> String Int))
+(pub fn (axqlFunMaxArgs name)
+  (if (isAny name "abs asint asreal astext length lower round trim typeof upper")
+    1
+    (isAny name "instr nullif")
+    2
+    (isAny name "replace substr")
+    3
+    (isAny name "coalesce max min")
+    32
+    -1))
+
+; Whether `name` is one of the space-separated words of `words`.
+(:: isAny (-> String String Bool))
+(fn (isAny name words)
+  (let (
+    (n (strLen name))
+    (w (strLen words))
+    (mut start 0)
+    (mut found false)
+  )
+    {
+      (for i in 0..(+ w 1)
+        (if (|| (== i w) (== (strByte words i) 32))
+          {
+            (if (&& (! found) (&& (== (- i start) n) (strEq (strSlice words start n) name)))
+              (set found true)
+              false)
+            (set start (+ i 1))
+          }
+          0))
+      found
+    }))
 
 ;; One item of a `SELECT` list: the expression, the name `AS` gave it
 ;; ("" when none), and the text the statement wrote it with.
@@ -213,13 +408,16 @@
   (expr : Expr)
   (desc : Bool))
 
-;; A `SELECT`. `star` is true for `SELECT *`, and then `items` is empty.
-;; `from` is "" when the statement has no FROM clause.
+;; A `SELECT`. `star` is true for `SELECT *`, and then `items` holds
+;; only the `link.*` items written after it. `from` is "" when the
+;; statement has no FROM clause.
 (pub struct Select
   (star : Bool)
   (items : (Vec SelectItem))
   (from : String)
   (where : (Option Expr))
+  (groupBy : (Vec Expr))
+  (having : (Option Expr))
   (orderBy : (Vec OrderTerm))
   (limit : (Option Expr))
   (offset : (Option Expr)))
@@ -231,6 +429,9 @@
   (SCreateIndex Bool Bool String String (Vec String))
   (SDropIndex Bool String)
   (SInsert String (Vec String) (Vec (Vec Expr)))
+  (SUpsert String (Vec String) (Vec (Vec Expr)))
+  (SAlterAdd String ColumnDef)
+  (SAlterRename String String)
   (SUpdate String (Vec String) (Vec Expr) (Option Expr))
   (SDelete String (Option Expr))
   (SSelect Select)
@@ -245,6 +446,10 @@
 ;; DROP INDEX [IF EXISTS] name
 ;; INSERT INTO table [(columns)] VALUES (row), ...: the columns are
 ;; empty when the statement names none
+;; UPSERT INTO table [(columns)] VALUES (row), ...: the same shape; a
+;; row whose rowid exists is updated in the columns given
+;; ALTER TABLE table ADD COLUMN column
+;; ALTER TABLE table RENAME TO name
 ;; UPDATE table SET column = expr, ... [WHERE expr]
 ;; DELETE FROM table [WHERE expr]
 ;; A parsed statement with what the parameter scan found: how many
@@ -272,6 +477,8 @@
     ((SDropTable _ _) true)
     ((SCreateIndex _ _ _ _ _) true)
     ((SDropIndex _ _) true)
+    ((SAlterAdd _ _) true)
+    ((SAlterRename _ _) true)
     (_ false)))
 
 ; ------------------------------------------------------------------

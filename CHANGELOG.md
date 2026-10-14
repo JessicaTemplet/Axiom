@@ -101,6 +101,61 @@ its changelog too.
   overwrite a local LLVM had kept there. Add `nostack` to a block
   that uses no stack. Tested by `tests/stdlib/870-inline-asm-operands.ax`.
 
+- Link AXQLite rows across tables. A `LINK table` column holds the
+  rowid of a row of `table`, and every write checks that row exists;
+  `author.name` reads a column of the linked row anywhere a `SELECT`
+  reads a value, and `author.*` spreads the whole row into the result.
+  A link to a row that is gone reads as NULL, and a table another links
+  to can't be dropped. Tested by `tests/axqlite/513-axql-links.ax`.
+- Group AXQL results. `count`, `sum`, `avg`, `min` and `max`, with
+  `GROUP BY` and `HAVING`, work out one row per group; a column read
+  outside the groups is refused before any row is read. Tested by
+  `tests/axqlite/512-axql-aggregates.ax`.
+- Add AXQL's functions and text operators: `length`, `lower`, `upper`,
+  `trim`, `substr`, `replace`, `instr`, `abs`, `round`, `coalesce`,
+  `nullif`, `min`, `max`, `typeOf`, and `asInt`, `asReal` and `asText`
+  to convert between TEXT and numbers; `LIKE`, `IN`, `BETWEEN` and `||`.
+  Each is type-checked before a row is read. Tested by
+  `tests/axqlite/511-axql-functions.ax`.
+- Add `UPSERT`, which inserts a row or changes the columns it lists in
+  the row with that rowid; column `DEFAULT`s and `CHECK`s, enforced on
+  every write; and `ALTER TABLE ... ADD COLUMN` and `RENAME TO`. The
+  macros gain `axqlUpsert`, `(groupBy ...)`, `(having ...)`, LINK
+  columns and a form for every new operator and function, and
+  `axqlTable` declares `upsertT`, `getT` and `deleteT`. Tested by
+  `tests/axqlite/514-axql-constraints.ax`,
+  `tests/axqlite/625-macro-forms.ax` and their neighbours.
+- AXQLite's errors say where and what to do. Every error from a
+  statement names the statement and the function that ran it; a
+  misspelt table, column, statement or result column comes back with
+  the name it was probably meant to be, or the names there are; a type
+  mismatch names the function that converts; and an I/O error says why
+  the system refused, as "no space left on the device". This changes
+  `errorText` for every AXQLite error. Tested by
+  `tests/axqlite/618-api-errors.ax`.
+- Describe and copy an AXQLite database: `axqTables`, `axqColumns` and
+  `axqIndexes` describe the schema, `axqQueryOne` and `axqQueryInt` read
+  one row or one number (`axqNotFound`, code 1313, when there is none),
+  and `axqDump` writes the database as a script that `axqExecBatch`
+  loads into an empty one, which is how to compact a file. Tested by
+  `tests/axqlite/617-api-schema.ax`.
+- Make big AXQLite transactions fast. When the page cache had to evict
+  a changed page, the journal was synced once per evicted page; it is
+  now synced once and every changed page the current operation isn't
+  using goes to the file with it. With the default 256-page cache on
+  darwin-aarch64, an `UPDATE` of 100,000 rows went from 6.0 to 2.2
+  seconds and a `DELETE` of half of them from 4.4 to 0.2; with an index
+  on the column changed, from 13.8 to 6.5 and from 12.6 to 2.9. Every
+  crash test still finds the database exactly before or exactly after.
+  Tested by `tests/axqlite/201-crash-insert.ax`.
+- Refuse an AXQL statement of more than 3000 operators with
+  `axqSyntax`. Its expressions are checked and worked out by recursion,
+  and 100,000 `OR`s overflowed the stack and killed the program; 4500
+  did on a `parallel` thread. Tested by
+  `tests/axqlite/406-parse-limits.ax`.
+- `axqValueText` writes an infinite REAL as `1e999`, which AXQL reads
+  back, rather than `inf`, which it doesn't.
+
 - Refuse a reference cast into a field declared `Int`. `AX3043` was a
   warning on the grounds that the cast was deliberate, but the leak is
   certain either way: the release walk follows declared types and

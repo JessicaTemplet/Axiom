@@ -1,10 +1,10 @@
 # AXQL
 
 AXQL is the query language of AXQLite, Axiom's embedded database. This
-page defines it: its words, its values and types, its expressions, and
-every statement, each shown as text and as the Axiom form the `axql`
-macros write. [axqlite.md](axqlite.md) is the guide to using a
-database from a program.
+page defines it: its words, its values and types, its expressions and
+functions, and every statement, each shown as text and as the Axiom
+form the `axql` macros write. [axqlite.md](axqlite.md) is the guide to
+using a database from a program.
 
 ## At a glance
 
@@ -76,9 +76,12 @@ INSERT INTO IS LIMIT NOT NULL OFFSET ON OR ORDER PRIMARY ROLLBACK
 SELECT SET TABLE TRUE UNIQUE UPDATE VALUES WHERE
 ```
 
-`INTEGER`, `REAL`, `TEXT`, `BLOB`, `KEY`, `ASC`, `DESC` and
-`TRANSACTION` are keywords only where the grammar expects them, so a
-column may be called `text` or `key`.
+Every other keyword is a keyword only where the grammar expects it,
+so a column may be called `text`, `key`, `group` or `link`. Those words
+are `INTEGER`, `REAL`, `TEXT`, `BLOB`, `LINK`, `KEY`, `DEFAULT`,
+`CHECK`, `ASC`, `DESC`, `TRANSACTION`, `LIKE`, `IN`, `BETWEEN`,
+`GROUP`, `HAVING`, `UPSERT`, `ALTER`, `ADD`, `COLUMN`, `RENAME` and
+`TO`.
 
 A name is `[A-Za-z_][A-Za-z0-9_]*`, or any text in double quotes, where
 `""` stands for one quote: `"order"`, `"first name"`. Names compare
@@ -102,7 +105,7 @@ end with one `;`. Whitespace separates words and means nothing else.
 An integer literal must fit in 64 bits. `-9223372036854775808` is read
 as the most negative `INTEGER`; anywhere else, `9223372036854775808` is
 `axqSyntax`. A `REAL` literal is read exactly, rounded to the nearest
-binary64 value, so `1e309` is infinity. A literal's minus sign is an
+binary64 value, so `1e999` is infinity. A literal's minus sign is an
 operator: `- 5` and `-5` are the same expression.
 
 ## Parameters
@@ -137,10 +140,12 @@ Every value has one of five types:
 | BLOB | bytes |
 | NULL | no value |
 
-A column is declared `INTEGER`, `REAL`, `TEXT` or `BLOB`, and holds values of
-that type or NULL, nothing else. A `REAL` column also takes an `INTEGER`,
-stored as the nearest `REAL`. Nothing converts `TEXT` to a number or a
-number to `TEXT`.
+A column is declared `INTEGER`, `REAL`, `TEXT`, `BLOB` or `LINK`, and
+holds values of that type or NULL, nothing else. A `LINK` column holds
+an `INTEGER` (see [Links](#links)). A `REAL` column also takes an
+`INTEGER`, stored as the nearest `REAL`. Nothing converts `TEXT` to a
+number or a number to `TEXT` by itself: `asInt`, `asReal` and `asText`
+do it when you ask.
 
 Every expression has a type the statement knows before it reads a row,
 from its columns' declared types and its parameters' values. A
@@ -157,14 +162,15 @@ From loosest to tightest:
 | `OR` | from the left |
 | `AND` | from the left |
 | `NOT` | prefix |
-| `=` `==` `!=` `<>` `IS NULL` `IS NOT NULL` | from the left |
+| `=` `==` `!=` `<>` `IS NULL` `IS NOT NULL` `LIKE` `IN` `BETWEEN`, each but `IS` with an optional `NOT` | from the left |
 | `<` `<=` `>` `>=` | from the left |
-| `+` `-` | from the left |
+| `+` `-` `\|\|` | from the left |
 | `*` `/` `%` | from the left |
 | unary `-` | prefix |
 
 Parentheses group as usual. An expression is a literal, a column name,
-a parameter, or operators over those. There are no function calls.
+a link path such as `author.name`, a parameter, a function call, or
+operators over those.
 
 ### Arithmetic
 
@@ -181,6 +187,19 @@ is `-1`.
 dividing by zero and a result that isn't a number (infinity minus
 infinity) are `axqArithmetic`.
 
+### Text
+
+`a || b` joins two TEXTs, or two BLOBs, end to end, and is NULL when
+either is NULL: `'tea' || 'pot'` is `'teapot'`. Joining a number is
+`axqType`; write `asText(n) || 'x'`.
+
+`a LIKE p` matches `TEXT` `a` against the pattern `p`, byte for byte and
+with case: `%` matches any run of bytes, `_` matches one byte, and `\`
+makes the byte after it stand for itself, so `'100\%'` matches only
+`100%`. It answers 1 or 0, or NULL when either side is NULL.
+`a NOT LIKE p` is the reverse. Both sides must be `TEXT`. For a match
+that ignores case, compare `lower(a)` with a lower-case pattern.
+
 ### Comparison
 
 The six comparisons answer 1, 0, or NULL when either side is NULL.
@@ -191,6 +210,14 @@ pair is `axqType`.
 
 `e IS NULL` is 1 when `e` is NULL and 0 otherwise; `IS NOT NULL` is the
 reverse. They never answer NULL.
+
+`a IN (e1, e2, ...)` is 1 when `a` equals an item, NULL when it doesn't
+but an item is NULL, and 0 otherwise; NULL `a` gives NULL. The list holds
+one value or more, each comparable with `a`. `NOT IN` is the reverse,
+NULL staying NULL.
+
+`a BETWEEN lo AND hi` is `a >= lo AND a <= hi`, and `NOT BETWEEN` is its
+`NOT`.
 
 ### Truth
 
@@ -203,6 +230,42 @@ gives NULL if either side is NULL. `TEXT` and `BLOB` aren't truth values.
 decides the answer, the other side's failure doesn't matter: in
 `b != 0 AND a / b > 1`, a row with `b` 0 is `FALSE`, not a division by
 zero, and so is the same condition written the other way round.
+
+### Functions
+
+A function is called by name, in any case, with its arguments in
+parentheses: `lower(name)`, `LOWER(name)`. Every function but
+`coalesce`, `nullif` and `typeOf` answers NULL when an argument is NULL.
+
+| Function | Answers |
+|---|---|
+| `length(s)` | the bytes in TEXT or BLOB `s`, as an INTEGER |
+| `lower(s)`, `upper(s)` | TEXT `s` with its ASCII letters lowered or raised |
+| `trim(s)` | TEXT `s` without the spaces, tabs and newlines at either end |
+| `substr(s, start)`, `substr(s, start, len)` | the bytes of TEXT or BLOB `s` from `start`, counting from 1, to the end or for `len` bytes |
+| `replace(s, from, to)` | TEXT `s` with every `from` replaced by `to` |
+| `instr(s, part)` | where `part` first starts in `s`, from 1, or 0 |
+| `abs(n)` | the magnitude of a number |
+| `round(x)` | the INTEGER nearest a number, halves away from zero |
+| `coalesce(a, b, ...)` | its first argument that isn't NULL, or NULL |
+| `nullif(a, b)` | NULL when `a` equals `b`, else `a` |
+| `min(a, b, ...)`, `max(a, b, ...)` | the least or greatest of two or more values |
+| `typeOf(v)` | `'integer'`, `'real'`, `'text'`, `'blob'` or `'null'` |
+| `asInt(v)` | an INTEGER from a number, truncating, or from TEXT that spells one |
+| `asReal(v)` | a REAL from a number or from TEXT that spells one |
+| `asText(v)` | a number written in decimal, or a BLOB's bytes as TEXT |
+
+`min` and `max` with one argument are aggregates (see
+[Grouping](#grouping)). `coalesce`, `min` and `max` take arguments of one
+type, or `INTEGER` mixed with `REAL`, and answer the argument they choose as
+it is.
+
+A name no function has, or the wrong number of arguments, is
+`axqSyntax` when the statement is read. An argument of the wrong type is
+`axqType` before any row is read. `asInt` and `asReal` refuse `TEXT` that
+doesn't spell a number with `axqType`, and `substr` refuses a start
+below 1 or a negative length with `axqArithmetic`, as do `abs` and
+`round` and `asInt` for a result outside 64 bits.
 
 ### When expressions run
 
@@ -228,21 +291,60 @@ A statement is one of these. The macro spelling beside each is what
 
 ```text
 CREATE TABLE [IF NOT EXISTS] name ( column , ... )
-column := name type [NOT NULL] [PRIMARY KEY]
-type   := INTEGER | REAL | TEXT | BLOB
+column     := name type constraint*
+type       := INTEGER | REAL | TEXT | BLOB | LINK table
+constraint := NOT NULL | PRIMARY KEY | DEFAULT value | CHECK ( expr )
 ```
 
 ```scheme fragment
-(axqlCreateTable IF NOT EXISTS people (id INTEGER PRIMARY KEY) (name TEXT NOT NULL) (age INTEGER))
+(axqlCreateTable IF NOT EXISTS people (id INTEGER PRIMARY KEY) (name TEXT NOT NULL) (team LINK teams))
 ```
 
-`NOT NULL` and `PRIMARY KEY` may come in either order. One `INTEGER`
-column may be the `PRIMARY KEY`, and is then the row's rowid (see
-[Rowids](#rowids)). Column names must differ.
+The constraints may come in any order. One `INTEGER` column may be the
+`PRIMARY KEY`, and is then the row's rowid (see [Rowids](#rowids)).
+Column names must differ.
+
+- `DEFAULT value` fills the column when an `INSERT` or `UPSERT` leaves
+  it out. The value is a literal, a negated number, a function call or
+  a parenthesised expression that names no column and takes no
+  parameter: `DEFAULT 0`, `DEFAULT 'anon'`, `DEFAULT (60 * 60)`. It must
+  fit the column, and can't be NULL on a `NOT NULL` column or be given
+  to the `PRIMARY KEY`.
+- `CHECK (expr)` is a truth value over the row's own columns, worked
+  out for every row written. A row it finds `FALSE` is refused with
+  `axqConstraint`; NULL passes, so `CHECK (age >= 0)` lets a NULL age
+  in. It can't take a parameter, follow a link or hold an aggregate.
+- `LINK table` makes the column a link to a row of `table`, which
+  exists or is the table being made. See [Links](#links).
 
 With `IF NOT EXISTS`, a table that already exists makes the statement
 do nothing. A name an index already uses, or an existing table without
-`IF NOT EXISTS`, is `axqSchema`.
+`IF NOT EXISTS`, is `axqSchema`. A `DEFAULT` or `CHECK` that can't work is
+refused when the table is made: `axqType` for a value of the wrong
+type, `axqSchema` for the rest.
+
+The macro form has no literals, so `DEFAULT` and `CHECK` are written
+as text.
+
+### `ALTER TABLE`
+
+```text
+ALTER TABLE name ADD [COLUMN] column
+ALTER TABLE name RENAME TO new
+```
+
+`ADD COLUMN` adds a column after the others and gives every row its
+`DEFAULT`, or NULL. The rows are checked against the new column's
+`CHECK` and `LINK` as they are rewritten, and any failure leaves the
+table as it was. The new column can't be the `PRIMARY KEY`, and a
+`NOT NULL` one needs a `DEFAULT`.
+
+`RENAME TO` renames the table. Its indices and every `LINK` that points
+at it follow the new name.
+
+Not yet: `DROP COLUMN` and `RENAME COLUMN`; see the
+[roadmap](roadmap.md#standard-library). Make a new table and copy the
+rows across with `INSERT` meanwhile.
 
 ### `DROP TABLE`
 
@@ -255,7 +357,8 @@ DROP TABLE [IF EXISTS] name
 ```
 
 Removes the table, its rows and its indices. A table that doesn't exist
-is `axqSchema`, unless `IF EXISTS` is written.
+is `axqSchema`, unless `IF EXISTS` is written. So is a table another
+table links to: drop that one first.
 
 ### `CREATE INDEX`
 
@@ -272,7 +375,8 @@ lookups described in [How rows are found](#how-rows-are-found). A
 `UNIQUE` index refuses a second row with the same values in all its
 columns, with `axqConstraint`; a row with NULL in any of them never
 conflicts. Creating a `UNIQUE` index over rows that already repeat a value
-is `axqConstraint`, and creates nothing.
+is `axqConstraint`, and creates nothing. An index entry holds at most
+1000 bytes, so a row whose indexed values are longer is `axqTooBig`.
 
 Tables and indices share one namespace. A name already used, a missing
 table, a missing column or a column named twice is `axqSchema`.
@@ -299,14 +403,34 @@ INSERT INTO table [( column , ... )] VALUES ( expr , ... ) , ...
 ```
 
 Without a column list, each row gives every column in order. With one,
-the columns it leaves out are NULL. Every row gives one value per
-column, or the statement is `axqSchema`; every row of one `VALUES` has the
-same length, or it is `axqSyntax`. `VALUES` can't name a column.
+the columns it leaves out take their `DEFAULT`, or NULL. Every row gives
+one value per column, or the statement is `axqSchema`; every row of one
+`VALUES` has the same length, or it is `axqSyntax`. `VALUES` can't name a
+column.
 
 A row that gives no rowid gets the largest rowid in the table plus one,
 or 1 in an empty table. Each row is checked before it is written: its
-types, `NOT NULL`, its rowid and every `UNIQUE` index. A row that fails
-fails the whole statement, and none of its rows stay.
+types, `NOT NULL`, every `CHECK`, its rowid and every `UNIQUE` index.
+Its links are checked once every row of the statement is written, so
+rows of one statement may link to each other. A row that fails fails
+the whole statement, and none of its rows stay.
+
+### `UPSERT`
+
+```text
+UPSERT INTO table [( column , ... )] VALUES ( expr , ... ) , ...
+```
+
+```scheme fragment
+(axqlUpsert people (id age) (values (int 7) (int 37)))
+```
+
+`UPSERT` is shaped as `INSERT` is. A row that gives a rowid, through
+`rowid` or the `INTEGER PRIMARY KEY`, of a row that exists sets the
+columns the statement lists and keeps the rest; any other row is
+inserted as `INSERT` would. So `UPSERT INTO people (id, age) VALUES (7, 37)`
+changes person 7's age and nothing else, or makes person 7 when there
+is none. Every row is checked as `INSERT` checks one.
 
 ### `UPDATE`
 
@@ -323,7 +447,8 @@ each with every `SET` expression worked out over its old values. So
 `UPDATE t SET id = id + 100` moves every row once, whatever order the
 new rowids fall in. Each row is checked before it is written, as `INSERT`
 checks one, and a failure leaves the table as it was. Setting the rowid
-or the `INTEGER PRIMARY KEY` moves the row.
+or the `INTEGER PRIMARY KEY` moves the row. `WHERE` may follow links; a
+`SET` expression can't.
 
 ### `DELETE`
 
@@ -341,9 +466,10 @@ entries.
 ### `SELECT`
 
 ```text
-SELECT * | item , ... [FROM table] [WHERE expr]
+SELECT * [, item ...] | item , ... [FROM table] [WHERE expr]
+       [GROUP BY expr , ... [HAVING expr]]
        [ORDER BY term , ...] [LIMIT expr [OFFSET expr]]
-item := expr [AS name]
+item := expr [AS name] | link.*
 term := expr [ASC | DESC]
 ```
 
@@ -353,8 +479,9 @@ term := expr [ASC | DESC]
 
 A result column is named by its `AS`, else by the column it names, else
 by the expression as written. `*` gives the table's columns in order and
-needs a `FROM`. A `SELECT` with no `FROM` answers one row of expressions over
-no columns.
+needs a `FROM`; items after it add more columns, as in
+`SELECT *, team.* FROM people`. A `SELECT` with no `FROM` answers one
+row of expressions over no columns.
 
 `ORDER BY` sorts by each term in turn, ascending unless `DESC` is written.
 NULL comes before every value going up and after every value going
@@ -369,6 +496,43 @@ that column. Anything else is an expression over the table.
 and names no column; anything else is `axqType`. `OFFSET` skips rows
 before `LIMIT` counts them, and needs a `LIMIT`.
 
+### Grouping
+
+```text
+SELECT team, count(*) AS n, avg(age) FROM people GROUP BY team HAVING count(*) > 1 ORDER BY n DESC
+```
+
+```scheme fragment
+(axqlSelect people (team (as (count *) n) (as (avg age) mean)) (groupBy team) (having (> (count *) (int 1))) (orderBy (desc (count *))))
+```
+
+An aggregate works out one value from many rows:
+
+| Aggregate | Answers |
+|---|---|
+| `count(*)` | how many rows |
+| `count(e)` | how many rows `e` isn't NULL for |
+| `sum(e)` | the sum of the numbers, NULL when there are none; an `INTEGER` sum outside 64 bits is `axqArithmetic` |
+| `avg(e)` | their mean as a `REAL`, NULL when there are none |
+| `min(e)`, `max(e)` | the least or greatest value, in `ORDER BY`'s order, NULL when there are none |
+
+Every aggregate skips NULL. A `SELECT` with `GROUP BY`, or with an
+aggregate in its select list, `HAVING` or `ORDER BY`, is grouped: the
+rows `WHERE` keeps are gathered into groups that share their `GROUP BY`
+values, and each group gives one row. NULLs fall into one group. With
+no `GROUP BY`, every row is one group, so `SELECT count(*) FROM t`
+answers one row even for an empty table.
+
+In a grouped `SELECT`, every column read outside an aggregate must be a
+`GROUP BY` term or sit inside one, such as `team` in the example; any
+other is `axqSchema`. `HAVING` keeps the groups it finds `TRUE`, and needs
+a `GROUP BY`. Without `ORDER BY`, groups come in the order of their
+`GROUP BY` values. `ORDER BY`, `LIMIT` and `OFFSET` then apply to the
+groups' rows.
+
+An aggregate in `WHERE`, `GROUP BY`, `SET`, `VALUES`, a `DEFAULT` or a
+`CHECK`, or inside another aggregate, is `axqSyntax`.
+
 ### `BEGIN`, `COMMIT`, `ROLLBACK`
 
 ```text
@@ -382,6 +546,43 @@ transaction a statement that fails is undone on its own and the
 transaction stays open. `BEGIN` inside a transaction, or `COMMIT` or
 `ROLLBACK` outside one, is `axqMisuse`. [axqlite.md](axqlite.md) covers
 transactions from the API.
+
+## Links
+
+A `LINK table` column holds the rowid of a row of `table`, or NULL. It is
+how one row points at another:
+
+```text
+CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL)
+CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, author LINK authors)
+SELECT title, author.name FROM books WHERE author.name LIKE 'Le%'
+SELECT title, author.* FROM books
+```
+
+`link.column` reads a column of the row the link points at, anywhere a
+`SELECT` reads a value: its select list, `WHERE`, `GROUP BY`, `HAVING` and
+`ORDER BY`, and the `WHERE` of an `UPDATE` or `DELETE`. `link.*` in a
+select list gives every column of that row, each named `link.column`.
+`link.rowid` is the link's own value.
+
+Writing a link checks its row exists, and refuses one that doesn't with
+`axqConstraint`. A row may link to a row of its own table, or to itself.
+Deleting a row others link to is allowed, and a link to a row that is
+gone reads as NULL through every path, as a NULL link does. A table
+that another table links to can't be dropped.
+
+A relation between rows, such as who wrote what, is a table of two
+links, read through both:
+
+```text
+CREATE TABLE wrote (author LINK authors NOT NULL, book LINK books NOT NULL, year INTEGER)
+SELECT author.name, book.title, year FROM wrote WHERE author.name = 'Le Guin'
+SELECT book.title, count(*) FROM wrote GROUP BY book.title HAVING count(*) > 1
+```
+
+A path has one step: `author.name`, never `author.team.name`. Not yet:
+paths of more steps, and links followed backwards; see the
+[roadmap](roadmap.md#standard-library).
 
 ## Rowids
 
@@ -412,7 +613,8 @@ AXQL chooses how to read a table from the `WHERE` clause's `AND` terms:
 against the whole `WHERE`, so the choice changes how long a statement
 takes and never what it answers. When the order rows are read in is
 already the order `ORDER BY` asks for, rows go straight out; otherwise
-they are collected and sorted.
+they are collected and sorted. A `BETWEEN` is two ranges, so it reads a
+stretch too.
 
 A `SELECT` without `ORDER BY` answers rows in the order they are read:
 rowid order from the table, or index order from an index. Write `ORDER`
@@ -425,13 +627,22 @@ database as it was before the statement ran:
 
 | Code | When |
 |---|---|
-| `axqSyntax` | the text doesn't parse. The message starts with the line and column, in bytes from 1 |
-| `axqSchema` | a table, column or index that doesn't exist, one that already does, or a column list that doesn't fit the table |
-| `axqType` | a value of the wrong type for a column, an operator, or LIMIT |
-| `axqConstraint` | NULL in a NOT NULL column, a rowid already taken, or a value a UNIQUE index already holds |
-| `axqArithmetic` | INTEGER overflow, division by zero, or a REAL with no numeric answer |
+| `axqSyntax` | the text doesn't parse, names no function, or puts an aggregate where it can't go. The message starts with the line and column, in bytes from 1 |
+| `axqSchema` | a table, column, index or link that doesn't exist, one that already does, a column list that doesn't fit the table, or a column a grouped `SELECT` reads outside its groups |
+| `axqType` | a value of the wrong type for a column, an operator, a function or `LIMIT` |
+| `axqConstraint` | NULL in a NOT NULL column, a `CHECK` found FALSE, a link to no row, a rowid already taken, or a value a UNIQUE index already holds |
+| `axqArithmetic` | INTEGER overflow, division by zero, a REAL with no numeric answer, or a number a function doesn't take |
 | `axqMisuse` | transaction statements out of order, or the wrong number of parameters |
 | `axqTooBig` | no rowid left, or an index entry longer than 1000 bytes |
+
+Each message says what failed and, where it can, what to do about it:
+a misspelt table or column comes back with the name it was probably
+meant to be, or the names there are. The error's context names the
+statement and the function that ran it:
+
+```text
+line 1, column 8: no such column: titel; did you mean title? while running `SELECT titel FROM books` in axqExec
+```
 
 `axqBusy`, `axqReadOnly`, `axqIoFailed`, `axqCorrupt` and
 `axqNotADatabase` come from the database file rather than the
@@ -464,13 +675,29 @@ The operators are `and`, `or`, `not`, `=`, `!=`, `<`, `<=`, `>`, `>=`,
 operand in parentheses only when it is itself an operation, so that
 form is `(age > ?) AND (deleted IS NULL)`.
 
-The clauses of `axqlSelect` are `(where e)`, `(orderBy term ...)`,
-`(limit n)` and `(offset n)`, in that order and each optional, with `n`
-an Axiom `Int`. An `ORDER BY` term is a column, `(column desc)` or
-`(column asc)`, or `(desc e)` or `(asc e)` for any expression. A select
-list is `*`, one column, or a list of columns and `(as e name)` items.
-`UPDATE`'s list is `(assign (column e) ...)`, because `set` is Axiom's own
-word.
+The rest of the expression forms:
+
+| Form | Text |
+|---|---|
+| `(like a p)`, `(notLike a p)` | `a LIKE p`, `a NOT LIKE p` |
+| `(isIn a e ...)`, `(notIn a e ...)` | `a IN (e, ...)`, `a NOT IN (e, ...)`, one to eight items |
+| `(between a lo hi)` | `a BETWEEN lo AND hi` |
+| `(concat a b ...)` | `a \|\| b \|\| ...`, two to eight operands |
+| `(link l c)`, `(link l *)` | `l.c`, `l.*` |
+| `(lower e)`, `(substr s (int 2))` and every other function | `lower(e)`, `substr(s, ?)` |
+| `(count *)`, `(sum e)` and the other aggregates | `count(*)`, `sum(e)` |
+
+The clauses of `axqlSelect` are `(where e)`, `(groupBy e ...)` with one
+to three terms, `(having e)`, `(orderBy term ...)`, `(limit n)` and
+`(offset n)`, in that order and each optional, with `n` an Axiom `Int`.
+An `ORDER BY` term is a column, `(column desc)` or `(column asc)`, or
+`(desc e)` or `(asc e)` for any expression. A select list is `*`, one
+column, or a list of columns, `(link l c)` and `(link l *)` paths, and
+`(as e name)` items; any other expression needs its `as`. `UPDATE`'s
+list is `(assign (column e) ...)`, because `set` is Axiom's own word.
+`axqlUpsert` is shaped as `axqlInsert` is. A column of
+`axqlCreateTable` is `(name TYPE ...)` or `(name LINK table)`, with or
+without `NOT NULL`.
 
 A form that doesn't fit a statement's shape is a compile error at the
 invocation. `axqlTable` goes further and declares a record type with
@@ -479,22 +706,25 @@ typed reads and writes for a table; [axqlite.md](axqlite.md) shows it.
 Limits, all of the forms rather than of AXQL:
 
 - A form has no number or string literals, because a macro can't tell
-  `18` from a column name. A constant goes through a marker.
-- A list in a form holds at most 16 items, and `axqlCreateTable` at most
-  32 columns. The text has no such limits.
+  `18` from a column name. A constant goes through a marker, and
+  `DEFAULT` and `CHECK`, which hold constants in the schema, are written
+  as text.
+- A list in a form holds at most 16 items, `axqlCreateTable` at most
+  32 columns, and `groupBy` at most three terms. The text has no such
+  limits.
 - A name must be an Axiom identifier. A name beginning `axqlArg` can't
   be used in a form.
 
-Tested by `tests/axqlite/620-macro-text.ax` and `tests/axqlite/624-macro-malformed.ax`.
+Tested by `tests/axqlite/620-macro-text.ax` and `tests/axqlite/625-macro-forms.ax`.
 
 ## What AXQL doesn't have
 
-AXQL reads and writes one table per statement. It has no joins, no
-subqueries, no aggregates and no `GROUP BY`, no views, triggers, window
-functions or virtual tables, and no functions of any kind. There is no
-`ALTER TABLE`: drop the table and create it again. There are no default
-values, no column-level `UNIQUE` (use a `UNIQUE` index), no collations, and
-no conversion between `TEXT` and numbers.
+AXQL reads one table per statement, with the rows its links point at.
+It has no joins, no subqueries, no views, triggers, window functions or
+virtual tables, no column-level `UNIQUE` (use a `UNIQUE` index) and no
+collations. Not yet: `DROP COLUMN`, `RENAME COLUMN`, link paths of more
+than one step, links followed backwards, a change feed, and compacting
+the file; see the [roadmap](roadmap.md#standard-library).
 
 Tested by the scripts in `tests/axqlite/axql/`, run by
 `tests/axqlite/500-axql-ddl.ax` and its neighbours.
