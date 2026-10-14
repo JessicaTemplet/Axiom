@@ -144,7 +144,9 @@ depth and keeps working while the server is busy.
 
 VS Code has no tree-sitter, so its highlighting comes from the TextMate
 grammar in the extension at [`editors/vscode/`](../editors/vscode/README.md)
-and from the server's semantic tokens. The Neovim, Helix and VS Code
+and from the server's semantic tokens. The tree-sitter queries give each
+token the role VS Code gives it, apart from uses that only resolution
+can colour (see the [grammar's notes](../tree-sitter-axiom/README.md#colours-match-vs-code)). The Neovim, Helix and VS Code
 sections each end with a check that tells you which of the two pieces
 you have.
 

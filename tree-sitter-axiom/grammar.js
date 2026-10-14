@@ -321,16 +321,23 @@ module.exports = grammar({
     // `(c)` rebuilt once per absorbed element by the rule-form
     // repetition (MAC-LANG-16 v3) - which the compiler's
     // `parseOneCtorInner` accepts through `parseDeclName` with no
-    // case asked. So the name here is an `identifier` beside the
-    // uppercase one, not instead of it: existing trees keep the
-    // `constructor_identifier` they have, by the same tie-break
-    // every `(Nil)` in the corpus already exercises.
+    // case asked. That form is nullary here. With fields allowed, a
+    // lowercase-named constructor was the same tokens as a type
+    // parameter list, and `(data Result (a e) ...)` parsed `(a e)` as
+    // a constructor `a` with one field; the compiler reads a group of
+    // lowercase names after the type's name as its parameters, and so
+    // does this grammar now (test/corpus/declarations.txt).
     data_constructor: $ => seq(
       '(',
-      field('name', choice($.constructor_identifier, $.identifier, $.syntax_join_name)),
       choice(
-        repeat(field('field', $._type)),
-        seq('{', repeat(seq(field('field', $.named_field), optional(','))), '}'),
+        seq(
+          field('name', choice($.constructor_identifier, $.syntax_join_name)),
+          choice(
+            repeat(field('field', $._type)),
+            seq('{', repeat(seq(field('field', $.named_field), optional(','))), '}'),
+          ),
+        ),
+        field('name', $.identifier),
       ),
       ')',
     ),
@@ -905,6 +912,7 @@ module.exports = grammar({
       $.block,
       $.list_literal,
       $.removed_form,
+      $.field_expression,
       // Application is last so that every special form gets first refusal
       // on the token after `(`. A head that is not a keyword falls through
       // to here, which is what makes `(+ 1 2)` and `(f x)` the same shape.
@@ -940,7 +948,7 @@ module.exports = grammar({
     // `Mod::name`, and `Mod.Sub::name` - the dotted path is already a
     // single identifier token, because `.` continues an identifier.
     qualified_identifier: $ => prec(2, seq(
-      field('module', $.identifier), '::', field('name', $.identifier),
+      field('module', choice($.identifier, alias($.field_expression, $.dotted_module))), '::', field('name', $.identifier),
     )),
 
     // `Mod::Name` where a TYPE stands - the same spelling expressions
@@ -1042,7 +1050,7 @@ module.exports = grammar({
     // the parser rebuilds the chain; only the spelling of the split
     // differs, not the set of programs accepted.
     set_expression: $ => seq(
-      '(', 'set', field('target', $.identifier), field('value', $._expression), ')',
+      '(', 'set', field('target', choice($.identifier, $.field_expression)), field('value', $._expression), ')',
     ),
 
     match_expression: $ => seq(
@@ -1131,8 +1139,10 @@ module.exports = grammar({
     // nothing and removes that ambiguity outright.
     //
     // The remaining ambiguity, `(foo)` as a one-element effect list versus
-    // an application, is declared as a conflict below.
-    effect_list: $ => seq('(', repeat1(field('effect', $.effect)), ')'),
+    // an application, is declared as a conflict below, and settled the
+    // compiler's way: a `(` right after the body always opens the effect
+    // list (`parseHandleExpr`), so the list reading is preferred.
+    effect_list: $ => prec.dynamic(1, seq('(', repeat1(field('effect', $.effect)), ')')),
 
     sizeof_expression: $ => seq('(', 'sizeof', field('type', $._type), ')'),
 
@@ -1152,6 +1162,15 @@ module.exports = grammar({
     application: $ => seq(
       '(', repeat(field('operand', $._expression)), ')',
     ),
+
+    // `p.x`, `a.b.c` and `(f x).y`: a field read off what the `.`
+    // touches. The `.` and the name both touch, as the compiler's lexer
+    // requires, which is what keeps `lo..hi` a range.
+    field_expression: $ => prec.left(seq(
+      field('object', choice($.identifier, $.field_expression, $.application)),
+      token.immediate('.'),
+      field('field', alias(token.immediate(/[A-Za-z_][A-Za-z0-9_']*/), $.field_identifier)),
+    )),
 
     // -----------------------------------------------------------------
     // Literals and identifiers
@@ -1212,15 +1231,16 @@ module.exports = grammar({
     // self_host/lexer.ax.
     constructor_identifier: _ => token(/[+*/%<>=!&|^~-]*[A-Z][A-Za-z0-9_']*/),
 
-    // An identifier is either a name (possibly dotted, since `.` is an
-    // operator character that the lexer glues on) or a bare run of
-    // operator characters. A dot inside a name is never followed by a
-    // second one, so `lo..hi` is a range between two names. Operators
-    // being identifiers is why this grammar has no precedence table.
+    // An identifier is either a name or a bare run of operator
+    // characters. A `.` that touches a name is field access
+    // (`field_expression`), not part of the name, so `p.x` is the
+    // binding `p` and the field `x`, as the compiler and the language
+    // server read it. Operators being identifiers is why this grammar
+    // has no precedence table.
     // The name alternative starts on the lexer's full start set,
     // operators included, for the reason above.
     identifier: _ => token(choice(
-      /[A-Za-z_+*/%<>=!&|^~-][A-Za-z0-9_']*([+\-*\/%^=<>!&|?~@]+[A-Za-z0-9_']*|\.[A-Za-z0-9_'+\-*\/%^=<>!&|?~@][A-Za-z0-9_']*)*/,
+      /[A-Za-z_+*/%<>=!&|^~-][A-Za-z0-9_']*([+\-*\/%^=<>!&|?~@]+[A-Za-z0-9_']*)*/,
       new RegExp(OPERATOR_CHAR.source + '+'),
     )),
   },

@@ -16,6 +16,22 @@ its changelog too.
 
 ## Unreleased
 
+- Tree-sitter colours Axiom the way VS Code does. The queries now give
+  each token the role the language server and the TextMate grammar give
+  it: one keyword colour, operators wherever they stand, constructors
+  for capitalised names in expressions, library colours for builtin
+  types and effects, and a parameter's uses coloured as the parameter
+  through a new `locals.scm`. No node is captured twice, so Neovim and
+  Helix agree; before, Neovim and the tree-sitter CLI let the catch-all
+  `@variable` override every function, call and field name. The grammar
+  splits field access (`p.x`) out of the identifier, reads `(a e)` after
+  a `data` name as its type parameters and a `handle`'s list as its
+  effects, as the compiler does. In VS Code, `true` and `false` keep the
+  constant colour when the server attaches, an immutable binding keeps
+  the variable colour, and the server no longer colours `for` in
+  `(let ((for 5)) ...)` as a keyword. Tested by
+  `scripts/check-highlight-parity.sh`.
+
 - Release what `vecPop` hands over. A popped element's share was
   transferred to the caller and never given back, about 78 bytes per
   pop measured on a string. A trusted function now says

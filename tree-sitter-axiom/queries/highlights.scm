@@ -1,30 +1,34 @@
 ; Syntax highlighting for Axiom.
 ;
-; Capture names follow the tree-sitter convention set used by Neovim,
-; Helix, and the tree-sitter CLI's own `highlight` command, so this file
-; works in all three without a per-editor variant.
+; The roles are VS Code's. In VS Code the language server colours each
+; token (its semantic tokens, `SECTION HL` in `self_host/lsp.ax`) over
+; the TextMate grammar in `editors/vscode/syntaxes/`, and this file
+; gives every token the role VS Code gives it: one keyword colour, an
+; operator wherever a word is spelled only with operator characters,
+; a constructor for a capitalised name in an expression, the library's
+; colour for the lexicon's builtin types and effects.
+; `scripts/check-highlight-parity.sh` holds the three together, token
+; by token, over the repository's own sources.
 ;
-; Consumers disagree about which of two overlapping patterns wins:
-; `tree-sitter-highlight` and most published grammars take the first, and
-; recent Neovim takes the last unless an explicit priority is set. Rather
-; than pick a side, this file avoids overlaps wherever the two answers
-; would *differ*, by scoping each pattern to the context that determines
-; the role.
+; Capture names follow the convention Neovim, Helix and the tree-sitter
+; CLI share. Those consumers disagree about which of two patterns wins
+; on the same node: Neovim and tree-sitter's own highlighter take the
+; last, Helix the first. So no node here is captured twice. Each
+; identifier position has its own pattern, and the predicates split a
+; position by spelling rather than by order:
 ;
-; Concretely: there is no blanket `(constructor_identifier) @type` rule,
-; because the same token is a type in `(Maybe Int)` and a data constructor
-; in `(Just a)`, and a blanket rule gets one of them wrong under either
-; convention. The one overlap left is the catch-all `(identifier)
-; @variable` at the end of the file, where the fallback is a strictly worse
-; but still correct answer.
+;   operator   only `+ - * / % < > = ! & | ^ ~`, or `...`, in any position
+;   `_`        the wildcard, in any position
+;   syntax/    a macro-template word, in any position
+;   upper      starts with a capital: a constructor in an expression
+;   lower      everything else
 ;
-; Uppercased heads are constructors by the language's own naming rule -
-; the grammar reads them as `constructor_identifier` in type position
-; for the same reason - so a bare `(Point 1 2)` is a construction, not
-; a call. The two application-head rules below are disjoint by case
-; (`#match?` / `#not-match?` on the first letter) rather than by
-; priority, which is what keeps both answers stable under the two
-; overlap conventions above: no token matches both.
+; The gate checks that no node is captured twice over the whole corpus.
+;
+; `locals.scm` colours a use of a name by its binding, as the language
+; server does: a parameter's uses as parameters, a function's uses as
+; functions. Editors that do not read it for colour (Neovim) show those
+; uses as variables.
 
 ; ---------------------------------------------------------------
 ; Comments and metadata
@@ -33,14 +37,10 @@
 (comment) @comment
 (block_comment) @comment
 
-; A `;;` doc comment is what hover and `axiom doc` show, so it gets
-; the documentation colour apart from a maintainer's `;` note.
+; A `;;` doc comment is what hover and `axiom doc` show.
 (doc_comment) @comment.documentation
 
-; AXTAGs are agent-authored metadata that the compiler validates, not
-; free-form prose. Highlighting them apart from comments is the point:
-; `;@axiom:effect(io)` is a claim the compiler will check and reject
-; (`AX3010`), and it should not look like a note to a human.
+; `;@axiom:effect(io)` is a claim the compiler checks, not a note.
 (axtag) @attribute
 
 ; ---------------------------------------------------------------
@@ -50,128 +50,256 @@
 (integer_literal) @number
 (float_literal) @number.float
 (boolean_literal) @boolean
-(character_literal) @character
+; A character is a string to the language server, as in VS Code.
+(character_literal) @string
 (string_literal) @string
+
+; ---------------------------------------------------------------
+; Words by spelling, in any position
+; ---------------------------------------------------------------
+
+((identifier) @operator
+  (#match? @operator "^([-+*/%<>=!&|^~]+|[.][.][.])$"))
+
+((identifier) @variable.builtin
+  (#eq? @variable.builtin "_"))
+(wildcard_pattern) @variable.builtin
+
+((identifier) @keyword
+  (#match? @keyword "^syntax/"))
 
 ; ---------------------------------------------------------------
 ; Types
 ; ---------------------------------------------------------------
 
-(builtin_type) @type.builtin
+; The lexicon's builtin types are the library's; the grammar's other
+; builtin words (`I64`, `Double`, ...) are ordinary type names to the
+; compiler.
+((builtin_type) @type.builtin
+  (#match? @type.builtin "^(Int|Float|Bool|Char|String)$"))
+((builtin_type) @type
+  (#not-match? @type "^(Int|Float|Bool|Char|String)$"))
 (unit_type) @type.builtin
-(type_variable) @variable.parameter
 
-; Scoped to type position. `(type_constructor (constructor_identifier))`
-; matches both spellings - the bare `Maybe` and the applied `(Maybe Int)`,
-; whose head carries a `name:` field - because they are the same node.
-(type_constructor (constructor_identifier) @type)
+((type_constructor (constructor_identifier) @type.builtin)
+  (#match? @type.builtin "^(Int|Float|Bool|Char|String|Foreign|Handle|Vec|Option|Result|Addr)$"))
+((type_constructor (constructor_identifier) @type)
+  (#not-match? @type "^(Int|Float|Bool|Char|String|Foreign|Handle|Vec|Option|Result|Addr)$"))
 
-(builtin_effect) @keyword.modifier
-(effect (identifier) @keyword.modifier)
+(type_variable) @type.parameter
+; `(data Tree a ...)`: one parameter, written without its parens.
+((type_parameters) @type.parameter
+  (#match? @type.parameter "^[a-z]"))
+(struct_declaration marker: (identifier) @type.parameter)
+
+(qualified_type module: (constructor_identifier) @module)
+(qualified_type submodule: (constructor_identifier) @module)
+((qualified_type name: (constructor_identifier) @type.builtin)
+  (#match? @type.builtin "^(Int|Float|Bool|Char|String|Foreign|Handle|Vec|Option|Result|Addr)$"))
+((qualified_type name: (constructor_identifier) @type)
+  (#not-match? @type "^(Int|Float|Bool|Char|String|Foreign|Handle|Vec|Option|Result|Addr)$"))
+
+; Effects take the type colours, as VS Code paints them: a builtin
+; effect the library's, a declared one a type's.
+(builtin_effect) @type.builtin
+((effect (identifier) @type.builtin)
+  (#match? @type.builtin "^(IO|Alloc|Mut|Unsafe|Spawn|Block|Entropy|Div|Pure)$"))
+((effect (identifier) @type)
+  (#not-match? @type "^(IO|Alloc|Mut|Unsafe|Spawn|Block|Entropy|Div|Pure|[-+*/%<>=!&|^~]+|[.][.][.]|_|syntax/.*)$"))
+
+(region_annotation) @label
 
 ; ---------------------------------------------------------------
 ; Declarations
-;
-; A declaration's name is highlighted by role rather than by shape, which
-; is the whole reason for the `field(...)` labels in the grammar: `Point`
-; in `(struct Point ...)` is a type, and `add` in `(fn (add x y) ...)` is
-; a function, and neither is inferable from the token alone.
 ; ---------------------------------------------------------------
 
-(function_definition name: (identifier) @function)
-(function_definition parameter: (identifier) @variable.parameter)
-
-; A macro's name is a function name of its own colour, and its
-; parameters bind like any other: a bare identifier in a rule pattern
-; binds (MAC-LANG-15), so only identifier elements are captured and a
-; literal or nested form keeps whatever colour it already had.
-(macro_declaration name: (identifier) @function.macro)
-(macro_declaration parameter: (identifier) @variable.parameter)
-(macro_rule rule_name: (identifier) @function.macro)
-(macro_rule parameter: (identifier) @variable.parameter)
-(emacro_declaration name: (identifier) @function.macro)
-(emacro_rule rule_name: (identifier) @function.macro)
-
-(lambda parameter: (identifier) @variable.parameter)
-
-(data_declaration name: (identifier) @type)
-(data_constructor name: (constructor_identifier) @constructor)
-
-(struct_declaration name: (identifier) @type)
-(field_declaration name: (identifier) @variable.member)
-
-(type_alias name: (identifier) @type.definition)
-(subtype_declaration name: (identifier) @type.definition)
-
-(effect_declaration name: (identifier) @keyword.modifier)
-(effect_operation name: (identifier) @function.method)
-
-(import module: (module_path) @module)
-(import name: (identifier) @variable)
-
-; An `extern` item names the Rust function it binds; its clauses are
-; keyed like attributes, `(symbol "demo_add")`.
+((function_definition name: (identifier) @function)
+  (#not-match? @function "^(_|syntax/.*|[.][.][.]|[-+*/%<>=!&|^~]+)$"))
+((type_signature subject: (identifier) @function)
+  (#not-match? @function "^(_|syntax/.*|[.][.][.]|[-+*/%<>=!&|^~]+)$"))
 (extern_item name: (identifier) @function)
-(extern_clause key: (identifier) @attribute)
+(effect_operation name: (identifier) @function)
 
-; A field named in a constructor's braces, `(Circle { r : Float })`.
-(named_field name: (identifier) @variable.member)
+((import name: (identifier) @type)
+  (#match? @type "^[A-Z]"))
+((import name: (identifier) @function)
+  (#not-match? @function "^([A-Z]|_$|syntax/|[.][.][.]$|[-+*/%<>=!&|^~]+$)"))
+(import module: (module_path) @module)
 
-; A qualified type, `Net.Tcp::Stream`: modules, then the type.
-(qualified_type module: (constructor_identifier) @module)
-(qualified_type submodule: (constructor_identifier) @module)
-(qualified_type name: (constructor_identifier) @type)
+([
+  (macro_declaration name: (identifier) @function.macro)
+  (emacro_declaration name: (identifier) @function.macro)
+  (macro_rule rule_name: (identifier) @function.macro)
+  (emacro_rule rule_name: (identifier) @function.macro)
+]
+  (#not-match? @function.macro "^(_|syntax/.*|[.][.][.]|[-+*/%<>=!&|^~]+)$"))
 
-; A top-level signature's subject is a bare identifier naming the
-; function it describes. An inline ascription's subject is an arbitrary
-; expression, and this pattern correctly does not match it.
-(type_signature subject: (identifier) @function)
+([
+  (function_definition parameter: (identifier) @variable.parameter)
+  (lambda parameter: (identifier) @variable.parameter)
+  (macro_declaration parameter: (identifier) @variable.parameter)
+  (macro_rule parameter: (identifier) @variable.parameter)
+  (emacro_rule parameter: (identifier) @variable.parameter)
+  (macro_pattern_form (identifier) @variable.parameter)
+]
+  (#not-match? @variable.parameter "^(_|syntax/.*|[.][.][.]|[-+*/%<>=!&|^~]+)$"))
 
-; ---------------------------------------------------------------
-; Patterns
-; ---------------------------------------------------------------
+([
+  (data_declaration name: (identifier) @type)
+  (struct_declaration name: (identifier) @type)
+  (type_alias name: (identifier) @type)
+  (subtype_declaration name: (identifier) @type)
+  (effect_declaration name: (identifier) @type)
+]
+  (#not-match? @type "^(_|syntax/.*|[.][.][.]|[-+*/%<>=!&|^~]+)$"))
 
-(wildcard_pattern) @character.special
+(data_constructor name: (constructor_identifier) @constructor)
+((data_constructor name: (identifier) @constructor)
+  (#not-match? @constructor "^(_|syntax/.*|[.][.][.]|[-+*/%<>=!&|^~]+)$"))
 (constructor_pattern constructor: (constructor_identifier) @constructor)
-(let_binding pattern: (identifier) @variable)
-(field_pattern name: (identifier) @variable.member)
+(syntax_binders_pattern constructor: (identifier) @constructor)
 
-; ---------------------------------------------------------------
-; Expressions
-; ---------------------------------------------------------------
+([
+  (field_declaration name: (identifier) @variable.member)
+  (named_field name: (identifier) @variable.member)
+  (extern_clause key: (identifier) @variable.member)
+]
+  (#not-match? @variable.member "^(_|syntax/.*|[.][.][.]|[-+*/%<>=!&|^~]+)$"))
 
-; The head of an application is the thing being called. Axiom has no
-; operator syntax - `+` is an ordinary identifier in head position - so
-; these two rules are what make `(f x)`, `(+ 1 2)` and `(Point 1 2)`
-; highlight sensibly, and it is why there is no operator pattern below.
-; An upcased head is a constructor application; anything else is a call.
-(application
-  .
-  (identifier) @constructor
-  (#match? @constructor "^[A-Z]"))
-(application
-  .
-  (identifier) @function.call
-  (#not-match? @function.call "^[A-Z]"))
-
-; A qualified head calls out of its module: the module reads as one,
-; the name as the call it is.
-(application
-  .
-  (qualified_identifier
-    module: (identifier) @module
-    name: (identifier) @function.call))
-
-; Regions are named scopes, and `@r` in a type points back at one.
-(region_annotation) @label
 (region_expression name: (identifier) @label)
 (parallel_expression region: (identifier) @label)
 
-; Macro templates: `syntax/binders` and `syntax/join` build names.
-(syntax_binders_pattern constructor: (identifier) @constructor)
+(qualified_identifier module: (identifier) @module)
+(dotted_module object: (identifier) @module)
+(dotted_module field: (field_identifier) @module)
+(qualified_identifier name: (identifier) @function.call)
+
+; `p.x`: the field is a field, and `p` is coloured as any expression.
+(field_expression field: (field_identifier) @variable.member)
+
+; ---------------------------------------------------------------
+; Bindings and patterns
+;
+; A binder is a variable whatever its case: a bare `None` in a match
+; arm binds a name, as the compiler reads it.
+; ---------------------------------------------------------------
+
+([
+  (let_binding pattern: (identifier) @variable)
+  (parallel_binding name: (identifier) @variable)
+  (for_expression binder: (identifier) @variable)
+  (match_arm pattern: (identifier) @variable)
+  (constructor_pattern argument: (identifier) @variable)
+  (field_pattern name: (identifier) @variable)
+  (field_pattern pattern: (identifier) @variable)
+  (parenthesized_pattern pattern: (identifier) @variable)
+  (tuple_pattern element: (identifier) @variable)
+  (list_pattern element: (identifier) @variable)
+  (syntax_binders_pattern prefix: (identifier) @variable)
+  (syntax_for_arm binder: (identifier) @variable)
+  (syntax_for_declaration binder: (identifier) @variable)
+]
+  (#not-match? @variable "^(_|syntax/.*|[.][.][.]|[-+*/%<>=!&|^~]+)$"))
+
+; ---------------------------------------------------------------
+; Expressions
+;
+; The head of an application is called: a function, or a constructor
+; when it is capitalised. An identifier anywhere else an expression
+; stands is a variable, or a constructor when capitalised.
+; ---------------------------------------------------------------
+
+((application . (identifier) @constructor)
+  (#match? @constructor "^[A-Z]"))
+((application . (identifier) @function.call)
+  (#not-match? @function.call "^([A-Z]|_$|syntax/|[.][.][.]$|[-+*/%<>=!&|^~]+$)"))
+
+([
+  (application . (_) (identifier) @constructor)
+  (block body: (identifier) @constructor)
+  (cast_expression operand: (identifier) @constructor)
+  (function_definition body: (identifier) @constructor)
+  (if_expression operand: (identifier) @constructor)
+  (for_expression start: (identifier) @constructor)
+  (for_expression end: (identifier) @constructor)
+  (for_expression step: (identifier) @constructor)
+  (for_expression operand: (identifier) @constructor)
+  (for_expression body: (identifier) @constructor)
+  (handle_expression body: (identifier) @constructor)
+  (handle_expression handler: (identifier) @constructor)
+  (lambda body: (identifier) @constructor)
+  (let_expression body: (identifier) @constructor)
+  (let_binding value: (identifier) @constructor)
+  (list_literal element: (identifier) @constructor)
+  (macro_declaration body: (identifier) @constructor)
+  (macro_rule template: (identifier) @constructor)
+  (emacro_rule template: (identifier) @constructor)
+  (match_arm body: (identifier) @constructor)
+  (match_expression scrutinee: (identifier) @constructor)
+  (parallel_binding value: (identifier) @constructor)
+  (parallel_expression body: (identifier) @constructor)
+  (region_expression body: (identifier) @constructor)
+  (set_expression target: (identifier) @constructor)
+  (set_expression value: (identifier) @constructor)
+  (subtype_declaration lower: (identifier) @constructor)
+  (subtype_declaration upper: (identifier) @constructor)
+  (while_expression condition: (identifier) @constructor)
+  (while_expression body: (identifier) @constructor)
+  (literals_clause literal: (identifier) @constructor)
+  (removed_form (identifier) @constructor)
+  (extern_clause . (_) (identifier) @constructor)
+  (field_expression object: (identifier) @constructor)
+  (syntax_join_name left: (identifier) @constructor)
+  (syntax_join_name right: (identifier) @constructor)
+]
+  (#match? @constructor "^[A-Z]"))
+
+([
+  (application . (_) (identifier) @variable)
+  (block body: (identifier) @variable)
+  (cast_expression operand: (identifier) @variable)
+  (function_definition body: (identifier) @variable)
+  (if_expression operand: (identifier) @variable)
+  (for_expression start: (identifier) @variable)
+  (for_expression end: (identifier) @variable)
+  (for_expression step: (identifier) @variable)
+  (for_expression operand: (identifier) @variable)
+  (for_expression body: (identifier) @variable)
+  (handle_expression body: (identifier) @variable)
+  (handle_expression handler: (identifier) @variable)
+  (lambda body: (identifier) @variable)
+  (let_expression body: (identifier) @variable)
+  (let_binding value: (identifier) @variable)
+  (list_literal element: (identifier) @variable)
+  (macro_declaration body: (identifier) @variable)
+  (macro_rule template: (identifier) @variable)
+  (emacro_rule template: (identifier) @variable)
+  (match_arm body: (identifier) @variable)
+  (match_expression scrutinee: (identifier) @variable)
+  (parallel_binding value: (identifier) @variable)
+  (parallel_expression body: (identifier) @variable)
+  (region_expression body: (identifier) @variable)
+  (set_expression target: (identifier) @variable)
+  (set_expression value: (identifier) @variable)
+  (subtype_declaration lower: (identifier) @variable)
+  (subtype_declaration upper: (identifier) @variable)
+  (while_expression condition: (identifier) @variable)
+  (while_expression body: (identifier) @variable)
+  (literals_clause literal: (identifier) @variable)
+  (removed_form (identifier) @variable)
+  (extern_clause . (_) (identifier) @variable)
+  (field_expression object: (identifier) @variable)
+  (syntax_join_name left: (identifier) @variable)
+  (syntax_join_name right: (identifier) @variable)
+]
+  (#not-match? @variable "^([A-Z]|_$|syntax/|[.][.][.]$|[-+*/%<>=!&|^~]+$)"))
 
 ; ---------------------------------------------------------------
 ; Keywords
+;
+; One colour, as VS Code has one: the language server sends `keyword`
+; for every head keyword and for the words inside a form (`mut`, `in`,
+; `by`, `is`, `range`, `literals`).
 ; ---------------------------------------------------------------
 
 [
@@ -179,38 +307,17 @@
   "lambda"
   "macro"
   "emacro"
-] @keyword.function
-
-[
   "data"
   "struct"
   "type"
   "subtype"
   "effect"
-] @keyword.type
-
-; `else` left with `cond`: it was only ever the else-clause marker
-; (`cond_clause`'s `field('else', ...)`), never a keyword of its own,
-; so with that rule gone the token is gone too and an `else` is an
-; ordinary identifier, highlighted as one.
-[
   "if"
   "match"
-] @keyword.conditional
-
-; The loop heads, the `in` of `(for x in xs ...)` and the `by` of
-; `(for i in lo..hi by step ...)`.
-[
   "while"
   "for"
   "in"
   "by"
-  "syntax/for"
-] @keyword.repeat
-
-; `is` and `range` are the refinement words of
-; `(subtype Port is Int range 1..65536)`.
-[
   "let"
   "set"
   "handle"
@@ -218,53 +325,39 @@
   "import"
   "extern"
   "region"
+  "parallel"
   "literals"
   "is"
   "range"
-] @keyword
-
-[
-  "syntax/binders"
-  "syntax/join"
-] @function.builtin
-
-[
   "sizeof"
   "alignof"
   "cast"
   "mut"
-] @keyword.modifier
+  "syntax/for"
+  "syntax/binders"
+  "syntax/join"
+] @keyword
 
-; The concurrency form: what runs beside the caller.
-[
-  "parallel"
-] @keyword.coroutine
-
-; ---------------------------------------------------------------
-; Removed constructs
-;
-; `union` and `foreign` parse, so that an editor can mark the dead
-; form as one bounded region instead of showing an anonymous ERROR
-; whose extent depends on where recovery landed. They are highlighted
-; as errors because that is what the compiler reports (`AX2004`).
-; `region` left this list on 2026-09-03: it is a keyword again, above.
-; ---------------------------------------------------------------
-
+; `union`, `foreign`, `trait`, `impl` and `cond` parse, so an editor
+; can mark the dead word rather than show an error whose extent depends
+; on where recovery landed; the compiler refuses them (`AX2004`).
 (removed_keyword) @error
-(removed_form) @error
 
 ; ---------------------------------------------------------------
-; Punctuation
+; Operators and punctuation
 ; ---------------------------------------------------------------
-
-".." @operator
-(ellipsis) @punctuation.special
 
 [
   "::"
   "->"
-  ":"
   "="
+  ".."
+  "..-"
+] @operator
+(ellipsis) @operator
+
+[
+  ":"
   "!"
   "*"
   ","
@@ -279,7 +372,3 @@
   "{"
   "}"
 ] @punctuation.bracket
-
-; Everything not captured above is a plain variable reference. Last, so
-; that every rule above wins over it.
-(identifier) @variable
