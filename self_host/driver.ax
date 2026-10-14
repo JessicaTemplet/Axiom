@@ -501,11 +501,471 @@
 (pub fn (baremetalLinkScript)
   "ENTRY(_start)\nSECTIONS {\n  . = 0x40000000;\n  .text.boot : { KEEP(*(.text.boot)) }\n  .text : { *(.text*) }\n  . = ALIGN(4096);\n  __axiom_rx_end = .;\n  .rodata : { *(.rodata*) }\n  .eh_frame : { *(.eh_frame*) }\n  .got : { *(.got) *(.got.plt) }\n  . = ALIGN(4096);\n  __axiom_ro_end = .;\n  .data : { *(.data*) }\n  .bss : { *(.bss*) *(COMMON) }\n  . = ALIGN(4096);\n  __axiom_rw_end = .;\n  . = . + 0x10000;\n  __axiom_stack_lo = .;\n  . = . + 0x2000;\n  __stack_top = .;\n  . = . + 0x1000;\n  __axiom_exc_lo = .;\n  . = . + 0x2000;\n  __axiom_exc_top = .;\n  __axiom_pt = .;\n}\n")
 
-(pub :: assembleAndLink (-> String String String Int (Vec Int) String Bool Int))
+; ------------------------------------------------------------------
+; AX3117: llc rejected a line of an `asm` template, reported at that
+; line (MM-FFI-9).
+;
+; `check` runs no assembler, so a template's instructions are first
+; assembled here, by `llc`. Every inline-assembly line codegen emits
+; carries a `!srcloc` cookie, and an `; axiom-asm-site FIRST K s-e ...`
+; comment before its call maps cookies FIRST, FIRST+1, ... to the
+; lines' bytes in source file K, which an `; axiom-asm-file K "path"`
+; line at the end of the module names (`asmSrcloc` in codegen.ax). llc
+; names the cookie in one of two shapes:
+;
+;   <inline asm>:2:1: error: unrecognized instruction mnemonic
+;   frobnicate x8, x0
+;   ^
+;   note: !srcloc = 7002
+;
+;   error: inline assembly requires more registers than available at line 33
+;
+; The first is the assembler's, and the line after it is the
+; instruction as the assembler read it, registers filled in. The second
+; is the register allocator's. Each becomes an AX3117 at the template
+; line, and the build fails with status 1, a program error, as every
+; diagnostic at a source position does. When any error carries no
+; cookie - llc refusing something that is not a template - the report
+; is llc's own text and AX4003, as before.
+; ------------------------------------------------------------------
+
+; `runTool` with the tool's standard error written to `errPath`.
+(pub :: runToolErrTo (-> String (Vec Int) String Int))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
-(pub fn (assembleAndLink llPath objPath outPath optLevel linkArgs winTarget isBaremetal)
+(pub fn (runToolErrTo tool args errPath)
+  (let ((n (vecLen args)))
+    (let ((v (memAlloc (* (+ n 2) 8))))
+      {
+        (memSetWord v 0 (strCStr (strDup tool)))
+        (fillArgv v args 0 n)
+        (memSetWord v (+ n 1) 0)
+        (match (sysRunPathErrTo tool v sysEnvp errPath)
+          ((Ok code) code)
+          ((Err e) (- 0 (errCode e))))
+      })))
+
+; The lines of `s`, without their newlines.
+(pub :: asmTextLines (-> String (Vec String)))
+(pub fn (asmTextLines s)
+  (let (
+    (out vecNew)
+    (mut from 0)
+    (mut i 0)
+  )
+    {
+      (while (<= i (strLen s))
+        {
+          (if (|| (== i (strLen s)) (== (strByte s i) 10))
+            {
+              (if (|| (> i from) (< i (strLen s)))
+                {
+                  (vecPush out (strSlice s from (- i from)))
+                  0
+                }
+                0)
+              (set from (+ i 1))
+            }
+            0)
+          (set i (+ i 1))
+        })
+      out
+    }))
+
+; The decimal at `at` in `s`, or -1 when there is no digit there.
+(pub :: asmNumAt (-> String Int Int))
+(pub fn (asmNumAt s at)
+  (let (
+    (mut v 0)
+    (mut any false)
+    (mut i at)
+  )
+    {
+      (while (&& (< i (strLen s)) (&& (>= (strByte s i) 48) (<= (strByte s i) 57)))
+        {
+          (set v (+ (* v 10) (- (strByte s i) 48)))
+          (set any true)
+          (set i (+ i 1))
+        })
+      (if any
+        v
+        (- 0 1))
+    }))
+
+; `s` without the blanks at either end.
+(pub :: asmTrim (-> String String))
+(pub fn (asmTrim s)
+  (let (
+    (mut a 0)
+    (mut b (strLen s))
+  )
+    {
+      (while (&& (< a b) (|| (== (strByte s a) 32) (== (strByte s a) 9)))
+        (set a (+ a 1)))
+      (while (&& (> b a) (|| (== (strByte s (- b 1)) 32) (|| (== (strByte s (- b 1)) 9) (== (strByte s (- b 1)) 13))))
+        (set b (- b 1)))
+      (strSlice s a (- b a))
+    }))
+
+; A file name between the quotes of an `; axiom-asm-file` line, with
+; codegen's `\XX` escapes (`asmQuoteName`) undone.
+(pub :: asmUnquoteName (-> String String))
+(pub fn (asmUnquoteName s)
+  (let (
+    (mut out "")
+    (mut i 0)
+  )
+    {
+      (while (< i (strLen s))
+        (if (&& (== (strByte s i) 92) (< (+ i 2) (strLen s)))
+          {
+            (set out (concat out (strFromByteVal (+ (* 16 (asmHexVal (strByte s (+ i 1)))) (asmHexVal (strByte s (+ i 2)))))))
+            (set i (+ i 3))
+          }
+          {
+            (set out (concat out (strSlice s i 1)))
+            (set i (+ i 1))
+          }))
+      out
+    }))
+
+(pub :: asmHexVal (-> Int Int))
+(pub fn (asmHexVal c)
+  (if (&& (>= c 48) (<= c 57))
+    (- c 48)
+    (if (&& (>= c 65) (<= c 70))
+      (- c 55)
+      (- c 87))))
+
+; A one-byte string.
+(pub :: strFromByteVal (-> Int String))
+;@axiom:effect(unsafe)
+(pub fn (strFromByteVal c)
+  (let ((s (strAlloc 1)))
+    {
+      (__store8 (strData s) 0 c)
+      s
+    }))
+
+; Where cookie `n` points: `[file, start, end]` from the site comment
+; whose cookies cover it, or an empty Vec when none does.
+(pub :: asmSiteOf (-> String Int (Vec String)))
+(pub fn (asmSiteOf ir n)
+  (let (
+    (out vecNew)
+    (mut from 0)
+  )
+    {
+      (while (&& (== (vecLen out) 0) (>= from 0))
+        (let ((k (strFindSub ir "; axiom-asm-site " from)))
+          (if (< k 0)
+            {
+              (set from (- 0 1))
+              0
+            }
+            (let (
+              (eol (match (strFindByte ir 10 k)
+                ((Some e) e)
+                ((None) (strLen ir))))
+            )
+              {
+                (asmSiteLine ir (strSlice ir (+ k 17) (- eol (+ k 17))) n out)
+                (set from eol)
+                0
+              }))))
+      out
+    }))
+
+; One site comment's body, `FIRST K s-e s-e ...`: when cookie `n` is
+; one of its lines, push file K's name and that line's two offsets.
+(pub :: asmSiteLine (-> String String Int (Vec String) Int))
+(pub fn (asmSiteLine ir body n out)
+  (let (
+    (parts (asmSplitBlank body))
+    (first (asmNumAt body 0))
+  )
+    (if (|| (< first 0) (< (vecLen parts) 3))
+      0
+      (let (
+        (k (- n first))
+        (file (asmFileName ir (vecGetStr parts 1)))
+      )
+        (if (|| (< k 0) (|| (>= (+ k 2) (vecLen parts)) (== (strLen file) 0)))
+          0
+          (let (
+            (r (vecGetStr parts (+ k 2)))
+            (dash (match (strFindByte (vecGetStr parts (+ k 2)) 45 0)
+              ((Some d) d)
+              ((None) (- 0 1))))
+          )
+            (if (< dash 0)
+              0
+              {
+                (vecPush out file)
+                (vecPush out (strSlice r 0 dash))
+                (vecPush out (strSlice r (+ dash 1) (- (strLen r) (+ dash 1))))
+                0
+              })))))))
+
+; The name `; axiom-asm-file K "path"` gives file K, or "".
+(pub :: asmFileName (-> String String String))
+(pub fn (asmFileName ir k)
+  (let ((at (strFindSub ir (concat (concat "; axiom-asm-file " k) " \"") 0)))
+    (if (< at 0)
+      ""
+      (let (
+        (s (+ (+ at 19) (strLen k)))
+        (e (match (strFindByte ir 34 (+ (+ at 19) (strLen k)))
+          ((Some q) q)
+          ((None) (- 0 1))))
+      )
+        (if (< e 0)
+          ""
+          (asmUnquoteName (strSlice ir s (- e s))))))))
+
+(pub :: asmSplitBlank (-> String (Vec String)))
+(pub fn (asmSplitBlank s)
+  (let (
+    (out vecNew)
+    (mut from 0)
+    (mut i 0)
+  )
+    {
+      (while (<= i (strLen s))
+        {
+          (if (|| (== i (strLen s)) (== (strByte s i) 32))
+            {
+              (if (> i from)
+                {
+                  (vecPush out (strSlice s from (- i from)))
+                  0
+                }
+                0)
+              (set from (+ i 1))
+            }
+            0)
+          (set i (+ i 1))
+        })
+      out
+    }))
+
+; The unit index of `file` in `units`, adding it, with its text, the
+; first time it is asked for.
+(pub :: asmUnitFor (-> (Vec Int) String Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (asmUnitFor units file)
+  (let ((mut i 0) (mut at (- 0 1)))
+    {
+      (while (&& (< at 0) (< i (vecLen units)))
+        {
+          (if (strEq (memGetWordStr (vecGet units i) 0) file)
+            {
+              (set at i)
+              0
+            }
+            0)
+          (set i (+ i 1))
+        })
+      (if (>= at 0)
+        at
+        {
+          (vecPush units (cast Int (CUnit2
+            file
+            (readFile file)
+            (cast String 0))))
+          (- (vecLen units) 1)
+        })
+    }))
+
+; One AX3117, at the template line cookie `n` names, pushed onto `ds`;
+; 1 when the cookie found its line, else 0. A line the optimiser copied
+; - a function inlined into its caller, a loop unrolled - fails once per
+; copy, with the same message and other registers; `seen` keeps the
+; report to one per line and message.
+(pub :: asmRejectDiag (-> String Int String String (Vec Int) (Vec Int) (Vec String) Int))
+;@axiom:effect(io)
+(pub fn (asmRejectDiag ir n msg read ds units seen)
+  (let ((site (asmSiteOf ir n)))
+    (if (== (vecLen site) 0)
+      0
+      (let (
+        (u (asmUnitFor units (vecGetStr site 0)))
+        (s (asmNumAt (vecGetStr site 1) 0))
+        (e (asmNumAt (vecGetStr site 2) 0))
+        (key (concat (concat (concat (vecGetStr site 0) ":") (concat (vecGetStr site 1) ":")) (concat (concat (vecGetStr site 2) ":") msg)))
+      )
+        (let ((src (memGetWordStr (vecGet units u) 1)))
+          (if (>= (asmSeenAt seen key 0) 0)
+            1
+          {
+            (vecPush seen key)
+            (vecPush ds (diagSetUnitD (mkDiagNote
+              SEV_ERROR
+              "AX3117"
+              "inline-asm-rejected"
+              (if (&& (>= s 0) (&& (> e s) (<= e (strLen src))))
+                (mkSpan s e)
+                0)
+              (concat "llc rejected this line of an `asm` template: " msg)
+              0
+              0
+              "`check` runs no assembler, so an `asm` template is first assembled when the program is built; fix the instruction, or keep the IR with `--emit-llvm` and run `llc` on it to see the whole report"
+              (if (> (strLen read) 0)
+                (concat (concat "the assembler read `" read) "`, with the operands in their registers")
+                "the register allocator found no registers for the operands this line asks for; name fewer operands, or fewer clobbers")) u))
+            1
+          }))))))
+
+(pub :: asmSeenAt (-> (Vec String) String Int Int))
+(pub fn (asmSeenAt v k i)
+  (if (>= i (vecLen v))
+    (- 0 1)
+    (if (strEq (vecGetStr v i) k)
+      i
+      (asmSeenAt v k (+ i 1)))))
+
+; `diagSetUnit`, answering the diagnostic so it can wrap a constructor.
+(pub :: diagSetUnitD (-> Int Int Int))
+(pub fn (diagSetUnitD d u)
+  {
+    (diagSetUnit d u)
+    d
+  })
+
+; Read llc's report: an AX3117 onto `ds` for each error that names a
+; cookie a site comment in `ir` covers. Answers how many errors did not.
+(pub :: asmFailDiags (-> String String (Vec Int) (Vec Int) Int))
+;@axiom:effect(io)
+(pub fn (asmFailDiags text ir ds units)
+  (let (
+    (ls (asmTextLines text))
+    (seen vecNew)
+    (mut unmapped 0)
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen ls))
+        (let (
+          (l (vecGetStr ls i))
+          (at (strFindSub (vecGetStr ls i) "error: " 0))
+        )
+          {
+            (if (>= at 0)
+              (let (
+                (msg (strSlice l (+ at 7) (- (strLen l) (+ at 7))))
+                (inline (strStartsWith l "<inline asm>:"))
+              )
+                (let (
+                  (cookie (if inline
+                    (asmNoteCookie ls (+ i 1))
+                    (asmAtLine msg)))
+                  (shown (if inline
+                    msg
+                    (asmBeforeAtLine msg)))
+                  (read (if (&& inline (< (+ i 1) (vecLen ls)))
+                    (asmTrim (vecGetStr ls (+ i 1)))
+                    ""))
+                )
+                  (if (&& (>= cookie 0) (== (asmRejectDiag ir cookie shown read ds units seen) 1))
+                    0
+                    {
+                      (set unmapped (+ unmapped 1))
+                      0
+                    })))
+              0)
+            (set i (+ i 1))
+          }))
+      unmapped
+    }))
+
+; The cookie of a `note: !srcloc = N` within the three lines after an
+; assembler error, or -1.
+(pub :: asmNoteCookie (-> (Vec String) Int Int))
+(pub fn (asmNoteCookie ls from)
+  (let (
+    (mut i from)
+    (mut c (- 0 1))
+  )
+    {
+      (while (&& (< c 0) (&& (< i (vecLen ls)) (< i (+ from 3))))
+        {
+          (let ((at (strFindSub (vecGetStr ls i) "note: !srcloc = " 0)))
+            (if (>= at 0)
+              {
+                (set c (asmNumAt (vecGetStr ls i) (+ at 16)))
+                0
+              }
+              0))
+          (set i (+ i 1))
+        })
+      c
+    }))
+
+; `... at line N`: N, or -1.
+(pub :: asmAtLine (-> String Int))
+(pub fn (asmAtLine msg)
+  (let ((at (strFindSub msg " at line " 0)))
+    (if (< at 0)
+      (- 0 1)
+      (asmNumAt msg (+ at 9)))))
+
+(pub :: asmBeforeAtLine (-> String String))
+(pub fn (asmBeforeAtLine msg)
+  (let ((at (strFindSub msg " at line " 0)))
+    (if (< at 0)
+      msg
+      (strSlice msg 0 at))))
+
+; A failed llc: AX3117 at each template line it names when every error
+; names one, else its own report and AX4003.
+(pub :: llcFailed (-> String String Int Int))
+;@axiom:effect(io)
+(pub fn (llcFailed ir errPath rc)
+  (if (< rc 0)
+    (toolFailDiag "could not run `llc`" "install LLVM and put `llc` on PATH; `--emit-llvm` keeps the IR so the step can be run by hand")
+    (let (
+      (text (readFile errPath))
+      (ds vecNew)
+      (units vecNew)
+    )
+      {
+        (unwrapOr (removeFile errPath) 0)
+        (let ((unmapped (asmFailDiags text ir ds units)))
+          (if (&& (== unmapped 0) (> (vecLen ds) 0))
+            {
+              (writeStr stderr (renderDiagsFormat diagFormatFromArgv ds units))
+              (writeStr stderr (renderFailTrailer (vecLen ds)))
+              1
+            }
+            {
+              (writeStr stderr text)
+              (toolFailDiag "llc failed" "install LLVM and put `llc` on PATH; `--emit-llvm` keeps the IR so the step can be run by hand")
+            }))
+      })))
+
+; What a successful llc printed, passed on to standard error, and the
+; file removed.
+(pub :: llcPassOn (-> String Int))
+;@axiom:effect(io)
+(pub fn (llcPassOn errPath)
+  (let ((text (readFile errPath)))
+    {
+      (unwrapOr (removeFile errPath) 0)
+      (if (> (strLen text) 0)
+        {
+          (writeStr stderr text)
+          0
+        }
+        0)
+    }))
+
+(pub :: assembleAndLink (-> String String String String Int (Vec Int) String Bool Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (assembleAndLink ir llPath objPath outPath optLevel linkArgs winTarget isBaremetal)
   (let ((lvl 
     (if (> optLevel 3)
       3
@@ -535,13 +995,15 @@
             (cast Int llcRelocArg))
           v
         })))
-      (let ((rc (runTool "llc" llcArgs)))
+      ; llc's standard error goes to a file beside the object, so a
+      ; rejected `asm` template line is reported where it is written
+      ; (`llcFailed`, AX3117). A run that succeeds passes on what llc
+      ; printed, its warnings, unchanged.
+      (let ((rc (runToolErrTo "llc" llcArgs (concat objPath ".llc-err"))))
         (if (!= rc 0)
-          (toolFailDiag
-            (if (< rc 0)
-              "could not run `llc`"
-              "llc failed")
-            "install LLVM and put `llc` on PATH; `--emit-llvm` keeps the IR so the step can be run by hand")
+          (llcFailed ir (concat objPath ".llc-err") rc)
+          {
+          (llcPassOn (concat objPath ".llc-err"))
           (if (> (strLen winTarget) 0)
             (if cgStaticlib
               (toolFailDiag (concat "`--emit-staticlib` is not supported for " (concat winTarget " yet")) "the Windows link is lld-link's and `ar` has no place in it; an archive for a Windows host is a later phase of the Windows track")
@@ -692,7 +1154,8 @@
                           "could not run `cc`"
                           "cc failed")
                         "a C compiler drives the link step; put `cc` on PATH")
-                      0)))))))))))
+                      0))))))
+          })))))
 
 ; ------------------------------------------------------------------
 ; `--crate DIR`, the whole of it: before the program is compiled, each
@@ -2053,6 +2516,7 @@
                   (toolFailDiag "opt failed" "`opt` is optional - a PATH without it warns and builds - so this is a failure of the one that is installed")
                 }
                 (let ((rc (assembleAndLink
+                  ir
                   toAssemble
                   objPath
                   exePath

@@ -1,0 +1,70 @@
+; The two operand kinds whose meaning the checker settles
+; (docs/memory-model.md MM-FFI-9). A `sym` operand names a function
+; with a symbol of its own, monomorphic; an output stored `into` a
+; binding stores into a `mut` `Int` this frame may assign. `good` is
+; the control.
+;
+;   `symOperator`  a `sym` naming an operator, which has no symbol (AX3091)
+;   `symPoly`      a `sym` naming a polymorphic function (AX3091)
+;   `symNowhere`   a `sym` naming nothing (AX3001)
+;   `intoFixed`    `into` a binding that isn't `mut` (AX3012)
+;   `intoString`   `into` a `mut` binding of another type (AX3004)
+;   `intoParam`    `into` a parameter (AX3012)
+(:: helper (-> Int Int))
+(fn (helper y)
+  (+ y 1))
+
+(:: same (-> a a))
+(fn (same v)
+  v)
+
+(:: good (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (good x)
+  (let ((mut lo 0))
+    {
+      (asm (aarch64
+        "mov x0, {a}\nbl {f}\nmov {s}, x0"
+        (out r "x0")
+        (out s "x1" into lo)
+        (in a x)
+        (sym f helper)
+        (clobber_abi "C")))
+      lo
+    }))
+
+(:: symOperator Int)
+;@axiom:effect(unsafe)
+(fn (symOperator)
+  (asm (aarch64 "bl {f}" (sym f +) (clobber_abi "C"))))
+
+(:: symPoly Int)
+;@axiom:effect(unsafe)
+(fn (symPoly)
+  (asm (aarch64 "bl {f}" (sym f same) (clobber_abi "C"))))
+
+(:: symNowhere Int)
+;@axiom:effect(unsafe)
+(fn (symNowhere)
+  (asm (aarch64 "bl {f}" (sym f helpr) (clobber_abi "C"))))
+
+(:: intoFixed (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (intoFixed x)
+  (let ((lo 0))
+    (asm (aarch64 "mov {r}, {a}\nmov {s}, {a}" (out r) (out s into lo) (in a x)))))
+
+(:: intoString (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (intoString x)
+  (let ((mut name "none"))
+    (asm (aarch64 "mov {r}, {a}\nmov {s}, {a}" (out r) (out s into name) (in a x)))))
+
+(:: intoParam (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (intoParam x)
+  (asm (aarch64 "mov {r}, {a}\nmov {s}, {a}" (out r) (out s into x) (in a x))))
+
+(:: main Int)
+(fn (main)
+  0)

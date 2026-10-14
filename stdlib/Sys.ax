@@ -613,6 +613,54 @@
                           (+ end 1))))
                   })))))))))
 
+;; Run `name` as `sysRunPath` does, with the child's standard error
+;; written to the file at `errPath`, created or truncated, rather than
+;; to this process's. `(Ok code)` is the child's answer and `(Err e)` a
+;; child that never ran, as `sysRunPath` answers; a file that can't be
+;; opened is `(Err e)` too, and then nothing runs. A target with no
+;; syscall ABI runs the child with standard error where it was.
+;
+; The child inherits descriptor 2, so the swap happens here in the
+; parent, which works under both spawn backends - `posix_spawn` and
+; `fork`+`execve` - with no file actions: descriptor 2 is saved, the
+; file put in its place for the spawn, and the saved one put back.
+; `fcntl(fd, F_DUPFD, 2)` just after closing 2 answers 2, the lowest
+; free descriptor at or above it, which is `dup2` without needing
+; `dup2` (linux-aarch64 has none). F_DUPFD is 0 on every POSIX target.
+; For as long as the child runs, this process's own standard error is
+; the file too, so it is not for a program writing to standard error
+; from another thread meanwhile. The compiler driver captures `llc`
+; through it (`runToolErrTo`).
+(pub :: sysRunPathErrTo (-> String Int Int String (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (sysRunPathErrTo name argv envp errPath)
+  (if (== usesSyscallAbi 0)
+    (sysRunPath name argv envp)
+    (let ((fd (sysOpenPathMode (strCStr (strDup errPath)) (| oWronlyCreateTrunc oCloexec) 420)))
+      (if (< fd 0)
+        (Err (mkError (- 0 fd) (concat "sysRunPathErrTo: " errPath)))
+        (let ((saved (__syscall3 sysFcntlNum 2 fDupFdCloexec 3)))
+          (if (< saved 0)
+            {
+              (__syscall1 sysCloseNum fd)
+              (Err (mkError (- 0 saved) "sysRunPathErrTo: saving descriptor 2"))
+            }
+            {
+              (__syscall1 sysCloseNum 2)
+              (__syscall3 sysFcntlNum fd 0 2)
+              (__syscall1 sysCloseNum fd)
+              (let ((r (sysRunPath name argv envp)))
+                {
+                  (__syscall1 sysCloseNum 2)
+                  (__syscall3 sysFcntlNum saved 0 2)
+                  (__syscall1 sysCloseNum saved)
+                  r
+                })
+            }))))))
+
 ;; The calling process's own id - the per-session suffix scratch
 ;; files need so two concurrent processes cannot collide. The
 ;; syscall takes no arguments; the unused ones are simply zero.

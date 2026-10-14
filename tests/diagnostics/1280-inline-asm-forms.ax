@@ -1,0 +1,135 @@
+; The shapes of the operand kinds and items beyond `in`, `out` and
+; `inout`, each refused as AX3091 at the part that is wrong
+; (docs/memory-model.md MM-FFI-9). `good` and `goodCall` are the
+; controls: every kind and item, well formed, draws nothing.
+;
+;   `intoInput`   `into` on an input, which has no output to store
+;   `intoLiteral` `into` naming something that is not a binding
+;   `constParam`  a `const` the compiler can't work out
+;   `constView`   a modifier on a `const`
+;   `symLocal`    a `sym` naming a parameter, which has no symbol
+;   `named`       a template defining a label by name
+;   `option`      an option `asm` doesn't have
+;   `optionTwice` one option given twice
+;   `abi`         a calling convention `clobber_abi` doesn't know
+;   `abiTwice`    two `clobber_abi` items
+;   `inAndOut`    an input and an output sharing a name
+;   `answerTwo`   two outputs, neither stored `into` a binding
+;   `noOptions`   an empty option list
+;   `lateReg`     a `lateout` in the platform register
+(:: helper (-> Int Int))
+(fn (helper y)
+  (+ y 1))
+
+(:: good (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (good x)
+  (let ((mut hi 0))
+    (asm
+      (aarch64
+        "mov {s}, {a}\nadd {r}, {a}, #{n}"
+        (lateout r)
+        (out s into hi)
+        (in a x)
+        (const n 4)
+        (clobber "x9")
+        (options nostack))
+      (x86_64
+        "movq {a}, {s}\nleaq {n}({a}), {r}"
+        (lateout r)
+        (out s into hi)
+        (in a x)
+        (const n 4)
+        (options att_syntax)))))
+
+(:: goodCall (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (goodCall x)
+  (asm
+    (aarch64
+      "mov x0, {a}\nbl {f}"
+      (out r "x0")
+      (in a x)
+      (sym f helper)
+      (clobber_abi "C"))
+    (x86_64
+      "movq {a}, %rdi\ncall {f}"
+      (out r "rax")
+      (in a x)
+      (sym f helper)
+      (clobber_abi "C"))))
+
+(:: intoInput (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (intoInput x)
+  (let ((mut lo 0))
+    (asm (aarch64 "mov {a}, {a}" (in a x into lo)))))
+
+(:: intoLiteral (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (intoLiteral x)
+  (asm (aarch64 "mov {r}, {a}" (out r into 5) (in a x))))
+
+(:: constParam (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (constParam x)
+  (asm (aarch64 "mov {r}, #{n}" (out r) (const n x))))
+
+(:: constView Int)
+;@axiom:effect(unsafe)
+(fn (constView)
+  (asm (aarch64 "mov {r}, #{n:w}" (out r) (const n 4))))
+
+(:: symLocal (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (symLocal x)
+  (asm (aarch64 "bl {f}" (sym f x) (clobber_abi "C"))))
+
+(:: named (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (named x)
+  (asm (aarch64 "mov {r}, {a}\nspin: subs {r}, {r}, #1\nb.ne spin" (out r) (in a x))))
+
+(:: option Int)
+;@axiom:effect(unsafe)
+(fn (option)
+  (asm (aarch64 "nop" (options fast))))
+
+(:: optionTwice Int)
+;@axiom:effect(unsafe)
+(fn (optionTwice)
+  (asm (aarch64 "nop" (options nomem nostack nomem))))
+
+(:: abi Int)
+;@axiom:effect(unsafe)
+(fn (abi)
+  (asm (aarch64 "nop" (clobber_abi "sysv"))))
+
+(:: abiTwice Int)
+;@axiom:effect(unsafe)
+(fn (abiTwice)
+  (asm (aarch64 "nop" (clobber_abi "C") (clobber_abi "C"))))
+
+(:: inAndOut (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (inAndOut x)
+  (asm (aarch64 "add {r}, {r}, #1" (out r) (in r x))))
+
+(:: answerTwo (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (answerTwo x)
+  (asm (aarch64 "mov {r}, {a}\nmov {s}, {a}" (out r) (lateout s) (in a x))))
+
+(:: noOptions Int)
+;@axiom:effect(unsafe)
+(fn (noOptions)
+  (asm (aarch64 "nop" (options))))
+
+(:: lateReg Int)
+;@axiom:effect(unsafe)
+(fn (lateReg)
+  (asm (aarch64 "nop" (lateout r "x18"))))
+
+(:: main Int)
+(fn (main)
+  0)

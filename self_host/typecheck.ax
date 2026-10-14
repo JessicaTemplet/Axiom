@@ -4044,6 +4044,12 @@
       (regFnEff fns "__store8v" (mkIntArrow 3) (builtinEff "Mut"))
       (tcRegDevicePrims fns)
       (tcRegAsmPrims fns 0)
+      ; `(__asm.sym f)`: an `asm` form's `sym` operand (`expandAsm`).
+      ; The argument is checked as the reference it is - an undefined
+      ; name is AX3001 at the name - and `checkAsmSym` holds it to a
+      ; function with a symbol. Codegen never evaluates the call: it
+      ; reads the name and passes the symbol to the instructions.
+      (regFn fns "__asm.sym" (mkTArr (mkTVar "a") mkIntTy))
       (regFn fns "__load64" (mkIntArrow 2))
       ; `(__call_word fn arg)`: call a C function `i64 (i64)` by its
       ; ADDRESS - the destructor word of a foreign-form block
@@ -12147,10 +12153,15 @@
                     (nodeB (nodeA e))
                     (nodeB e)
                     head)
-                  (if (&& (== headIsVar 1) (&& (|| (strEq hname "__contract") (strEq hname "parallel$lends")) (== (spineArgs e 0) 2)))
+                  ; `(__asm.sym f)` names `f` without using it as a value:
+                  ; a function of two parameters is no bare value (AX3013),
+                  ; and is still a function `bl` can reach (`checkAsmSym`).
+                  (if (&& (== headIsVar 1) (|| (&& (|| (strEq hname "__contract") (strEq hname "parallel$lends")) (== (spineArgs e 0) 2)) (&& (strEq hname "__asm.sym") (== (spineArgs e 0) 1))))
                     (if (strEq hname "parallel$lends")
                       (checkParLends tc e)
-                      (checkContractForm tc e))
+                      (if (strEq hname "__asm.sym")
+                        (checkAsmSym tc (nodeB e))
+                        (checkContractForm tc e)))
                     (if (&& (== headIsVar 1) (== (isCastLike hname) 1))
                       (checkCastForm tc e hname)
                       (if (&& (== headIsVar 1) (== (isMacroName tc hname) 1))
@@ -17618,9 +17629,51 @@
 ; anywhere, which is this set's definition at its widest.
 (pub :: isAsmPrim (-> String Int))
 (pub fn (isAsmPrim n)
-  (if (strStartsWith n "__asm.")
+  (if (&& (strStartsWith n "__asm.") (&& (> (strLen n) 6) (&& (>= (strByte n 6) 48) (<= (strByte n 6) 57))))
     1
     0))
+
+;; An `asm` form's `sym` operand, `(__asm.sym f)` (MM-FFI-9), which
+;; names `f` for the instructions to call and answers the `Int` the
+;; primitive takes. The name is looked up, never checked as a value:
+;; a function of two parameters is no bare value (AX3013) and is still
+;; one `bl` reaches. The expander has refused a local binding already.
+;; What is refused here is a name that resolves to nothing (AX3001, or
+;; AX3023 for a private one), to something with no symbol of its own -
+;; an operator or primitive, an effect operation - or to a polymorphic
+;; function, which takes a hidden evidence word the instructions would
+;; have to supply.
+(pub :: checkAsmSym (-> Int Int Int))
+(pub fn (checkAsmSym tc a)
+  (if (!= (nodeTag a) TAG_E_VAR)
+    mkIntTy
+    (let ((ent (findFnEnt tc (nodeAName a))))
+      (if (== ent 0)
+        {
+          (emitUndefinedVar tc (nodeAName a) (nodeSpan a))
+          mkIntTy
+        }
+        (if (|| (!= (memGetWord ent 3) 0) (== (memGetWord ent 4) 1))
+          (checkAsmSymBad tc a (concat (concat "`" (srcSpelling (nodeAName a))) "` has no symbol of its own; a `sym` operand names a function the program defines, or an `extern` item"))
+          (if (== (tyHasSrcVar (memGetWord ent 1)) 1)
+            (checkAsmSymBad tc a (concat (concat "`" (srcSpelling (nodeAName a))) "` is polymorphic, so it takes a hidden evidence word the instructions would have to supply; name a function whose signature has no type variable"))
+            mkIntTy))))))
+
+(pub :: checkAsmSymBad (-> Int Int String Int))
+(pub fn (checkAsmSymBad tc a msg)
+  {
+    (emitDiag tc (mkDiagNote
+      SEV_ERROR
+      "AX3091"
+      "inline-asm"
+      (nodeSpan a)
+      msg
+      0
+      0
+      "an `asm` form's `(sym name f)` passes the symbol of `f`, a top-level `fn` or an `extern` item, for instructions such as `bl {name}` or `call {name}`"
+      "run `axiom explain AX3091` for the full form"))
+    mkIntTy
+  })
 
 ; The handle table's three (MM-PAR-8). Each takes or answers an
 ; ADDRESS its caller will dereference: the checker cannot see what that

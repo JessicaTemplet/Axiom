@@ -179,13 +179,20 @@ ABLATIONS = {
         '\\\\0Aisb',
         "A12 - the vector table being installed",
     ),
-    # An `asm` block with an output loses `sideeffect`. The memory
-    # clobber still keeps it here, so A15 reads the emitted attributes,
-    # which is what the rule promises.
+    # An `asm` block loses `sideeffect` unless it says `pure`. The
+    # memory clobber still keeps it here, so A15 reads the emitted
+    # attributes, which is what the rule promises.
     "asmfx": (
-        '(concat "  " r) " = call i64 asm sideeffect \\"")',
-        '(concat "  " r) " = call i64 asm \\"")',
+        '(kw (concat (if (asmHasFlag flags 112)\n        ""\n        "sideeffect ")',
+        '(kw (concat (if (asmHasFlag flags 112)\n        ""\n        "")',
         "A15 - every inline-asm block being sideeffect",
+    ),
+    # An `asm` call carries no `!srcloc`, so llc names no cookie and a
+    # rejected template line falls back to AX4003 with no position.
+    "asmloc": (
+        '(concat (asmAttrs flags) (vecGetStr loc 1))',
+        '(concat (asmAttrs flags) "")',
+        "A15 - a rejected template line reported at the line (AX3117)",
     ),
     # `_start` builds the tables and never writes SCTLR_EL1: MAIR, TCR
     # and TTBR0 are set and nothing turns the MMU or the caches on.

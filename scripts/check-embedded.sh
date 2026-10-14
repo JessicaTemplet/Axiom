@@ -93,7 +93,8 @@
 #       fault's registers, and `isr(irq)` wires the IRQ slot.
 #   A13 A periodic workload on the timer's interrupt, within its budgets.
 #   A14 A DMA driver with interrupt and ownership boundaries.
-#   A15 Inline assembly (docs/memory-model.md MM-FFI-9).
+#   A15 Inline assembly (docs/memory-model.md MM-FFI-9): its lowering,
+#       its options, and an assembler error reported at its line.
 #   A16 The MMU and caches on (docs/memory-model.md MM-EXEC-19).
 #   A17 A stack overflow ends at the guard.
 #   A18 Code read-only, data execute-never, the rest unmapped.
@@ -113,7 +114,7 @@
 # compiler this gate uses from the broken copy, and the gate must fail.
 # `scripts/lib/embedded-patch.py` applies each patch by exact string
 # match and aborts if the string is missing, so a drill that does not
-# apply cannot pass as red. `--ablations` runs all twenty and requires
+# apply cannot pass as red. `--ablations` runs all twenty-one and requires
 # each to go red. The six from `mmuoff` on also break an IR-level check
 # on every host, so they go red without QEMU too; with it, the guest's
 # own output goes red beside the IR.
@@ -139,6 +140,8 @@
 #             table, so a fault is a hang again            -> A12
 #   asmfx     an `asm` block with an output is emitted
 #             without `sideeffect`                         -> A15
+#   asmloc    an `asm` call carries no `!srcloc`, so a
+#             rejected template line is AX4003 again       -> A15
 #   mmuoff    `_start` never writes SCTLR_EL1, so the MMU
 #             and caches stay off                          -> A16
 #   guard     the guard below the stack is mapped          -> A17
@@ -154,7 +157,7 @@
 #
 # Usage:
 #   scripts/check-embedded.sh              # the gate
-#   scripts/check-embedded.sh --ablations  # the twenty drills, each red
+#   scripts/check-embedded.sh --ablations  # the twenty-one drills, each red
 #   AXIOM_ABLATE=literal scripts/check-embedded.sh
 # ---------------------------------------------------------------------
 
@@ -192,7 +195,7 @@ if [[ "${1:-}" == "--ablations" ]]; then
   red=0
   ran=0
   for ab in chunk literal grain strategy cursor oomsig ceiling trapwrite allsilent \
-            volatile barrier refusal vbar asmfx mmuoff guard excstack codewrite hookoff reenter; do
+            volatile barrier refusal vbar asmfx asmloc mmuoff guard excstack codewrite hookoff reenter; do
     ran=$((ran + 1))
     echo "== ablation: $ab =="
     if AXIOM_ABLATE="$ab" bash "$self" > "/tmp/embedded-ablate-$ab.log" 2>&1; then
@@ -1725,7 +1728,7 @@ fi
 
 # ---------------------------------------------------------------------
 echo
-echo "== A15. inline assembly: the target's arm, kept, refused where it has none =="
+echo "== A15. inline assembly: the target's arm, its options, kept, refused where it has none, rejected at its line =="
 # MM-FFI-9, on every host: (1) each target's IR holds the arm for its
 # architecture and no other, every block `sideeffect` and clobbering
 # memory, with the constraints the operands give; (2) `opt -O2` keeps a
@@ -1734,30 +1737,47 @@ echo "== A15. inline assembly: the target's arm, kept, refused where it has none
 # on the call, which LLVM asks of any call it deletes); that control
 # shows `opt` would drop a block it could prove inert; (3) a reached
 # form with no arm for the target is AX4008 and an unreached one is
-# accepted. Under QEMU, (4) a bare-metal program reads CurrentEL, which
-# only EL1 may, through `asm`.
-# Drill: `asmfx` drops `sideeffect` from the emitter, and (1) goes red.
+# accepted; (4) `tests/stdlib/870-inline-asm-operands.ax` lowers each
+# option and operand kind to what the rule says - `pure` without
+# `sideeffect`, `nomem` and `readonly` as memory attributes, no flag
+# clobbers under `preserves_flags`, `alignstack` unless `nostack`,
+# `unreachable` after `noreturn`, `inteldialect`, a struct of outputs
+# stored `into` a binding, a `sym` passed as `s`, and `clobber_abi`'s
+# register set per target - and every line carries a `!srcloc` cookie
+# whose site comment names that line's bytes in the source; (5) that
+# file's IR assembles for every target at -O0 and -O2, so the x86_64
+# arms no runner executes are still assembled; (6) llc's refusals of
+# `tests/embedded/asm-rejected.ax` come back as AX3117 at the lines
+# the fixture's own bytes put them on, with status 1, and an llc that
+# hides its cookies turns the same build into AX4003 and status 4.
+# Under QEMU, (7) a bare-metal program reads CurrentEL, which only EL1
+# may, through `asm`.
+# Drills: `asmfx` drops `sideeffect` from the emitter, and (1) goes red;
+# `asmloc` drops the `!srcloc`, and (6) goes red.
 asmprog="$repo_root/tests/stdlib/581-inline-asm.ax"
+asmops="$repo_root/tests/stdlib/870-inline-asm-operands.ax"
+asmrej="$repo_root/tests/embedded/asm-rejected.ax"
 asmel="$repo_root/tests/embedded/asm-el.ax"
-[[ -f "$asmprog" && -f "$asmel" ]] || abort "an A15 program is gone; A15 has nothing to lower."
+[[ -f "$asmprog" && -f "$asmops" && -f "$asmrej" && -f "$asmel" ]] || abort "an A15 program is gone; A15 has nothing to lower."
 asm_blocks() {  # asm_blocks <ll>: one line per inline-asm call, `fx|template|constraints`
   python3 - "$1" <<'PY'
 import re, sys
 for line in open(sys.argv[1]):
-    m = re.search(r'call (?:i64|void) asm (sideeffect )?"((?:[^"\\]|\\[0-9A-Fa-f]{2})*)", "([^"]*)"', line)
+    m = re.search(r'call (?:i64|void|\{[^}]*\}) asm ((?:\w+ )*)"((?:[^"\\]|\\[0-9A-Fa-f]{2})*)", "([^"]*)"', line)
     if m:
         t = re.sub(r'\\([0-9A-Fa-f]{2})', lambda h: chr(int(h.group(1), 16)), m.group(2))
-        print('%s|%s|%s' % ('fx' if m.group(1) else 'nofx', t.replace('\n', '\\n'), m.group(3)))
+        fx = 'fx' if 'sideeffect' in m.group(1).split() else 'nofx'
+        print('%s|%s|%s' % (fx, t.replace('\n', '\\n'), m.group(3)))
 PY
 }
 checks=$((checks + 1))
 prob=0
 a64='fx|add ${0}, ${1}, ${2}|=&r,r,r,~{memory},~{cc}
-fx|mov ${0:w}, ${0:w}|=r,0,~{memory},~{cc}
+fx|mov ${0:w}, ${0:w}|=&r,0,~{memory},~{cc}
 fx|mov x9, ${1}\nadd ${0}, x9, #1|=&{x0},{x8},~{x9},~{memory},~{cc}
 fx||~{memory},~{cc}'
 x64='fx|leaq (${1},${2}), ${0}|=&r,r,r,~{memory},~{dirflag},~{fpsr},~{flags}
-fx|movl ${0:k}, ${0:k}|=r,0,~{memory},~{dirflag},~{fpsr},~{flags}
+fx|movl ${0:k}, ${0:k}|=&r,0,~{memory},~{dirflag},~{fpsr},~{flags}
 fx|movq ${1}, %rdx\nleaq 1(%rdx), ${0}|=&{rax},{rcx},~{rdx},~{memory},~{dirflag},~{fpsr},~{flags}
 fx||~{memory},~{dirflag},~{fpsr},~{flags}'
 for t in "${targets[@]}" "$bm"; do
@@ -1799,18 +1819,18 @@ else
 import re, sys
 out = []
 for line in open(sys.argv[1]):
-    if re.search(r'asm sideeffect "\\6[Dd]\\6[Ff]\\76', line):
-        line = line.replace('asm sideeffect "', 'asm "', 1).replace(',~{memory}', '', 1)
+    if re.search(r'asm sideeffect alignstack "\\6[Dd]\\6[Ff]\\76', line):
+        line = line.replace('asm sideeffect ', 'asm ', 1).replace(',~{memory}', '', 1)
         # What LLVM needs before it may delete a call at all: no unwind,
         # a guaranteed return and no memory access.
-        line = re.sub(r'\)\s*$', ') nounwind willreturn memory(none)\n', line)
+        line = re.sub(r'\) nounwind', ') nounwind willreturn memory(none)', line, count=1)
     out.append(line)
 open(sys.argv[2], 'w').writelines(out)
 PY
   opt -O2 -S "$work/asm-keep.ll" -o "$work/asm-keep.O2.ll" 2>"$work/opt.err"
   opt -O2 -S "$work/asm-keep-bare.ll" -o "$work/asm-keep-bare.O2.ll" 2>>"$work/opt.err"
-  kept=$(grep -cE 'asm sideeffect "mov(q \$\$7, \$\{0\}| \$\{0\}, #7)"' "$work/asm-keep.O2.ll" || true)
-  bare=$(grep -cE 'asm "mov(q \$\$7, \$\{0\}| \$\{0\}, #7)"' "$work/asm-keep-bare.O2.ll" || true)
+  kept=$(grep -cE 'asm sideeffect alignstack "mov(q \$\$7, \$\{0\}| \$\{0\}, #7)"' "$work/asm-keep.O2.ll" || true)
+  bare=$(grep -cE 'asm alignstack "mov(q \$\$7, \$\{0\}| \$\{0\}, #7)"' "$work/asm-keep-bare.O2.ll" || true)
   if (( kept >= 1 && bare == 0 )) && [[ -s "$work/asm-keep-bare.O2.ll" ]]; then
     note "opt -O2 keeps a block whose result nothing reads ($kept kept), and drops the same block once it is marked removable (the control)"
   else
@@ -1839,6 +1859,204 @@ if ! emit "$axc" "$host_target" "$work/asm-unreached.ax" "$work/asm-unreached.ll
   bad "an unreached form with only a $other_arch arm was refused on $host_target:"; head -3 "$work/emit.log" | sed 's/^/       /'; prob=1
 fi
 (( prob )) || note "AX4008 refuses a reached form with no $host_target arm, and a function nothing reaches may hold one"
+
+# (4) and (5): the options and operand kinds, lowered and assembled for
+# every target. The expectations are written per architecture and per
+# calling convention here, from the rule, never read off the compiler.
+checks=$((checks + 1))
+prob=0
+for t in "${targets[@]}" "$bm"; do
+  if ! emit "$axc" "$t" "$asmops" "$work/ops-$t.ll"; then
+    bad "$t: tests/stdlib/870-inline-asm-operands.ax does not emit:"; head -3 "$work/emit.log" | sed 's/^/       /'; prob=1; continue
+  fi
+  if ! python3 - "$work/ops-$t.ll" "$t" "$asmops" > "$work/ops-$t.log" 2>&1 <<'PY'
+import re, sys
+ll, target, src_path = sys.argv[1], sys.argv[2], sys.argv[3]
+src = open(src_path, 'rb').read()
+lines = open(ll).read().split('\n')
+arch = 'aarch64' if 'aarch64' in target else 'x86_64'
+CALL = re.compile(r'call (void|i64|\{[^}]*\}) asm ((?:\w+ )*)"((?:[^"\\]|\\[0-9A-Fa-f]{2})*)", "([^"]*)"\((.*?)\) ([^,!]*?)(?:, !srcloc !\{([^}]*)\})?\s*$')
+SITE = re.compile(r'; axiom-asm-site (\d+) (\d+)((?: \d+-\d+)+)\s*$')
+FILES = dict(re.findall(r'^; axiom-asm-file (\d+) "((?:[^"\\]|\\[0-9A-F]{2})*)"$', open(ll).read(), re.M))
+calls = []
+for i, l in enumerate(lines):
+    m = CALL.search(l)
+    if not m:
+        continue
+    tpl = re.sub(r'\\([0-9A-Fa-f]{2})', lambda h: chr(int(h.group(1), 16)), m.group(3))
+    site = SITE.search(lines[i - 1]) if i > 0 else None
+    calls.append(dict(ty=m.group(1), kw=m.group(2).split(), tpl=tpl, cons=m.group(4),
+                      args=m.group(5), attrs=m.group(6).split(), cookies=m.group(7),
+                      site=site, after=lines[i + 1].strip() if i + 1 < len(lines) else '',
+                      rest='\n'.join(lines[i + 1:i + 5])))
+fails = []
+def need(cond, what):
+    if not cond:
+        fails.append(what)
+def find(prefix):
+    hit = [c for c in calls if c['tpl'].startswith(prefix)]
+    need(len(hit) >= 1, 'no block whose template starts %r' % prefix)
+    return hit[0] if hit else None
+flags = '~{cc}' if arch == 'aarch64' else '~{flags}'
+a64 = arch == 'aarch64'
+bump = find('add ${0}, ${1}, #1' if a64 else 'leaq 1(${1}), ${0}')
+if bump:
+    need(bump['cons'].startswith('=r,r,'), 'lateout is not `=r`: ' + bump['cons'])
+    need('alignstack' in bump['kw'], 'a block without `nostack` has no `alignstack`')
+    need('nounwind' in bump['attrs'], 'no `nounwind`')
+twice = find('add ${0}, ${0}')
+if twice:
+    need(twice['cons'].startswith('=r,0,'), 'inlateout is not `=r` tied to 0: ' + twice['cons'])
+    need(('inteldialect' in twice['kw']) == (not a64), 'intel_syntax: inteldialect is %s on %s' % ('inteldialect' in twice['kw'], arch))
+div = find('udiv' if a64 else 'xorl')
+if div:
+    need(div['ty'] == '{ i64, i64 }', 'two outputs answer %s, not a struct of two words' % div['ty'])
+    need(re.search(r'extractvalue \{ i64, i64 \} %[\w.]+, 1\n\s*store i64', div['rest']) is not None, 'the `into` output is not extracted and stored')
+    if not a64:
+        need(div['cons'].startswith('=&{rax},=&{rdx},') and ',0,' in div['cons'], 'divq operands: ' + div['cons'])
+scaled = find('lsl ${0}, ${1}, #3' if a64 else 'movq ${1}, ${0}\nshlq $$3, ${0}')
+call = find('mov x0, ${1}\nbl ${2:c}' if a64 else 'movq ${1}, %rdi\ncall ${2:c}')
+if call:
+    need(',s,' in call['cons'], 'a `sym` is not an `s` constraint: ' + call['cons'])
+    need(re.search(r'ptr @"?triple"?\b', call['args']) is not None, 'the `sym` argument is not `ptr @triple`: ' + call['args'])
+    clob = set(re.findall(r'~\{(\w+)\}', call['cons']))
+    if a64:
+        want = {'x%d' % i for i in range(1, 18)} | {'x30'} | {'v%d' % i for i in range(32)}
+        need(want <= clob, 'clobber_abi misses %s' % sorted(want - clob))
+        need('x0' not in clob, 'clobber_abi clobbers the output register x0')
+        reserved = target.startswith('darwin') or target.startswith('windows')
+        need(('x18' in clob) == (not reserved), 'x18 clobbered=%s on %s' % ('x18' in clob, target))
+        need(not ({'x19', 'x28', 'x29'} & clob), 'clobber_abi clobbers a callee-saved register')
+    elif target.startswith('windows'):
+        want = {'rcx', 'rdx', 'r8', 'r9', 'r10', 'r11'} | {'xmm%d' % i for i in range(6)}
+        need(want <= clob, 'clobber_abi (win64) misses %s' % sorted(want - clob))
+        need(not ({'rsi', 'rdi', 'xmm6', 'xmm15', 'rbx'} & clob), 'clobber_abi (win64) clobbers a callee-saved register: %s' % sorted({'rsi', 'rdi', 'xmm6', 'xmm15', 'rbx'} & clob))
+    else:
+        want = {'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'} | {'xmm%d' % i for i in range(16)}
+        need(want <= clob, 'clobber_abi (System V) misses %s' % sorted(want - clob))
+        need(not ({'rbx', 'r12', 'r15'} & clob), 'clobber_abi (System V) clobbers a callee-saved register')
+        need('rax' not in clob, 'clobber_abi clobbers the output register rax')
+sq = find('mul ${0}, ${1}, ${1}' if a64 else 'movq ${1}, ${0}\nimulq')
+if sq:
+    need('sideeffect' not in sq['kw'], '`pure` kept `sideeffect`')
+    need('alignstack' not in sq['kw'], '`nostack` kept `alignstack`')
+    need('memory(none)' in sq['attrs'] and 'willreturn' in sq['attrs'], '`pure nomem` attributes: %s' % sq['attrs'])
+    need('~{memory}' not in sq['cons'], '`nomem` kept the memory clobber')
+fb = find('ldrb' if a64 else 'movzbq')
+if fb:
+    need('memory(read)' in fb['attrs'] and 'sideeffect' not in fb['kw'], '`pure readonly` attributes: %s %s' % (fb['kw'], fb['attrs']))
+    need('~{memory}' in fb['cons'], '`readonly` dropped the memory clobber')
+rl = find('yield' if a64 else 'pause')
+if rl:
+    need('sideeffect' in rl['kw'], '`nomem` alone dropped `sideeffect`')
+    need('memory(inaccessiblemem:' in ' '.join(rl['attrs']), '`nomem` alone: %s' % rl['attrs'])
+    need(flags not in rl['cons'] and '~{memory}' not in rl['cons'], '`nomem preserves_flags` constraints: ' + rl['cons'])
+    need(rl['ty'] == 'void', 'a block with no outputs answers %s' % rl['ty'])
+ck = find('brk #1' if a64 else 'ud2')
+if ck:
+    need(ck['after'] == 'unreachable', '`noreturn` is followed by %r, not `unreachable`' % ck['after'])
+for c in calls:
+    n = c['tpl'].count('\n') + 1
+    cookies = [x for x in (c['cookies'] or '').split(',') if x.strip()]
+    need(len(cookies) == n, '%r: %d `!srcloc` cookies for %d lines' % (c['tpl'][:20], len(cookies), n))
+    s = c['site']
+    need(s is not None, '%r: no site comment before the call' % c['tpl'][:20])
+    if s is None:
+        continue
+    need(int(cookies[0].split()[-1]) == int(s.group(1)), '%r: the comment and the cookies disagree' % c['tpl'][:20])
+    need(FILES.get(s.group(2)) == src_path, '%r: file %s is %r, not the source' % (c['tpl'][:20], s.group(2), FILES.get(s.group(2))))
+    ranges = [tuple(map(int, r.split('-'))) for r in s.group(3).split()]
+    need(len(ranges) == n, '%r: %d ranges for %d lines' % (c['tpl'][:20], len(ranges), n))
+    pieces = [src[a:b].decode() for a, b in ranges]
+    # The ranges, joined by the escape that split them, are one arm's
+    # template literal in the source, byte for byte.
+    joined = '"' + '\\n'.join(pieces) + '"'
+    need(joined.encode() in src, '%r: the site ranges %s are not one template literal in the source' % (c['tpl'][:20], s.group(3)))
+for f in fails:
+    print(f)
+sys.exit(1 if fails else 0)
+PY
+  then
+    bad "$t: tests/stdlib/870-inline-asm-operands.ax lowers wrongly:"; sed 's/^/       /' "$work/ops-$t.log" | head -8; prob=1
+  fi
+  for o in 0 2; do
+    if ! llc -O$o -filetype=obj -relocation-model=pic "$work/ops-$t.ll" -o "$work/ops-$t.o" 2>"$work/ops-$t.llc.err"; then
+      bad "$t: llc -O$o rejects tests/stdlib/870-inline-asm-operands.ax:"; head -4 "$work/ops-$t.llc.err" | sed 's/^/       /'; prob=1
+    fi
+  done
+done
+(( prob )) || note "every target lowers each option and operand kind as the rule says, gives every template line its own cookie at its own source bytes, and assembles at -O0 and -O2"
+
+# (6) AX3117. The expected positions come from the fixture's bytes: for
+# each function, the host arm's template line holding its marker.
+checks=$((checks + 1))
+prob=0
+python3 - "$asmrej" "$host_arch" > "$work/rej.want" <<'PY'
+import re, sys
+src, arch = open(sys.argv[1]).read().split('\n'), sys.argv[2]
+# Each arm's template literal, with the line and column its body starts
+# at: on the arm's own line, or on the next when the arm is laid out one
+# item per line.
+arms, cur = [], None
+for n, line in enumerate(src, 1):
+    head = re.search(r'\((aarch64|x86_64)\b', line)
+    if head:
+        cur = head.group(1)
+        lit = re.search(r'"([^"]*)"', line[head.end():])
+        if lit:
+            arms.append((cur, n, head.end() + lit.start(1), lit.group(1)))
+            cur = None
+        continue
+    lit = re.match(r'(\s*)"([^"]*)"', line)
+    if cur and lit:
+        arms.append((cur, n, lit.start(2), lit.group(2)))
+    cur = None
+# The rejected line of each function, in the host's arm: the one holding
+# its marker. `registers` is the one-line template the call can't place.
+markers = ['frobnicate', '#99999' if arch == 'aarch64' else 'movq ({r}), ({a})',
+           'mov {r}, {a}' if arch == 'aarch64' else 'movq {a}, {r}']
+for i, marker in enumerate(markers):
+    for a, n, col, body in arms:
+        parts = body.split('\\n')
+        if a != arch or (i == 2 and len(parts) != 1):
+            continue
+        off, hit = 0, None
+        for p in parts:
+            if marker in p:
+                hit = '%d:%d-%d' % (n, col + off + 1, col + off + len(p) + 1)
+                break
+            off += len(p) + 2
+        if hit:
+            print(hit)
+            break
+PY
+"$axc" --diagnostic-format=ai build --input "$asmrej" --output "$work/rej" > "$work/rej.out" 2>&1
+rc=$?
+nwant=$(grep -c . "$work/rej.want" || true)
+if (( rc != 1 )) || (( nwant != 3 )); then
+  bad "asm-rejected.ax built with status $rc (want 1), and the fixture names $nwant lines (want 3):"; head -4 "$work/rej.out" | sed 's/^/       /'; prob=1
+fi
+while IFS= read -r at; do
+  grep -qE "^E AX3117 [^ ]*asm-rejected\.ax:$at inline-asm-rejected " "$work/rej.out" \
+    || { bad "no AX3117 at asm-rejected.ax:$at:"; grep '^E ' "$work/rej.out" | head -4 | sed 's/^/       /'; prob=1; }
+done < "$work/rej.want"
+n3117=$(grep -c '^E AX3117 ' "$work/rej.out" || true)
+(( n3117 == 3 )) || { bad "asm-rejected.ax drew $n3117 AX3117 lines, not 3: one per rejected line"; prob=1; }
+! grep -qE 'AX4003|<inline asm>' "$work/rej.out" || { bad "llc's own report leaked beside AX3117:"; grep -E 'AX4003|<inline asm>' "$work/rej.out" | head -2 | sed 's/^/       /'; prob=1; }
+! ls "$work"/rej*.llc-err >/dev/null 2>&1 || { bad "the captured llc report was left beside the object"; prob=1; }
+# The cookie is the whole link: an llc that prints no cookie leaves the
+# driver nothing to map, and the build must say so as llc's text and
+# AX4003, status 4, never as a guess at a line.
+mkdir -p "$work/nocookie"
+real_llc="$(command -v llc)"
+printf '#!/bin/sh\n"%s" "$@" 2>"$0.err"\nrc=$?\ngrep -v srcloc "$0.err" >&2\nexit $rc\n' "$real_llc" > "$work/nocookie/llc"
+chmod +x "$work/nocookie/llc"
+PATH="$work/nocookie:$PATH" "$axc" --diagnostic-format=ai build --input "$asmrej" --output "$work/rej2" > "$work/rej2.out" 2>&1
+rc2=$?
+if (( rc2 != 4 )) || ! grep -q '^E AX4003 ' "$work/rej2.out" || ! grep -q '<inline asm>' "$work/rej2.out" || grep -q 'AX3117' "$work/rej2.out"; then
+  bad "with llc's cookies hidden the build answered $rc2 (want 4, AX4003 and llc's own text, no AX3117):"; head -4 "$work/rej2.out" | sed 's/^/       /'; prob=1
+fi
+(( prob )) || note "llc's three refusals come back as AX3117 at the template lines the fixture's bytes name, status 1; with the cookies hidden the same build is AX4003, status 4"
 if qemu_or_skip "A15 inline assembly at EL1 under QEMU"; then
   checks=$((checks + 1))
   if ! build_bm asm-el.bm "$asmel" --target="$bm"; then

@@ -1,0 +1,49 @@
+; AX3118: an operand the template never names, so no instruction can
+; reach it (docs/memory-model.md MM-FFI-9). `fixed` is the control: an
+; operand in a register of its own needn't appear, because an
+; instruction reaches it through that register.
+;
+;   `input`   an input nothing reads
+;   `output`  an output nothing writes, which would answer junk
+;   `both`    an `inout` the template never names
+;   `count`   a `const` the template never writes
+;   `target`  a `sym` nothing calls
+(:: helper (-> Int Int))
+(fn (helper y)
+  (+ y 1))
+
+(:: fixed (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (fixed x)
+  (asm
+    (aarch64 "add x0, x8, #1" (out r "x0") (in n "x8" x))
+    (x86_64 "leaq 1(%rcx), %rax" (out r "rax") (in n "rcx" x))))
+
+(:: input (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (input x)
+  (asm (aarch64 "mov {r}, #42" (out r) (in a x))))
+
+(:: output (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (output x)
+  (asm (x86_64 "nop" (out r))))
+
+(:: both (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (both x)
+  (asm (aarch64 "nop" (inout v x))))
+
+(:: count Int)
+;@axiom:effect(unsafe)
+(fn (count)
+  (asm (aarch64 "mov {r}, #1" (out r) (const n 4))))
+
+(:: target Int)
+;@axiom:effect(unsafe)
+(fn (target)
+  (asm (aarch64 "nop" (sym f helper))))
+
+(:: main Int)
+(fn (main)
+  0)

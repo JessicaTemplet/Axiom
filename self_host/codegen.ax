@@ -596,6 +596,14 @@
       (vecPushVec ps vecNew)
       ; slot 19: the owner registry is on (`resRegistryOn`, `parScan`).
       (vecPush ps 0)
+      ; slot 20: the last `!srcloc` cookie an inline-assembly line took
+      ; (`asmSrcloc`), so every line in the module has its own.
+      (vecPush ps 0)
+      ; slot 21: the source files those lines are in, numbered in the
+      ; order first seen (`asmFileIndex`), and written once at the end
+      ; of the module (`emitAsmFiles`) rather than into each function,
+      ; so a function's body never depends on its file's name.
+      (vecPushVec ps vecNew)
       (addTypeNamed
         ts
         "Some"
@@ -14996,7 +15004,7 @@
       ; was measured. A stripped function can never appear in a
       ; backtrace, so a table over the survivors is the complete table.
       (let ((tailCg (pruneDeadDefs (emitExternDeclares decls (emitRecoverSlotHelpers (emitEffectGlobals (emitStringGlobals nextCg 0) 0)) 0 (runtimeDeclaredSyms (memGetWord nextCg 26))))))
-        (renderCG (emitLine (emitBacktrace tailCg (symtabNames (memGetWordVec tailCg 0))) (attrGroupZero (memGetWord tailCg 26)))))
+        (renderCG (emitAsmFiles (emitLine (emitBacktrace tailCg (symtabNames (memGetWordVec tailCg 0))) (attrGroupZero (memGetWord tailCg 26))))))
       (emitModuleTail decls nextCg (+ i 1)))))
 
 ; `attributes #0`, per target. The bare target adds `+strict-align`:
@@ -15086,13 +15094,23 @@
 (pub fn (linesCallSym lines sym i)
   (if (>= i (vecLen lines))
     0
-    (if (==
+    (if (|| (==
       (strHasSub
         (cast String (vecGet lines i))
         (concat "@" (concat sym "(")))
-      1)
+      1) (asmLineNamesSym (cast String (vecGet lines i)) sym))
       1
       (linesCallSym lines sym (+ i 1)))))
+
+; Does an inline-assembly call on this line pass `@sym` as a `sym`
+; operand (`asmInputArgs`), as `ptr @sym` followed by `,` or `)`? That
+; is a use of the symbol as much as a call is, and it needs the
+; `declare` too.
+(pub :: asmLineNamesSym (-> String String Bool))
+(pub fn (asmLineNamesSym line sym)
+  (if (== (strHasSub line " asm ") 0)
+    false
+    (|| (== (strHasSub line (concat (concat "ptr @" sym) ",")) 1) (== (strHasSub line (concat (concat "ptr @" sym) ")")) 1))))
 
 (pub :: strHasSub (-> String String Int))
 (pub fn (strHasSub hay needle)
@@ -21228,16 +21246,42 @@
 ; INLINE ASSEMBLY (MM-FFI-9). `(__asm.N desc v...)` is what an `asm`
 ; form expands to (`expandAsm` in expand.ax, which documents the
 ; description). This emits the arm for the target's architecture as
-; one `asm sideeffect` call: `sideeffect` so the optimiser never deletes,
-; merges or hoists it, and the description's constraints already clobber
-; memory and the flags. Only that arm's inputs are evaluated, in the
-; order the arm writes them. A target with no arm gets AX4008's marker,
-; so a portable module may carry an arm for each architecture, and a
+; one `call asm`. Only that arm's inputs are evaluated, in the order
+; the arm writes them. A target with no arm gets AX4008's marker, so a
+; portable module may carry an arm for each architecture, and a
 ; function nothing reaches is never refused.
+;
+; What the options become, Rust's lowering on the same LLVM:
+;
+;   every block    `nounwind`; clobbers memory unless `nomem`, and the
+;                  flags unless `preserves_flags`
+;   not `pure`     `sideeffect`, so the optimiser never deletes,
+;                  merges or hoists it
+;   `pure`         no `sideeffect`, `willreturn`, and `memory(none)`
+;                  with `nomem` or `memory(read)` with `readonly`
+;   `nomem` alone  `memory(inaccessiblemem: readwrite)`
+;   not `nostack`  `alignstack`: the stack pointer is aligned for a
+;                  call, and the function keeps nothing in a red zone
+;                  below it - on x86-64 it otherwise would, and a
+;                  `call` in the template overwrote it (measured: a
+;                  local at -24(%rsp) across the block)
+;   `noreturn`     `unreachable` after the call
+;   `intel_syntax` `inteldialect`
+;   `clobber_abi`  every register the target's C convention lets a
+;                  callee overwrite (`asmAbiClobbers`)
+;
+; Every line of the template carries a `!srcloc` cookie, numbered by
+; pair slot 20 across the module. An `; axiom-asm-site FIRST K s-e ...`
+; comment before the call maps the cookies to the lines' bytes in
+; source file K, and the module ends with one `; axiom-asm-file K
+; "path"` line per file (`emitAsmFiles`). llc names the cookie when the
+; assembler or the register allocator rejects a line, and
+; `asmFailDiags` in driver.ax reads the comments back to report AX3117
+; at that line.
 ; ------------------------------------------------------------------
 (pub :: isAsmPrimName (-> String Bool))
 (pub fn (isAsmPrimName nm)
-  (strStartsWith nm "__asm."))
+  (&& (strStartsWith nm "__asm.") (&& (> (strLen nm) 6) (&& (>= (strByte nm 6) 48) (<= (strByte nm 6) 57)))))
 
 (pub :: emitPrimAsm (-> (Vec Int) Int Int))
 ;@axiom:effect(io)
@@ -21254,24 +21298,7 @@
       (let ((at (asmArmAt desc arch 0)))
         (if (< at 0)
           (emitAsmRefused cg arch)
-          (emitAsmArm desc at args cg))))))
-
-; The offset of `arch`'s arm in the description, or -1. Each arm is
-; five `;`-ended fields and a template of the length the fifth gives.
-(pub :: asmArmAt (-> String String Int Int))
-(pub fn (asmArmAt desc arch pos)
-  (if (>= pos (strLen desc))
-    (- 0 1)
-    (let ((f0 (asmSemi desc pos)))
-      (let ((f1 (asmSemi desc (+ f0 1))))
-        (let ((f2 (asmSemi desc (+ f1 1))))
-          (let ((f3 (asmSemi desc (+ f2 1))))
-            (let ((f4 (asmSemi desc (+ f3 1))))
-              (if (|| (< f0 0) (< f4 0))
-                (- 0 1)
-                (if (strEq (strSlice desc pos (- f0 pos)) arch)
-                  pos
-                  (asmArmAt desc arch (+ (+ f4 1) (asmDigits desc f3 f4))))))))))))
+          (emitAsmArm desc (asmArmFields desc at) args cg))))))
 
 ; The next `;` at or after `i`, or -1.
 (pub :: asmSemi (-> String Int Int))
@@ -21282,98 +21309,509 @@
       i
       (asmSemi s (+ i 1)))))
 
-; The decimal between the `;` at `from` and the one at `to`.
+; The decimal between the `;` at `from` and the one at `to`, with an
+; optional leading `-`.
 (pub :: asmDigits (-> String Int Int Int))
 (pub fn (asmDigits s from to)
   (let (
     (mut v 0)
+    (neg (&& (< (+ from 1) to) (== (strByte s (+ from 1)) 45)))
     (mut i (+ from 1))
   )
     {
+      (if neg
+        (set i (+ i 1))
+        0)
       (while (< i to)
         {
           (set v (+ (* v 10) (- (strByte s i) 48)))
           (set i (+ i 1))
         })
-      v
+      (if neg
+        (- 0 v)
+        v)
     }))
 
-(pub :: emitAsmArm (-> String Int (Vec Int) Int Int))
-;@axiom:effect(io)
-(pub fn (emitAsmArm desc at args cg)
+; Where the fields of the arm at `at` lie: the start and end of each of
+; its eight `;`-ended fields (words 0 to 15), FILE's start and length
+; (16, 17), TEMPLATE's (18, 19), and the offset just past the arm (20).
+; Empty when the arm is cut short, which only a hand-made description
+; can be.
+(pub :: asmArmFields (-> String Int (Vec Int)))
+(pub fn (asmArmFields desc at)
   (let (
-    (f0 (asmSemi desc at))
-  )
-    (let (
-      (f1 (asmSemi desc (+ f0 1)))
-    )
-      (let (
-        (f2 (asmSemi desc (+ f1 1)))
-      )
-        (let (
-          (f3 (asmSemi desc (+ f2 1)))
-        )
-          (let (
-            (f4 (asmSemi desc (+ f3 1)))
-            (cons (strSlice desc (+ f0 1) (- f1 (+ f0 1))))
-            (hasOut (== (strByte desc (+ f1 1)) 49))
-            (sel (asmSelect desc (+ f2 1) f3 args))
-          )
-            (let (
-              (tmpl (strSlice desc (+ f4 1) (asmDigits desc f3 f4)))
-              (cg1 (emitArgsList sel cg 0))
-            )
-              (let (
-                (argText (if (== (strLen (memGetWordStr cg1 9)) 0)
-                  ""
-                  (concat "i64 " (memGetWordStr cg1 9))))
-                (body (escBody tmpl 0 (strLen tmpl)))
-              )
-                (if hasOut
-                  (let ((r (regStr (allocReg cg1))))
-                    {
-                      (emitLine cg1 (concat (concat (concat "  " r) " = call i64 asm sideeffect \"") (concat (concat body "\", \"") (concat (concat cons "\"(") (concat argText ")")))))
-                      (memSetWord cg1 2 r)
-                      cg1
-                    })
-                  {
-                    (emitLine cg1 (concat "  call void asm sideeffect \"" (concat (concat body "\", \"") (concat (concat cons "\"(") (concat argText ")")))))
-                    (memSetWord cg1 2 (constStr 0))
-                    cg1
-                  })))))))))
-
-; The arm's value arguments, picked out of the call's by the indices
-; between `from` and `to`, in the order the constraints take them.
-(pub :: asmSelect (-> String Int Int (Vec Int) (Vec Int)))
-(pub fn (asmSelect desc from to args)
-  (let (
-    (out vecNew)
-    (mut v 0)
-    (mut any false)
-    (mut i from)
+    (v vecNew)
+    (mut p at)
+    (mut k 0)
+    (mut ok true)
   )
     {
-      (while (<= i to)
-        {
-          (if (|| (== i to) (== (strByte desc i) 44))
+      (while (&& ok (< k 8))
+        (let ((e (asmSemi desc p)))
+          (if (< e 0)
             {
-              (if any
+              (set ok false)
+              0
+            }
+            {
+              (vecPush v p)
+              (vecPush v e)
+              (set p (+ e 1))
+              (set k (+ k 1))
+            })))
+      (let ((fe (asmSemi desc p)))
+        (if (|| (! ok) (< fe 0))
+          vecNew
+          (let (
+            (flen (asmDigits desc (- p 1) fe))
+            (fs (+ fe 1))
+            (te (asmSemi desc (+ (+ fe 1) flen)))
+          )
+            (if (< te 0)
+              vecNew
+              (let (
+                (tlen (asmDigits desc (- (+ fs flen) 1) te))
+                (ts (+ te 1))
+              )
                 {
-                  (vecPush out (vecGet args (+ v 1)))
+                  (vecPush v fs)
+                  (vecPush v flen)
+                  (vecPush v ts)
+                  (vecPush v tlen)
+                  (vecPush v (+ ts tlen))
+                  v
+                })))))
+    }))
+
+; Field `k` of an arm, as text.
+(pub :: asmField (-> String (Vec Int) Int String))
+(pub fn (asmField desc f k)
+  (strSlice desc (vecGet f (* 2 k)) (- (vecGet f (+ (* 2 k) 1)) (vecGet f (* 2 k)))))
+
+; Field `k` of an arm, as a number.
+(pub :: asmFieldInt (-> String (Vec Int) Int Int))
+(pub fn (asmFieldInt desc f k)
+  (asmDigits desc (- (vecGet f (* 2 k)) 1) (vecGet f (+ (* 2 k) 1))))
+
+; The offset of `arch`'s arm in the description, or -1.
+(pub :: asmArmAt (-> String String Int Int))
+(pub fn (asmArmAt desc arch pos)
+  (if (>= pos (strLen desc))
+    (- 0 1)
+    (let ((f (asmArmFields desc pos)))
+      (if (== (vecLen f) 0)
+        (- 0 1)
+        (if (strEq (asmField desc f 0) arch)
+          pos
+          (asmArmAt desc arch (vecGet f 20)))))))
+
+; Does the arm's FLAGS field hold `letter`?
+(pub :: asmHasFlag (-> String Int Bool))
+(pub fn (asmHasFlag flags letter)
+  (match (strFindByte flags letter 0)
+    ((Some _) true)
+    ((None) false)))
+
+; The comma-separated items of a field, as a Vec of String.
+(pub :: asmSplit (-> String (Vec String)))
+(pub fn (asmSplit s)
+  (let (
+    (out vecNew)
+    (mut from 0)
+    (mut i 0)
+  )
+    {
+      (while (<= i (strLen s))
+        {
+          (if (|| (== i (strLen s)) (== (strByte s i) 44))
+            {
+              (if (> i from)
+                {
+                  (vecPush out (strSlice s from (- i from)))
                   0
                 }
                 0)
-              (set v 0)
-              (set any false)
+              (set from (+ i 1))
             }
-            {
-              (set v (+ (* v 10) (- (strByte desc i) 48)))
-              (set any true)
-            })
+            0)
           (set i (+ i 1))
         })
       out
     }))
+
+; The arm's inputs as the call's argument list, `i64 %a, ptr @f`: each
+; value evaluated in constraint order, which is the order written, and
+; each `sym` the symbol of the function its `(__asm.sym f)` names.
+(pub :: asmInputArgs (-> String (Vec Int) Int String))
+;@axiom:effect(io)
+(pub fn (asmInputArgs ins args cg)
+  (let (
+    (items (asmSplit ins))
+    (mut acc "")
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen items))
+        (let ((it (vecGetStr items i)))
+          {
+            (let ((one (if (== (strByte it 0) 115)
+              (let ((node (vecGet args (+ (asmDigits it 0 (strLen it)) 1))))
+                (concat "ptr @" (llvmSym (strDup (mangledForCg cg (nodeAName (nodeB node)))))))
+              (let ((cgV (emitExpr (vecGet args (+ (asmDigits it (- 0 1) (strLen it)) 1)) cg)))
+                (concat "i64 " (strDup (memGetWordStr cgV 2)))))))
+              (set acc (if (== (strLen acc) 0)
+                one
+                (concat (concat acc ", ") one))))
+            (set i (+ i 1))
+          }))
+      acc
+    }))
+
+; The registers the target's C calling convention lets a callee
+; overwrite, for `clobber_abi("C")`: AArch64's x0-x17, x30 and the
+; vector registers (only the low halves of v8-v15 survive a call), and
+; x18 where the platform doesn't reserve it; x86-64's System V set
+; with every xmm register, or the Windows set, which keeps rsi, rdi and
+; xmm6-xmm15. A register an output or a clobber of the arm already
+; names is left out: the output is written after any call returns, and
+; a clobber named twice adds nothing. An input's register stays in,
+; because the call overwrites it.
+(pub :: asmAbiClobbers (-> Int String String))
+(pub fn (asmAbiClobbers t cons)
+  (let (
+    (regs (if (targetIsAArch64 t)
+      (concat (asmRegRun "x" 0 17) (concat (if (|| (== t 0) (== t 8))
+        ""
+        " x18") (concat " x30 " (asmRegRun "v" 0 31))))
+      (if (targetIsWindows t)
+        (concat "rax rcx rdx r8 r9 r10 r11 " (asmRegRun "xmm" 0 5))
+        (concat "rax rcx rdx rsi rdi r8 r9 r10 r11 " (asmRegRun "xmm" 0 15)))))
+    (names (asmSplitSpace regs))
+    (mut acc "")
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen names))
+        (let ((r (vecGetStr names i)))
+          {
+            (if (asmConsNames cons r)
+              0
+              {
+                (set acc (if (== (strLen acc) 0)
+                  (concat (concat "~{" r) "}")
+                  (concat acc (concat (concat ",~{" r) "}"))))
+                0
+              })
+            (set i (+ i 1))
+          }))
+      acc
+    }))
+
+; `prefix` numbered from `lo` to `hi`, space-separated.
+(pub :: asmRegRun (-> String Int Int String))
+(pub fn (asmRegRun prefix lo hi)
+  (if (> lo hi)
+    ""
+    (if (== lo hi)
+      (concat prefix (fmtInt lo))
+      (concat (concat (concat prefix (fmtInt lo)) " ") (asmRegRun prefix (+ lo 1) hi)))))
+
+(pub :: asmSplitSpace (-> String (Vec String)))
+(pub fn (asmSplitSpace s)
+  (let (
+    (out vecNew)
+    (mut from 0)
+    (mut i 0)
+  )
+    {
+      (while (<= i (strLen s))
+        {
+          (if (|| (== i (strLen s)) (== (strByte s i) 32))
+            {
+              (if (> i from)
+                {
+                  (vecPush out (strSlice s from (- i from)))
+                  0
+                }
+                0)
+              (set from (+ i 1))
+            }
+            0)
+          (set i (+ i 1))
+        })
+      out
+    }))
+
+; Do the constraints already write register `r`, as an output
+; (`={r}`, `=&{r}`) or a clobber (`~{r}`)? An input in `r` doesn't
+; count: the call still overwrites it, so it stays clobbered.
+(pub :: asmConsNames (-> String String Bool))
+(pub fn (asmConsNames cons r)
+  (let ((braced (concat (concat "{" r) "}")))
+    (|| (== (strHasSub cons (concat "=" braced)) 1) (|| (== (strHasSub cons (concat "&" braced)) 1) (== (strHasSub cons (concat "~" braced)) 1)))))
+
+; The full constraint list: the arm's own, the ABI's clobbers, memory
+; unless `nomem`, and the flags unless `preserves_flags`.
+(pub :: asmConstraints (-> Int String String String))
+(pub fn (asmConstraints t flags cons)
+  (let (
+    (abi (if (asmHasFlag flags 97)
+      (asmAbiClobbers t cons)
+      ""))
+    (mem (if (asmHasFlag flags 109)
+      ""
+      "~{memory}"))
+    (fl (if (asmHasFlag flags 102)
+      ""
+      (if (targetIsAArch64 t)
+        "~{cc}"
+        "~{dirflag},~{fpsr},~{flags}")))
+  )
+    (asmJoin (asmJoin (asmJoin cons abi) mem) fl)))
+
+(pub :: asmJoin (-> String String String))
+(pub fn (asmJoin s t)
+  (if (== (strLen t) 0)
+    s
+    (if (== (strLen s) 0)
+      t
+      (concat (concat s ",") t))))
+
+; The call's attributes, which tell the optimiser what the options
+; promise.
+(pub :: asmAttrs (-> String String))
+(pub fn (asmAttrs flags)
+  (if (asmHasFlag flags 112)
+    (if (asmHasFlag flags 109)
+      "nounwind willreturn memory(none)"
+      "nounwind willreturn memory(read)")
+    (if (asmHasFlag flags 109)
+      "nounwind memory(inaccessiblemem: readwrite)"
+      "nounwind")))
+
+; A file name as it sits between the quotes of an `; axiom-asm-file`
+; line: a quote, a backslash and anything outside printable ASCII
+; as `\XX`, so the comment stays one line whatever the name holds.
+(pub :: asmQuoteName (-> String String))
+(pub fn (asmQuoteName s)
+  (let (
+    (mut out "")
+    (mut i 0)
+  )
+    {
+      (while (< i (strLen s))
+        (let ((c (strByte s i)))
+          {
+            (set out (concat out (if (|| (< c 32) (|| (> c 126) (|| (== c 34) (== c 92))))
+              (concat "\\" (concat (strSlice "0123456789ABCDEF" (/ c 16) 1) (strSlice "0123456789ABCDEF" (% c 16) 1)))
+              (strSlice s i 1))))
+            (set i (+ i 1))
+          }))
+      out
+    }))
+
+; The number of source file `file` in the module's table (pair slot
+; 21), adding it the first time it is asked for.
+(pub :: asmFileIndex (-> Int String Int))
+;@axiom:effect(unsafe)
+(pub fn (asmFileIndex cg file)
+  (let (
+    (files (cast (Vec String) (pairSlot cg 21)))
+    (mut at (- 0 1))
+    (mut i 0)
+  )
+    {
+      (while (&& (< at 0) (< i (vecLen files)))
+        {
+          (if (strEq (vecGetStr files i) file)
+            {
+              (set at i)
+              0
+            }
+            0)
+          (set i (+ i 1))
+        })
+      (if (>= at 0)
+        at
+        {
+          (vecPush files (strDup file))
+          (- (vecLen files) 1)
+        })
+    }))
+
+; `; axiom-asm-file K "path"` for each file an inline-assembly line
+; came from, at the end of the module, where no function's body
+; carries a file's name.
+(pub :: emitAsmFiles (-> Int Int))
+;@axiom:effect(unsafe)
+(pub fn (emitAsmFiles cg)
+  (let (
+    (files (cast (Vec String) (pairSlot cg 21)))
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen files))
+        {
+          (emitLine cg (concat (concat (concat "; axiom-asm-file " (fmtInt i)) " \"") (concat (asmQuoteName (vecGetStr files i)) "\"")))
+          (set i (+ i 1))
+        })
+      cg
+    }))
+
+; The `!srcloc` node and the site comment for an arm whose LINES are
+; known: one cookie per line, the first taken from pair slot 20 and
+; the slot moved past the last. Answers `[comment, node]`, both ""
+; when the lines are unknown.
+(pub :: asmSrcloc (-> Int String String (Vec String)))
+(pub fn (asmSrcloc cg lines file)
+  (let (
+    (items (asmSplit lines))
+    (out vecNew)
+  )
+    (if (== (vecLen items) 0)
+      {
+        (vecPush out "")
+        (vecPush out "")
+        out
+      }
+      (let (
+        (first (+ (pairSlot cg 20) 1))
+        (k (asmFileIndex cg file))
+        (mut node "")
+        (mut ranges "")
+        (mut i 0)
+      )
+        {
+          (pairSetSlot cg 20 (+ (pairSlot cg 20) (vecLen items)))
+          (while (< i (vecLen items))
+            {
+              (set node (concat node (concat (if (== i 0)
+                "i64 "
+                ", i64 ") (fmtInt (+ first i)))))
+              (set ranges (concat ranges (concat " " (vecGetStr items i))))
+              (set i (+ i 1))
+            })
+          (vecPush out (concat (concat (concat "  ; axiom-asm-site " (fmtInt first)) (concat " " (fmtInt k))) ranges))
+          (vecPush out (concat (concat ", !srcloc !{" node) "}"))
+          out
+        }))))
+
+(pub :: emitAsmArm (-> String (Vec Int) (Vec Int) Int Int))
+;@axiom:effect(io)
+(pub fn (emitAsmArm desc f args cg)
+  (let (
+    (t (memGetWord cg 26))
+    (flags (asmField desc f 1))
+    (nOut (asmFieldInt desc f 3))
+    (ans (asmFieldInt desc f 4))
+    (outs (asmSplit (asmField desc f 5)))
+    (tmpl (strSlice desc (vecGet f 18) (vecGet f 19)))
+    (argText (asmInputArgs (asmField desc f 6) args cg))
+    (loc (asmSrcloc cg (asmField desc f 7) (strSlice desc (vecGet f 16) (vecGet f 17))))
+  )
+    (let (
+      (cons (asmConstraints t flags (asmField desc f 2)))
+      (body (escBody tmpl 0 (strLen tmpl)))
+      (ty (asmResultTy nOut))
+      (kw (concat (if (asmHasFlag flags 112)
+        ""
+        "sideeffect ") (concat (if (asmHasFlag flags 115)
+        ""
+        "alignstack ") (if (asmHasFlag flags 105)
+        "inteldialect "
+        ""))))
+    )
+      (let (
+        (callText (concat (concat (concat "call " ty) (concat " asm " kw)) (concat (concat "\"" body) (concat (concat "\", \"" cons) (concat (concat "\"(" argText) (concat ") " (concat (asmAttrs flags) (vecGetStr loc 1))))))))
+        (r (if (== nOut 0)
+          ""
+          (regStr (allocReg cg))))
+      )
+        {
+          (if (> (strLen (vecGetStr loc 0)) 0)
+            (emitLine cg (vecGetStr loc 0))
+            0)
+          (emitLine cg (if (== nOut 0)
+            (concat "  " callText)
+            (concat (concat (concat "  " r) " = ") callText)))
+          (let (
+            (res (if (< ans 0)
+              (constStr 0)
+              (asmOutput cg r ty nOut ans)))
+            (mut i 0)
+          )
+            {
+              (while (< i (vecLen outs))
+                (let ((pair (vecGetStr outs i)))
+                  {
+                    (asmStoreInto cg r ty nOut pair args)
+                    (set i (+ i 1))
+                  }))
+              (if (asmHasFlag flags 110)
+                {
+                  (emitLine cg "  unreachable")
+                  (emitLabel cg (concat "asmnr" (fmtInt (allocReg cg))))
+                  0
+                }
+                0)
+              (memSetWord cg 2 res)
+              (memSetWord cg 14 0)
+              cg
+            })
+        }))))
+
+; The call's type: nothing, one word, or a struct of words.
+(pub :: asmResultTy (-> Int String))
+(pub fn (asmResultTy n)
+  (if (== n 0)
+    "void"
+    (if (== n 1)
+      "i64"
+      (concat (concat "{ " (asmWords n)) " }"))))
+
+(pub :: asmWords (-> Int String))
+(pub fn (asmWords n)
+  (if (<= n 1)
+    "i64"
+    (concat "i64, " (asmWords (- n 1)))))
+
+; Output `k` of the call whose result is `r`: `r` itself when it is the
+; only one, else an `extractvalue`.
+(pub :: asmOutput (-> Int String String Int Int String))
+(pub fn (asmOutput cg r ty nOut k)
+  (if (== nOut 1)
+    r
+    (let ((x (regStr (allocReg cg))))
+      {
+        (emitLine cg (concat (concat (concat "  " x) " = extractvalue ") (concat (concat ty " ") (concat (concat r ", ") (fmtInt k)))))
+        x
+      })))
+
+; `k:i`: output k is stored in the `mut` binding the call's argument i
+; names, a `(set slot 0)` the checker has held to a `mut` `Int` this
+; frame may assign. The `0` is never evaluated.
+(pub :: asmStoreInto (-> Int String String Int String (Vec Int) Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (asmStoreInto cg r ty nOut pair args)
+  (let (
+    (colon (match (strFindByte pair 58 0)
+      ((Some c) c)
+      ((None) 0)))
+    (k (asmDigits pair (- 0 1) colon))
+    (node (vecGet args (+ (asmDigits pair colon (strLen pair)) 1)))
+  )
+    (let (
+      (name (nodeAName node))
+      (storage (lookupSym cg (nodeAName node)))
+      (kind (lookupSymKind cg (nodeAName node)))
+    )
+      (if (|| (== storage 0) (&& (!= kind 1) (!= kind 4)))
+        (dieCodegenDiag "an `asm` output's `into` target is not a mut binding: " name)
+        {
+          (emitLine cg (concat (concat "  store i64 " (asmOutput cg r ty nOut k)) (concat ", ptr " (cast String storage))))
+          0
+        }))))
 
 ; AX4008's marker for a form with no arm this target runs.
 (pub :: emitAsmRefused (-> Int String Int))

@@ -1,0 +1,142 @@
+; Inline assembly's operand kinds and options (docs/memory-model.md
+; MM-FFI-9). Every form carries an arm for each architecture, so the
+; file answers the same on aarch64 and x86_64, and at every `--opt`
+; (the `.optstable` beside it). Each function says `effect(unsafe)`,
+; and `main`, which calls them, says nothing.
+;
+;   `bump`      `lateout`: the output may share the input's register
+;   `twice`     `inlateout`, and Intel syntax on x86_64
+;   `divmod`    two outputs, the remainder stored `into` a `mut` binding
+;   `scaled`    `const`: an integer folded into the template
+;   `viaCall`   `sym` and `clobber_abi`: the block calls `triple`
+;   `square`    `pure nomem`, which the optimiser may drop when unused
+;   `firstByte` `pure readonly`, reading through a string's address
+;   `countdown` a numbered label in a `while` the optimiser may unroll
+;   `relax`     no outputs, in statement position
+;   `checked`   `noreturn`, on a path the program never takes
+(import IO)
+(import Str)
+
+(:: bump (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (bump x)
+  (asm
+    (aarch64 "add {r}, {a}, #1" (lateout r) (in a x))
+    (x86_64 "leaq 1({a}), {r}" (lateout r) (in a x))))
+
+(:: twice (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (twice x)
+  (asm
+    (aarch64 "add {v}, {v}, {v}" (inlateout v x))
+    (x86_64 "add {v}, {v}" (inlateout v x) (options intel_syntax))))
+
+(:: divmod (-> Int Int Int))
+;@axiom:effect(unsafe)
+(fn (divmod n d)
+  (let ((mut rem 0))
+    (let ((q (asm
+      (aarch64
+        "udiv {q}, {a}, {b}\nmsub {r}, {q}, {b}, {a}"
+        (out q)
+        (out r into rem)
+        (in a n)
+        (in b d))
+      (x86_64 "xorl %edx, %edx\ndivq {b}" (inout q "rax" n) (out r "rdx" into rem) (in b d)))))
+      (+ (* q 1000) rem))))
+
+(:: scaled (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (scaled x)
+  (asm
+    (aarch64 "lsl {r}, {a}, #{n}" (out r) (in a x) (const n (+ 1 2)))
+    (x86_64 "movq {a}, {r}\nshlq ${n}, {r}" (out r) (in a x) (const n (+ 1 2)))))
+
+(:: triple (-> Int Int))
+(fn (triple y)
+  (* y 3))
+
+(:: viaCall (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (viaCall x)
+  (asm
+    (aarch64
+      "mov x0, {a}\nbl {f}"
+      (out r "x0")
+      (in a x)
+      (sym f triple)
+      (clobber_abi "C"))
+    (x86_64
+      "movq {a}, %rdi\ncall {f}"
+      (out r "rax")
+      (in a x)
+      (sym f triple)
+      (clobber_abi "C"))))
+
+(:: square (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (square x)
+  (asm
+    (aarch64 "mul {r}, {a}, {a}" (out r) (in a x) (options pure nomem nostack))
+    (x86_64 "movq {a}, {r}\nimulq {a}, {r}" (out r) (in a x) (options pure nomem nostack))))
+
+(:: firstByte (-> String Int))
+;@axiom:effect(unsafe)
+(fn (firstByte s)
+  (asm
+    (aarch64 "ldrb {r:w}, [{p}]" (out r) (in p (strData s)) (options pure readonly nostack))
+    (x86_64 "movzbq ({p}), {r}" (out r) (in p (strData s)) (options pure readonly nostack))))
+
+(:: countdown (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (countdown n)
+  (let (
+    (mut i 0)
+    (mut acc 0)
+  )
+    {
+      (while (< i 3)
+        {
+          (set acc (+ acc (asm
+            (aarch64 "mov {r}, {a}\n1: subs {r}, {r}, #1\nb.ne 1b\nadd {r}, {r}, #1" (out r) (in a n))
+            (x86_64 "movq {a}, {r}\n1: decq {r}\njnz 1b\nincq {r}" (out r) (in a n)))))
+          (set i (+ i 1))
+        })
+      acc
+    }))
+
+(:: relax Int)
+;@axiom:effect(unsafe)
+(fn (relax)
+  {
+    (asm
+      (aarch64 "yield" (options nomem nostack preserves_flags))
+      (x86_64 "pause" (options nomem nostack preserves_flags)))
+    7
+  })
+
+(:: checked (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (checked x)
+  (if (< x 0)
+    (asm
+      (aarch64 "brk #1" (options noreturn nomem nostack))
+      (x86_64 "ud2" (options noreturn nomem nostack)))
+    x))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println (fmtInt (bump 41)))
+    (println (fmtInt (twice 21)))
+    (println (fmtInt (divmod 47 5)))
+    (println (fmtInt (scaled 5)))
+    (println (fmtInt (viaCall 14)))
+    (println (fmtInt (square 7)))
+    (println (fmtInt (firstByte "Axiom")))
+    (println (fmtInt (countdown 5)))
+    (println (fmtInt relax))
+    (println (fmtInt (checked 42)))
+    0
+  })
