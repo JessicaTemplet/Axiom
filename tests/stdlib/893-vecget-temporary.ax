@@ -1,0 +1,116 @@
+; A vector passed straight to `vecGet` is released, and its element
+; keeps a share of its own (MM-LIFE-2m). Each line must read `true`.
+;
+;   1  an element let-bound out of a temporary vector reads correctly
+;      after the vector is released and the allocator is churned
+;   2  the same through a function that answers its parameter's element
+;   3  the same two vectors deep: an element of an element
+;   4  the same inside a polymorphic function, at a type variable
+;   5  discarded elements in a loop hold no memory: the temporary
+;      vector and the element share both go back
+;
+; Releasing the vector without retaining the element would free the
+; element under its reader, and retaining the element without
+; releasing the vector is the leak this case was written for.
+(import IO)
+(import Vec)
+(import Str)
+(import Fmt)
+(import Mem)
+
+(:: churn Int)
+(fn (churn)
+  (let ((mut i 0) (mut acc 0))
+    {
+      (while (< i 20000)
+        {
+          (let ((s (concat "zz-" (fmtInt i))))
+            (set acc (+ acc (strLen s))))
+          (set i (+ i 1))
+        })
+      acc
+    }))
+
+(:: fresh (-> String (Vec String)))
+(fn (fresh s)
+  (let ((v vecNew))
+    {
+      (vecPush v s)
+      v
+    }))
+
+(:: grid (Vec (Vec String)))
+(fn (grid)
+  (let ((outer vecNew) (inner (fresh "deep-value")))
+    {
+      (vecPush outer inner)
+      outer
+    }))
+
+(:: pickFirst (-> (Vec a) a))
+(fn (pickFirst v)
+  (vecGet v 0))
+
+(:: freshVec (-> a (Vec a)))
+(fn (freshVec x)
+  (let ((v vecNew))
+    {
+      (vecPush v x)
+      v
+    }))
+
+(:: held Int)
+(fn (held)
+  (let ((s memStats))
+    s.heldBytes))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    ; 1: let-bound element of a temporary vector survives its release
+    (let ((x (vecGet (fresh "keep-me-1") 0)))
+      {
+        churn
+        (println (if (strEq x "keep-me-1") "true" "false"))
+      })
+    ; 2: result returned from a function
+    (let ((y (pickFirst (fresh "keep-me-2"))))
+      {
+        churn
+        (println (if (strEq y "keep-me-2") "true" "false"))
+      })
+    ; 3: nested: element of an element of a temporary
+    (let ((z (vecGet (vecGet (grid) 0) 0)))
+      {
+        churn
+        (println (if (strEq z "deep-value") "true" "false"))
+      })
+    ; 4: inside a polymorphic function, element of a temporary at a type variable
+    (let ((w (pickFirst (freshVec "keep-me-4"))))
+      {
+        churn
+        (println (if (strEq w "keep-me-4") "true" "false"))
+      })
+    ; 5: discarded results release both the vector and the element share
+    (let ((mut i 0))
+      {
+        (while (< i 2000)
+          {
+            (vecGet (fresh (concat "drop-" (fmtInt i))) 0)
+            (set i (+ i 1))
+          })
+        (let ((a held))
+          {
+            (set i 0)
+            (while (< i 2000)
+              {
+                (vecGet (fresh (concat "drop-" (fmtInt i))) 0)
+                (set i (+ i 1))
+              })
+            (let ((g (- held a)))
+              (println (if (== g 0) "true" "false")))
+          })
+      })
+    0
+  })

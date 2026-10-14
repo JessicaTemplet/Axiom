@@ -1,0 +1,75 @@
+; A field passed beside its struct keeps a share (MM-LIFE-2m).
+; Each line must read `true`.
+;
+;   1  a callee overwrites the field and churns the allocator; the
+;      parameter that was the field's old value still reads it
+;   2  passing a field beside its struct in a loop holds no memory:
+;      the argument's share goes back when the call returns
+;
+; Without the share, the store to the field releases the old value
+; under the parameter, and the read after the churn is of freed
+; bytes - this case segfaulted before the share was taken.
+(import IO)
+(import Str)
+(import Fmt)
+(import Mem)
+
+(struct Box (mut s : String))
+
+(:: churn Int)
+(fn (churn)
+  (let ((mut i 0) (mut acc 0))
+    {
+      (while (< i 40000)
+        {
+          (let ((t (concat "value-value-" (fmtInt i))))
+            (set acc (+ acc (strLen t))))
+          (set i (+ i 1))
+        })
+      acc
+    }))
+
+(:: clobber (-> Box String String))
+(fn (clobber b x)
+  {
+    (set b.s "replacement-value-999999999999999999999999999999")
+    churn
+    x
+  })
+
+(:: readIt (-> Box String Int))
+(fn (readIt b x)
+  (strLen x))
+
+(:: held Int)
+(fn (held)
+  (let ((s memStats))
+    s.heldBytes))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (let ((b (Box (concat "value-value-" (fmtInt 424242)))))
+      (println (if (strEq (clobber b b.s) "value-value-424242") "true" "false")))
+    (let ((b (Box "held-value")) (mut i 0) (mut acc 0))
+      {
+        (while (< i 2000)
+          {
+            (set acc (+ acc (readIt b b.s)))
+            (set i (+ i 1))
+          })
+        (let ((a held))
+          {
+            (set i 0)
+            (while (< i 2000)
+              {
+                (set acc (+ acc (readIt b b.s)))
+                (set i (+ i 1))
+              })
+            (let ((g (- held a)))
+              (println (if (&& (== g 0) (== acc 40000)) "true" "false")))
+          })
+      })
+    0
+  })

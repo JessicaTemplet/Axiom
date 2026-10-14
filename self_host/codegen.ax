@@ -1306,12 +1306,14 @@
 ; result or field class being a reference (`fldClass` 2).
 ;
 ; What stays leaked, deliberately: a temporary passed to a primitive,
-; a `cast`, a local function value, or a function whose result is a
-; type variable (none of those retains what it is handed back);
-; a `match` scrutinee built in place; a temporary stored through
-; `set` into a slot that only stores (`slotOwns` refused it). Each is
-; the leak direction, and each is narrower than the old rule's
-; "everything not bound to a direct construction".
+; a `cast` or a local function value (none of those retains what it
+; is handed back); a temporary a type-variable-result call parks,
+; consumes, or does not answer from (`borrowedFromOwnedClass` handles
+; the one it answers from); a `match` scrutinee built in place; a
+; temporary stored through `set` into a slot that only stores
+; (`slotOwns` refused it). Each is the leak direction, and each is
+; narrower than the old rule's "everything not bound to a direct
+; construction".
 ; ------------------------------------------------------------------
 (pub :: inferOwnership (-> Int (Vec Int) Int))
 (pub fn (inferOwnership cg decls)
@@ -22668,9 +22670,27 @@
                                     args
                                     argRegs
                                     0)
-                                  (memSetWord cgE 2 r)
-                                  (memSetWord cgE 14 (fnRetIsFloat cgE full))
-                                  cgE
+                                  ; a result borrowed from an owned temporary
+                                  ; takes a share of its own, and the
+                                  ; temporary is handed back: the result
+                                  ; is transferred from here on
+                                  ; (`borrowedFromOwnedClass`)
+                                  (let ((bc (borrowedFromOwnedClass cgE snode)))
+                                    (if (== bc 0)
+                                      {
+                                        (memSetWord cgE 2 r)
+                                        (memSetWord cgE 14 (fnRetIsFloat cgE full))
+                                        cgE
+                                      }
+                                      (let ((cgR (if (== bc 1)
+                                        (emitRetainOf cgE r)
+                                        (emitRetainIfEvBit cgE r (- bc 2)))))
+                                        (let ((cgF (releaseBorrowedFrom cgR fnName args argRegs 0)))
+                                          {
+                                            (memSetWord cgF 2 r)
+                                            (memSetWord cgF 14 (fnRetIsFloat cgF full))
+                                            cgF
+                                          }))))
                                 }))))))))))))))))
 
 ; `emitArgsList` that also records each argument's register, in
@@ -22701,7 +22721,10 @@
             (vecPush
               regs
               (cast Int reg))
-            (let ((lent (lendClass cg1 node)))
+            (let ((lent (let ((l (lendClass cg1 node)))
+              (if (!= l 0)
+                l
+                (fieldArgClass cg1 node)))))
               (if (&& (!= lent 0) (== (argOwnedRelease cg1 fnName args i) 1))
                 (if (== lent 1)
                   (emitRetainOf cg1 reg)
@@ -22781,7 +22804,10 @@
             (+ i 1))
           (let ((lent (let ((l (lendClass cg a)))
             (if (== l 0)
-              (transferClass cg a)
+              (let ((t (transferClass cg a)))
+                (if (== t 0)
+                  (fieldArgClass cg a)
+                  t))
               l))) (reg (cast String (vecGet regs i))))
             (releaseOwnedArgs
               (if (>= lent 2)
@@ -22799,6 +22825,32 @@
         regs
         (+ i 1)))))
 
+; Hand back every argument this call borrowed its result from, once
+; the result has taken a share of its own (the caller retains it
+; first). The share a transferred argument brought is handed back
+; under the same class `releaseOwnedArgs` would use.
+(pub :: releaseBorrowedFrom (-> Int String (Vec Int) (Vec Int) Int Int))
+;@axiom:effect(unsafe)
+(pub fn (releaseBorrowedFrom cg fnName args regs i)
+  (if (>= i (vecLen args))
+    cg
+    (if (== (borrowedFromOwnedArg cg fnName args i) 1)
+      (let ((a (vecGet args i)) (reg (cast String (vecGet regs i))))
+        (let ((lent (let ((l (lendClass cg a)))
+          (if (== l 0)
+            (transferClass cg a)
+            l))))
+          (releaseBorrowedFrom
+            (if (>= lent 2)
+              (let ((cgR (emitEvwRead cg)))
+                (emitRcIfBitOf cgR reg (- lent 2) (strDup (memGetWordStr cgR 2)) 0))
+              (emitReleaseOf cg reg))
+            fnName
+            args
+            regs
+            (+ i 1))))
+      (releaseBorrowedFrom cg fnName args regs (+ i 1)))))
+
 ; Would `releaseOwnedArgs` release argument `i` after the call? ONE
 ; predicate, asked by the release above and by `mustTailOK` below, so
 ; the two cannot drift: a `musttail` over an argument the caller still
@@ -22814,7 +22866,7 @@
 (pub fn (argOwnedRelease cg fnName args i)
   (let ((cls (fnResultClass cg fnName)))
     (if (|| (== cls 0) (== cls 2))
-      (if (&& (|| (== (valueOwnedRef cg (vecGet args i)) 1) (|| (!= (lendClass cg (vecGet args i)) 0) (!= (transferClass cg (vecGet args i)) 0))) (&& (== (isStaticSentinelNode cg (vecGet args i)) 0) (&& (== (isNullaryConNode cg (vecGet args i)) 0) (&& (== (& (fnCallStashMask cg fnName args) (| (paramBit i) (ownerBit i))) 0) (&& (== (& (fnConsumeMask cg fnName) (| (paramBit i) (ownerBit i))) 0) (|| (== cls 2) (== (& (fnRetMask cg fnName) (anyBit i)) 0)))))))
+      (if (&& (|| (== (valueOwnedRef cg (vecGet args i)) 1) (|| (!= (lendClass cg (vecGet args i)) 0) (|| (!= (transferClass cg (vecGet args i)) 0) (!= (fieldArgClass cg (vecGet args i)) 0)))) (&& (== (isStaticSentinelNode cg (vecGet args i)) 0) (&& (== (isNullaryConNode cg (vecGet args i)) 0) (&& (== (& (fnCallStashMask cg fnName args) (| (paramBit i) (ownerBit i))) 0) (&& (== (& (fnConsumeMask cg fnName) (| (paramBit i) (ownerBit i))) 0) (|| (== cls 2) (== (& (fnRetMask cg fnName) (anyBit i)) 0)))))))
         1
         0)
       0)))
@@ -22892,9 +22944,14 @@
               0
               (if (> (ownedArgReleases cg fnName args 0) 0)
                 0
-                (if (== (slotsReachArgs cg (cast (Vec Int) (pairSlot cg 17)) args 0) 1)
+                (if (&& (== (fnResultClass cg fnName) 1) (== (borrowedFromOwnedAny cg fnName args 0) 1))
+                  ; a result borrowed from an owned temporary is
+                  ; retained and the temporary released after the
+                  ; call (`emitPlainCall`); a musttail has no after
                   0
-                  1)))))))))
+                  (if (== (slotsReachArgs cg (cast (Vec Int) (pairSlot cg 17)) args 0) 1)
+                    0
+                    1))))))))))
 
 ; `dispatchCall` arms the token for the one call it may mark: a tail
 ; application (3 - no leaf retain owed) whose head is a DEFINED
@@ -24898,15 +24955,57 @@
         0
         cls))))
 
+; Whether argument `i` of a call to `fnName` is one the result may be
+; borrowed from (the callee's return mask names it), is an owned
+; temporary or a transferred value here, and is neither parked nor
+; consumed by the callee - so the caller may hand its share back once
+; the result has taken a share of its own.
+(pub :: borrowedFromOwnedArg (-> Int String (Vec Int) Int Int))
+(pub fn (borrowedFromOwnedArg cg fnName args i)
+  (let ((a (vecGet args i)))
+    (if (&& (&& (!= (& (fnRetMask cg fnName) (anyBit i)) 0) (|| (== (valueOwnedRef cg a) 1) (!= (transferClass cg a) 0))) (&& (== (& (fnCallStashMask cg fnName args) (| (paramBit i) (ownerBit i))) 0) (== (& (fnConsumeMask cg fnName) (| (paramBit i) (ownerBit i))) 0)))
+      1
+      0)))
+
+; Whether any argument of the call is such a temporary.
+(pub :: borrowedFromOwnedAny (-> Int String (Vec Int) Int Int))
+(pub fn (borrowedFromOwnedAny cg fnName args i)
+  (if (>= i (vecLen args))
+    0
+    (if (== (borrowedFromOwnedArg cg fnName args i) 1)
+      1
+      (borrowedFromOwnedAny cg fnName args (+ i 1)))))
+
+; The class of a counted value a call lends from an owned temporary:
+; `(vecGet (fresh) 0)`, where the vector the element is borrowed from
+; is itself a temporary the caller owns. The call site retains the
+; result and releases the temporary (`emitPlainCall`), so the result
+; stops being lent and becomes transferred - the caller's share,
+; handed back wherever a transferred value's is. 0 when the result
+; is not such a value.
+(pub :: borrowedFromOwnedClass (-> Int Int Int))
+(pub fn (borrowedFromOwnedClass cg valExpr)
+  (let ((cls (tyvarResultClass cg valExpr)))
+    (if (== cls 0)
+      0
+      (let ((args (spineArgVec valExpr vecNew)))
+        (if (== (borrowedFromOwnedAny cg (spineHeadName valExpr) args 0) 1)
+          cls
+          0)))))
+
 ; The class of a counted value a call LENDS: a signed global applied at
 ; its arity whose declared result is a type variable, which retains
 ; nothing on return (`vecGet`), at a counted instantiation. 1 for a
 ; counted type, `2+k` for this function's type variable k, 0 otherwise.
+; A value lent from an owned temporary is not lent: it is transferred
+; (`borrowedFromOwnedClass`), because its holder is going away.
 (pub :: lendClass (-> Int Int Int))
 (pub fn (lendClass cg valExpr)
   (if (== (tyvarResultTransfers cg valExpr) 1)
     0
-    (tyvarResultClass cg valExpr)))
+    (if (!= (borrowedFromOwnedClass cg valExpr) 0)
+      0
+      (tyvarResultClass cg valExpr))))
 
 ; The class of a counted value a call TRANSFERS: the same shape as a
 ; lent one, from a function that says `;@axiom:result(owned)`
@@ -24918,7 +25017,7 @@
 (pub fn (transferClass cg valExpr)
   (if (== (tyvarResultTransfers cg valExpr) 1)
     (tyvarResultClass cg valExpr)
-    0))
+    (borrowedFromOwnedClass cg valExpr)))
 
 ; Does the call's callee say `result(owned)`?
 (pub :: tyvarResultTransfers (-> Int Int Int))
@@ -25913,6 +26012,28 @@
         (if (== (fldClass cg (nodeC fi)) 0)
           1
           0)))))
+
+; The class of a counted field read, for the share a use of it as a
+; call argument takes: 1 for a counted type, `2+k` for this
+; function's type variable k, 0 for a scalar or a shape this does
+; not know. A field read is lent from its struct, as a `vecGet`
+; element is lent from its vector: passed beside its struct to a
+; callee that overwrites the field, it dangles unless the argument
+; takes a share, which `emitArgsRegs` takes and
+; `releaseOwnedArgs` hands back.
+(pub :: fieldArgClass (-> Int Int Int))
+(pub fn (fieldArgClass cg node)
+  (if (== (nodeTag node) TAG_E_FIELD)
+    (let ((fi (resolveStructField (memGetWordVec cg 3) node)))
+      (if (== fi 0)
+        0
+        (let ((cls (fldClass cg (nodeC fi))))
+          (if (== cls 2)
+            1
+            (if (== cls 1)
+              (pinnedClass cg (checkedValueTy node))
+              0)))))
+    0))
 
 ; The names a pattern binds, or 0 for a pattern shape this does not
 ; know - the checker's `patBinders`, with the refusal added, plus the

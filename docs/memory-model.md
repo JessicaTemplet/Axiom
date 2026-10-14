@@ -3690,8 +3690,10 @@ written to that container convention. The element such a read answers
 belongs to the vector, so it keeps the vector alive. A `Vec`'s word 2
 is an owner word, while words 0, 1 and 3 are numbers, so `vecGet`'s
 answer aliases the vector's data block. A binding read through it in
-value position escapes, and a vector passed straight to `vecGet`
-without a binding leaks.
+value position escapes. A vector passed straight to `vecGet` is the
+other shape: when the vector is a temporary the caller owns, the
+element takes a share of its own at the call and the vector is
+released, so neither leaks (`tests/stdlib/893-vecget-temporary.ax`).
 
 These cases don't leak:
 
@@ -4845,9 +4847,11 @@ overwrite slot 0 and still read its parameter. Inside a polymorphic
 function, where the element's type is the function's own type
 variable, both steps follow that variable's evidence bit
 (`tests/stdlib/778-vec-lent-argument.ax`). An element passed to a
-call whose own result is a type variable gets no such share, and a
-struct field passed beside its struct still carries the aliasing
-hazard of `MM-MUT-4`.
+call whose own result is a type variable gets no such share. A
+struct field passed beside its struct, as in `(f b b.name)`, takes
+the same share on the same terms, so a store to the field in `f`
+cannot free the value its parameter still reads
+(`tests/stdlib/894-field-beside-struct.ax`).
 
 The committed seed's `__retainref` answers 0, so the compiler it builds
 keeps every container plain: it leaks and never frees early. The rule
@@ -4855,7 +4859,6 @@ applies from the second stage of the bootstrap ladder.
 
 These leak, which is the safe direction:
 
-- a vector passed straight to `vecGet` without a binding;
 - a container whose first element arrives through a call that can't
   see its type, such as a `cast` or a function value's thunk, which
   stays plain;
