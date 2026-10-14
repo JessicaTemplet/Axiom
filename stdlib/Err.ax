@@ -1,5 +1,5 @@
-;;! Err — Axiom's failure type, its error record, and the propagation
-;;! form that binds one.
+;;! Err — Axiom's failure type, its error record, the combinators that
+;;! work on them, and checked integer arithmetic.
 ;
 ; The specification is `docs/error-model.md`; this module is its
 ; `ERR-TYPE-*` and `ERR-REC-2` rules made real. Three of its decisions
@@ -85,11 +85,8 @@
   1008)
 
 ;; A descriptor accepted some bytes and then accepted none, without an
-;; errno to say why. It is NOT a syscall error - `write` returned 0,
-;; which is a legal answer - so it cannot borrow an errno, and it is not
-;; success either, which is exactly why `IO`'s write loop could not
-;; express it while it answered an Int. `ERR-REC-3` calls a short write
-;; a failure and not an absence: the bytes were meant to go and did not.
+;; errno to say why: `write` answered 0, which the kernel doesn't count
+;; as an error, but the bytes were meant to go and did not (`ERR-REC-3`).
 (pub :: errShortWrite Int)
 (pub fn (errShortWrite)
   1009)
@@ -126,11 +123,13 @@
 (pub fn (errContext e)
   e.context)
 
-;; The rendering `main` writes to fd 2 (ERR-REC-4), and the one a
-;; program builds a longer report out of. A plain function rather than a
-;; format hole: a rendering is chosen from a concrete type, so a value
-;; reached through a type variable is AX3025, and every caller here has
-;; a concrete `Error` in hand anyway.
+;; The error as one line of text: what `main` writes to standard error
+;; when it answers `Err` (ERR-REC-4), and what a longer report is built
+;; from.
+;
+; A plain function rather than a format hole: a rendering is chosen
+; from a concrete type, so a value reached through a type variable is
+; AX3025, and every caller here has a concrete `Error` in hand anyway.
 (pub :: errorText (-> Error String))
 (pub fn (errorText e)
   (if (== (strLen e.context) 0)
@@ -190,34 +189,15 @@
     ((Ok x) (f x))
     ((Err y) (Err y))))
 
-;; Attach what the caller was doing to an error in flight, passing `Ok`
-;; through untouched. It needs no binder, so it is a function and not a
-;; form.
-;
-; The field reads go through `errContextOf` rather than being written
-; inline in the arm, and that is not tidiness. A `match` binder over a
-; polymorphic scrutinee does not carry its instantiated type: reading
-; `y.code` in the arm below WAS AX3004 `expected struct or data type,
-; found _t206`, because the checker instantiated `Result a Error`'s
-; constructor field to a variable and never resolved it against the
-; signature. Handing `y` to a function whose PARAMETER is declared
-; `Error` got the concrete type back, and that is why every
-; error-inspecting combinator in this module was shaped this way.
-;
-; It is no longer required: `ctorPatEnv` (2026-08-21) instantiates a
-; constructor pattern's field types against the scrutinee's, so the
-; arm can read `y.code` directly. This function stays because it is
-; PUBLIC - `docs/stdlib-api.md` lists it and importers may call it -
-; and because deleting an exported name to tidy a rule that no longer
-; binds costs its callers and buys nothing. `docs/error-model.md`
-; ERR-TYPE-3a records the retirement; `tests/stdlib/371-err-module.ax`
-; term 2 checks the direct spelling against this one.
+;; `e` with its context set to `ctx`, so a caller up the stack can say
+;; what it was doing when the error arrived: `(errContextOf e "axqOpen")`.
+;; `withContext` does the same to the error inside a `Result`.
 (pub :: errContextOf (-> Error String Error))
 (pub fn (errContextOf e ctx)
   (Error e.code e.message ctx))
 
-;; Add `ctx` to the error's context, so a caller up the stack can say
-;; what it was doing. An `Ok` passes through unchanged.
+;; Set the context of the error inside `r` to `ctx`, so a caller up the
+;; stack can say what it was doing. An `Ok` passes through unchanged.
 (pub :: withContext (-> (Result a Error) String (Result a Error)))
 (pub fn (withContext r ctx)
   (match r
@@ -282,17 +262,14 @@
     ((Some x) true)
     ((None) false)))
 
-;; Whether the `Option` is empty. Exactly `isSome` negated, spelled
-;; out because a caller reads for the case it cares about.
+;; Whether the `Option` is empty: `isSome` negated.
 (pub :: isNone (-> (Option a) Bool))
 (pub fn (isNone o)
   (match o
     ((Some x) false)
     ((None) true)))
 
-;; The value, or `fallback` when there is none. The one combinator that
-;; ends the `Option` rather than passing it on, and the reason most
-;; call sites need no `match` at all.
+;; The value, or `fallback` when there is none.
 (pub :: optUnwrapOr (-> (Option a) a a))
 (pub fn (optUnwrapOr o fallback)
   (match o
@@ -317,10 +294,9 @@
     ((Some x) (f x))
     ((None) None)))
 
-;; The first of two that is present. `alt` is EVALUATED at the call, so
-;; this is not a short-circuit: a caller whose alternative is expensive
-;; should write the `match`. Said here because the name is borrowed
-;; from languages where it is lazy.
+;; The first of two that is present. `alt` is evaluated at the call,
+;; even when `o` holds a value, so a caller whose alternative is
+;; expensive should write the `match`.
 (pub :: optOr (-> (Option a) (Option a) (Option a)))
 (pub fn (optOr o alt)
   (match o
@@ -348,7 +324,7 @@
   (- (- 0 9223372036854775807) 1))
 
 ; ------------------------------------------------------------------
-;; The three that WRAP.
+; The three that WRAP.
 ;
 ; `+`, `-` and `*` emit plain `add`/`sub`/`mul` with no `nsw`, so
 ; overflow is silent two's-complement wraparound. That is the safer of
@@ -377,6 +353,8 @@
 ; `subChecked` asks whether they DISAGREED and the answer differs from
 ; the first; `mulChecked` divides the answer back out, which is exact
 ; whenever the multiplication did not wrap.
+;; `a + b`, or `Err` with `errOverflow` when the sum does not fit an
+;; `Int`.
 (pub :: addChecked (-> Int Int (Result Int Error)))
 (pub fn (addChecked a b)
   ; Both operands on the same side of zero, the answer on the other:
@@ -443,9 +421,8 @@
       (Err (mkError errOverflow "remainder is not representable"))
       (Ok (% a b)))))
 
-;; A shift amount of 64 or more, and a negative one, trap (exit 84,
-;; MM-VAL-3b) - `(<< 1 100)` used to answer 68719476736 at `--opt 0`
-;; and 1 at `--opt 1`, and no masking is emitted either way.
+;; `a << n`, or `Err` with `errShiftTooWide` when `n` is negative or 64
+;; or more, where the `<<` operator traps (exit 84, MM-VAL-3b).
 (pub :: shlChecked (-> Int Int (Result Int Error)))
 (pub fn (shlChecked a n)
   (if (|| (< n 0) (>= n 64))

@@ -1,12 +1,11 @@
-;;! Mem - raw memory operations, in Axiom.
+;;! Mem - raw memory: allocation, byte and word access, copying, and
+;;! the typed `Addr` for comparing values by identity.
 ;
-; These are the functions that used to require FFI bindings to
-; `malloc`/`memcpy`/`memset`. They are now ordinary Axiom loops over the
-; `__alloc`/`__load8`/`__store8` primitives, which means they are
-; type-checked, span-checked, and steppable like any other Axiom code,
-; and a compiled program needs no libc.
+; These are ordinary Axiom loops over the `__alloc`/`__load8`/`__store8`
+; primitives, so they are type-checked and steppable like any other
+; Axiom code, and a compiled program needs no libc.
 ;
-; Addresses are plain `Int`s. That is deliberately unsafe at this layer -
+; Addresses are plain `Int`s. That is unsafe at this layer -
 ; it is the layer where Axiom's type system stops and the machine
 ; begins - and every safe abstraction above it (`Str`, `Buf`) is
 ; responsible for never handing out an address a caller could misuse.
@@ -53,10 +52,10 @@
 (pub fn (memAlloc bytes)
   (__alloc bytes))
 
-;; The same allocation, declaring which of the block's words hold
-;; REFERENCES: bit i of `map` says payload word i is a handle to
-;; another counted block, so releasing this block releases that one
-;; too (docs/memory-model.md MM-LIFE-2d, the record form).
+;; Allocate `bytes` bytes as `memAlloc` does, declaring which words hold
+;; references: bit i of `map` says payload word i is a handle to another
+;; counted block, so releasing this block releases that one too
+;; (docs/memory-model.md MM-LIFE-2d, the record form).
 ;
 ; `memAlloc` cannot answer this and never will - it sees a byte count
 ; and nothing else, so it stamps every block a LEAF, which is the
@@ -104,11 +103,10 @@
               h
             }))))))
 
-;; The ARRAY FORM: payload words 0..n-1 of this block are handles to
-;; other counted blocks, so releasing it releases all of them, and `n`
-;; is the caller's ELEMENT count (docs/memory-model.md MM-LIFE-2d names
-;; the two forms; the array form landed 2026-08-24 and took its own
-;; length 2026-09-03).
+;; Mark the block at `h` as an array of `n` handles: payload words
+;; 0..n-1 are handles to other counted blocks, so releasing it releases
+;; all of them (docs/memory-model.md MM-LIFE-2d, the array form).
+;; Answers `h`.
 ;
 ; It is one bit - bit 15 of the shape word - and no second header word.
 ; The LENGTH goes in bits 16..62, which the record form uses for its
@@ -173,12 +171,13 @@
     h
   })
 
-;; The inverse, and it is not symmetry for its own sake: it is what a
-;; container's GROWTH needs. Doubling a buffer copies the elements to a
-;; new block WITHOUT retaining them - the shares move - so releasing the
-;; old block while it still reads as an array would spend every share
-;; twice. Clearing the bit first makes the old block a leaf, and its
-;; release then reclaims the block and touches nothing it used to hold.
+;; Mark the block at `h` as a leaf, holding no handles, so releasing it
+;; releases nothing it used to point at. Answers `h`.
+;;
+;; A container that grows needs this. Doubling a buffer moves the
+;; elements' shares to a new block without retaining them, so the old
+;; block must stop reading as an array before it is released, or every
+;; share would be spent twice.
 ;
 ; IT CLEARS THE LENGTH TOO, and that half is load-bearing rather than
 ; tidy. Bits 16..62 are the record form's REFERENCE BITMAP, so a block
@@ -207,7 +206,7 @@
     h
   })
 
-;; THERE IS NO `memIsArray`, AND THE REASON IS A MEASURED CRASH.
+; THERE IS NO `memIsArray`, AND THE REASON IS A MEASURED CRASH.
 ;
 ; The obvious companion to the two above is a reader - "does this block
 ; carry the array form" - and the first version of this work had one.
@@ -241,12 +240,11 @@
 ; the shape bit stays what it is for: the RUNTIME's instruction for
 ; walking a dead block, written by the same compiler that emits the
 ; walk that reads it.
-; Copy `count` bytes from `src` to `dst`. Returns `dst`.
-;
-; Copies forwards, so overlapping ranges are only safe when
-; `dst <= src`; `memMove` is not provided yet rather than being
-; provided wrongly.
-; `dst` and `src` must each name `count` live bytes.
+
+;; Copy `count` bytes from `src` to `dst`. Returns `dst`.
+;;
+;; It copies forwards, so overlapping ranges are safe only when
+;; `dst <= src`. `dst` and `src` must each name `count` live bytes.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: memCopy (-> Int Int Int Int))
 (pub fn (memCopy dst src count)
@@ -331,54 +329,58 @@
 ; built on them - the `Str` header, `Buf`, and every `data` value the
 ; compiler boxes - are arrays of machine words.
 ; ------------------------------------------------------------------
-;; The word at `index`. A word is what it is: an integer, or a handle,
-;; or a reference whose type this layer does not know. It answers `Int`
-;; because that is the truth about a machine word - it used to answer a
-;; type variable, which let the CALLER name any type at all and get it,
-;; including a reference, which then dereferenced. See `AX3040`.
-;; `addr` must name a live block of at least `index` + 1 words.
+;; The 8-byte word at word offset `index` from `addr`. `addr` must name
+;; a live block of at least `index` + 1 words.
+;
+; A word is an integer, a handle, or a reference whose type this layer
+; does not know, so it answers `Int`. Answering a type variable would
+; let the caller name any type and get it, a reference included
+; (`AX3040`).
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: memGetWord (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (memGetWord addr index)
   (__load64 addr index))
 
-;; The String view, for the typed accessors built on this layer -
-;; `tokenLexeme`, `diagCode`, and the several dozen others whose own
-;; signature says `String` and whose body is one word read.
+;; The word at `index` read as a `String`. `addr` must name a live block
+;; of at least `index` + 1 words, and that word must hold a live
+;; `String`.
 ;
 ; The cast is HERE, at a return inside a signature that carries the
 ; type, and deliberately not at those call sites: a cast at an argument
 ; root classifies the value's evidence 0 and drops its retain or its
 ; release (docs/memory-model.md MM-LIFE-2e, measured).
-; `addr` must name a live block of at least `index` + 1 words, and that
-; word must hold a live `String`.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: memGetWordStr (-> Int Int String))
 ;@axiom:effect(unsafe)
 (pub fn (memGetWordStr addr index)
   (cast String (memGetWord addr index)))
 
-;; The `Vec` view of the word at `index`. A `Vec` is a handle - one
-;; word, exactly what `memGetWord` answers - so this reinterprets and
-;; converts nothing. The cast is HERE, at a return inside a signature
-;; that carries the type, for the reason `memGetWordStr` gives: a cast
-;; at an argument root classifies that value's evidence 0 and drops its
-;; retain or its release (docs/memory-model.md MM-VAL-22, measured).
-;; `addr` must name a live block of at least `index` + 1 words, and that
-;; word must hold a live `Vec` of the element type the caller names.
+;; The word at `index` read as a `Vec`. `addr` must name a live block of
+;; at least `index` + 1 words, and that word must hold a live `Vec` of
+;; the element type the caller names.
+;
+; A `Vec` is a handle, one word, so this reinterprets and converts
+; nothing. The cast is here, at a return inside a signature that
+; carries the type, for the reason `memGetWordStr` gives: a cast at an
+; argument root classifies that value's evidence 0 and drops its retain
+; or its release (docs/memory-model.md MM-VAL-22).
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: memGetWordVec (-> Int Int (Vec a)))
 ;@axiom:effect(unsafe)
 (pub fn (memGetWordVec addr index)
   (cast (Vec a) (memGetWord addr index)))
 
-;; Storing a word here is the moment a value can leave the type
-;; system's sight: `(cast Int value)` erases whatever `value` was, and
-;; the machine word that lands in `addr` is indistinguishable from an
-;; integer forever after. That is the whole of MM-LIFE-2c's
-;; co-ownership blocker, and the fix is one line - the store takes a
-;; SHARE of what it is about to hide.
+;; Store `value` as the 8-byte word at word offset `index` from `addr`,
+;; taking a share of it when it is a reference. Answers `addr`. `addr`
+;; must name a live block of at least `index` + 1 words, and the word
+;; must be read back only at a type `value` has.
+;
+; Storing a word here is the moment a value can leave the type
+; system's sight: `(cast Int value)` erases whatever `value` was, and
+; the machine word that lands in `addr` is indistinguishable from an
+; integer forever after. That is MM-LIFE-2c's co-ownership blocker,
+; and the store answers it by taking a share of what it hides.
 ;
 ; `__retainref` is type-directed, so this is free where it should be:
 ; the overwhelming majority of word stores put an integer somewhere,
@@ -403,8 +405,6 @@
 ; walk never counted, so the owner's release frees a block this word
 ; still names. Store references through here (or `Ffi.ax`'s handle
 ; close path), never with a bare `__store64`.
-; `addr` must name a live block of at least `index` + 1 words, and the
-; word must be read back only at a type `value` has.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: memSetWord (-> Int Int a Int))
 ;@axiom:effect(unsafe)
@@ -418,14 +418,17 @@
     addr
   })
 
-;; `addr` must name at least `index` + 1 live bytes.
+;; The byte at offset `index` from `addr`, 0 to 255. `addr` must name
+;; at least `index` + 1 live bytes.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: memGetByte (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (memGetByte addr index)
   (__load8 addr index))
 
-;; `addr` must name at least `index` + 1 live writable bytes.
+;; Store the low 8 bits of `value` at offset `index` from `addr`.
+;; Answers `addr`, which must name at least `index` + 1 live writable
+;; bytes.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: memPutByte (-> Int Int Int Int))
 ;@axiom:effect(unsafe)
@@ -446,8 +449,9 @@
   (mappedBytes : Int)
   (backlogBytes : Int))
 
-;; Read the counters before allocating the result, so this snapshot
-;; excludes its own record. All fields describe the calling arena only.
+;; The allocator's counts for the calling binding's arena. The counters
+;; are read before the record is allocated, so the snapshot leaves its
+;; own record out.
 ;@axiom:restrict(no-io,no-unsafe,no-foreign)
 (pub :: memStats MemoryStats)
 (pub fn (memStats)

@@ -3016,17 +3016,18 @@
         1
         (exportedFromModule allDecls modName n (+ i 1))))))
 
-(pub :: checkMissingDefs (-> (Vec (Vec String)) (Vec Int) (Vec Int) Int (Vec Int)))
-(pub fn (checkMissingDefs bs entryDecls out i)
+(pub :: checkMissingDefs (-> (Vec (Vec String)) (Vec Int) (Vec Int) Int (Vec Int) (Vec Int)))
+(pub fn (checkMissingDefs bs entryDecls out i missing)
   (if (>= i (vecLen entryDecls))
     out
     (let ((d (vecGet entryDecls i)))
       (if (!= (nodeTag d) TAG_D_SIG)
-        (checkMissingDefs bs entryDecls out (+ i 1))
+        (checkMissingDefs bs entryDecls out (+ i 1) missing)
         (let ((name (nodeAName d)))
           (if (== (isDefined bs name) 1)
-            (checkMissingDefs bs entryDecls out (+ i 1))
+            (checkMissingDefs bs entryDecls out (+ i 1) missing)
             {
+              (vecPushStr missing name)
               (vecPush out (diagSetLabel (mkDiag
                 SEV_ERROR
                 "AX3015"
@@ -3036,7 +3037,7 @@
                 0
                 0
                 "add the definition, or if it lives in another module, mark that definition `pub` so the import carries it") (concat (concat "no `fn` defines `" name) "`")))
-              (checkMissingDefs bs entryDecls out (+ i 1))
+              (checkMissingDefs bs entryDecls out (+ i 1) missing)
             }))))))
 
 ; ------------------------------------------------------------------
@@ -3304,6 +3305,14 @@
 ;                    bodies never overlap, and one context per walk was
 ;                    a kilobyte per function the compiler never gave
 ;                    back.
+;  12 `discard`     1 while the expression being checked has its value
+;                    dropped (`tcDiscard`): a block's earlier statements,
+;                    a loop's body, and what they reach.
+;  13 `unknownCallees` the names a call may reach that have no body:
+;                    an undefined name (AX3001) and a signature with no
+;                    definition (AX3015). The effect walk reads a call to
+;                    one as unresolved (`tcIsUnknownCallee`), so what it
+;                    performs is unknown rather than nothing.
 (struct UState
   (unsafeSink : Int)
   (forgeSites : Int)
@@ -3317,7 +3326,8 @@
   (fieldVals : (Vec FieldStore))
   (mayCalls : Int)
   (walkCtx : (Vec BCtx))
-  (mut discard : Int))
+  (mut discard : Int)
+  (unknownCallees : (Vec Int)))
 
 ; One evidence witness kept for `evSettle`: a call is checked in program
 ; order, and the pin that decides its witness may come later in the
@@ -4310,7 +4320,7 @@
           vecNew
           vecNew
           (countWordStructs allDecls 0 0)
-          (UState 0 0 vecNew vecNew 0 0 vecNew 0 vecNew vecNew 0 (bsCtxOf vecNew vecNew 0 vecNew) 0)
+          (UState 0 0 vecNew vecNew 0 0 vecNew 0 vecNew vecNew 0 (bsCtxOf vecNew vecNew 0 vecNew) 0 vecNew)
           vecNew
           vecNew))))
         {
@@ -9792,6 +9802,27 @@
 (pub fn (tcDiscard tc)
   (memGetWord (memGetWord tc 44) 12))
 
+; The unknown callees (`UState` word 13).
+(pub :: tcUnknownCallees (-> Int (Vec Int)))
+(pub fn (tcUnknownCallees tc)
+  (memGetWordVec (memGetWord tc 44) 13))
+
+(pub :: tcNoteUnknownCallee (-> Int String Int))
+(pub fn (tcNoteUnknownCallee tc name)
+  {
+    (vecPushStr (tcUnknownCallees tc) name)
+    0
+  })
+
+; Poison (ERR-DIAG-3): a call to a name with no body. Its row is not
+; empty, it is unknown, and a claim checked against it has no answer.
+(pub :: tcIsUnknownCallee (-> Int String Bool))
+(pub fn (tcIsUnknownCallee tc name)
+  (let ((v (tcUnknownCallees tc)))
+    (if (== (vecLen v) 0)
+      false
+      (== (strVecHas v name) 1))))
+
 (pub :: tcSetDiscard (-> Int Int Int))
 (pub fn (tcSetDiscard tc v)
   {
@@ -10884,6 +10915,7 @@
 (pub fn (emitUndefinedVarPlain tc name span)
   (let ((best newBest))
     {
+      (tcNoteUnknownCallee tc name)
       (offerScope best name (tcScopeVec tc) 0)
       (offerFnEnts best name (tcFnsVec tc) 0)
       (offerCtorEnts best name (tcDatasVec tc) 0)
@@ -12346,6 +12378,13 @@
 (pub fn (pinShape rest param argTy)
   (if (|| (== param 0) (== argTy 0))
     rest
+    (if (== (tyIsErr argTy) 1)
+      ; Poison (ERR-DIAG-3): an argument whose diagnostic is already
+      ; out makes every placeholder of its parameter poison in the
+      ; rest of THIS call's arrow, so `(vecGet broken 0)` answers poison
+      ; and a `println` of it stays quiet. `rest` is this call's own
+      ; instantiation: nothing shared is bound, so rule 2 above holds.
+      (poisonPlaceholders rest param)
     (let ((pt (nodeTag param)))
       (if (== pt TAG_T_VAR)
         (pinArg rest param argTy)
@@ -12361,7 +12400,34 @@
               (if (&& (== (nodeTag argTy) TAG_T_TUP) (== (vecLen (nodeAVec param)) (vecLen (nodeAVec argTy))))
                 (pinShapeVec rest (nodeAVec param) (nodeAVec argTy) 0)
                 rest)
-              rest)))))))
+              rest))))))))
+
+; `rest` with every minted placeholder written in `param` replaced by
+; poison. A source variable is rigid and stays.
+(pub :: poisonPlaceholders (-> Int Int Int))
+(pub fn (poisonPlaceholders rest param)
+  (if (|| (== param 0) (== rest 0))
+    rest
+    (let ((pt (nodeTag param)))
+      (if (== pt TAG_T_VAR)
+        (if (|| (== (tyIsSrcVar param) 1) (== (strLen (nodeAName param)) 0))
+          rest
+          (tyPinVar rest (nodeAName param) (mkNode TAG_T_ERR 0 0 0)))
+        (if (== pt TAG_T_ARR)
+          (poisonPlaceholders (poisonPlaceholders rest (nodeA param)) (nodeB param))
+          (if (== pt TAG_T_CON)
+            (poisonPlaceholdersVec rest (nodeBVec param) 0)
+            (if (== pt TAG_T_TUP)
+              (poisonPlaceholdersVec rest (nodeAVec param) 0)
+              (if (== pt TAG_T_PTR)
+                (poisonPlaceholders rest (nodeA param))
+                rest))))))))
+
+(pub :: poisonPlaceholdersVec (-> Int (Vec Int) Int Int))
+(pub fn (poisonPlaceholdersVec rest ps i)
+  (if (|| (== (vecLen ps) 0) (>= i (vecLen ps)))
+    rest
+    (poisonPlaceholdersVec (poisonPlaceholders rest (vecGet ps i)) ps (+ i 1))))
 
 (pub :: pinShapeVec (-> Int (Vec Int) (Vec Int) Int Int))
 (pub fn (pinShapeVec rest ps as i)
@@ -16746,8 +16812,8 @@
           ; `findFnEnt` answers 0 for every form parsed as an
           ; application without being a function - `cast` first of all,
           ; and with it every struct and data constructor. A name that
-          ; really resolves to nothing is `AX3001` and the program does
-          ; not get this far. NONE of those CALL their arguments, so
+          ; really resolves to nothing is `AX3001`, answered at the end
+          ; of this branch. NONE of the others CALL their arguments, so
           ; this branch used to be doubly wrong:
           ;
           ;   - it marked them incomplete, which put the sentinel on
@@ -16801,9 +16867,16 @@
           ; says so. The mirror on the emitter's side is `pairFnOK`,
           ; and `scripts/check-unboxed-sums.sh` holds the two to the
           ; same answer over the compiler's own source.
-          (if (&& (== unboxed 0) (> (ctorAllocArity tc n) 0))
-            (effAdd acc (builtinEff "Alloc"))
-            0)
+          {
+            (if (&& (== unboxed 0) (> (ctorAllocArity tc n) 0))
+              (effAdd acc (builtinEff "Alloc")))
+            ; ...except that a name AX3001 refused does reach here:
+            ; the effect walk runs after a body's type errors, not
+            ; instead of them. Its call is unresolved (ERR-DIAG-3).
+            (if (tcIsUnknownCallee tc n)
+              (effAdd acc effPoison))
+            0
+          }
           (walkCallEnt tc n ent args bound acc unboxed))))))
 
 ; One call to a function the walk resolved, `ent` under the name `n`:
@@ -16815,6 +16888,10 @@
 (pub fn (walkCallEnt tc n ent args bound acc unboxed)
   {
     (tcNoteCall tc (memGetWordStr ent 0))
+    ; A signature with no definition (AX3015) has no body to give it a
+    ; row, so the call is unresolved, not effect-free (ERR-DIAG-3).
+    (if (tcIsUnknownCallee tc n)
+      (effAdd acc effPoison))
     ; A PAIR FUNCTION'S ANSWER IS BOXED BY ITS CALLER, at every
     ; call that is not a recorded site: the callee's row no
     ; longer carries the block its tail leaves used to build,
@@ -17173,6 +17250,14 @@
 (pub fn (effIncomplete)
   "?:incomplete")
 
+; The marker for a call to a name with no body: an undefined name
+; (AX3001) or a signature with no definition (AX3015). Like
+; `effIncomplete` it makes the row a lower bound, and unlike it, the
+; diagnostic that explains the gap is already out (ERR-DIAG-3).
+(pub :: effPoison String)
+(pub fn (effPoison)
+  "?:poison")
+
 ; Did the walk meet a call it could not resolve? Then this set is a
 ; LOWER BOUND on what the body performs, and every claim checked
 ; against it has to answer for the difference rather than read an
@@ -17208,7 +17293,9 @@
 ;   effDefinite v X      `b:X`/`c:X` present - the body performs X
 ;   effPossible v X      `~b:X`/`~c:X` present - it may
 ;   effMay v X           either - the upper bound AX3011 needs
-;   effPartial v         unchanged: `?:incomplete`, a LOWER bound
+;   effPartial v         `?:incomplete` or `?:poison`, a LOWER bound
+;   effUnresolved v      `?:incomplete` alone: a lower bound no
+;                        diagnostic has explained yet
 ;
 ; `X` is always the DEFINITE spelling (`builtinEff`/`customEff`); the
 ; possible spelling is derived here and never written by a caller.
@@ -17353,12 +17440,25 @@
 ; an EFFECT to every renderer and is not skipped.
 (pub :: effIsMarker (-> String Int))
 (pub fn (effIsMarker e)
-  (if (strEq e effIncomplete)
+  (if (|| (strEq e effIncomplete) (strEq e effPoison))
     1
     0))
 
+; Is this row a lower bound? A call the walk could not resolve, or one
+; to a name with no body (`effPoison`), may perform anything, so a claim
+; read against the row has no answer for what is absent.
 (pub :: effPartial (-> (Vec a) Int))
 (pub fn (effPartial v)
+  (if (== (effIn v effIncomplete) 1)
+    1
+    (effIn v effPoison)))
+
+; Is it a lower bound for a reason no diagnostic has named yet? Only
+; then does "this cannot be checked" tell the reader something: a row
+; that is partial through poison alone sits beside the error that made
+; it so (ERR-DIAG-3).
+(pub :: effUnresolved (-> (Vec a) Int))
+(pub fn (effUnresolved v)
   (effIn v effIncomplete))
 
 ; The concrete effects, sorted by display name, joined with ", ".
@@ -19031,7 +19131,7 @@
 ; an error, "this cannot be checked" informs.
 (pub :: checkHandleIncomplete (-> Int (Vec a) Int Int))
 (pub fn (checkHandleIncomplete tc inner span)
-  (if (&& (== (effPartial inner) 1) (!= span 0))
+  (if (&& (== (effUnresolved inner) 1) (!= span 0))
     (emitDiag tc (mkDiag
       SEV_WARNING
       "AX3038"
@@ -19538,7 +19638,7 @@
         ; type below; name the shape instead (same expectation).
         (if (== (isPendingNode baseTy) 1)
           (refusePendingOperand tc baseTy "struct or data type" (spanOf (nodeA e)))
-          (if (== (tyIsSilentWild baseTy) 0)
+          (if (&& (== (tyIsSilentWild baseTy) 0) (== (tyIsErr baseTy) 0))
             (emitMismatch tc "struct or data type" (tyRender baseTy) (spanOf (nodeA e)))))
         ; Poison, like every other refused read above: the access
         ; has been reported, and a type made up here would be
@@ -19806,7 +19906,7 @@
         ; type below; name the shape instead (same expectation).
         (if (== (isPendingNode baseTy) 1)
           (refusePendingOperand tc baseTy "struct or data type" (spanOf (nodeA e)))
-          (if (== (tyIsSilentWild baseTy) 0)
+          (if (&& (== (tyIsSilentWild baseTy) 0) (== (tyIsErr baseTy) 0))
             (emitMismatch tc "struct or data type" (tyRender baseTy) (spanOf (nodeA e))))))
       mkI64Ty
     }))
@@ -20252,7 +20352,12 @@
                   (if (== dent 0)
                     0
                     {
-                      (checkExhaustiveMatrix tc (nodeBVec e) exhTy (nodeA e))
+                      ; Poison (ERR-DIAG-3): an arm naming a constructor
+                      ; that does not exist has drawn AX3003, and what
+                      ; it was meant to cover is unknown, so "missing
+                      ; Sq" beside it would be a guess about a typo.
+                      (if (! (armsNameUnknownCtor tc (nodeBVec e) 0))
+                        (checkExhaustiveMatrix tc (nodeBVec e) exhTy (nodeA e)))
                       1
                     }))
                 0)))
@@ -20530,6 +20635,39 @@
 ; which asks whether any arm is a constructor at all. Whether the
 ; constructor arms TOGETHER cover the type is `checkExhaustiveMatrix`'s
 ; question, and it has to look at sub-patterns to answer it.
+; Whether any arm's pattern, at any depth, names a constructor no
+; declaration introduces: the arm `checkCtorPattern` refused.
+(pub :: armsNameUnknownCtor (-> Int (Vec Int) Int Bool))
+(pub fn (armsNameUnknownCtor tc arms i)
+  (if (>= i (vecLen arms))
+    false
+    (let ((arm (vecGet arms i)))
+      (if (&& (!= (nodeTag arm) TAG_M_FOR) (patNamesUnknownCtor tc (nodeA arm)))
+        true
+        (armsNameUnknownCtor tc arms (+ i 1))))))
+
+(pub :: patNamesUnknownCtor (-> Int Int Bool))
+(pub fn (patNamesUnknownCtor tc pat)
+  (if (== pat 0)
+    false
+    (let ((tag (nodeTag pat)))
+      (if (|| (== tag TAG_P_CON0) (== tag TAG_P_CONNAMED))
+        (== (findCtor tc (nodeAName pat)) 0)
+        (if (== tag TAG_E_APP)
+          (let ((head (spineHead pat)))
+            (if (&& (== (nodeTag head) TAG_E_VAR) (== (findCtor tc (nodeAName head)) 0))
+              true
+              (patArgsNameUnknownCtor tc (spineArgVec pat vecNew) 0)))
+          false)))))
+
+(pub :: patArgsNameUnknownCtor (-> Int (Vec Int) Int Bool))
+(pub fn (patArgsNameUnknownCtor tc args i)
+  (if (>= i (vecLen args))
+    false
+    (if (patNamesUnknownCtor tc (vecGet args i))
+      true
+      (patArgsNameUnknownCtor tc args (+ i 1)))))
+
 (pub :: recordCoverage (-> Int (Vec Int) Int Int))
 (pub fn (recordCoverage pat covered catchall)
   ; A NAMED constructor arm covers its constructor exactly as a
@@ -21681,7 +21819,7 @@
     (if (== ctor 0)
       {
         (emitUndefinedCtor tc cname span)
-        (bindPatternArgsFresh tc args 0)
+        (bindPatternArgsPoison tc args 0)
         0
       }
       ; Instantiated for the same reason a reference to the
@@ -21741,13 +21879,16 @@
         (bindPatternArgs tc args fieldTys (+ i 1))
       })))
 
-(pub :: bindPatternArgsFresh (-> Int (Vec Int) Int Int))
-(pub fn (bindPatternArgsFresh tc args i)
+; The arguments of a constructor pattern that names no constructor,
+; bound as poison (ERR-DIAG-3): AX3003 is out, the fields' types are
+; unknown, and the arm's body checks without comparing them again.
+(pub :: bindPatternArgsPoison (-> Int (Vec Int) Int Int))
+(pub fn (bindPatternArgsPoison tc args i)
   (if (>= i (vecLen args))
     0
     {
-      (bindOnePatArg tc (vecGet args i) (freshTVar tc 1))
-      (bindPatternArgsFresh tc args (+ i 1))
+      (bindOnePatArg tc (vecGet args i) (mkNode TAG_T_ERR 0 0 0))
+      (bindPatternArgsPoison tc args (+ i 1))
     }))
 
 ; Record on the binder what type it stands for, so codegen can ask a
@@ -23165,7 +23306,7 @@
         r
         (concat (concat "`" e) "` reaches the effect row only as a possible effect - the body names a function without calling it, or calls a field whose stored functions do not all perform it - so its presence is not evidence the body performs it")
         (cast (Vec Int) 0))
-      (if (== (effPartial eff) 1)
+      (if (== (effUnresolved eff) 1)
         (emitRestrictUnverifiable
           tc
           d
@@ -23210,7 +23351,7 @@
             r
             (concat (concat (concat "the body reaches the `extern` item `" (bareOf (memGetWordStr hit 0))) "`: ") (graphRender path))
             path)))
-      (if (== (effPartial eff) 1)
+      (if (== (effUnresolved eff) 1)
         (emitRestrictUnverifiable
           tc
           d
@@ -23252,7 +23393,7 @@
             r
             (concat (concat (concat "the call graph closes a cycle at `" (bareOf (memGetWordStr again 0))) "`: ") (graphRender path))
             path)))
-      (if (== (effPartial eff) 1)
+      (if (== (effUnresolved eff) 1)
         (emitRestrictUnverifiable
           tc
           d
@@ -23834,7 +23975,7 @@
                 r
                 (concat (concat (concat "the closure reaches a cast in the body of `" (bareOf (memGetWordStr hit 0))) "`: ") (graphRender path))
                 path)))
-          (if (&& (== (vecLen local) 0) (== (effPartial eff) 1))
+          (if (&& (== (vecLen local) 0) (== (effUnresolved eff) 1))
             (emitRestrictUnverifiable
               tc
               d
@@ -26800,7 +26941,7 @@
     ; different things: a call the walk could not resolve, or effects
     ; that are only POSSIBLE - a function the body names without
     ; calling, or a field whose stored functions disagree.
-    (if (== (effPartial eff) 1)
+    (if (== (effUnresolved eff) 1)
       (emitAxtagUnverifiable tc d label)
       (if (== (effAnyPossibleOnly eff) 1)
         (emitAxtagPossible tc d label eff)
@@ -29450,7 +29591,7 @@
         ; An import leaves the list before `allDecls` is built, so its
         ; tags are asked here, over the entry file's own.
         (checkStrayImportAxtags tc entryDecls 0)
-        (checkMissingDefs (defIdxBuild allDecls) entryDecls out 0)
+        (checkMissingDefs (defIdxBuild allDecls) entryDecls out 0 (tcUnknownCallees tc))
         (tcWalkDecls tc 0)
         ; A witness noted outside any function body.
         (evSettle tc)

@@ -22,6 +22,15 @@ its changelog too.
   two derivers, `deriveEq` and `deriveArity`. **BREAKING**:
   `compat/BREAKING` names both. Tested by `tests/stdlib/100-pre.ax`.
 
+- One mistake draws one diagnostic in more places (`ERR-DIAG-3`). A
+  call with a poisoned argument answers poison, so printing
+  `(vecGet broken 0)` stays quiet. A field read on a poisoned value
+  isn't reported again. A misspelt constructor in a pattern no longer
+  also makes the `match` non-exhaustive. A call to an undefined name,
+  or to a signature with no definition, no longer makes the caller's
+  effect claims look unsupported. The fixture with one mistake in each
+  of five functions drew thirteen errors and now draws five.
+
 - A macro whose template is `()` expands to the unit value, not to the
   integer 0: rebuilding a template's literal kept its value and lost
   the mark that makes it `()`, so `(macro (m x) ())` gave `main` a

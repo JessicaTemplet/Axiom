@@ -1,0 +1,54 @@
+; One mistake, one diagnostic (ERR-DIAG-3). Each function below holds
+; one mistake, and every check downstream of it is poisoned rather than
+; repeated: this file draws exactly five errors, one per function.
+(import IO)
+(import Vec)
+
+(data Shape (Circle Int) (Square Int))
+
+(struct Point (x : Int) (y : Int))
+
+; An undefined name read through a call: `(vecGet v 0)` answers poison,
+; so printing it draws nothing more.
+(:: printsBroken Int)
+;@axiom:effect(io)
+(fn (printsBroken)
+  (let ((v vecNw))
+    {
+      (println (vecGet v 0))
+      (println (vecLen v))
+      0
+    }))
+
+; A field read on a value whose diagnostic is already out.
+(:: readsBroken Int)
+(fn (readsBroken)
+  (let ((p (mkPoint 1 2)))
+    (+ p.x p.y)))
+
+; A constructor misspelled in a pattern: what the arm meant to cover is
+; unknown, so the match is not also called non-exhaustive.
+(:: area (-> Shape Int))
+(fn (area s)
+  (match s
+    ((Circle r) (* r r))
+    ((Sqare w) (* w w))))
+
+; A misspelled callee: the body's effects are unknown, not empty, so the
+; `effect(io)` claim is not called unsupported.
+(:: shout Int)
+;@axiom:effect(io)
+(fn (shout)
+  (printLine "hey"))
+
+; A signature with no definition, called from a function that claims
+; IO: the call is unresolved, and the claim stands unanswered.
+(:: emit (-> Int Int))
+
+(:: callsEmit Int)
+;@axiom:effect(io)
+(fn (callsEmit)
+  (emit 1))
+
+(:: main Int)
+(fn (main) 0)
