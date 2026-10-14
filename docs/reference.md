@@ -1511,10 +1511,11 @@ the lock too, and poisons the mutex, so later lock calls answer
 `taskMap worker count width limit` runs `(-> Int String)` tasks with at
 most `width` children and a per-result byte limit. Results are
 `(Result String Error)` values in submit order. `TaskOpts` adds deadlines,
-cancellation and fail-fast behaviour, and two budgets: `taskWithKeep`
-bounds the answer bytes a call holds, and `taskWithMemory` caps each
-task's memory, so a task that runs away answers `Err` 70 instead of
-taking the machine with it. `taskFold` consumes answers with a scalar
+cancellation and fail-fast behaviour, and three budgets. `taskWithKeep`
+bounds the answer bytes a call holds. `taskWithMemory` caps each task's
+memory, so a task that runs away answers `Err` 70 instead of taking the
+machine with it. `taskWithStack` sets the stack each task runs on, so a
+task that recurses too deep answers `Err` 86. `taskFold` consumes answers with a scalar
 accumulator; the callback must not retain region-owned values.
 
 `Par` offers word and external-command pools. The

@@ -606,6 +606,10 @@
       ; slot 22: the module names `__axiom_arena_cap`, so the allocator
       ; checks the cap before it maps a chunk (`arenaCapOn`, `parScan`).
       (vecPush ps 0)
+      ; slot 23: the module names `__axiom_stack_run`, so the runtime
+      ; that maps a guarded stack and reports its overflow is emitted
+      ; (`stackRunOn`, `parScan`).
+      (vecPush ps 0)
       (addTypeNamed
         ts
         "Some"
@@ -3312,11 +3316,11 @@
                                 0
                               }))
                           0)
-                        ; `__axiom_recover` CALLS the closure it is
-                        ; handed, which is the same claim `__call_word`
-                        ; makes about an address, so it takes the same
-                        ; conservative answer.
-                        (if (|| (strEq n "__call_word") (strEq n "__axiom_recover"))
+                        ; `__axiom_recover` and `__axiom_stack_run` CALL
+                        ; the closure they are handed, which is the same
+                        ; claim `__call_word` makes about an address, so
+                        ; they take the same conservative answer.
+                        (if (|| (strEq n "__call_word") (|| (strEq n "__axiom_recover") (strEq n "__axiom_stack_run")))
                           ; a function reached by address may park
                           ; what it is handed
                           (stashAdd cell (parkForms (flowMaskAll
@@ -6104,6 +6108,7 @@
         0))
     (pairSetSlot cg 19 (resRegistryWanted decls))
     (pairSetSlot cg 22 (declsNamePrim decls "__axiom_arena_cap" 0))
+    (pairSetSlot cg 23 (declsNamePrim decls "__axiom_stack_run" 0))
     cg
   })
 
@@ -14587,6 +14592,7 @@
     (emitArenaKeepHelper cg)
     (emitMemStatFn cg)
     (emitArenaCapRuntime cg)
+    (emitStackRunRuntime cg)
     cg
   })
 
@@ -14657,6 +14663,340 @@
           cg
         }))
     cg))
+
+; ------------------------------------------------------------------
+; A STACK OF ITS OWN (docs/memory-model.md MM-PAR-17, MM-EXEC-16's 86).
+; `(__axiom_stack_run bytes thunk arg)` runs `(thunk arg)` on a stack
+; the call maps, and answers what the thunk answered. The stack is
+; `bytes` rounded up to 64 KiB - at least 64 KiB, at most 2^46 - with a
+; 64 KiB guard below it that no access may touch, so its size is the
+; caller's choice and not the calling thread's: the main thread's stack
+; is what `RLIMIT_STACK` said at exec, and a thread's is a fixed
+; allocation (512 KiB by default on Darwin). Lowering `RLIMIT_STACK`
+; after a fork is not an equivalent: measured on darwin-aarch64, a child
+; forked from a thread is refused the `setrlimit` and dies of SIGBUS at
+; its thread's 512 KiB, and on Linux the limit binds only a main
+; thread's stack, which grows. `stdlib/Task.ax` runs every task on one.
+;
+; AN ACCESS IN THE GUARD IS A STACK OVERFLOW, and it traps 86 with a
+; sentence of its own. The first call on a thread maps a 64 KiB
+; alternate signal stack, installs it with `sigaltstack`, and points
+; SIGSEGV and SIGBUS at `@__axiom_stack_fault` with SA_ONSTACK, so the
+; handler runs there and not on the stack that overflowed. It compares
+; the fault address with the guard the innermost call armed. Inside
+; it, the handler writes the sentence and exits 86. Outside it, the
+; fault is not this mechanism's: SA_RESETHAND has already put the
+; default action back and SA_NODEFER left the signal unblocked, so the
+; handler sends the signal to its own process, which dies of it with
+; the status it always would have. The handler never returns. On
+; Darwin, where the kernel enters a handler through the trampoline the
+; action names, as `tramp(catcher, style, signo, info, uap)`, it IS the
+; trampoline; on linux-x86_64, whose kernel refuses an action without a
+; restorer, it is its own restorer, never reached.
+;
+; NOT RECOVERABLE. The trap is taken inside a signal handler on the
+; alternate stack, and a recovery point armed before the switch was
+; armed on another stack, so the thunk runs with none armed: a trap
+; inside it ends the process with its status. A task's child already
+; runs with none (`emitParProc`), and a point the thunk arms itself
+; works as it always does.
+;
+; A mapping the kernel refuses, the stack's or the alternate stack's,
+; traps 70 before the thunk runs. A `sigaltstack` or `sigaction` it
+; refuses leaves the guard in place and the report out: an overflow
+; then dies of the signal, 128 plus its number, instead of 86.
+;
+; ONLY A MODULE THAT NAMES THE PRIMITIVE PAYS FOR IT (slot 23). The
+; three words are mutable runtime globals (`cgMutGlobal`), so under
+; `--threads` each thread has its own guard and alternate stack, as
+; `sigaltstack` is itself per thread. On a target with no syscall ABI,
+; Windows or bare metal, the call runs the thunk on the stack it is on:
+; neither has a `fork` for a task to need it, and bare metal's one
+; stack has a guard of its own (`emitCpuExceptionFn`).
+(pub :: stackRunOn (-> Int Bool))
+(pub fn (stackRunOn cg)
+  (== (pairSlot cg 23) 1))
+
+; `mprotect`, `sigaltstack` and `sigaction` (`rt_sigaction` on Linux):
+; darwin BSD 74, 53 and 46 with the class bit; linux-aarch64 226, 132
+; and 134; linux-x86_64 10, 131 and 13; FreeBSD 74, 53 and 416. Read
+; only where `targetHasSpawn` answers 1.
+(pub :: targetMprotectNum (-> Int Int))
+(pub fn (targetMprotectNum t)
+  (if (|| (== t 0) (== t 1))
+    33554506
+    (if (== t 2)
+      226
+      (if (== t 3)
+        10
+        74))))
+
+(pub :: targetSigAltStackNum (-> Int Int))
+(pub fn (targetSigAltStackNum t)
+  (if (|| (== t 0) (== t 1))
+    33554485
+    (if (== t 2)
+      132
+      (if (== t 3)
+        131
+        53))))
+
+(pub :: targetSigActionNum (-> Int Int))
+(pub fn (targetSigActionNum t)
+  (if (|| (== t 0) (== t 1))
+    33554478
+    (if (== t 2)
+      134
+      (if (== t 3)
+        13
+        416))))
+
+; SIGBUS is 7 on Linux and 10 on the BSDs; SIGSEGV is 11 on all three.
+(pub :: targetSigBusNum (-> Int Int))
+(pub fn (targetSigBusNum t)
+  (if (|| (== t 2) (== t 3))
+    7
+    10))
+
+; Word `k` of the action, with `h` the handler's address. Linux's
+; `struct sigaction` is the handler, the flags, the restorer and the
+; mask. Darwin's `struct __sigaction` is the handler, the trampoline,
+; then the mask and the flags as two 32-bit words. FreeBSD's is the
+; handler, then the flags and the first of the mask's four 32-bit
+; words. The flags are SA_SIGINFO, SA_ONSTACK, SA_NODEFER and
+; SA_RESETHAND, with SA_RESTORER on linux-x86_64: 0xC8000004 and
+; 0xCC000004 on Linux, 0x55 on the BSDs, which on Darwin sits in the
+; high half of word 2.
+(pub :: stackActionWord (-> Int Int String String))
+(pub fn (stackActionWord t k h)
+  (if (|| (== t 2) (== t 3))
+    (if (== k 0)
+      h
+      (if (== k 1)
+        (if (== t 3)
+          "3422552068"
+          "3355443204")
+        (if (&& (== k 2) (== t 3))
+          h
+          "0")))
+    (if (|| (== t 0) (== t 1))
+      (if (< k 2)
+        h
+        (if (== k 2)
+          "365072220160"
+          "0"))
+      (if (== k 0)
+        h
+        (if (== k 1)
+          "85"
+          "0")))))
+
+; Word `k` of the alternate stack's `stack_t`, `sp` its base: Linux's is
+; the base, the flags and the size; the BSDs' the base, the size and
+; the flags.
+(pub :: stackAltWord (-> Int Int String String))
+(pub fn (stackAltWord t k sp)
+  (if (== k 0)
+    sp
+    (if (== k (if (|| (== t 2) (== t 3))
+      2
+      1))
+      "65536"
+      "0")))
+
+; The switch. It keeps the stack pointer in a register the callee
+; saves (x19, rbx), moves to `top`, calls `@__axiom_stack_call` with the
+; thunk and its word in the first two argument registers, which the
+; constraints tie to them, and moves back. Every other register a callee
+; may overwrite is clobbered, as `targetRecoverArmAsm` accounts for
+; them, x18 where it is allocatable; so is the keeping register, which
+; the function saves in its prologue. The answer comes back in x0 or
+; rax.
+(pub :: targetStackSwitchAsm (-> Int String))
+(pub fn (targetStackSwitchAsm t)
+  (if (targetIsAArch64 t)
+    (concat
+      "{ i64, i64 } asm sideeffect \"mov x19, sp\\0Amov sp, $2\\0Ablr $3\\0Amov sp, x19\", \"={x0},={x1},r,r,0,1,~{x2},~{x3},~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17}"
+      (concat (if (|| (== t 2) (|| (== t 5) (== t 7)))
+        ",~{x18}"
+        "")
+      ",~{x19},~{lr},~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7},~{v8},~{v9},~{v10},~{v11},~{v12},~{v13},~{v14},~{v15},~{v16},~{v17},~{v18},~{v19},~{v20},~{v21},~{v22},~{v23},~{v24},~{v25},~{v26},~{v27},~{v28},~{v29},~{v30},~{v31},~{memory},~{cc}\""))
+    "{ i64, i64, i64 } asm sideeffect \"movq %rsp, %rbx\\0Amovq $3, %rsp\\0Acallq *$4\\0Amovq %rbx, %rsp\", \"={rax},={rdi},={rsi},r,r,1,2,~{rbx},~{rcx},~{rdx},~{r8},~{r9},~{r10},~{r11},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{memory},~{dirflag},~{fpsr},~{flags}\""))
+
+(pub :: emitStackRunRuntime (-> Int Int))
+(pub fn (emitStackRunRuntime cg)
+  (if (stackRunOn cg)
+    {
+      (emitLine cg "define internal i64 @__axiom_stack_call(i64 %fn, i64 %arg) #0 {")
+      (emitLine cg "entry:")
+      (emitLine cg "  %recp = inttoptr i64 %fn to ptr")
+      (emitLine cg "  %cp = load i64, ptr %recp")
+      (emitLine cg "  %f = inttoptr i64 %cp to ptr")
+      (emitLine cg "  %r = call i64 %f(i64 %fn, i64 %arg, i64 0)")
+      (emitLine cg "  ret i64 %r")
+      (emitLine cg "}")
+      (emitLine cg "")
+      (if (== (targetHasSpawn (memGetWord cg 26)) 1)
+        (emitStackRunGuarded cg (memGetWord cg 26))
+        {
+          (emitLine cg "define internal i64 @__axiom_stack_run(i64 %bytes, i64 %fn, i64 %arg) #0 {")
+          (emitLine cg "entry:")
+          (emitLine cg "  %r = call i64 @__axiom_stack_call(i64 %fn, i64 %arg)")
+          (emitLine cg "  ret i64 %r")
+          (emitLine cg "}")
+          (emitLine cg "")
+        })
+    }
+    cg))
+
+; A syscall line: `%dst = ` the call of `num` with six operands.
+(pub :: emitStackSys (-> Int String Int String Int))
+(pub fn (emitStackSys cg dst num rest)
+  (emitLine cg (concat (concat "  " (concat dst " = ")) (parSys cg (fmtInt num) rest))))
+
+(pub :: emitStackRunGuarded (-> Int Int Int))
+(pub fn (emitStackRunGuarded cg t)
+  (let (
+    (msg "axiom: stack overflow: the fault address is in the guard below a mapped stack")
+    (darwin (|| (== t 0) (== t 1)))
+    (flags (fmtInt (targetMapFlags t)))
+  )
+    (let ((n (fmtInt (+ (strLen msg) 1))))
+      {
+        (emitLine cg (concat "@__axiom_stack_lo = " (concat (cgMutGlobal cg) " i64 0")))
+        (emitLine cg (concat "@__axiom_stack_hi = " (concat (cgMutGlobal cg) " i64 0")))
+        (emitLine cg (concat "@__axiom_stack_alt = " (concat (cgMutGlobal cg) " i64 0")))
+        (emitLine cg (concat "@__axiom_stack_msg = private unnamed_addr constant [" (concat n (concat " x i8] c\"" (concat msg "\\0A\"")))))
+        ; The handler. `info` is the siginfo, whose fault address is at
+        ; byte 16 on Linux and byte 24 on the BSDs.
+        (emitLine
+          cg
+          (if darwin
+            "define internal void @__axiom_stack_fault(i64 %catcher, i64 %style, i64 %sig, i64 %info, i64 %uap) #0 {"
+            "define internal void @__axiom_stack_fault(i64 %sig, i64 %info, i64 %uap) #0 {"))
+        (emitLine cg "entry:")
+        (emitLine cg "  %ip = inttoptr i64 %info to ptr")
+        (emitLine
+          cg
+          (concat
+            "  %ap = getelementptr i8, ptr %ip, i64 "
+            (if (|| (== t 2) (== t 3))
+              "16"
+              "24")))
+        (emitLine cg "  %addr = load i64, ptr %ap")
+        (emitLine cg "  %lo = load i64, ptr @__axiom_stack_lo")
+        (emitLine cg "  %hi = load i64, ptr @__axiom_stack_hi")
+        (emitLine cg "  %ge = icmp uge i64 %addr, %lo")
+        (emitLine cg "  %lt = icmp ult i64 %addr, %hi")
+        (emitLine cg "  %in = and i1 %ge, %lt")
+        (emitLine cg "  br i1 %in, label %over, label %other")
+        (emitLine cg "over:")
+        (emitLine cg "  %mp = ptrtoint ptr @__axiom_stack_msg to i64")
+        (emitRuntimeWrite cg "%mp" n)
+        (emitRuntimeExit cg "86")
+        (emitLine cg "  unreachable")
+        (emitLine cg "other:")
+        (emitStackSys cg "%pid" (targetGetPidNum t) "i64 0, i64 0, i64 0, i64 0, i64 0, i64 0")
+        (emitStackSys cg "%k" (targetKillNum t) "i64 %pid, i64 %sig, i64 0, i64 0, i64 0, i64 0")
+        (emitLine cg "  %st = add i64 %sig, 128")
+        (emitRuntimeExit cg "%st")
+        (emitLine cg "  unreachable")
+        (emitLine cg "}")
+        (emitLine cg "")
+        ; Once per thread: the alternate stack and the two actions.
+        (emitLine cg "define internal void @__axiom_stack_arm() #0 {")
+        (emitLine cg "entry:")
+        (emitLine cg "  %ss = alloca [3 x i64], align 8")
+        (emitLine cg "  %act = alloca [4 x i64], align 8")
+        (emitLine cg "  %alt = load i64, ptr @__axiom_stack_alt")
+        (emitLine cg "  %have = icmp ne i64 %alt, 0")
+        (emitLine cg "  br i1 %have, label %done, label %map")
+        (emitLine cg "map:")
+        (emitStackSys cg "%a" (targetMmapNum t) (concat "i64 0, i64 65536, i64 3, i64 " (concat flags ", i64 -1, i64 0")))
+        (emitLine cg "  %al = icmp ult i64 %a, 4096")
+        (emitLine cg "  %an = icmp ugt i64 %a, -4096")
+        (emitLine cg "  %af = or i1 %al, %an")
+        (emitLine cg "  br i1 %af, label %oom, label %install")
+        (emitLine cg "oom:")
+        (emitLine cg "  %o = call i64 @__axiom_out_of_memory()")
+        (emitLine cg "  unreachable")
+        (emitLine cg "install:")
+        (emitLine cg "  store i64 %a, ptr @__axiom_stack_alt")
+        (emitLine cg (concat "  store i64 " (concat (stackAltWord t 0 "%a") ", ptr %ss")))
+        (emitLine cg "  %s1 = getelementptr i64, ptr %ss, i64 1")
+        (emitLine cg (concat "  store i64 " (concat (stackAltWord t 1 "%a") ", ptr %s1")))
+        (emitLine cg "  %s2 = getelementptr i64, ptr %ss, i64 2")
+        (emitLine cg (concat "  store i64 " (concat (stackAltWord t 2 "%a") ", ptr %s2")))
+        (emitLine cg "  %ssw = ptrtoint ptr %ss to i64")
+        (emitStackSys cg "%sa" (targetSigAltStackNum t) "i64 %ssw, i64 0, i64 0, i64 0, i64 0, i64 0")
+        (emitLine cg "  %h = ptrtoint ptr @__axiom_stack_fault to i64")
+        (emitLine cg (concat "  store i64 " (concat (stackActionWord t 0 "%h") ", ptr %act")))
+        (emitLine cg "  %c1 = getelementptr i64, ptr %act, i64 1")
+        (emitLine cg (concat "  store i64 " (concat (stackActionWord t 1 "%h") ", ptr %c1")))
+        (emitLine cg "  %c2 = getelementptr i64, ptr %act, i64 2")
+        (emitLine cg (concat "  store i64 " (concat (stackActionWord t 2 "%h") ", ptr %c2")))
+        (emitLine cg "  %c3 = getelementptr i64, ptr %act, i64 3")
+        (emitLine cg (concat "  store i64 " (concat (stackActionWord t 3 "%h") ", ptr %c3")))
+        (emitLine cg "  %actw = ptrtoint ptr %act to i64")
+        ; The fourth operand is `rt_sigaction`'s mask size; the BSDs
+        ; read three.
+        (emitStackSys cg "%segv" (targetSigActionNum t) "i64 11, i64 %actw, i64 0, i64 8, i64 0, i64 0")
+        (emitStackSys cg "%bus" (targetSigActionNum t) (concat "i64 " (concat (fmtInt (targetSigBusNum t)) ", i64 %actw, i64 0, i64 8, i64 0, i64 0")))
+        (emitLine cg "  br label %done")
+        (emitLine cg "done:")
+        (emitLine cg "  ret void")
+        (emitLine cg "}")
+        (emitLine cg "")
+        ; The call: map, guard, arm, switch, and give it all back.
+        (emitLine cg "define internal i64 @__axiom_stack_run(i64 %bytes, i64 %fn, i64 %arg) #0 {")
+        (emitLine cg "entry:")
+        (emitLine cg "  %small = icmp slt i64 %bytes, 1")
+        (emitLine cg "  %b1 = select i1 %small, i64 1, i64 %bytes")
+        (emitLine cg "  %huge = icmp sgt i64 %b1, 70368744177664")
+        (emitLine cg "  %b2 = select i1 %huge, i64 70368744177664, i64 %b1")
+        (emitLine cg "  %b3 = add i64 %b2, 65535")
+        (emitLine cg "  %size = and i64 %b3, -65536")
+        (emitLine cg "  %total = add i64 %size, 65536")
+        (emitStackSys cg "%base" (targetMmapNum t) (concat "i64 0, i64 %total, i64 3, i64 " (concat flags ", i64 -1, i64 0")))
+        (emitLine cg "  %bl = icmp ult i64 %base, 4096")
+        (emitLine cg "  %bn = icmp ugt i64 %base, -4096")
+        (emitLine cg "  %bf = or i1 %bl, %bn")
+        (emitLine cg "  br i1 %bf, label %oom, label %mapped")
+        (emitLine cg "oom:")
+        (emitLine cg "  %o = call i64 @__axiom_out_of_memory()")
+        (emitLine cg "  unreachable")
+        (emitLine cg "mapped:")
+        (emitStackSys cg "%g" (targetMprotectNum t) "i64 %base, i64 65536, i64 0, i64 0, i64 0, i64 0")
+        (emitLine cg "  %gbad = icmp ne i64 %g, 0")
+        (emitLine cg "  br i1 %gbad, label %unguarded, label %guarded")
+        (emitLine cg "unguarded:")
+        (emitStackSys cg "%u0" (targetMunmapNum t) "i64 %base, i64 %total, i64 0, i64 0, i64 0, i64 0")
+        (emitLine cg "  %o2 = call i64 @__axiom_out_of_memory()")
+        (emitLine cg "  unreachable")
+        (emitLine cg "guarded:")
+        (emitLine cg "  call void @__axiom_stack_arm()")
+        (emitLine cg "  %olo = load i64, ptr @__axiom_stack_lo")
+        (emitLine cg "  %ohi = load i64, ptr @__axiom_stack_hi")
+        (emitLine cg "  %orec = load i64, ptr @__axiom_recover_top")
+        (emitLine cg "  store i64 %base, ptr @__axiom_stack_lo")
+        (emitLine cg "  %ghi = add i64 %base, 65536")
+        (emitLine cg "  store i64 %ghi, ptr @__axiom_stack_hi")
+        (emitLine cg "  store i64 0, ptr @__axiom_recover_top")
+        (emitLine cg "  %top = add i64 %base, %total")
+        (emitLine cg (concat "  %rr = call " (concat (targetStackSwitchAsm t) "(i64 %top, ptr @__axiom_stack_call, i64 %fn, i64 %arg)")))
+        (emitLine
+          cg
+          (if (targetIsAArch64 t)
+            "  %r = extractvalue { i64, i64 } %rr, 0"
+            "  %r = extractvalue { i64, i64, i64 } %rr, 0"))
+        (emitLine cg "  store i64 %orec, ptr @__axiom_recover_top")
+        (emitLine cg "  store i64 %olo, ptr @__axiom_stack_lo")
+        (emitLine cg "  store i64 %ohi, ptr @__axiom_stack_hi")
+        (emitStackSys cg "%u" (targetMunmapNum t) "i64 %base, i64 %total, i64 0, i64 0, i64 0, i64 0")
+        (emitLine cg "  ret i64 %r")
+        (emitLine cg "}")
+        (emitLine cg "")
+      })))
 
 ; MM-ALLOC-24: `@__axiom_mem_stat_fn(k)`, the allocator's own counts.
 ;
@@ -19992,7 +20332,7 @@
                                       true
                                       (if (strEq nm "__axiom_arena_reset_keeping")
                                         true
-                                        (if (|| (strEq nm "__axiom_mem_stat") (strEq nm "__axiom_arena_cap"))
+                                        (if (|| (strEq nm "__axiom_mem_stat") (|| (strEq nm "__axiom_arena_cap") (strEq nm "__axiom_stack_run")))
                                         true
                                         ; Not spellable in source: `checkNumeric` rewrites `==`/`!=` into
                                         ; these when it can see that BOTH operands are `String`. They are
@@ -20112,8 +20452,8 @@
                                         (if (strEq fnName "__axiom_arena_mark_into") (emitPrimArenaMarkInto args cg) (emitPrimArenaReset args cg))
                                         (if (strEq fnName "__axiom_arena_reset_keeping")
                                           (emitPrimArenaResetKeeping args cg)
-                                          (if (|| (strEq fnName "__axiom_mem_stat") (strEq fnName "__axiom_arena_cap"))
-                                          (if (strEq fnName "__axiom_mem_stat") (emitPrimMemStat args cg) (emitPrimArenaCap args cg))
+                                          (if (|| (strEq fnName "__axiom_mem_stat") (|| (strEq fnName "__axiom_arena_cap") (strEq fnName "__axiom_stack_run")))
+                                          (if (strEq fnName "__axiom_mem_stat") (emitPrimMemStat args cg) (if (strEq fnName "__axiom_arena_cap") (emitPrimArenaCap args cg) (emitPrimStackRun args cg)))
                                           (if (strEq fnName "__streq")
                                             (emitPrimStrEq args cg 1)
                                             (if (strEq fnName "__strne")
@@ -20699,6 +21039,36 @@
             (memSetWord cg1 2 r)
             cg1
           })))))
+
+; `(__axiom_stack_run bytes thunk arg)` -> what `(thunk arg)` answered,
+; run on a stack of its own (MM-PAR-17): one call into the runtime
+; `emitStackRunRuntime` defines in every module that names the
+; primitive. The thunk is `emitPrimRecover`'s: a lambda built AT the
+; call moves its birth share in, anything else is retained first, and
+; the release after the call spends that share.
+(pub :: emitPrimStackRun (-> (Vec Int) Int Int))
+;@axiom:effect(io)
+(pub fn (emitPrimStackRun args cg)
+  (let ((cgB (emitExpr (vecGet args 0) cg)))
+    (let ((b (strDup (memGetWordStr cgB 2))))
+      (let ((cgT (emitExpr (vecGet args 1) cgB)))
+        (let ((f (strDup (memGetWordStr cgT 2))))
+          (let ((cgO
+            (if (== (argIsDirectCon cgT (vecGet args 1)) 1)
+              cgT
+              (emitRetainOf cgT f))))
+            (let ((cgA (emitExpr (vecGet args 2) cgO)))
+              (let (
+                (a (strDup (memGetWordStr cgA 2)))
+                (r (regStr (allocReg cgA)))
+              )
+                {
+                  (emitLine cgA (concat (concat "  " r) (concat " = call i64 @__axiom_stack_run(i64 " (concat b (concat ", i64 " (concat f (concat ", i64 " (concat a ")"))))))))
+                  (emitReleaseOf cgA (strDup f))
+                  (memSetWord cgA 2 r)
+                  (memSetWord cgA 14 0)
+                  cgA
+                }))))))))
 
 ; `(__axiom_arena_reset_keeping mark addr bytes)` -> where the kept
 ; block landed. Unlike the other two this one ANSWERS a value, so its
@@ -25599,7 +25969,7 @@
                 (mentions name (spineArgAt e 2))
                 ; a function reached by address may keep what it is
                 ; handed
-                (if (|| (strEq n "__call_word") (strEq n "__axiom_recover"))
+                (if (|| (strEq n "__call_word") (|| (strEq n "__axiom_recover") (strEq n "__axiom_stack_run")))
                   (mentionsArgs name e n_ 0)
                   ; a `__release` of the binding ends its share: the
                   ; caller must not hand it back, exactly as if a

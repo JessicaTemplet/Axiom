@@ -585,7 +585,7 @@ The metadata keys:
 | `repr` | `S` | A word struct's representation: `#repr=word`, or `#repr=word,shared` when a concurrent binding may capture it ([memory-model.md](memory-model.md) `MM-VAL-10a`). `#repr=sealed,shared` on a heap struct a `parallel` form lends (`MM-PAR-16`). Absent on any other heap struct |
 | `tyvars` | `A` | Type parameters, comma-separated, e.g. `#tyvars=a,b`. Absent when there are none |
 | `effects` | `F` | The effect row the checker derived by walking the function's calls, sorted and comma-separated, e.g. `#effects=IO`. Absent when the function performs none. An `extern` item carries `#effects=IO` |
-| `effect-params` | `F` | For an effect-polymorphic signature, the parameters the row varies in, by their declared names |
+| `effect-params` | `F` | For an effect-polymorphic signature, the parameters the row varies in, by their declared names, in parameter order |
 | `effects-incomplete` | `F` | The walk met a call it couldn't resolve: a struct field holding a value it can't name, an opaque local holding a function, or a call that applies a callee's result. So `#effects=` is a lower bound. A row with nothing but this carries no `#effects=` |
 | `effects-overapprox` | `F` | Some member of `#effects=` is only *possible*: it comes from naming an arrow-typed function without calling it, such as handing it back or storing it in a capability record. Always appears with `effects-possible` |
 | `effects-possible` | `F` | Which members those are, sorted and comma-separated, e.g. `#effects-possible=IO` on `(fn (handoff k) shout)`. A member the body also performs definitely isn't listed. `#effects=` stays the union either way (see "definite" and "possible" in [Effects](reference.md#effects)) |

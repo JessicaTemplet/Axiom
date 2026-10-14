@@ -2218,21 +2218,23 @@ target being compiled for (this one is `darwin`).
 
 ## `Task`
 
-`stdlib/Task.ax` — 21 public names
+`stdlib/Task.ax` — 23 public names
 
 Structured tasks with typed results across the process boundary
 (R-C2, docs/memory-model.md MM-PAR-13).
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `TaskOpts` | struct |  |  | `width` children at most (clamped to 1..n); `limit` bytes per answer (0 or more); `deadline` nanoseconds per task from its spawn, 0 for none; `grace` nanoseconds a running task gets after a cancellation; `failFast` cancels the pool at the first error; `token` is `Some` a token from `taskTokenNew`, or `None` for one private to the call; `keep` bytes of answers one call may hold, and `memory` bytes one task's arena may map, each 0 for no bound. |
-| `taskOpts` | value | `(-> Int Int TaskOpts)` | `Alloc` | No deadline, a 100 ms grace, no fail-fast, a private token, and no `keep` or `memory` bound. |
+| `TaskOpts` | struct |  |  | `width` children at most (clamped to 1..n); `limit` bytes per answer (0 or more); `deadline` nanoseconds per task from its spawn, 0 for none; `grace` nanoseconds a running task gets after a cancellation; `failFast` cancels the pool at the first error; `token` is `Some` a token from `taskTokenNew`, or `None` for one private to the call; `keep` bytes of answers one call may hold, and `memory` bytes one task's arena may map, each 0 for no bound; `stack` bytes of stack each task runs on, 0 for `taskStackDefault`. |
+| `taskOpts` | value | `(-> Int Int TaskOpts)` | `Alloc` | No deadline, a 100 ms grace, no fail-fast, a private token, no `keep` or `memory` bound, and the default stack. |
 | `taskWithDeadline` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` | The options with a deadline of `nanos` nanoseconds for the whole run. |
 | `taskWithGrace` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` | The options with `nanos` nanoseconds of grace after cancellation before a task is abandoned. |
 | `taskWithFailFast` | value | `(-> TaskOpts Bool TaskOpts)` | `Alloc` | The options with fail-fast `on` or off: when on, the first failure cancels the rest. |
 | `taskWithToken` | value | `(-> TaskOpts CancelToken TaskOpts)` | `Alloc` | The options with `tok` as the cancel token: cancelling it cancels the run. |
 | `taskWithKeep` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` | The options with a `keep` budget of `bytes`: the answers one call holds may total at most that many bytes. The answer that would pass it answers `Err taskOverBudgetCode` instead, and the pool is then cancelled as a refused spawn cancels it. `taskFold` holds no answer, so the budget doesn't bound it. 0 is no bound. |
 | `taskWithMemory` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` | The options with a `memory` budget of `bytes`: each task's arena may map at most that many bytes beyond what its process began with. A task that asks for more traps 70 in its own process and answers `Err 70`; its siblings and the caller are untouched. 0 is no bound. |
+| `taskWithStack` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` | The options with a `stack` budget of `bytes`: each task runs on a stack of that many bytes, rounded up to 64 KiB, mapped in its own process with a guard below it, whichever thread started the pool. A task that recurses past it traps 86 in its own process and answers `Err 86`; its siblings and the caller are untouched. 0 or less is `taskStackDefault`. |
+| `taskStackDefault` | value | `Int` |  | The stack a task runs on when its options name none: 8 MiB, what Linux and Darwin give a main thread by default. |
 | `taskCancelledCode` | value | `Int` |  | The error code a cancelled task answers, 1002. |
 | `taskTooLargeCode` | value | `Int` |  | The error code for a task whose input is larger than the budget allows, 1003. |
 | `taskOverBudgetCode` | value | `Int` |  | The error code a task answers when its answer would take the call past its `keep` budget, 1012. |

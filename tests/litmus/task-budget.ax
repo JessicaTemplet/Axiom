@@ -26,6 +26,11 @@
 ;                             arena's live bytes at the end
 ;   task-budget soakkeep R    the same, keeping every round's answers: the
 ;                             control
+;   task-budget stack         8 tasks, width 4, a `stack` budget of 256
+;                             KiB: the even ones recurse 50,000 calls deep
+;                             and the odd ones 100; prints how many
+;                             answered Ok and 86, every task's pid, and
+;                             the bytes the arena held before and after
 (import IO)
 (import Str)
 (import Fmt)
@@ -198,6 +203,80 @@
     )
     ((Err e) 1)))
 
+; Recursion no optimiser turns into a loop: the work after each call
+; depends on its answer.
+(:: deep (-> Int Int))
+(fn (deep n)
+  (if (== n 0)
+    0
+    (let ((r (deep (- n 1))))
+      (if (> r n)
+        r
+        (+ r 1)))))
+
+; The stack pool: each task records its pid in the page.
+(:: stackPool (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (stackPool page)
+  (let (
+    (rs 
+      (taskMapWith
+        (lambda (i)
+          {
+            (memSetWord page (+ i 1) sysPid)
+            (fmtInt
+              (deep
+                (if (== (% i 2) 0)
+                  50000
+                  100)))
+          }
+        )
+        8
+        (taskWithStack (taskOpts 4 64) 262144)))
+    (mut ok 0)
+    (mut over 0)
+    (mut other 0)
+  )
+    {
+      (for i in 0..(vecLen rs)
+        (match (vecGet rs i)
+          ((Ok s)
+            (set ok (+ ok 1))
+          )
+          ((Err e)
+            (if (== (errCode e) 86)
+              (set over (+ over 1))
+              (set other (+ other 1)))
+          )))
+      (println (concat (concat (concat "ok " (fmtInt ok)) (concat " overflow " (fmtInt over))) (concat " other " (fmtInt other))))
+      0
+    }))
+
+(:: stacks Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (stacks)
+  (match (sysMapShared 4096)
+    ((Ok page)
+      (let ((before memStats))
+        {
+          (stackPool page)
+          (let ((after memStats))
+            {
+              (for i in 0..8
+                (let ((pid (memGetWord page (+ i 1))))
+                  (if (> pid 0)
+                    (println (concat "pid " (fmtInt pid))))))
+              (println (concat "backlog-grew " (fmtInt (- after.backlogBytes before.backlogBytes))))
+              0
+            })
+        })
+    )
+    ((Err e) 1)))
+
 (:: soak (-> Int Bool Int))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -264,7 +343,9 @@
                     (soak n false)
                     0
                   }
-                  {
-                    (soak n true)
-                    0
-                  })))))))))
+                  (if (strEq mode "stack")
+                    stacks
+                    {
+                      (soak n true)
+                      0
+                    }))))))))))

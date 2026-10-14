@@ -47,6 +47,22 @@ its changelog too.
   examples lost. Possible now that the seed knows an `if`'s branches
   are dropped when the `if` is.
 
+- Give task pools a `stack` budget. Each task now runs on a stack of its
+  own, mapped in its process with a 64 KiB guard below it: 8 MiB by
+  default (`taskStackDefault`), or what `taskWithStack` sets. It's the
+  same size whichever thread started the pool, so a pool inside a
+  `--threads` binding no longer gives its tasks that thread's 512 KiB
+  on Darwin. A task that recurses past its stack traps 86 in its own
+  process and answers `Err 86`, "task out of stack", while its siblings
+  and the caller go on; any other fault still dies of its signal.
+
+  The mechanism is a new runtime primitive, `__axiom_stack_run`, with a
+  `SIGSEGV` and `SIGBUS` handler on an alternate signal stack, emitted
+  only into a module that names it, and 86 is a new reserved trap
+  status. `TaskOpts` gains the field, so a program that builds one by
+  hand passes one more zero. Tested by `tests/stdlib/920-task-stack.ax`
+  and `scripts/check-task.sh`.
+
 - A dropped branch's own branches are dropped too: an `if` or `match`
   nested in the branch of a dropped `if`, or in the branch of an `if`
   written without an else, may have branches that disagree, as one at

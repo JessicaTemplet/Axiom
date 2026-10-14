@@ -1,0 +1,143 @@
+; A task pool's stack budget (docs/memory-model.md MM-PAR-17). Every
+; line is the same on every run, in both lowerings:
+;
+;   * Under a 256 KiB budget, task 0 recurses 50,000 calls deep, more
+;     than that stack holds. It traps 86 in its own process and answers
+;     86, "task out of stack". Task 1, its sibling, recurses 100 calls
+;     deep and answers Ok.
+;   * With the default budget, 8 MiB, the same 50,000 calls answer Ok.
+;   * So do they from a pool started inside a `parallel` binding. Under
+;     `--threads` that binding is a thread, whose own stack is smaller
+;     (512 KiB on Darwin), and the task runs on its budget, not on it.
+;   * The caller goes on, and the arena's live bytes come back.
+;
+; `scripts/check-task.sh` section 13 runs this in both lowerings at
+; `--opt` 0 and 2, and checks every task's pid is gone afterwards.
+(import IO)
+(import Str)
+(import Fmt)
+(import Mem)
+(import Vec)
+(import Err)
+(import Task)
+
+; Recursion no optimiser turns into a loop: the work after each call
+; depends on its answer.
+(:: deep (-> Int Int))
+(fn (deep n)
+  (if (== n 0)
+    0
+    (let ((r (deep (- n 1))))
+      (if (> r n)
+        r
+        (+ r 1)))))
+
+(:: show (-> (Result String Error) String))
+(fn (show r)
+  (match r
+    ((Ok s) (concat "ok " s))
+    ((Err e) (concat (concat "err " (fmtInt (errCode e))) (concat " " (errMessage e))))))
+
+(:: showAll (-> String (Vec (Result String Error)) Int))
+;@axiom:effect(io)
+(fn (showAll what rs)
+  {
+    (for i in 0..(vecLen rs)
+      (println (concat (concat what (concat " " (fmtInt i))) (concat ": " (show (vecGet rs i))))))
+    0
+  })
+
+; Task `i` of a pool recurses `(depth i)` calls and answers the count.
+(:: recurse (-> (-> Int Int) Int TaskOpts (Vec (Result String Error))))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (recurse depth n opts)
+  (taskMapWith
+    (lambda (i) (fmtInt (deep (depth i))))
+    n
+    opts))
+
+(:: smallRun Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (smallRun)
+  (showAll
+    "small"
+    (recurse
+      (lambda (i)
+        (if (== i 0)
+          50000
+          100))
+      2
+      (taskWithStack (taskOpts 2 64) 262144))))
+
+(:: defaultRun Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (defaultRun)
+  (showAll "default" (recurse (lambda (i) 50000) 1 (taskOpts 1 64))))
+
+; The default-budget pool from inside a binding: 1 when its one task
+; answered Ok with the count, else 0.
+(:: inBinding (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (inBinding x)
+  (let ((rs (recurse (lambda (i) 50000) 1 (taskOpts 1 64))))
+    (match (vecGet rs 0)
+      ((Ok s)
+        (if (strEq s "50000")
+          1
+          0)
+      )
+      ((Err e) 0))))
+
+(:: bindingRun Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (bindingRun)
+  (let ((both
+    (parallel p (
+      (a (inBinding 0))
+      (b 1)
+    )
+      (+ a b))))
+    {
+      (println
+        (concat
+          "binding: "
+          (if (== both 2)
+            "ok 50000"
+            "the task failed")))
+      0
+    }))
+
+(:: live Int)
+(fn (live)
+  (let ((st memStats))
+    st.backlogBytes))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  (let ((before live))
+    {
+      smallRun
+      defaultRun
+      bindingRun
+      (let ((grew (- live before)))
+        (println
+          (concat
+            "the arena's live bytes came back: "
+            (if (<= grew 4096)
+              "yes"
+              (fmtInt grew)))))
+      0
+    }))

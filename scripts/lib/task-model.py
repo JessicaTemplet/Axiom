@@ -7,8 +7,10 @@ WHAT IS TRANSCRIBED. The pool's parent loop, `taskLoop`, and every step it
 takes on shared state or on a child: the token's cancel flag and event
 counter, a slot's state word, the spawn, the look at a child
 (`sysChildExited`), the kill, the join that reaps, the clock, and the
-sleep on the event counter. And the child's half, `taskChild`: its answer
-into its slot, over the limit or not, and the bump that wakes the parent.
+sleep on the event counter. And the child's half, `taskChild` and the
+`taskAnswer` it runs on the task's own stack: its answer into its slot,
+over the limit or not, and the bump that wakes the parent. The stack the
+answer runs on is the process's own, so the switch to it is no step.
 The parent's per-slot words (`st`) and its handles (`hs`) are its own, so
 their accesses are plain steps inside the one before them.
 
@@ -359,11 +361,18 @@ def install(ns):
     # `beh` is the tuple of behaviours the task's `f` may have.
     # A `slow` body takes `x` units of the clock, sleeping on `idle`, a
     # word nobody writes, before it answers.
-    F("taskChild", ["tok", "slab", "w", "lim", "beh", "x", "idle", "arg"], ["slot", "p", "b", "c0", "c", "code", "len"],
+    F("taskChild", ["tok", "slab", "w", "lim", "beh", "x", "idle", "arg"], ["slot", "p", "r"],
       (TASK, "taskChild"), [
         ("set", "slot", "slab + %d * (arg %% w)" % SB, "(let ((slot (+ slab (* (% arg w) slotBytes))))"),
         ("pid", "p"),
         ("pstore", "slot + 2", "p", "(memSetWord slot 2 sysPid)"),
+        ("call", "r", "taskAnswer", ["tok", "slot", "w", "lim", "beh", "x", "idle", "arg"],
+         "(lambda (i) (taskAnswer f slot limit tok i))"),
+        ("ret", "r"),
+    ])
+    # The task itself, on the stack `taskChild` mapped for it.
+    F("taskAnswer", ["tok", "slot", "w", "lim", "beh", "x", "idle", "arg"], ["b", "c0", "c", "code", "len"],
+      (TASK, "taskAnswer"), [
         ("choose", "b", "beh"),
         ("if", "b == %d" % SLOW, "work"),
         ("clock", "c0"),
@@ -373,7 +382,7 @@ def install(ns):
         ("sleepuntil", "code", "idle", "0", "c0 + x"),
         ("goto", "nap"),
         ("L", "work"),
-        ("if", "b == %d" % TRAP, "runs", "(let ((r (f (/ arg w))))"),
+        ("if", "b == %d" % TRAP, "runs", "(let ((r (f i)))"),
         ("ghost", "tTrap", ["arg // w", "72"]),
         ("ret", "72"),
         ("L", "runs"),
@@ -723,6 +732,7 @@ def install(ns):
         "taskWithGrace": "builds the options", "taskWithFailFast": "builds the options",
         "taskWithToken": "builds the options",
         "taskWithKeep": "builds the options", "taskWithMemory": "builds the options",
+        "taskWithStack": "builds the options", "taskStackDefault": "a constant",
         "taskOverBudgetCode": "a constant",
         "taskCapArena": "runs in the child before the task: caps its arena, which the model's tasks never fill",
         "taskOkBytes": "an answer's bytes against the keep budget: the model's pools have no keep budget",

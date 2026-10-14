@@ -16,23 +16,25 @@
 #
 #   1. The emitter's census: every `emitRuntimeExit cg "<n>"` in
 #      `self_host/codegen.ax` with a numeric operand is exactly
-#      70 71 72 74 75 76 77 78 79 80 82 83 84 85, each once. `0`
+#      70 71 72 74 75 76 77 78 79 80 82 83 84 85 86, each once. `0`
 #      (normal exit) and `%status` (the parallel join re-raising a
 #      child's status) are dynamic sites, not traps, and are named
-#      rather than counted.
+#      rather than counted, as is `%st`, the stack-fault handler's exit
+#      with a signal it did not handle.
 #   2. The documents' table: every `| NN |` row of the MM-EXEC-16 table
-#      in `docs/memory-model.md` names the same fourteen statuses (81,
+#      in `docs/memory-model.md` names the same fifteen statuses (81,
 #      the bare-metal CPU exception, is written by the vector table's
 #      module assembly, not by `emitRuntimeExit`, and is read by
 #      neither). A row edited without its emitter - or an emitter moved
 #      without its row - fails here rather than shipping a second
 #      collision.
-#   3. The live exits: eleven small programs each exit their own status
+#   3. The live exits: twelve small programs each exit their own status
 #      (70 OOM, 71 unhandled effect, 72 division by zero, 75 bad mark,
 #      76 reset past a live handle, 77 index out of range, 80 violated
 #      contract / subtype range, 82 misaligned atomic, 83 division
 #      overflow, 84 shift amount out of range, 85 a freed or forged
-#      handle). The eleven answers must be pairwise
+#      handle, 86 a mapped stack's guard touched). The twelve answers
+#      must be pairwise
 #      distinct - that distinctness IS the cross-trap comparison no
 #      gate performed - and each must equal its documented owner.
 #
@@ -62,10 +64,10 @@ checks=0
 ok()  { checks=$((checks + 1)); echo "ok   $*"; }
 bad() { checks=$((checks + 1)); failed=$((failed + 1)); echo "FAIL $*"; }
 
-# The fourteen trap statuses MM-EXEC-16 reserves that `emitRuntimeExit`
+# The fifteen trap statuses MM-EXEC-16 reserves that `emitRuntimeExit`
 # writes. 73 is the FFI's, not the emitter's, and 81 the vector table's
 # module assembly's, so both are absent here by decision.
-EXPECTED_TRAPS="70 71 72 74 75 76 77 78 79 80 82 83 84 85"
+EXPECTED_TRAPS="70 71 72 74 75 76 77 78 79 80 82 83 84 85 86"
 
 # Every numeric `emitRuntimeExit cg "<n>"` in a file, one per line,
 # excluding the normal-exit `0` (a successful `main`, not a trap).
@@ -74,14 +76,14 @@ emitter_trap_list() {
     | grep -oE '[0-9]+' | grep -vx '0' | LC_ALL=C sort -n | uniq -c | awk '{print $2}'
 }
 
-echo "== 1. the emitter's trap census is exactly the fourteen reserved statuses =="
+echo "== 1. the emitter's trap census is exactly the fifteen reserved statuses =="
 census="$work/census.txt"
 emitter_trap_list "$repo_root/self_host/codegen.ax" > "$census"
 # Distinctness first: a reused status shows up here as a missing one,
-# because `uniq -c` collapses the pair and the count drops below fourteen.
+# because `uniq -c` collapses the pair and the count drops below fifteen.
 got_n="$(wc -l < "$census" | tr -d ' ')"
-if [[ "$got_n" != 14 ]]; then
-  bad "emitter census found $got_n distinct numeric statuses, not 14: $(tr '\n' ' ' < "$census")"
+if [[ "$got_n" != 15 ]]; then
+  bad "emitter census found $got_n distinct numeric statuses, not 15: $(tr '\n' ' ' < "$census")"
 else
   want="$work/want.txt"
   printf '%s\n' $EXPECTED_TRAPS | LC_ALL=C sort -n > "$want"
@@ -99,13 +101,13 @@ else
   bad "dynamic emitRuntimeExit sites 0 / %status missing from codegen.ax"
 fi
 
-echo "== 2. the MM-EXEC-16 table names the same fourteen statuses =="
+echo "== 2. the MM-EXEC-16 table names the same fifteen statuses =="
 # Rows read `| 70 |`, `| 80 |` at the start of the table. The parse is
 # deliberately narrow: a status mentioned in prose elsewhere in the
 # document must not satisfy it.
 docs_traps="$work/docs.txt"
 grep -oE '^\| 7[0-9] \|' "$repo_root/docs/memory-model.md" | grep -oE '[0-9]+' > "$work/docs7.txt" || true
-grep -oE '^\| 8[02345] \|' "$repo_root/docs/memory-model.md" | grep -oE '[0-9]+' > "$work/docs80.txt" || true
+grep -oE '^\| 8[023456] \|' "$repo_root/docs/memory-model.md" | grep -oE '[0-9]+' > "$work/docs80.txt" || true
 cat "$work/docs7.txt" "$work/docs80.txt" | LC_ALL=C sort -n -u > "$docs_traps"
 if cmp -s <(printf '%s\n' $EXPECTED_TRAPS | LC_ALL=C sort -n) "$docs_traps"; then
   ok "MM-EXEC-16 table names $EXPECTED_TRAPS"
@@ -113,15 +115,15 @@ else
   bad "MM-EXEC-16 table names [$(tr '\n' ' ' < "$docs_traps")] not [$EXPECTED_TRAPS]"
 fi
 
-echo "== 3. eleven traps exit their own statuses, all distinct =="
+echo "== 3. twelve traps exit their own statuses, all distinct =="
 run_exit() { # <file> -> prints exit status
   local f="$1" rc=0
   ( cd "$work" && "$axc" run --opt 1 --input "$f" >"$work/run.out" 2>"$work/run.err" ) || rc=$?
   printf '%s' "$rc"
 }
 
-# Inline probes for the two traps with no dedicated stdlib fixture:
-# division by zero (72) and a violated pre (80).
+# Inline probes for the three traps with no dedicated stdlib fixture:
+# division by zero (72), a violated pre (80) and a stack overflow (86).
 cat > "$work/div-zero.ax" <<'AX'
 (fn (main) (/ 10 0))
 AX
@@ -130,6 +132,13 @@ cat > "$work/pre-violated.ax" <<'AX'
 (:: half (-> Int Int))
 (fn (half n) (/ n 2))
 (fn (main) (half 0))
+AX
+# A recursion a 64 KiB mapped stack cannot hold (86).
+cat > "$work/stack-overflow.ax" <<'AX'
+(:: deep (-> Int Int))
+(fn (deep n) (if (== n 0) 0 (let ((r (deep (- n 1)))) (if (> r n) r (+ r 1)))))
+;@axiom:effect(io)
+(fn (main) (__axiom_stack_run 65536 (lambda (x) (deep x)) 1000000))
 AX
 
 got70="$(run_exit "$repo_root/tests/stdlib/314-out-of-memory.ax")"
@@ -144,6 +153,7 @@ got82="$(run_exit "$repo_root/tests/stdlib/544-misaligned-atomic.ax")"
 got83="$(run_exit "$repo_root/tests/stdlib/695-intmin-div-trap.ax")"
 got84="$(run_exit "$repo_root/tests/stdlib/696-shift-wide-trap.ax")"
 got85="$(run_exit "$repo_root/tests/stdlib/572-spawn-joined-twice.ax")"
+got86="$(run_exit "$work/stack-overflow.ax")"
 
 check_one() { # <want> <got> <name>
   if [[ "$2" == "$1" ]]; then ok "$3 exits $1";
@@ -161,14 +171,15 @@ check_one 82 "$got82" "misaligned atomic (544)"
 check_one 83 "$got83" "division overflow (695)"
 check_one 84 "$got84" "shift amount out of range (696)"
 check_one 85 "$got85" "a second join (572)"
+check_one 86 "$got86" "a mapped stack's guard"
 
-# The cross-trap comparison no gate performed: the eleven answers must
-# be eleven different numbers. Each `check_one` above is internally
+# The cross-trap comparison no gate performed: the twelve answers must
+# be twelve different numbers. Each `check_one` above is internally
 # consistent on its own - the 77 collision proved that is not enough.
 seen="$work/seen.txt"
-printf '%s\n' "$got70" "$got71" "$got72" "$got75" "$got76" "$got77" "$got80a" "$got82" "$got83" "$got84" "$got85" | LC_ALL=C sort -n -u > "$seen"
-if [[ "$(wc -l < "$seen" | tr -d ' ')" == 11 ]]; then
-  ok "eleven traps, eleven distinct statuses"
+printf '%s\n' "$got70" "$got71" "$got72" "$got75" "$got76" "$got77" "$got80a" "$got82" "$got83" "$got84" "$got85" "$got86" | LC_ALL=C sort -n -u > "$seen"
+if [[ "$(wc -l < "$seen" | tr -d ' ')" == 12 ]]; then
+  ok "twelve traps, twelve distinct statuses"
 else
   bad "trap statuses collide: [$(tr '\n' ' ' < "$seen")]"
 fi
@@ -184,11 +195,11 @@ done
 
 echo "== ablations: a reused status must be refused =="
 # A. the emitter reuses 77 for the contract trap: 80 vanishes, 77
-# appears twice, the distinct census drops to thirteen.
+# appears twice, the distinct census drops to fourteen.
 cp "$repo_root/self_host/codegen.ax" "$work/abl-codegen.ax"
 sed -i.bak 's/emitRuntimeExit cg "80"/emitRuntimeExit cg "77"/' "$work/abl-codegen.ax"
 emitter_trap_list "$work/abl-codegen.ax" > "$work/abl-census.txt"
-if [[ "$(wc -l < "$work/abl-census.txt" | tr -d ' ')" == 13 ]] \
+if [[ "$(wc -l < "$work/abl-census.txt" | tr -d ' ')" == 14 ]] \
 && cmp -s <(printf '%s\n' $EXPECTED_TRAPS | LC_ALL=C sort -n) "$work/abl-census.txt"; then
   bad "ablation: census with 80->77 still accepted (this gate cannot fail that way)"
 else
@@ -198,7 +209,7 @@ fi
 cp "$repo_root/docs/memory-model.md" "$work/abl-mm.md"
 sed 's/^\| 80 \|/| 77 |/' "$repo_root/docs/memory-model.md" > "$work/abl-mm.md"
 grep -oE '^\| 7[0-9] \|' "$work/abl-mm.md" | grep -oE '[0-9]+' > "$work/abl7.txt" || true
-grep -oE '^\| 8[02345] \|' "$work/abl-mm.md" | grep -oE '[0-9]+' > "$work/abl80.txt" || true
+grep -oE '^\| 8[023456] \|' "$work/abl-mm.md" | grep -oE '[0-9]+' > "$work/abl80.txt" || true
 cat "$work/abl7.txt" "$work/abl80.txt" | LC_ALL=C sort -n -u > "$work/abl-docs.txt"
 if cmp -s <(printf '%s\n' $EXPECTED_TRAPS | LC_ALL=C sort -n) "$work/abl-docs.txt"; then
   bad "ablation: docs table with 80->77 still accepted (this gate cannot fail that way)"

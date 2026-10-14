@@ -777,6 +777,10 @@ prim_case "__fence"                     "(__fence)"                            "
 # then too. Starting a binding is also `Spawn`, and waiting for one is
 # `Block`: the two refinements of `IO` a caller must declare.
 prim_case "__par_spawn"                 "(__par_spawn (lambda (x) x) n)"       "IO,Spawn"
+# A task's own stack (MM-PAR-17) maps memory and sets signal actions
+# through the kernel, and calls its thunk where it is: `IO`, and
+# nothing more for a thunk that performs nothing.
+prim_case "__axiom_stack_run"           "(__axiom_stack_run n (lambda (x) x) 0)" "IO"
 # The syscall primitives themselves carry `IO` and, since R-B10's third
 # step, `Unsafe`: the kernel reads and writes this process's memory
 # through their arguments (MM-EXEC-9c). Before it, this row read `IO`

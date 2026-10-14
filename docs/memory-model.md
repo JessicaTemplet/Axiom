@@ -963,6 +963,7 @@ statuses. A program **MUST NOT** reuse them as a normal result:
 | 83 | `INT_MIN / -1`, raised by the division guard (`emitDivGuard`): `sdiv`/`srem` overflow has no representable answer | measured: `tests/stdlib/695-intmin-div-trap.ax` divides inside a recovery point, which answers 83, then prints `axiom: division overflow` to fd 2 and exits 83, at every `--opt` level |
 | 84 | a shift amount below 0 or above 63, raised by the shift guard (`emitShiftGuard`): an overshift is poison in LLVM | measured: `tests/stdlib/696-shift-wide-trap.ax` shifts inside a recovery point, which answers 84, then prints `axiom: shift amount out of range` to fd 2 and exits 84, at every `--opt` level |
 | 85 | a handle that isn't live: a spawn handle joined twice or by the other lowering's join, a forged one, or a table handle the unsafe layer freed (`@__axiom_handle_dead`, `MM-PAR-8`) | measured: `tests/stdlib/572-spawn-joined-twice.ax` runs a second join, the pid of a joined binding, a forged word and a channel used as a spawn handle, each inside a recovery point, which answers 85 each time, then prints `axiom: not a live handle (freed, or never made)` to fd 2 and exits 85, at every `--opt` level. `tests/stdlib/571-handle-table.ax` pins the table: 65,536 live handles, the next refused, and a reused slot under a new generation |
+| 86 | a stack overflow into the guard below a stack `__axiom_stack_run` mapped (`@__axiom_stack_fault`, `MM-PAR-17`) | measured: `scripts/check-trap-statuses.sh` §3 recurses a million calls on a 64 KiB stack, and the run prints `axiom: stack overflow: the fault address is in the guard below a mapped stack` to fd 2 and exits 86. `tests/stdlib/920-task-stack.ax` pins the sentence from a task's process, whose slot answers 86, at `--opt` 0 and 2 in both lowerings. Not recoverable: the handler runs on an alternate signal stack, and the thunk runs with no recovery point armed. A fault outside the guard dies of its signal, as it would with no handler |
 
 `(__indexTrap)` never returns, so it fits every result type. It exists
 because traps are `internal` LLVM functions emitted by the runtime
@@ -6446,8 +6447,8 @@ and 2 and holds the peak RSS after 100,000 of each to that after
 a capture at a hand-written spawn refused.
 `tests/diagnostics/1236-shared-heap-marker.ax`: the marker's shape.
 
-**MM-PAR-17 (H; its stack clause P). A task pool's budgets are fixed
-when it starts, and running one out is an answer in a slot.** It is
+**MM-PAR-17 (H). A task pool's budgets are fixed when it starts, and
+running one out is an answer in a slot.** It is
 never a hang or a dropped task. `TaskOpts` holds every bound a `Task`
 pool keeps (`MM-PAR-13`), and each has a stated outcome:
 
@@ -6458,12 +6459,12 @@ pool keeps (`MM-PAR-13`), and each has a stated outcome:
 | Answers in flight | `width` and `limit` | the slab: `width` slots of `limit` bytes | an answer over `limit` answers `Err` 1003 |
 | Kept answers | `keep` (`taskWithKeep`) | the answer bytes one `taskMap`, `taskMapWith` or `taskMapDecoded*` call holds | the answer that would pass it, and every non-empty `Ok` after it, answers `Err` `taskOverBudgetCode` (1012), and the pool is cancelled |
 | Task memory | `memory` (`taskWithMemory`) | bytes one task's arena may map beyond what its process began with | the task traps 70 in its own process and answers `Err` 70, "task out of memory"; its siblings and the caller go on |
-| Stack | none yet | a task runs on the stack of the thread that started the pool | a task that overflows it dies of the signal and answers that status, 139 or 138, in its slot |
+| Stack | `stack` (`taskWithStack`), `taskStackDefault` (8 MiB) when 0 | the stack one task runs on: that many bytes, rounded up to 64 KiB, mapped in the task's process with a 64 KiB guard below, whichever thread started the pool | the task touches the guard, traps 86 in its own process and answers `Err` 86, "task out of stack"; its siblings and the caller go on |
 
-`keep` and `memory` default to 0, no bound. `taskFold` holds no answer,
-so `keep` doesn't bound it, and each task's arena is its own process's.
-A call still answers one `Result` per task, so `taskMap`'s answer is
-O(n) words however small `keep` is.
+`keep` and `memory` default to 0, no bound, and `stack` to 8 MiB.
+`taskFold` holds no answer, so `keep` doesn't bound it, and each task's
+arena is its own process's. A call still answers one `Result` per task,
+so `taskMap`'s answer is O(n) words however small `keep` is.
 
 *Shutdown.* A cancellation, from the token, `failFast`, a refused spawn
 or the `keep` budget, starts nothing more. Every task not yet started
@@ -6486,17 +6487,40 @@ module that doesn't name the primitive emits none of it. The cap is a
 mutable runtime global, so under `--threads` it is per thread, as the
 arena it caps is. A task's child sets it before the task runs.
 
-*Limits.* Not yet: a task's stack size isn't a budget, so a pool started
-from a `--threads` binding gives its tasks that thread's smaller stack
-([roadmap](roadmap.md#concurrency-and-bounded-execution)). The memory
-budget counts the arena's mapped chunks, not what the kernel or a
-foreign library maps for the task.
+*The task's stack.* `(__axiom_stack_run bytes thunk arg)` runs
+`(thunk arg)` on a stack the call maps and answers what the thunk
+answered. The stack is `bytes` rounded up to 64 KiB, with a 64 KiB
+guard below it that no access may touch, and it's unmapped when the
+thunk returns. A task's child runs the task on one, so its stack is its
+budget, not the stack of the thread that forked it. A `--threads`
+binding's own stack is 512 KiB on Darwin.
+
+The first call on a thread installs a 64 KiB alternate signal stack and
+a handler for `SIGSEGV` and `SIGBUS`. A fault in the guard writes `axiom:
+stack overflow: the fault address is in the guard below a mapped stack`
+and exits 86. Any other fault takes its default action, so the process
+dies of its signal as it would without the handler. The thunk runs
+with no recovery point armed, so 86 isn't recoverable, and a mapping
+the kernel refuses traps 70 before the thunk runs. A module that
+doesn't name the primitive emits none of it. On Windows and bare metal,
+which have no `fork`, the call runs the thunk on the stack it's on.
+
+Lowering `RLIMIT_STACK` in the child isn't an equivalent. On Darwin a
+child forked from a thread is refused the `setrlimit` and keeps its
+thread's stack, and on Linux the limit binds only a main thread's stack.
+
+*Limits.* The memory budget counts the arena's mapped chunks, not what
+the kernel or a foreign library maps for the task. A frame larger than
+the 64 KiB guard can step past it.
 
 *Evidence.* `tests/stdlib/852-task-budgets.ax`: a `keep` budget
 spent on the third answer, a task over its `memory` budget beside one
 under it, and a shutdown from inside a task with the arena's live
-bytes back where they were. `scripts/check-task.sh` §13 runs both
-lowerings:
+bytes back where they were. `tests/stdlib/920-task-stack.ax`: a task
+50,000 calls deep answers 86 under a 256 KiB `stack` budget beside a
+sibling that answers Ok, and the default budget holds the same task,
+from the caller and from a pool started inside a `parallel` binding.
+`scripts/check-task.sh` §13 runs both lowerings:
 
 - peak RSS flat from 500 to 5,000 tasks under `keep`, against a
   control that grows;
@@ -6505,8 +6529,14 @@ lowerings:
 - a shutdown with 36 tasks queued or running, whose pids are all gone;
 - 20 against 200 rounds of an over-budget pool, flat in peak RSS and in
   the arena's live bytes;
-- three ablations, each red: the budget never checked, the cap never
-  set, and a region around each spawn again.
+- 920 at `--opt` 0 and 2, and 8 tasks under a 256 KiB `stack` budget
+  answering 4 Ok and 4 overflows, every pid gone and the arena's live
+  bytes back;
+- four ablations, each red: the budget never checked, the cap never
+  set, a region around each spawn again, and the task run on the stack
+  its process forked with. On Darwin that last one fails the pool
+  inside a `--threads` binding too, whose thread stack can't hold the
+  task.
 
 ---
 
@@ -7122,7 +7152,7 @@ moves), `MM-MUT-2`'s visibility through aliases, `MM-EXEC-6b`'s
 self-TCO (a fixture would stop `reference.md` from misattributing it to
 LLVM again), and `MM-LIFE-3`'s cycles stated *as* a property.
 
-All twelve of `MM-EXEC-16`'s executable POSIX exit statuses are gated:
+All thirteen of `MM-EXEC-16`'s executable POSIX exit statuses are gated:
 
 - 70 by `tests/stdlib/314-out-of-memory.ax`;
 - 71 by `tests/stdlib/310-effect-unhandled.ax`;
@@ -7135,7 +7165,8 @@ All twelve of `MM-EXEC-16`'s executable POSIX exit statuses are gated:
 - 82 by `tests/stdlib/544-misaligned-atomic.ax`;
 - 83 by `tests/stdlib/695-intmin-div-trap.ax`;
 - 84 by `tests/stdlib/696-shift-wide-trap.ax`;
-- 85 by `tests/stdlib/572-spawn-joined-twice.ax`.
+- 85 by `tests/stdlib/572-spawn-joined-twice.ax`;
+- 86 by `tests/stdlib/920-task-stack.ax`.
 
 The 75 and 76 fixtures each pin the sentence, the status, and the
 legal shapes the trap must stay silent on.

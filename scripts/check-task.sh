@@ -154,10 +154,18 @@
 #      A long run: 20 and 200 rounds of a pool over its budget hold the
 #      same peak RSS within 1 MiB and the same live arena bytes within
 #      4 KiB, and the control that keeps every round's answers must grow
-#      by 8 MiB. Ablations: `keepcut` (the budget never checked),
-#      `capcut` (the child never capped) and `spawnregion` (a region
+#      by 8 MiB. `stack`: tests/stdlib/920-task-stack.ax answers its
+#      golden in both lowerings at --opt 0 and 2 - under a 256 KiB budget
+#      a task 50,000 calls deep answers 86 beside a sibling that answers
+#      Ok, the default budget holds the same task, and so does a pool
+#      started inside a `parallel` binding - and 8 tasks under the small
+#      budget answer 4 Ok and 4 overflows, every pid gone and the arena's
+#      live bytes back. Ablations: `keepcut` (the budget never checked),
+#      `capcut` (the child never capped), `spawnregion` (a region
 #      around each spawn again, whose reset loses what the pool gave
-#      back), each on a copy of the library.
+#      back) and `stackcut` (the task run on the stack its process forked
+#      with, which on Darwin is a 512 KiB thread stack inside a
+#      `--threads` binding), each on a copy of the library.
 #
 # WHAT THE NUMBERS ARE. Peak RSS (`max_rss_kb`), in KiB, of the whole
 # program. Times are the programs' own `sysTimeoutMicros` readings -
@@ -541,7 +549,7 @@ cuts = {
   "layout": [("Task.ax", "(fn (taskHandlePid h)\n  (__spawn_pid h))", "(fn (taskHandlePid h)\n  (+ (__spawn_pid h) 1073741824))")],
   "look": [("Sys.ax", "(Ok (!= (& (memGetWord buf 0) 4294967295) 0))", "(Ok false)")],
   "slot": [("Task.ax", "(let ((slot (+ slab (* (% arg w) slotBytes))))", "(let ((slot (+ slab (* (% (+ arg 1) w) slotBytes))))")],
-  "limit": [("Task.ax", "            (if (> len limit)", "            (if (> len (* limit 1000))")],
+  "limit": [("Task.ax", "        (if (> len limit)", "        (if (> len (* limit 1000))")],
   "grace": [("Task.ax", "(if (&& (== cancelling 1) (>= now graceEnd))", "(if (&& (== cancelling 2) (>= now graceEnd))")],
   # A guard's release no longer asks whose lock it is: a forked copy of
   # a guard then lets go of the lock its parent holds.
@@ -570,6 +578,8 @@ cuts = {
   "spawnregion": [("Task.ax", "  (if (== mark 0)\n    (region r", "  (if true\n    (region r")],
   # Section 13. The child never caps its arena.
   "capcut": [("Task.ax", "      (taskCapArena memory)\n", "      0\n")],
+  # Section 13. The task runs on the stack its process forked with.
+  "stackcut": [("Task.ax", "      (__axiom_stack_run\n        stack\n        (lambda (i) (taskAnswer f slot limit tok i))\n        (/ arg w))\n", "      (taskAnswer f slot limit tok (/ arg w))\n")],
   # Section 12. The sleep stops after its first wait, which is asked
   # for a tenth of the time: a sleep that ends short.
   "shortsleep": [("Sys.ax", "            (if (>= now deadline)\n              (set state 1)\n              {\n                (sysWaitWordTimeout (+ buf 16) 0 (- deadline now))\n              })", "            {\n              (sysWaitWordTimeout (+ buf 16) 0 (/ (- deadline now) 10))\n              (set state 1)\n            }")],
@@ -1353,6 +1363,30 @@ task 2: err 70 task out of memory'
   else
     bad "$lowering long run: peak RSS '${small}' after 20 rounds, '${large}' after 200, control '${ctl}' KiB"
   fi
+  # stack: a task past its stack budget traps 86 in its own process.
+  rc=0; out="$(gate_timeout 60 "$bin" stack 2>/dev/null)" || rc=$?
+  grew="$(field "$out" backlog-grew)"
+  pids="$(awk '$1 == "pid" {print $2}' <<<"$out")"
+  if [[ $rc -eq 0 && "$(head -1 <<<"$out")" == "ok 4 overflow 4 other 0" ]] \
+     && [[ "$(wc -l <<<"$pids" | tr -d ' ')" == 8 ]] && gone $pids && [[ "$grew" =~ ^-?[0-9]+$ ]] && (( grew <= 4096 )); then
+    ok "$lowering stack: under a 256 KiB budget 4 deep tasks answered 86 and 4 shallow ones Ok, all 8 pids gone, the arena's live bytes moved by ${grew}"
+  else
+    bad "$lowering stack: exit $rc, '$(tr '\n' ';' <<<"$out")'"
+  fi
+  fx="$repo_root/tests/stdlib/920-task-stack.ax"
+  for lvl in 0 2; do
+    fbin="$work/stack-$lowering-O$lvl"
+    if ! build "$fbin" "$fx" ${flags[@]+"${flags[@]}"} --opt "$lvl"; then
+      bad "920-task-stack ($lowering -O$lvl) did not build"; sed 's/^/    /' "$fbin.build" | head -6; continue
+    fi
+    rc=0; gate_timeout 60 "$fbin" > "$fbin.out" 2> "$fbin.err" || rc=$?
+    if [[ "$rc" == 0 ]] && cmp -s "$repo_root/tests/stdlib/920-task-stack.out" "$fbin.out" \
+       && cmp -s "$repo_root/tests/stdlib/920-task-stack.err" "$fbin.err"; then
+      ok "920-task-stack ($lowering -O$lvl): 86 in its slot beside an Ok sibling, the default budget and a binding's pool hold the deep task"
+    else
+      bad "920-task-stack ($lowering -O$lvl): exit $rc, '$(tr '\n' ';' < "$fbin.out")' '$(tr '\n' ';' < "$fbin.err")'"
+    fi
+  done
 done
 if run_ablation keepcut "$budget" 60 "$work/abl-keepcut/prog" keep 500; then
   red keepcut "$([[ "$rc" == 0 && "$out" == "ok 16 over "* ]] && echo 1 || echo 0)"
@@ -1365,6 +1399,30 @@ if run_ablation capcut "$budget" 60 "$work/abl-capcut/prog" hog2 64; then
   red capcut "$([[ "$rc" == 0 && "$(sed -n 2p <<<"$out")" == "task 1: err 70 task out of memory" ]] && echo 1 || echo 0)"
   pkill -KILL -f "$work/abl-capcut/prog" 2>/dev/null || true
 fi
+stack_golden="$repo_root/tests/stdlib/920-task-stack.out"
+if run_ablation stackcut "$repo_root/tests/stdlib/920-task-stack.ax" 60 "$work/abl-stackcut/prog"; then
+  red stackcut "$([[ "$rc" == 0 && "$out" == "$(cat "$stack_golden")" ]] && echo 1 || echo 0)"
+  # Under --threads the binding is a thread, and its own stack is what
+  # the cut leaves the binding's task: on Darwin, 512 KiB, which the
+  # 50,000 calls overflow. glibc gives a thread `RLIMIT_STACK`, 8 MiB,
+  # which holds them, so there this line cannot go red.
+  dir="$work/abl-stackcut"
+  if (cd "$dir" && AXIOM_STDLIB="$dir/stdlib" "$axc" build --threads --opt 2 --input prog.ax --output "$dir/prog-threads") > "$dir/threads.log" 2>&1; then
+    rc=0; out="$(gate_timeout 60 "$dir/prog-threads" 2>/dev/null)" || rc=$?
+    line="$(grep '^binding: ' <<<"$out")"
+    if [[ "$(uname -s)" == Darwin ]]; then
+      if [[ "$line" == "binding: ok 50000" ]]; then
+        bad "stackcut threads: the binding's task still held 50,000 calls on a 512 KiB thread stack - the check is blind to it"
+      else
+        ok "stackcut threads: red - with the cut, the pool inside a --threads binding answers '${line}'"
+      fi
+    else
+      echo "note stackcut threads: '${line}' - this platform's threads have the stack the budget gives, so the binding's line cannot go red here"
+    fi
+  else
+    bad "stackcut threads: the ablated copy did not build under --threads"; sed 's/^/    /' "$dir/threads.log" | head -6
+  fi
+fi
 
 echo
 if (( failed > 0 )); then
@@ -1375,5 +1433,5 @@ echo "check-task: $checks checks - the mutex excludes in both lowerings, timed w
 echo "            keep time, every task failure is a value in its slot, no child"
 echo "            outlives the pool, memory is flat, ordered answers and float"
 echo "            reductions are the sequential bits, a sleep keeps time on a clock"
-echo "            that never steps back, kept answers and task arenas obey their budgets,"
+echo "            that never steps back, kept answers, task arenas and task stacks obey their budgets,"
 echo "            and every ablation turns it red"

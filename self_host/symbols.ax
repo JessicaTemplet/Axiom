@@ -405,6 +405,15 @@
 ; Byte-wise ascending insertion sort, in place: stage0's effect list
 ; arrives sorted (probed: `Beta,zeta`), and byte order is what Rust's
 ; string ordering is.
+; Whether `v` holds `x`, from index `i` on.
+(pub :: smHasIndex (-> (Vec Int) Int Int Bool))
+(pub fn (smHasIndex v x i)
+  (if (>= i (vecLen v))
+    false
+    (if (== (vecGet v i) x)
+      true
+      (smHasIndex v x (+ i 1)))))
+
 (pub :: saSort (-> (Vec String) (Vec String)))
 (pub fn (saSort v)
   (let ((mut i 1))
@@ -1528,15 +1537,27 @@
                             (cast (Vec String) 0)))
                         (let ((eps (memGetWordVec e 6)))
                           (if (&& (> (vecLen eps) 0) (== isB 0))
+                            ; In parameter order, whatever order the checker met
+                            ; them in: the row names a set, and a set printed in
+                            ; walk order moves whenever the walk does.
                             (let (
                               (params (saGet (memGetWordVec sm 16) (memGetWordVec sm 17) name))
                               (pnames vecNew)
+                              (mut top 0)
+                              (mut pi 0)
                               (mut k 0)
                             )
                               {
                                 (while (< k (vecLen eps))
-                                  (let ((pi (vecGet eps k)))
-                                    {
+                                  {
+                                    (if (> (vecGet eps k) top)
+                                      (set top (vecGet eps k))
+                                      0)
+                                    (set k (+ k 1))
+                                  })
+                                (while (<= pi top)
+                                  {
+                                    (if (smHasIndex eps pi 0)
                                       (vecPush
                                         pnames
                                         (if (&&
@@ -1546,8 +1567,9 @@
                                           (< pi (vecLen params)))
                                           (vecGetStr params pi)
                                           (fmtInt pi)))
-                                      (set k (+ k 1))
-                                    }))
+                                      0)
+                                    (set pi (+ pi 1))
+                                  })
                                 (vecPush metas (concat "effect-params=" (saJoinComma pnames)))
                               })
                             (cast (Vec String) 0)))

@@ -571,9 +571,15 @@ API: [Crypto modules](stdlib-api.md#cryptosecret).
 
 `Task.taskMap` runs bounded `(-> Int String)` workers and returns ordered
 `Result` values. `taskMapWith` adds deadlines, cancellation and fail-fast
-options, and budgets: `taskWithKeep` for the answer bytes a call holds
-and `taskWithMemory` for each task's memory. Tested by
-`tests/stdlib/852-task-budgets.ax`. `taskMapDecoded` and `taskMapDecodedWith` decode successful
+options, and budgets: `taskWithKeep` for the answer bytes a call holds,
+`taskWithMemory` for each task's memory, and `taskWithStack` for the
+stack each task runs on, 8 MiB by default (`taskStackDefault`). A task
+that recurses past its stack answers `Err` 86, "task out of stack",
+while its siblings go on. The stack is the task's own, so it's the same
+size wherever the pool started. Tested by
+`tests/stdlib/852-task-budgets.ax` and `tests/stdlib/920-task-stack.ax`.
+
+`taskMapDecoded` and `taskMapDecodedWith` decode successful
 answers into typed values in the parent, in submit order; transport
 errors bypass the decoder. The byte limit covers the encoded answer,
 so your decoder must bound its own storage. `taskFold` consumes results

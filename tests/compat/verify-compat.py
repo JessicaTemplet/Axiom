@@ -180,12 +180,20 @@ def identity(row):
 
 def contract(row):
     """Everything a caller can depend on: the type and the contract
-    metadata, with the annotations stripped."""
+    metadata, with the annotations stripped.
+
+    `#effect-params=` names a SET of parameters, so it is compared in
+    one order: a baseline written before `symbols` printed it in
+    parameter order carries the order the checker happened to meet
+    them in, and a walk that meets them differently changes nothing a
+    caller can see."""
     tail = row.split(" ", 4)[4]
     for m in re.findall(r'\s#[a-z-]+(?:=\S*)?', tail):
         if m.strip().startswith(ANNOTATION_META):
             tail = tail.replace(m, "")
-    return tail
+    return re.sub(r'#effect-params=(\S+)',
+                  lambda g: "#effect-params=" + ",".join(sorted(g.group(1).split(","))),
+                  tail)
 
 
 def deprecated(row):
