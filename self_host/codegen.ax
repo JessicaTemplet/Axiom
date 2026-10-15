@@ -7413,6 +7413,30 @@
 (pub fn (heapCeilingBytes)
   (ceilingScan 1))
 
+; Whether this build's allocator poisons a block as it files it:
+; `--alloc-poison` on the command line. A filed block's payload is
+; overwritten with a pattern before it can be handed out again, so a
+; read or write of freed memory in the program being built sees the
+; pattern rather than the bytes it left there. The handout still
+; promises zeroed memory (MM-ALLOC-6): only the filing changes.
+; Nothing in a default build changes - the flag is read here, from
+; the emitter's own arguments, as `--heap-ceiling` is.
+(pub :: allocPoisonOn Int)
+;@axiom:effect(io)
+(pub fn (allocPoisonOn)
+  (poisonScan 1))
+
+(pub :: poisonScan (-> Int Int))
+;@axiom:effect(io)
+(pub fn (poisonScan i)
+  (if (>= i sysArgc)
+    0
+    (if (strEq (sysArg i) "--")
+      0
+      (if (strEq (sysArg i) "--alloc-poison")
+        1
+        (poisonScan (+ i 1))))))
+
 (pub :: ceilingScan (-> Int Int))
 ;@axiom:effect(io)
 (pub fn (ceilingScan i)
@@ -11708,7 +11732,16 @@
     (emitLine cg "  %ok = and i1 %ok1, %ok2")
     (emitLine cg "  br i1 %ok, label %push, label %after")
     (emitLine cg "push:")
-    (emitFloorClass cg "pf" "%bcnt" "%pcls" "push")
+    (if (== (allocPoisonOn) 1)
+      (emitPoisonFill cg "pz" "%h" "%bcnt" "push"))
+    (emitFloorClass
+      cg
+      "pf"
+      "%bcnt"
+      "%pcls"
+      (if (== (allocPoisonOn) 1)
+        "pzdone"
+        "push"))
     (emitLine cg "  %pslotp = getelementptr [4097 x i64], ptr @__axiom_slabs, i64 0, i64 %pcls")
     (emitLine cg "  %ohead = load i64, ptr %pslotp")
     (emitLine cg "  %oenc = sub i64 -2, %ohead")
@@ -11781,7 +11814,16 @@
     (emitLine cg "  store i64 0, ptr %D")
     (emitLine cg "  br i1 %dok, label %pushD, label %drain")
     (emitLine cg "pushD:")
-    (emitFloorClass cg "df" "%dcnt" "%dcls" "pushD")
+    (if (== (allocPoisonOn) 1)
+      (emitPoisonFill cg "pzD" "%Dw" "%dcnt" "pushD"))
+    (emitFloorClass
+      cg
+      "df"
+      "%dcnt"
+      "%dcls"
+      (if (== (allocPoisonOn) 1)
+        "pzDdone"
+        "pushD"))
     (emitLine cg "  %dslotp = getelementptr [4097 x i64], ptr @__axiom_slabs, i64 0, i64 %dcls")
     (emitLine cg "  %dohead = load i64, ptr %dslotp")
     (emitLine cg "  %dbase = add i64 %Dw, -16")
@@ -11912,6 +11954,51 @@
 ; helper is emitted into, because the rounding sits behind a branch:
 ; a block at or below 1 KiB - every constructor, closure and header -
 ; pays one compare for it, not the logarithm.
+; Fill a reusable block after its reference walk has finished. The
+; allocator header stays intact; allocation still returns zeroed memory.
+(pub :: emitPoisonFill (-> Int String String String String Int))
+(pub fn (emitPoisonFill cg p base cnt from)
+  {
+    (emitLine cg (concat "  %" (concat p (concat "bytes = shl i64 " (concat cnt ", 3")))))
+    (emitLine
+      cg
+      (concat
+        "  %"
+        (concat p (concat "end = add i64 " (concat base (concat ", %" (concat p "bytes")))))))
+    (emitLine cg (concat "  br label %" (concat p "loop")))
+    (emitLine cg (concat p "loop:"))
+    (emitLine
+      cg
+      (concat
+        "  %"
+        (concat
+          p
+          (concat
+            "i = phi i64 [ "
+            (concat
+              base
+              (concat
+                ", %"
+                (concat from (concat " ], [ %" (concat p (concat "next, %" (concat p "body ]")))))))))))
+    (emitLine
+      cg
+      (concat
+        "  %"
+        (concat p (concat "more = icmp ult i64 %" (concat p (concat "i, %" (concat p "end")))))))
+    (emitLine
+      cg
+      (concat
+        "  br i1 %"
+        (concat p (concat "more, label %" (concat p (concat "body, label %" (concat p "done")))))))
+    (emitLine cg (concat p "body:"))
+    (emitLine cg (concat "  %" (concat p (concat "p = inttoptr i64 %" (concat p "i to ptr")))))
+    (emitLine cg (concat "  store i64 -6510615555426900571, ptr %" (concat p "p")))
+    (emitLine cg (concat "  %" (concat p (concat "next = add i64 %" (concat p "i, 8")))))
+    (emitLine cg (concat "  br label %" (concat p "loop")))
+    (emitLine cg (concat p "done:"))
+    cg
+  })
+
 (pub :: emitFloorClass (-> Int String String String String Int))
 (pub fn (emitFloorClass cg p words out from)
   (let (

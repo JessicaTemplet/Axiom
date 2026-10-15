@@ -137,7 +137,7 @@ done
 # a gate that grows slower belongs there too. `check-gate-lib.sh`
 # requires every name here to be a script that exists.
 FAST_RE='check-(type-pinning|gate-lib|ci-coverage|vec-field-shape|cast-arg-root|tail-position|agent-policy|agent-calls|c-abi|nostd-subset|platform-constants|seed-supply-chain|terminal-restore|version|windows-entry|diverging-tyvar|mir-projection|frontend-parity|trap-statuses|backtrace|test-runner|packages|doc-drift|diagnostic-coverage|examples|repl-highlight|tail-calls|install|release-targets)\.sh$'
-EXPENSIVE_RE='check-(bootstrap|seed-lineage|seed-provenance|ddc|cross-targets|embedded|windows-hello|reproducible|memory-baseline|arena-reset-rate|container-reclaim|reclaim-soak|steady-state|recover|name-scale|type-namespace|degenerate|stack-bound|stack-depth)\.sh$'
+EXPENSIVE_RE='check-(bootstrap|poisoned-alloc|seed-lineage|seed-provenance|ddc|cross-targets|embedded|windows-hello|reproducible|memory-baseline|arena-reset-rate|container-reclaim|reclaim-soak|steady-state|recover|name-scale|type-namespace|degenerate|stack-bound|stack-depth)\.sh$'
 all=(); omitted=()
 for g in scripts/check-*.sh; do
   if [[ "$profile" == fast && ! "$g" =~ $FAST_RE ]] ||

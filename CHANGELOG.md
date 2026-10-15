@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- `--alloc-poison` overwrites a reusable block's payload when it is freed.
+  Allocation still returns zeroed memory. CI builds poisoned compiler
+  generations and compares their emitted IR. Tested by
+  `scripts/check-poisoned-alloc.sh`.
+
 - Formatter width trials stop once a call cannot fit, and nested trials
   print directly. Deep expressions no longer trigger exponential work.
   The source tree, examples and snapshots follow the width-based layout.

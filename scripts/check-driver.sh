@@ -714,7 +714,7 @@ done
 # flag is added to `flagArity`, it is added here in the same change.
 "$s1" --help >full-help.txt 2>&1
 missing=""
-for f in --input --output -o --target --opt --heap-ceiling --link-lib --link-search --crate \
+for f in --input --output -o --target --opt --heap-ceiling --alloc-poison --link-lib --link-search --crate \
          --emit-rust-binding --filter --diagnostic-format --emit-llvm --emit-staticlib --threads \
          --check --builtins --calls --mir --axir --list --no-banner --out --no-open --missing \
          --help -h --version -V; do

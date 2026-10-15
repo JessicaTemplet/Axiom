@@ -1890,6 +1890,14 @@ lowering. `--heap-ceiling BYTES` bounds the arena and refuses threads.
 `--obfuscate` obscures literals and internal names in executables;
 [obfuscation](obfuscation.md) explains its limits and asset packing.
 
+For memory debugging, pass `--alloc-poison` to `build`, `run`, `test` or
+`emit-llvm`. Freed payloads are overwritten when their blocks enter the
+reuse lists. New allocations still start zeroed. This helps expose stale
+references; it does not check every invalid memory access or poison an
+arena reset.
+
+Tested by `scripts/check-poisoned-alloc.sh`.
+
 ### Machine-readable output
 
 Use `--diagnostic-format=ai` for AXDL diagnostics and AXSYM symbols.
