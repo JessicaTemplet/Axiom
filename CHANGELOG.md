@@ -40,6 +40,11 @@ counted environments.
 
 <!-- release-notes: end of highlights -->
 
+- Dead-code elimination follows live references through private global
+  initialisers, removing unused function descriptors and callbacks.
+  Thread backtraces reference an entry point only when it survives pruning.
+  Tested by `scripts/check-dead-code.sh`.
+
 - Named unary function values use immutable static descriptors, avoiding
   allocations when passed, stored or captured. Capturing lambdas retain
   their counted environments. Tested by

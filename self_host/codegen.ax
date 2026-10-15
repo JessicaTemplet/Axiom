@@ -13053,14 +13053,11 @@
 ;                              into an ordinary executable calls
 ;                              `axiom_release` from Rust, where no IR
 ;                              of ours mentions it.
-;   every `@name` written      the catch-all, and the reason this is a
-;   OUTSIDE any define         root class rather than a list. A global
-;                              initialiser that names a function keeps
-;                              it, whatever the emitter grows next; so
-;                              does an `@name` inside a string constant
-;                              that merely looks like one. Deliberately
-;                              too generous - see the failure-mode note
-;                              above for why that costs nothing.
+;   non-local globals and     externally observable initializers and
+;   other top-level statements LLVM retention lists remain roots. Private
+;                              and internal globals are graph nodes: a
+;                              live reference follows their initializers,
+;                              while an unused descriptor pins no callback.
 ;
 ; and, transitively, every `@name` in the body of anything reachable.
 ;
@@ -13076,7 +13073,7 @@
 ; The four tables the walk carries, bundled so the scanners take one
 ; parameter instead of four: 0 = the defined symbols, interned;
 ; 1 = intern id -> index into `defStart`; 2 = index -> 0/1 live;
-; 3 = the worklist of defines marked live and not yet scanned.
+; 3 = the worklist of definitions marked live and not yet scanned.
 (pub :: pruneCtxNew (-> Int (Vec Int) (Vec Int) (Vec Int) (Vec Int)))
 (pub fn (pruneCtxNew si idToDef live stack)
   {
@@ -13171,68 +13168,144 @@
     }
   })
 
-; Index every `define` in the buffer: its symbol, its first and last
-; line, and for each line the define it belongs to (as index + 1, so 0
-; means "outside any define" and is the root class above).
-;
-; The block structure this relies on is the emitter's own and is
-; checked by construction: `emitFnDef` and every runtime emitter close
-; with a bare `}` in column 0, and nothing else in the buffer is a bare
-; `}` - a body's own lines are indented and its labels end in `:`.
+; A module-local global is reachable only through a real reference. Other
+; globals retain their initializer roots, including LLVM's observable lists.
+(:: pruneLocalGlobal (-> String Int Bool))
+(fn (pruneLocalGlobal line end)
+  (if (< end 0)
+    false
+    {
+      (let rest (strSlice line end (- (strLen line) end)))
+      (|| (strStartsWith rest " = private ") (strStartsWith rest " = internal "))
+    }))
+
+; Aggregate initializers can span lines. Delimiters inside a quoted name,
+; string or comment are data, so they do not change the continuation depth.
+(:: pruneGlobalDepth (-> String Int Int))
+(fn (pruneGlobalDepth line depth)
+  {
+    (let mut level depth)
+    (let mut i 0)
+    (let n (strLen line))
+    (while (< i n)
+      {
+        (let c (strByte line i))
+        (if (== c 34)
+          {
+            (let end (symtabQuoteEnd line (+ i 1) n))
+            (set i (if (< end 0)
+              n
+              end))
+          }
+          (if (== c 59)
+            (set i n)
+            {
+              (if (|| (== c 40) (|| (== c 91) (|| (== c 123) (== c 60))))
+                (set level (+ level 1))
+                (if (|| (== c 41) (|| (== c 93) (|| (== c 125) (== c 62))))
+                  (set level (- level 1))))
+              (set i (+ i 1))
+            }))
+      })
+    level
+  })
+
+; A balanced initializer can still continue on the next line: its value
+; may follow an aggregate type, or an alignment/metadata suffix may follow
+; the value. Close the node at the next module statement instead. A bare
+; @reference, named type or metadata attachment on a continuation line
+; is not a definition. Driver directive comments stay independent of any
+; preceding global: deleting a string must not delete its extern library.
+(:: pruneModuleLine (-> String Bool))
+(fn (pruneModuleLine line)
+  (if (|| (strStartsWith line "@")
+        (|| (strStartsWith line "%") (|| (strStartsWith line "$") (strStartsWith line "!"))))
+    {
+      (let end (pruneRefEnd line 1 (strLen line)))
+      (strStartsWith (strSlice line end (- (strLen line) end)) " =")
+    }
+    (|| (strStartsWith line "define ")
+      (|| (strStartsWith line "declare ")
+        (|| (strStartsWith line "target ")
+          (|| (strStartsWith line "source_filename ")
+            (|| (strStartsWith line "module asm ")
+              (|| (strStartsWith line "attributes ")
+                (|| (strStartsWith line "uselistorder ")
+                  (|| (strStartsWith line "uselistorder_bb ")
+                    (strStartsWith line "; axiom-")))))))))))
+
+; Index functions and module-local global definitions in the same graph.
+; Each line records its node index plus one; zero remains a top-level root.
+; Function bodies end at the emitter's bare closing brace. Global nodes
+; include all initializer and attribute lines before the next statement.
 (pub :: pruneIndexDefs (-> (Vec Int) Int (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int) Int))
 ;@axiom:effect(unsafe)
 (pub fn (pruneIndexDefs lines si idToDef defStart defEnd live defOf)
   {
     (let mut i 0)
     (let mut cur (- 0 1))
-    {
-      (while (< i (vecLen lines))
-        {
+    (let mut function 0)
+    (let mut depth 0)
+    (while (< i (vecLen lines))
+      {
+        (let line (vecGetStr lines i))
+        (if (&& (>= cur 0) (&& (== function 0) (&& (== depth 0) (pruneModuleLine line))))
+          (set cur (- 0 1)))
+        (if (>= cur 0)
           {
-            (let ln (vecGetStr lines i))
-            (if (>= cur 0)
+            (vecPush defOf (+ cur 1))
+            (vecSet defEnd cur i)
+            (if (== function 1)
+              (if (strEq line "}")
+                (set cur (- 0 1)))
+              (set depth (pruneGlobalDepth line depth)))
+          }
+          {
+            (let isFunction (strStartsWith line "define "))
+            (let at
+              (if isFunction
+                (symtabAtOf line 0 (strLen line))
+                (if (strStartsWith line "@")
+                  0
+                  (- 0 1))))
+            (let end
+              (if (< at 0)
+                (- 0 1)
+                (if isFunction
+                  (symtabEndOf line (+ at 1) (strLen line))
+                  (pruneRefEnd line (+ at 1) (strLen line)))))
+            (if (if (|| (< at 0) (< end 0))
+              false
+              (|| isFunction (pruneLocalGlobal line end)))
               {
-                (vecPush defOf (+ cur 1))
-                (if (strEq ln "}")
+                (let sym (strSlice line (+ at 1) (- end (+ at 1))))
+                (let d (vecLen defStart))
+                (vecPush defStart i)
+                (vecPush defEnd i)
+                (vecPush live 0)
+                {
+                  (let id (internIntern si sym))
+                  (if (== id (vecLen idToDef))
+                    (vecPush idToDef d)
+                    (as 0 (Vec Int)))
+                }
+                (vecPush defOf (+ d 1))
+                (if isFunction
                   {
-                    (vecSet defEnd cur i)
-                    (set cur (- 0 1))
+                    (set function 1)
+                    (set cur d)
+                  }
+                  {
+                    (set function 0)
+                    (set depth (pruneGlobalDepth line 0))
+                    (set cur d)
                   })
               }
-              (if (strStartsWith ln "define ")
-                {
-                  (let at (symtabAtOf ln 0 (strLen ln)))
-                  (if (< at 0)
-                    (vecPush defOf 0)
-                    {
-                      (let end (symtabEndOf ln (+ at 1) (strLen ln)))
-                      (if (< end 0)
-                        (vecPush defOf 0)
-                        {
-                          (let sym (strSlice ln (+ at 1) (- end (+ at 1))))
-                          (let d (vecLen defStart))
-                          {
-                            (vecPush defStart i)
-                            (vecPush defEnd i)
-                            (vecPush live 0)
-                            {
-                              (let id (internIntern si sym))
-                              (if (== id (vecLen idToDef))
-                                (vecPush idToDef d)
-                                (as 0 (Vec Int)))
-                            }
-                            (vecPush defOf (+ d 1))
-                            (set cur d)
-                          }
-                        })
-                    })
-                }
-                (vecPush defOf 0)))
-          }
-          (set i (+ i 1))
-        })
-      0
-    }
+              (vecPush defOf 0))
+          })
+        (set i (+ i 1))
+      })
+    0
   })
 
 ; The transitive closure, as a worklist rather than a fixpoint sweep:
@@ -13262,7 +13335,7 @@
     }
   })
 
-; The buffer without the lines of any define that was never reached.
+; The buffer without unreachable functions and module-local globals.
 (pub :: pruneRebuild (-> (Vec Int) (Vec Int) (Vec Int) (Vec String)))
 ;@axiom:effect(unsafe)
 (pub fn (pruneRebuild lines defOf live)
@@ -13330,14 +13403,9 @@
           (pruneMark ctx "axiom_alloc")
           (pruneMark ctx "axiom_retain")
           (pruneMark ctx "axiom_release")
-          ; And the catch-all, which is why the three above are the
-          ; only names this pass has to know: every `@name` written
-          ; OUTSIDE any define. A global initialiser that holds a
-          ; function's address keeps that function, whatever the
-          ; emitter grows next, and so does an `@`-shaped run of bytes
-          ; inside a string constant that merely looks like one. That
-          ; second case is the price of the first and it is the right
-          ; way round - it retains, it never removes.
+          ; Non-local globals and other top-level statements remain
+          ; roots, including LLVM retention lists. Private and internal
+          ; initializers are traversed only when their graph node is live.
           {
             (let mut i 0)
             (while (< i (vecLen lines))
@@ -14181,8 +14249,8 @@
 ; is the fourth: 64 frames is past anything this compiler's own
 ; `check-stack-depth.sh` measures, and a runaway loop printing forever
 ; would bury the message it exists to qualify.
-(pub :: emitBtWalk (-> Int Int))
-(pub fn (emitBtWalk cg)
+(pub :: emitBtWalk (-> Int (Vec Int) Int))
+(pub fn (emitBtWalk cg names)
   {
     (emitLine cg "define internal void @__axiom_backtrace() #0 {")
     (emitLine cg "entry:")
@@ -14248,12 +14316,10 @@
     ; confidence as the three that are - the one output `emitBtName`'s
     ; header says a backtrace must never produce.
     ;
-    ; EMITTED ONLY UNDER `cgThreads`, because `@__axiom_par_entry` is:
-    ; a module with no thread runtime has no such symbol to take the
-    ; address of, and every program that spawns no thread must stay
-    ; byte-identical (`scripts/check-thread-local.sh`'s OFF path,
-    ; `scripts/check-parallel.sh` arm 3).
-    (if (cgThreads cg)
+    ; Stop at a thread entry only when that entry survived pruning.
+    ; `cgThreads` also sees unreachable source functions, whose thread
+    ; runtime can be removed before this late backtrace emission.
+    (if (&& (cgThreads cg) (symtabHas names "__axiom_par_entry" 0))
       {
         (emitLine cg "  %pe = ptrtoint ptr @__axiom_par_entry to i64")
         (emitLine cg "  %isentry = icmp eq i64 %at, %pe")
@@ -14333,7 +14399,7 @@
           "@__axiom_bt_mainaddr = internal constant i64 -1"))
       (emitLine cg "")
       (emitBtName cg n ln)
-      (emitBtWalk cg)
+      (emitBtWalk cg names)
       cg
     }
   })

@@ -112,7 +112,7 @@ For bug reports and the supported version, see [security and support](../SECURIT
 | `Bool` | Boolean, with the literals `true` and `false`. A distinct type from `Int`, and the type `if` tests. | `i64` |
 | `Char` | Character. A codepoint at run time, and a distinct type from `Int`. | `i64` |
 | `String` | A `Str` handle: the address of a `{ length, bytes, owner }` header. One word wide like `Int`, but a distinct type. `(as s Int)` converts a `String` to an `Int`. See [Standard library](reference.md#standard-library). | `i64` |
-| `()` | The empty tuple type, with no value. | `i64` |
+| `()` | The unit type, whose one value is `()`. | `i64` |
 
 Every entry in the LLVM column is `i64`. Types exist only while the
 compiler checks your program, so every value is one machine word:

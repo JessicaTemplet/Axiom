@@ -265,13 +265,39 @@ tl_p="$(grep -c 'thread_local' "$work/p470.ll" || true)"
 tl_t="$(grep -c '= internal thread_local(localexec) global' "$work/t470.ll" || true)"
 if [[ "$tl_p" == 0 ]]; then ok "processes: no thread_local in the module"; else bad "processes: $tl_p thread_local line(s)"; fi
 # Six allocator globals and the recovery point, two child-registry
-# globals (MM-PAR-7), and three resource-owner registry globals
-# (MM-EXEC-20). This fixture declares no effect, so it has no evidence
-# slot. Check every name as well as the exact total.
-if [[ "$tl_t" == 12 ]]; then ok "threads: exactly 12 thread_local(localexec) globals - allocator, recovery point and both registries"; else bad "threads: $tl_t thread_local globals, expected 12"; grep 'thread_local' "$work/t470.ll" | sed 's/^/     /' | head -14; fi
-for g in __axiom_bump __axiom_bump_end __axiom_chunk __axiom_free __axiom_high __axiom_slabs __axiom_recover_top __axiom_par_live __axiom_par_seq __axiom_res_head __axiom_res_seq __axiom_res_unwinding; do
+# globals (MM-PAR-7), and the resource-owner head and unwinding flag
+# (MM-EXEC-20). This fixture declares no effect and creates no resource
+# owner, so its evidence slot and owner sequence counter are absent.
+if [[ "$tl_t" == 11 ]]; then ok "threads: exactly 11 live thread_local(localexec) globals - allocator, recovery point and both registries"; else bad "threads: $tl_t thread_local globals, expected 11"; grep 'thread_local' "$work/t470.ll" | sed 's/^/     /' | head -14; fi
+live_tls=(__axiom_bump __axiom_bump_end __axiom_chunk __axiom_free
+  __axiom_high __axiom_slabs __axiom_recover_top __axiom_par_live
+  __axiom_par_seq __axiom_res_head __axiom_res_unwinding)
+for g in "${live_tls[@]}"; do
   grep -q "^@$g = internal thread_local(localexec) global" "$work/t470.ll" || bad "threads: @$g did not move"
 done
+if grep -q '^@__axiom_res_seq =' "$work/t470.ll"; then
+  bad "threads: an unused resource sequence counter survived pruning"
+else
+  ok "threads: the unused resource sequence counter is absent"
+fi
+# 471's formatting path creates a stdout resource owner, so its sequence
+# counter must survive too. Distinguish live state from a declaration
+# dragged in by an imported module.
+if "$axc" --threads emit-llvm "$fx471" -o "$work/t471.ll" > "$work/t471-emit.log" 2>&1; then
+  tl_trap="$(grep -c '= internal thread_local(localexec) global' "$work/t471.ll" || true)"
+  missing_tls=""
+  for g in "${live_tls[@]}" __axiom_res_seq; do
+    grep -q "^@$g = internal thread_local(localexec) global" "$work/t471.ll" || missing_tls="$missing_tls $g"
+  done
+  if [[ "$tl_trap" == 12 && -z "$missing_tls" ]]; then
+    ok "threads: the resource-using trap fixture retains all 12 live TLS globals"
+  else
+    bad "threads: the trap fixture emitted $tl_trap TLS globals, expected 12; missing:$missing_tls"
+  fi
+else
+  bad "threads: the resource-using trap fixture did not emit"
+  sed 's/^/     /' "$work/t471-emit.log" | head -5
+fi
 if grep -q '@__axiom_arg[cv] = internal thread_local' "$work/t470.ll"; then bad "threads: argc/argv moved; they are write-once and shared by design"; else ok "threads: @__axiom_argc/argv stayed shared"; fi
 # The runtime halves: the process module carries no pthread declare and
 # the thread module carries exactly two.

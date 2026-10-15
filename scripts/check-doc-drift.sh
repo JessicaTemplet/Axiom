@@ -1073,39 +1073,29 @@ fi
 # --------------------------------------------------------------------
 echo "== types: the LLVM column in docs/status.md, against what the emitter actually writes =="
 # --------------------------------------------------------------------
-# The column was WRONG FOR SEVEN OF NINE ROWS until 2026-08-25, and had
-# been for as long as the self-hosted compiler existed: it said `f64`,
-# `i1`, `i8`, `ptr` and `void`, which is what the RUST compiler lowered
-# to. This one is uniformly word-wide - a type is a checking-time
-# distinction that carries no representation - so `(-> Bool Bool)` emits
-# `define i64 @f(i64)` and so does every other row.
-#
-# Nothing caught it because nothing read the column. A table of facts
-# about the emitter is checkable against the emitter, so this compiles
-# one probe per row and reads the `define` line back.
-#
-# THE TYPE GOES IN PARAMETER POSITION on purpose. In return position a
-# probe needs a VALUE of the type, which is not expressible at all for
-# `()` - so the shape of the probe would vary per row and the rows
-# would stop being comparable. A parameter needs no value.
-#
-# AND `main` HOLDS A BARE REFERENCE TO `g`, which is not decoration.
-# Until 2026-08-31 the probe never mentioned `g` at all, and once the
-# emitter stopped writing functions a program cannot reach
-# (`pruneDeadDefs`) there was no `define @g` left to read: every row
-# failed at "the probe stopped measuring", which is that check
-# doing its job. Calling `g` would need a value of the row's type and
-# would undo the paragraph above, so `main` binds it instead - a bare
-# reference to a one-argument function makes `g` reachable through the
-# thunk the emitter synthesises, and leaves the `define` line this
-# reads byte-identical. Verified across every row.
+# Compile one probe per documented type and inspect its parameter ABI.
+# Each probe calls the same `g` body with a value of that row's type.
+# An unused binding of `g` is insufficient: pruning can remove its
+# descriptor and the function itself. Unknown rows fail closed until
+# they have a typed argument, and missing definitions still fail below.
 types_before=$failed
 tw="$work/types"; mkdir -p "$tw"
 row_n=0
 while IFS='|' read -r ty want; do
   [[ -z "$ty" ]] && continue
   row_n=$((row_n + 1))
-  printf '(:: g (-> %s Int))\n\n(fn (g x) 0)\n\n(:: main Int)\n\n(fn (main) { (let h g) 0 })\n' "$ty" > "$tw/t.ax"
+  case "$ty" in
+    Int) argument=0 ;;
+    Float) argument=0.0 ;;
+    Bool) argument=false ;;
+    Char) argument="'x'" ;;
+    String) argument='""' ;;
+    '()') argument='()' ;;
+    *)
+      echo "FAIL types: no typed argument for documented type \`$ty\` - extend the ABI probe"
+      failed=$((failed+1)); continue ;;
+  esac
+  printf '(:: g (-> %s Int))\n\n(fn (g x) 0)\n\n(:: main Int)\n\n(fn (main) (g %s))\n' "$ty" "$argument" > "$tw/t.ax"
   if ! ( cd "$tw" && AXIOM_STDLIB="$repo_root/stdlib" "$axc" build \
            --input t.ax --output t.bin --emit-llvm ) >/dev/null 2>&1; then
     echo "FAIL types: the probe for \`$ty\` does not compile - docs/status.md names a type the compiler will not take"
