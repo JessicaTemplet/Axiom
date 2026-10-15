@@ -2,7 +2,10 @@
 
 This is the specification of how an Axiom program represents,
 allocates, changes and reclaims memory, and of what a compiler author
-may assume while doing it.
+may assume while doing it. Axiom calls this combination of lexical
+regions, effect checks, reference counting and arenas **RECAP**. The
+[reference overview](reference.md#what-recap-guarantees) explains the name
+and its limits; the rules below define the contract.
 
 ## In brief
 

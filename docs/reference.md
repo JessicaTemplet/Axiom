@@ -1089,10 +1089,50 @@ line editor, and `Tui.Term` connects it to terminal I/O. The
 
 ## Memory
 
-Heap values use reference counting. Releasing the final share releases
-the block's owned fields and makes storage reusable. The executable
-includes its allocator. There is no tracing collector or `--gc` mode.
-Reference cycles require explicit application management.
+Axiom calls its memory model **RECAP**: region-scoped, effect-checked,
+counted, arena-hybrid, predictable reclamation. It combines checked
+lexical regions, automatic reference counting and arena resets. The
+executable includes its allocator and ownership support; there is no
+tracing collector or `--gc` mode.
+
+### What RECAP guarantees
+
+| Part | Meaning |
+|---|---|
+| Region-scoped | A lexical `region` resets its allocation extent when its body ends. The compiler checks visible reference escapes. |
+| Effect-checked | Calls carry inferred `Alloc`, `Mut` and `Unsafe` effects. Allocation, arena resets and raw-memory operations participate in effect checks and restrictions. |
+| Counted | The compiler inserts ownership bookkeeping. Releasing the final share releases owned fields and makes eligible small blocks reusable. |
+| Arena-hybrid | Region resets reclaim their extent regardless of counts, including cycles within that extent. Counting also operates inside regions where releases remain necessary. |
+| Predictable reclamation | Ownership events and explicit reset boundaries determine reclamation. This gives defined reclamation points, without promising constant-time destruction or reset. |
+
+Reference counting does not collect unreachable cycles. Larger dead
+blocks wait for an arena reset. Automatic reclamation is incomplete:
+some mutable slots and closure paths retain shares. Registered resource
+owners receive cleanup during region reset and recovery; raw foreign
+resources remain your responsibility. The
+[memory contract](memory-model.md#5-lifetimes-and-reclamation) states the
+ownership events and remaining limits.
+
+Effects describe operations and calls, rather than every generated
+instruction. Automatic retains and releases are runtime work; they do
+not introduce a separate drop effect. An `effect(unsafe)` declaration
+records a trusted boundary whose author must uphold its obligations.
+It does not prove that a raw address is valid.
+
+Axiom uses region and escape analysis rather than Rust's borrow checker.
+It also has a MIR representation and compiler-generated runtime helpers.
+Use `axiom symbols FILE --mir --diagnostic-format=ai` to inspect region
+facts. RECAP does not imply the absence of lifetime analysis or runtime
+costs, nor a worst-case execution-time bound. See
+[assurance](assurance.md) for the evidence needed by restricted builds.
+
+RECAP names Axiom's integration of these mechanisms. Combining regions
+and reference counting has [prior art](https://www2.eecs.berkeley.edu/Pubs/TechRpts/2000/5340.html).
+Rust also supports [reference-counted values with cycle obligations](https://doc.rust-lang.org/stable/book/ch15-06-reference-cycles.html).
+The name does not claim a unique reclamation algorithm.
+
+Tested by `tests/stdlib/479-region-reclaim.ax` and
+`tests/stdlib/557-cycle-backlog.ax`.
 
 ### Regions
 ```scheme
