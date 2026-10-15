@@ -89,17 +89,13 @@
 ; An IPv4 address from four octets the parser has already checked.
 (:: ipOfOctets (-> (Vec Int) IpAddr))
 (fn (ipOfOctets q)
-  (IpAddr
-    false
-    0
+  (IpAddr false 0
     (| (<< (vecGet q 0) 24) (| (<< (vecGet q 1) 16) (| (<< (vecGet q 2) 8) (vecGet q 3))))))
 
 ; An IPv6 address from eight groups the parser has already checked.
 (:: ipOfGroups (-> (Vec Int) IpAddr))
 (fn (ipOfGroups g)
-  (IpAddr
-    true
-    (pack16 (vecGet g 0) (vecGet g 1) (vecGet g 2) (vecGet g 3))
+  (IpAddr true (pack16 (vecGet g 0) (vecGet g 1) (vecGet g 2) (vecGet g 3))
     (pack16 (vecGet g 4) (vecGet g 5) (vecGet g 6) (vecGet g 7))))
 
 ; Octet `i` (0..3) of an IPv4 address.
@@ -249,8 +245,7 @@
   (if a.v6
     (&& (== (ipGroup a 0) 8193) (== (ipGroup a 1) 3512))
     (let ((net (>> a.lo 8)))
-      (||
-        (== net (+ (<< 192 16) 2))
+      (|| (== net (+ (<< 192 16) 2))
         (|| (== net (+ (<< 198 16) (+ (<< 51 8) 100))) (== net (+ (<< 203 16) 113)))))))
 
 ; Whether an IPv6 address is IPv4-mapped, `::ffff:a.b.c.d`.
@@ -534,15 +529,12 @@
 (:: ipTextOf (-> Int String))
 (fn (ipTextOf p)
   (if (&& (== (netAddrFamily p) afInet6) (mappedV4 p))
-    (concat
-      "::ffff:"
-      (concat
-        (fmtInt (memGetByte p 20))
-        (concat
-          "."
-          (concat
-            (fmtInt (memGetByte p 21))
-            (concat "." (concat (fmtInt (memGetByte p 22)) (concat "." (fmtInt (memGetByte p 23)))))))))
+    (concat "::ffff:"
+      (concat (fmtInt (memGetByte p 20))
+        (concat "."
+          (concat (fmtInt (memGetByte p 21))
+            (concat "."
+              (concat (fmtInt (memGetByte p 22)) (concat "." (fmtInt (memGetByte p 23)))))))))
     (netAddrText p)))
 
 ; ------------------------------------------------------------------
@@ -562,17 +554,8 @@
   (let ((s (strAlloc netAddrMaxBytes)))
     {
       (if a.v6
-        (netAddr6
-          (strData s)
-          port
-          (ipGroup a 0)
-          (ipGroup a 1)
-          (ipGroup a 2)
-          (ipGroup a 3)
-          (ipGroup a 4)
-          (ipGroup a 5)
-          (ipGroup a 6)
-          (ipGroup a 7))
+        (netAddr6 (strData s) port (ipGroup a 0) (ipGroup a 1) (ipGroup a 2) (ipGroup a 3)
+          (ipGroup a 4) (ipGroup a 5) (ipGroup a 6) (ipGroup a 7))
         (netAddr4 (strData s) port (ipOctet a 0) (ipOctet a 1) (ipOctet a 2) (ipOctet a 3)))
       s
     }))
@@ -589,11 +572,8 @@
           (vecPush g (+ (<< (memGetByte p (+ 8 (* 2 i))) 8) (memGetByte p (+ 9 (* 2 i))))))
         (ipOfGroups g)
       })
-    (IpAddr
-      false
-      0
-      (|
-        (<< (memGetByte p 4) 24)
+    (IpAddr false 0
+      (| (<< (memGetByte p 4) 24)
         (| (<< (memGetByte p 5) 16) (| (<< (memGetByte p 6) 8) (memGetByte p 7)))))))
 
 ;; The socket address of `ip` and `port`.
@@ -640,7 +620,8 @@
                   (netBadAddr "the port is not a number in 0..65535" "socketAddrParse")
                   (if (parseV4Into text 0 colon q)
                     (Ok (SocketAddr (sockBytes (ipOfOctets q) port)))
-                    (netBadAddr "not an IPv4 address; an IPv6 one goes in brackets" "socketAddrParse")))))
+                    (netBadAddr "not an IPv4 address; an IPv6 one goes in brackets"
+                      "socketAddrParse")))))
           })))))
 
 ;; The address as text, `a.b.c.d:port` or `[ipv6]:port`, with the IP
@@ -992,8 +973,7 @@
     __indexTrap
     (if (> (strLen s.pending) 0)
       (Ok
-        (netTake
-          s
+        (netTake s
           (if (< max (strLen s.pending))
             max
             (strLen s.pending))))
@@ -1160,8 +1140,7 @@
 ;@axiom:effect(io)
 (pub fn (tcpShutdown s how)
   (netCtx
-    (socketShutdown
-      s.file
+    (socketShutdown s.file
       (match how
         ((ShutdownRead) 0)
         ((ShutdownWrite) 1)
@@ -1249,10 +1228,7 @@
 ;@axiom:effect(io)
 (pub fn (tcpSetNoDelay s on)
   (netCtx
-    (socketSetInt
-      s.file
-      ipprotoTcp
-      tcpNoDelayOpt
+    (socketSetInt s.file ipprotoTcp tcpNoDelayOpt
       (if on
         1
         0))

@@ -207,7 +207,7 @@ def run(compiler):
         answers = {m["id"]: m for m in replies if "id" in m}
         assert all("error" not in answer for answer in answers.values()), answers
         capabilities = answers["init"]["result"]["capabilities"]
-        assert capabilities["textDocumentSync"] == {"openClose": True, "change": 2}
+        assert capabilities["textDocumentSync"] == {"openClose": True, "change": 2, "save": True}
         assert capabilities["positionEncoding"] == "utf-16"
         published = [m["params"] for m in replies
                      if m.get("method") == "textDocument/publishDiagnostics"]

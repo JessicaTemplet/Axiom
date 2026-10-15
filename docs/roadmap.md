@@ -93,8 +93,8 @@ integrator would still need.
 | Fixed-width signed and unsigned integers through 64 bits, with explicit casts and width-correct operators | Done | `tests/stdlib/948-fixed-width-integers.ax`, `tests/stdlib/949-fixed-width-alias-callback.ax` |
 | Wider integer literals, widths beyond 64 bits and checked fixed-width FFI shims | Planned | |
 | Transparent type aliases support parameters, simultaneous substitution and finite expansion | Done | `tests/stdlib/946-generic-aliases.ax`, `tests/diagnostics/1420-generic-alias-arity.ax`, `tests/diagnostics/1421-generic-alias-parameters.axbad`, `tests/diagnostics/1422-recursive-alias.ax` |
-| Generic bodies are checked for their declared types; each call constrains repeated parameters independently | In progress | `tests/diagnostics/1423-generic-rigidity.ax`, `tests/diagnostics/1439-nominal-generic-results.ax` |
-| Distinguish homonymous nominal types across module boundaries | Done | `tests/stdlib/954-nominal-identity.ax`, `tests/diagnostics/1438-nominal-module-boundaries.ax` |
+| Generic bodies preserve parameters through returned containers, ADTs and callbacks; each call constrains repeated parameters independently | Done | `tests/diagnostics/1443-generic-result-rigidity.ax`, `tests/stdlib/956-generic-result-rigidity.ax` |
+| Distinguish homonymous nominal types across module boundaries, runtime protocols and host bindings | Done | `tests/stdlib/954-nominal-identity.ax`, `tests/stdlib/957-main-result-nominal.ax`, `tests/diagnostics/1444-err-protocol-provenance.ax`, `tests/ffi/host/nominal.ax` |
 | Numeric conversions are explicit; mixed numeric operands and incompatible ADT parameters are refused | Done | `tests/diagnostics/1117-mixed-numeric-operands.ax`, `tests/diagnostics/1410-explicit-numeric-boundaries.ax` |
 | Explicit numeric conversions document rounding and range; exact conversions refuse value loss | Done | `tests/stdlib/947-exact-numeric-conversions.ax` |
 | Legacy CLI and syntax removed: `axiom FILE`, expression `fn`, keyword struct construction, format aliases | Done | `compat/BREAKING` |
@@ -105,6 +105,7 @@ integrator would still need.
 | Errors propagate with a postfix `?` | Done | `ERR-SUGAR-4`, `tests/stdlib/847-propagate.ax`, `tests/diagnostics/1300-propagate-position.ax` |
 | A unit type with a value, `()`, so an `if` without an else, a dropped branch and a procedure need no filler `0` | Done | `tests/stdlib/890-unit-and-if.ax`, `tests/stdlib/892-dropped-branches.ax` |
 | Explicit numeric conversion uses `(as value Type)`; bit reinterpretation has named Float operations | Done | `tests/stdlib/943-as-numeric.ax`, `tests/diagnostics/1411-as-boundaries.ax` |
+| AXQL select aliases use `(alias expression name)` and keep `as` for language conversions | Done | `tests/axqlite/620-macro-text.ax`, `tests/axqlite/625-macro-forms.ax` |
 | Prefix pipelines evaluate each stage once, with explicit argument placement | Done | `tests/stdlib/945-pipelines.ax`, `tests/diagnostics/1430-pipeline-boundaries.ax` |
 | One code-generation route: the MIR route is finished or removed | Not started | |
 
@@ -140,6 +141,7 @@ ADT instantiation.
 | Task slab sizes are checked before mapping or spawning; indices cross without overflow-prone packing | Done | `tests/stdlib/941-task-index-and-size.ax` |
 | Explicit task grain with bounded range jobs, ordered answers and per-range budgets | Done | `tests/stdlib/951-task-ranges.ax`, `tests/stdlib/952-task-ranges-lifecycle.ax` |
 | Checked streaming callbacks reject retained answers and temporary allocations, with explicit forwarding contracts | Done | `tests/stdlib/953-scoped-task-fold.ax`, `tests/diagnostics/1440-scoped-callback-escape.ax` |
+| Cancellation is checked between spawn attempts, and grace starts at the observed shutdown boundary | Done | `tests/stdlib/960-task-launch-cancellation.ax`, `tests/litmus/check-task-launch.py` |
 | Scale multicore work with bounded worker reuse and scheduling, preserving isolation, submit order and cancellation | Planned | `MM-PAR-3`, `MM-PAR-5`, `MM-PAR-17` |
 | A `parallel` form keeps no arena storage once it returns, in both lowerings | Done | `tests/litmus/par-forms.ax`, `scripts/check-parallel.sh` |
 | Fixed worker, queue, memory and stack budgets, with exhaustion and shutdown tests | Done | `MM-PAR-17`, `tests/stdlib/920-task-stack.ax` |
@@ -150,6 +152,7 @@ ADT instantiation.
 | Item | State |
 |---|---|
 | Formatting preserves the import header, doc-comment attachment and literal contents, without trailing layout whitespace | Done |
+| Width-aware argument packing and attached call comments, with batch preflight, stdin/stdout and non-writing diffs | Done |
 | Doc comments: `;;` documents the declaration below and `;;!` the module, and hover, the library reference and `axiom doc` read them | Done |
 | Hover explains every word of the language: keywords, builtin types, effects, operators, AXTAG keys and values, and imported modules | Done |
 | Every public standard library name carries a doc comment, and every module a `;;!` block | Done |
@@ -173,7 +176,8 @@ ADT instantiation.
 | UTF-16 ranged document edits apply in order and atomically, with monotonic versions and versioned diagnostics | Done |
 | The language server cancels obsolete work and serves requests from revisioned background analysis | Not started |
 | Unsaved imported documents feed checks and navigation, with transitive dependency invalidation and diagnostics for open modules | Done |
-| Workspace semantic results are shared through a revision-keyed cache | Not started |
+| Workspace request results are cached by revision, with exact file and module-search validation | Done |
+| Parsed and checked semantic models are reused across different requests | Not started |
 | Completion uses expected types, offers auto-import edits and resolves expensive details on demand | Not started |
 | Safe assists organise top-level imports and preserve attached comments | Not started |
 | Semantic tokens support range and delta requests | Done |

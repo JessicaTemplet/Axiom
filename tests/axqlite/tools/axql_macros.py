@@ -52,11 +52,11 @@ def rule(pattern, body_lines, indent=2):
     return f"{' ' * indent}(({pattern})\n{' ' * (indent + 2)}{{\n{inner}\n{' ' * (indent + 2)}}})"
 
 
-def emacro(name, literals, rules, pub=False):
+def macro_rules(name, literals, rules, pub=False):
     """A rule list laid out as `axiom fmt` lays it out: one rule per
     line, the first on the head's line unless a literals header is
     there."""
-    head = f"({'pub ' if pub else ''}emacro {name}"
+    head = f"({'pub ' if pub else ''}macro {name}"
     if literals:
         head += f" (literals {' '.join(literals)})"
         return head + "\n" + "\n".join(rules) + ")"
@@ -69,7 +69,7 @@ def spread():
         a = " ".join(names("axqlArgA", n))
         rules.append(f"  ((axqlSpread axqlArgK axqlArgQb ({a})) (axqlArgK axqlArgQb {a}))")
     rules.append("  ((axqlSpread axqlArgK axqlArgQb axqlArgA1) (axqlArgK axqlArgQb axqlArgA1))")
-    return emacro("axqlSpread", [], rules, pub=True)
+    return macro_rules("axqlSpread", [], rules, pub=True)
 
 
 def list_macro(name, item, sep, head_word=None, max_n=LIST, min_n=1, pub=False):
@@ -86,14 +86,14 @@ def list_macro(name, item, sep, head_word=None, max_n=LIST, min_n=1, pub=False):
         else:
             rest = " ".join([name, "axqlArgQb"] + lits + xs[1:])
             rules.append(f'  (({pat}) {{ ({item} axqlArgQb {xs[0]}) (axqlPut axqlArgQb "{sep}") ({rest}) }})')
-    return emacro(name, lits, rules, pub=pub)
+    return macro_rules(name, lits, rules, pub=pub)
 
 
 def items_macro():
-    """The select list: plain items, or a first `(as e n)` or
-    `(link l c)` item spread in front as `as e n` or `link l c`."""
+    """The select list: plain items, or a first `(alias e n)` or
+    `(link l c)` item spread in front as `alias e n` or `link l c`."""
     rules = []
-    for word in ("as", "link"):
+    for word in ("alias", "link"):
         rules.append(f"  ((axqlItems axqlArgQb {word} axqlArgE axqlArgN) (axqlItem axqlArgQb ({word} axqlArgE axqlArgN)))")
         for n in range(1, LIST):
             xs = names("axqlArgX", n, 2)
@@ -108,7 +108,7 @@ def items_macro():
         else:
             rest = " ".join(["axqlItems", "axqlArgQb"] + xs[1:])
             rules.append(f'  (({pat}) {{ (axqlItem axqlArgQb axqlArgX1) (axqlPut axqlArgQb ", ") ({rest}) }})')
-    return emacro("axqlItems", ["as", "link"], rules)
+    return macro_rules("axqlItems", ["alias", "link"], rules)
 
 
 def select_macro():
@@ -167,17 +167,17 @@ def select_macro():
             inner = block(body, 8)
             rules.append(f"  (({pat})\n    (let ((axqlArgQb axqlBuilder))\n      {{\n{inner}\n      }}))")
     doc = """;; A SELECT from table `t`: its select list (`*`, one column, or a list
-;; of columns and `(as e name)` items), then its clauses in this order,
+;; of columns and `(alias e name)` items), then its clauses in this order,
 ;; each optional: `(where e)`, `(groupBy e ...)` with up to three
 ;; terms, `(having e)`,
 ;; `(orderBy term ...)`, `(limit n)`, and `(offset n)` after a `limit`.
 ;; `n` is an Axiom `Int`, bound as a parameter.
 ;
 ;     (axqlSelect users * (where (= id (int 7))))
-;     (axqlSelect users (name (as (* age (int 12)) months)) (orderBy (name desc)) (limit 5) (offset 10))
-;     (axqlSelect books (author (as (count *) n)) (groupBy author) (having (> (count *) (int 1))))
+;     (axqlSelect users (name (alias (* age (int 12)) months)) (orderBy (name desc)) (limit 5) (offset 10))
+;     (axqlSelect books (author (alias (count *) n)) (groupBy author) (having (> (count *) (int 1))))
 """
-    return doc + emacro("axqlSelect", ["*", "where", "groupBy", "having", "limit", "offset"], rules, pub=True)
+    return doc + macro_rules("axqlSelect", ["*", "where", "groupBy", "having", "limit", "offset"], rules, pub=True)
 
 
 def insert_macro():
@@ -195,7 +195,7 @@ def insert_macro():
 ;
 ;     (axqlInsert users (name age) (values (text n) (int a)) (values (text m) null))
 """
-    return doc + emacro("axqlInsert", ["*"], rules, pub=True)
+    return doc + macro_rules("axqlInsert", ["*"], rules, pub=True)
 
 
 def upsert_macro():
@@ -214,7 +214,7 @@ def upsert_macro():
 ;
 ;     (axqlUpsert users (id score) (values (int uid) (int s)))
 """
-    return doc + emacro("axqlUpsert", ["*"], rules, pub=True)
+    return doc + macro_rules("axqlUpsert", ["*"], rules, pub=True)
 
 
 def create_table_macro():
@@ -230,7 +230,7 @@ def create_table_macro():
 ;
 ;     (axqlCreateTable IF NOT EXISTS users (id INTEGER PRIMARY KEY) (name TEXT NOT NULL))
 """
-    return doc + emacro("axqlCreateTable", ["IF", "NOT", "EXISTS"], rules, pub=True)
+    return doc + macro_rules("axqlCreateTable", ["IF", "NOT", "EXISTS"], rules, pub=True)
 
 
 def table_macro():
@@ -283,7 +283,7 @@ def field_values_macro():
         else:
             rest = "axqlFieldValues axqlArgQb (types " + " ".join(ts[1:]) + ") " + " ".join(vs[1:])
             rules.append(f"  (({pat}) {{ {first} ({rest}) }})")
-    return emacro("axqlFieldValues", ["types"], rules, pub=True)
+    return macro_rules("axqlFieldValues", ["types"], rules, pub=True)
 
 
 def operand_macro():
@@ -302,7 +302,7 @@ def operand_macro():
                           ['(axqlPut axqlArgQb "(")', f"(axqlExpr axqlArgQb {form})", '(axqlPut axqlArgQb ")")']))
     rules.append("  ((axqlOperand axqlArgQb axqlArgC) (axqlPutName axqlArgQb (syntax/name axqlArgC))))")
     lits = "null int real text blob param link * " + " ".join(CALL_WORDS)
-    return f"(emacro axqlOperand (literals {lits})\n" + "\n".join(rules)
+    return f"(macro axqlOperand (literals {lits})\n" + "\n".join(rules)
 
 
 # The functions an expression may call, with the arities a form may
@@ -371,7 +371,7 @@ def expr_macro():
     rules.append("  ((axqlExpr axqlArgQb axqlArgC) (axqlPutName axqlArgQb (syntax/name axqlArgC))))")
     lits = ("null int real text blob param and or not neg isNull isNotNull like notLike between isIn notIn concat link * "
             + " ".join(CALL_WORDS) + " " + " ".join(op for op, _ in BINARY))
-    return f"(emacro axqlExpr (literals {lits})\n" + "\n".join(rules)
+    return f"(macro axqlExpr (literals {lits})\n" + "\n".join(rules)
 
 
 def generate():
@@ -391,9 +391,9 @@ def generate():
         ";; statement macros that use it are expanded where they are invoked.\n" + spread(),
         "\n; Expressions separated by `, `.\n" + list_macro("axqlExprs", "axqlExpr", ", "),
         "\n; Names separated by `, `.\n" + list_macro("axqlNames", "axqlPutNameOf", ", "),
-        "\n; The items of a select list. A list whose first item is `(as e n)`\n"
+        "\n; The items of a select list. A list whose first item is `(alias e n)`\n"
         "; or `(link l c)` arrives with that item's three parts spread in\n"
-        "; front, because `((as e n) b)` and `(as e n b)` are one form.\n" + items_macro(),
+        "; front, because `((alias e n) b)` and `(alias e n b)` are one form.\n" + items_macro(),
         "\n; `(orderBy term ...)`, spread: the word, then the terms.\n"
         + list_macro("axqlOrderTerms", "axqlOrderTerm", ", ", head_word="orderBy"),
         "\n" + select_macro(),

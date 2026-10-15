@@ -387,8 +387,8 @@ pub fn point_maybe(ok: bool) -> Option<Point> {
 
 // 6k. `char` is Axiom `Char`: the code point in the word, both ways.
 //     Rust -> Axiom is `c as i64`; Axiom -> Rust is `char::from_u32`,
-//     and a word that is not a Unicode scalar value (`((as //
-Char)     1114112)`, a surrogate, a negative word) aborts with the
+//     and a word that is not a Unicode scalar value (`(as 1114112 Char)`,
+//     a surrogate or a negative word) aborts with the
 //     argument named, as a narrow integer out of range does. The same
 //     rule covers a record field, a `Vec<char>` element and a `&[char]`
 //     element.

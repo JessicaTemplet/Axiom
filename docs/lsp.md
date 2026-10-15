@@ -68,7 +68,7 @@ capabilities included.
 ### How a session behaves
 
 - Sync is incremental: `textDocumentSync` advertises `openClose: true`
-  and `change: 2`. Your editor can send UTF-16 ranged edits or full
+  `change: 2` and `save: true`. Your editor can send UTF-16 ranged edits or full
   replacements. Multiple edits apply in order, each to the preceding
   edit's result.
 - A document's version increases on each accepted change. Stale or
@@ -78,9 +78,9 @@ capabilities included.
   its version. Negative positions, missing endpoints, reversed ranges
   and endpoints inside a surrogate pair are refused. A column beyond
   its line clamps to the line's end. CRLF counts as one line ending.
-- The server reads three notifications: `didOpen`, `didChange` and
-  `didClose`. It drops `didSave`, as it drops any notification it
-  doesn't know.
+- `didOpen`, `didChange` and `didClose` update the document store.
+  `didSave` and `workspace/didChangeWatchedFiles` refresh disk dependencies,
+  generated names and diagnostics for open documents.
 - Positions are UTF-16 code units, the protocol's default.
   `tests/lsp/030-utf16-columns.ax` pins this.
 - A request the server doesn't know gets the error `-32601`
@@ -310,19 +310,17 @@ name = "axiom"
 source = { path = "/path/to/axiom/tree-sitter-axiom" }
 ```
 
-**Don't set `formatter` for this language.** Helix formats by piping
-the buffer through a command's standard input. `axiom fmt` rewrites a
-file in place and has no `--stdin`, so a
-`formatter = { command = "axiom fmt", args = ["--stdin"] }` line can't
-work.
+With this configuration, `auto-format` uses the server's
+`textDocument/formatting`. You can also use the same formatter through
+stdin by adding this property to the `[[language]]` table:
 
-A configured formatter also takes precedence over the language
-server, so that line turns off the formatting that does work.
-`hx --health axiom` reports it as `✘ 'axiom fmt' not found in $PATH`,
-because Helix reads the whole string as one command name. With no
-`formatter` line, `auto-format` uses the server's
-`textDocument/formatting`, which runs the same `fmtFormat` as the
-command.
+```toml
+formatter = { command = "axiom", args = ["fmt", "-"] }
+```
+
+[Helix's formatter configuration](https://docs.helix-editor.com/languages.html#language-configuration)
+takes precedence over language-server formatting. Keep `command` and
+`args` separate. Both interfaces use Axiom's canonical layout.
 
 Then build the grammar and link its queries into Helix's runtime.
 Link all three files so checkout updates also update the colours,
@@ -1422,6 +1420,24 @@ consult.
 
 Tested by `tests/lsp/drive.py`.
 
+## Repeated requests
+
+Navigation and reading requests reuse their result when the workspace
+revision, method and parameters match. Each reuse checks the exact disk
+sources and module search roots it observed, including missing files that
+could take priority over a resolved module. Accepted document changes,
+saves and watched-file notifications start a new revision.
+
+The result cache holds at most eight entries and four MiB. Completion,
+code actions and semantic-token updates keep their own request paths.
+Set LSP trace to `messages` or `verbose` to see cache hits and misses;
+`$/setTrace` turns tracing off again without restarting the server.
+
+Tested by `tests/lsp/semantic-cache.py`.
+
+Not yet: parsed and checked models are shared between different requests.
+See the [roadmap](roadmap.md#tools).
+
 ## The cost rule
 
 Every request your editor sends per keystroke or per cursor move reads
@@ -1430,7 +1446,7 @@ This is `MAC-TOOL-3` in [macro-system.md](macro-system.md), which
 gives the measured reason: expansion is bounded but not free, and an
 editor can't wait.
 
-Each such request costs one parse, one line index and one walk.
+A cache miss costs one parse, one line index and one walk.
 Requests share their walks:
 
 - `references` and its siblings share one walk;

@@ -2,53 +2,13 @@
 //! `axiom fmt` would, so a generated module is formatter-clean without
 //! shelling out to the formatter.
 //!
-//! THAT IS A CLAIM ABOUT TWO IMPLEMENTATIONS, and `check-fmt.sh`
-//! section 1b is what holds it: every committed binding under
-//! `rust/examples/*/axiom/` must be a fixed point of `axiom fmt`. It
-//! was held by nothing until 2026-09-03 - `check-ffi.sh` diffs each
-//! binding against a FRESH GENERATION, which compares this printer
-//! with itself and stays green while both sides drift together away
-//! from the formatter. Measured then: a one-line change to `fpApp` in
-//! `self_host/format.ax` moves `Demo.ax` by five lines and this file
-//! not at all. Change one printer, change the other.
+//! Applications fit on one line within 100 columns. Longer calls pack
+//! complete arguments into rows; multiline arguments retain their own
+//! layout. Bindings, branches and matches keep their structural layout.
+//! Explicit conversions print as `(as value Type)`.
 //!
-//! The formatter (`self_host/format.ax`) has no line-width rule; its
-//! layout is STRUCTURAL, and the rules for the forms this generator
-//! emits are:
-//!
-//! - an atom is simple; an application is simple iff every element is
-//!   simple; `cast`, `let`, `if`, `match` and a multi-statement `{}`
-//!   block are never simple (`isSimpleForm`);
-//! - an application prints on one line when its one-line form fits
-//!   within `WIDTH` columns from where it starts, or when its head is
-//!   simple and it has at most four arguments, every one an atom;
-//!   otherwise
-//!   the head ends the line and the arguments follow ONE PER LINE two
-//!   columns past the call's paren, then `)` stacked onto the last one
-//!   (`fpApp`).
-//!   Until 2026-09-04 there was no newline between the arguments at
-//!   all - stage0's quirk, kept for byte-identity until stage0 was
-//!   deleted;
-//! - `let` with one binding keeps the binding on the `let` line (the
-//!   init breaks onto its own line if it is not simple, and the pair
-//!   closes stacked onto it); with several, each binding sits on its
-//!   own line under `(let (` and the list closes with `)` at the
-//!   `let`'s indent; the body is always on its own line at one deeper
-//!   indent, and the `let` closes stacked onto it (`fpLet`,
-//!   `fpLetBinding`, `fpLetBindingBroken`);
-//! - `if` puts the condition on the `if` line and each branch on its
-//!   own line, `)` stacked (`fpIf`);
-//! - `match` puts every arm on its own line; an arm's body sits beside
-//!   the pattern if simple, else below it; the `match` closes stacked
-//!   (`fpMatch`, `fpTailBody`);
-//! - a block prints `{`, one statement per line, `}` (`fpBeginVec`);
-//! - a `fn` head stands alone and the body sits below it, `)` stacked
-//!   (`fpDeclFn`).
-//!
-//! The indent is a column: a nested construct indents two columns past
-//! the one it sits in, and a broken call hangs its arguments two columns
-//! past its own paren. A closing paren never stands on its own line: it
-//! stacks onto whatever precedes it.
+//! `scripts/check-fmt.sh` checks generated bindings against the Axiom
+//! formatter, while `scripts/check-ffi.sh` checks fresh generation.
 
 /// An Axiom expression.
 #[derive(Clone, Debug)]
@@ -146,12 +106,12 @@ fn print_flat(e: &Ex, out: &mut String) -> bool {
     match e {
         Ex::Atom(s) => out.push_str(s),
         Ex::Cast(ty, inner) => {
-            out.push_str("(cast ");
-            out.push_str(ty);
-            out.push(' ');
+            out.push_str("(as ");
             if !print_flat(inner, out) {
                 return false;
             }
+            out.push(' ');
+            out.push_str(ty);
             out.push(')');
         }
         Ex::App(elems) => {
@@ -174,53 +134,60 @@ fn print_flat(e: &Ex, out: &mut String) -> bool {
 /// Print `e` at `level`, assuming the cursor already sits at the
 /// column where the expression starts.
 pub fn print(e: &Ex, level: usize, out: &mut String) {
+    print_shape(e, level, 0, out);
+}
+
+// Reserve the structural suffix appended to the final line. Non-final
+// children end their own shape; final children inherit their parent's suffix.
+fn print_shape(e: &Ex, level: usize, suffix: usize, out: &mut String) {
     match e {
         Ex::Atom(s) => out.push_str(s),
         Ex::Cast(ty, inner) => {
-            out.push_str("(cast ");
-            out.push_str(ty);
+            out.push_str("(as ");
+            print_shape(inner, level, suffix + ty.len() + 2, out);
             out.push(' ');
-            print(inner, level, out);
+            out.push_str(ty);
             out.push(')');
         }
         Ex::App(elems) => {
-            let head = &elems[0];
-            let args = &elems[1..];
-            let inline = head.is_simple() && args.len() <= 4 && args.iter().all(Ex::is_simple);
-            if inline && args.iter().all(|a| matches!(a, Ex::Atom(_))) {
-                out.push('(');
-                for (i, arg) in elems.iter().enumerate() {
-                    if i > 0 {
-                        out.push(' ');
-                    }
-                    print(arg, level, out);
-                }
-                out.push(')');
+            if let Some(flat) = app_flat(elems)
+                && column(out) + flat.len() + suffix <= WIDTH
+            {
+                out.push_str(&flat);
                 return;
             }
-            let flat = app_flat(elems);
-            if let Some(f) = &flat {
-                let atoms = args.iter().all(|a| matches!(a, Ex::Atom(_)));
-                if (inline && atoms) || column(out) + f.len() <= WIDTH {
-                    out.push_str(f);
-                    return;
-                }
-            }
-            // A broken call hangs its arguments two columns past its own
-            // paren (`foSetIndent` in `fpApp`).
             let col = column(out);
-            // The formatter keeps the older one-line rule only for a call
-            // with a comment inside; generated code has none, so a call
-            // that is not laid out on one line above always breaks.
             out.push('(');
-            print(head, level, out);
-            out.push('\n');
-            for (i, a) in args.iter().enumerate() {
-                if i > 0 {
+            let head_start = out.len();
+            print_shape(&elems[0], level, 0, out);
+            let mut previous_broken = out[head_start..].contains('\n');
+            for (index, arg) in elems[1..].iter().enumerate() {
+                let tail = if index + 2 == elems.len() { suffix } else { 0 };
+                let mut flat = String::new();
+                if print_flat(arg, &mut flat) && col + 2 + flat.len() + 1 + tail <= WIDTH {
+                    if previous_broken || column(out) + flat.len() + 2 + tail > WIDTH {
+                        out.push('\n');
+                        out.push_str(&ind(col + 2));
+                    } else {
+                        out.push(' ');
+                    }
+                    out.push_str(&flat);
+                    previous_broken = false;
+                } else {
                     out.push('\n');
+                    out.push_str(&ind(col + 2));
+                    print_shape(
+                        arg,
+                        col + 2,
+                        if index + 2 == elems.len() {
+                            suffix + 1
+                        } else {
+                            0
+                        },
+                        out,
+                    );
+                    previous_broken = true;
                 }
-                out.push_str(&ind(col + 2));
-                print(a, col + 2, out);
             }
             out.push(')');
         }
@@ -230,13 +197,13 @@ pub fn print(e: &Ex, level: usize, out: &mut String) {
                 let (name, init) = &binds[0];
                 out.push('(');
                 out.push_str(name);
-                out.push(' ');
                 if init.is_simple() {
-                    print(init, level, out);
+                    out.push(' ');
+                    print_shape(init, level, 2, out);
                 } else {
                     out.push('\n');
                     out.push_str(&ind(level + 2));
-                    print(init, level + 2, out);
+                    print_shape(init, level + 2, 2, out);
                 }
                 out.push(')');
             } else {
@@ -246,30 +213,30 @@ pub fn print(e: &Ex, level: usize, out: &mut String) {
                     out.push('(');
                     out.push_str(name);
                     out.push(' ');
-                    print(init, level + 2, out);
+                    print_shape(init, level + 2, 1, out);
                     out.push_str(")\n");
                 }
                 out.push_str(&ind(level));
             }
             out.push_str(")\n");
             out.push_str(&ind(level + 2));
-            print(body, level + 2, out);
+            print_shape(body, level + 2, suffix + 1, out);
             out.push(')');
         }
         Ex::If(c, t, f) => {
             out.push_str("(if ");
-            print(c, level, out);
+            print_shape(c, level, 0, out);
             out.push('\n');
             out.push_str(&ind(level + 2));
-            print(t, level + 2, out);
+            print_shape(t, level + 2, 0, out);
             out.push('\n');
             out.push_str(&ind(level + 2));
-            print(f, level + 2, out);
+            print_shape(f, level + 2, suffix + 1, out);
             out.push(')');
         }
         Ex::Match(scrut, arms) => {
             out.push_str("(match ");
-            print(scrut, level, out);
+            print_shape(scrut, level, 0, out);
             out.push('\n');
             for (i, (pat, body)) in arms.iter().enumerate() {
                 if i > 0 {
@@ -277,8 +244,13 @@ pub fn print(e: &Ex, level: usize, out: &mut String) {
                 }
                 out.push_str(&ind(level + 2));
                 out.push('(');
-                print(pat, level + 2, out);
-                tail_body(body, level + 2, out);
+                print_shape(pat, level + 2, 0, out);
+                tail_body(
+                    body,
+                    level + 2,
+                    if i + 1 == arms.len() { suffix + 1 } else { 0 },
+                    out,
+                );
                 out.push(')');
             }
             out.push(')');
@@ -301,10 +273,10 @@ pub fn print(e: &Ex, level: usize, out: &mut String) {
 
 /// `fpTailBody`: a space and the body inline when simple, else the body
 /// alone on the next line with the closing paren's indent restored.
-fn tail_body(body: &Ex, level: usize, out: &mut String) {
+fn tail_body(body: &Ex, level: usize, suffix: usize, out: &mut String) {
     if body.is_simple() {
         out.push(' ');
-        print(body, level, out);
+        print_shape(body, level, suffix + 1, out);
     } else {
         out.push('\n');
         out.push_str(&ind(level + 2));
@@ -336,7 +308,7 @@ fn decl_fn_vis(public: bool, name: &str, params: &[String], body: &Ex) -> String
     // The head stands alone; the body goes on the next line, as
     // `fpDeclFn` lays it out.
     out.push_str(")\n  ");
-    print(body, 2, &mut out);
+    print_shape(body, 2, 1, &mut out);
     out.push(')');
     out
 }
@@ -377,13 +349,56 @@ mod tests {
             &mut s,
         );
         assert_eq!(s, "(f a b c d e)");
-        // One that does not fit breaks, one argument per line.
+        // Long calls wrap complete arguments into bounded rows.
         let long: Vec<Ex> = std::iter::once(atom("f"))
             .chain((0..12).map(|i| atom(&format!("argument{i}"))))
             .collect();
         let mut s = String::new();
         print(&app(long), 2, &mut s);
-        assert!(s.starts_with("(f\n  argument0\n  argument1\n"));
+        assert_eq!(s, "(f argument0 argument1 argument2 argument3 argument4 argument5 argument6 argument7 argument8\n  argument9 argument10 argument11)");
+        assert!(s.lines().all(|line| line.len() <= WIDTH));
+    }
+
+    #[test]
+    fn enclosing_closers_fit_within_width() {
+        let body = app(vec![
+            atom("call"),
+            app(vec![
+                atom("call"),
+                app(vec![
+                    atom("call"),
+                    app(vec![atom("call"), atom("argument17"), atom("argument31")]),
+                    app(vec![
+                        atom("call"),
+                        atom("argument56"),
+                        atom("argument6"),
+                        atom("argument75"),
+                    ]),
+                    app(vec![atom("call"), atom("argument65"), atom("argument92")]),
+                    app(vec![
+                        atom("call"),
+                        atom("argument86"),
+                        atom("argument99"),
+                        atom("argument31"),
+                        atom("argument42"),
+                        atom("argument48"),
+                    ]),
+                ]),
+            ]),
+        ]);
+        let output = decl_private_fn("main", &[], &body);
+        assert!(output.lines().all(|line| line.len() <= WIDTH), "{}", output);
+    }
+
+    #[test]
+    fn conversion_is_value_first() {
+        let mut output = String::new();
+        print(
+            &Ex::Cast("Foreign".into(), Box::new(atom("value"))),
+            0,
+            &mut output,
+        );
+        assert_eq!(output, "(as value Foreign)");
     }
 
     #[test]

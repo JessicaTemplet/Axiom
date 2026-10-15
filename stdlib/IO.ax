@@ -642,9 +642,7 @@
 (pub :: fileSize (-> String (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (fileSize path)
-  (ioResult
-    "fileSize"
-    path
+  (ioResult "fileSize" path
     (let ((fd (ioOpen (ioPath path) oRdonly)))
       (if (< fd 0)
         fd
@@ -716,8 +714,7 @@
   (match (makeDirAllFrom path 1)
     ((Ok v) (Ok v))
     ((Err e) (Err
-               (mkError
-                 (errCode e)
+               (mkError (errCode e)
                  (concat (concat "makeDirAll: " path) (concat ": errno " (fmtInt (errCode e)))))))))
 
 ; From 1, not 0: a leading `/` is the root, which exists and cannot
@@ -1175,10 +1172,8 @@
 
 (:: ioGetInt32 (-> Int Int Int))
 (fn (ioGetInt32 buf off)
-  (+
-    (memGetByte buf off)
-    (+
-      (<< (memGetByte buf (+ off 1)) 8)
+  (+ (memGetByte buf off)
+    (+ (<< (memGetByte buf (+ off 1)) 8)
       (+ (<< (memGetByte buf (+ off 2)) 16) (<< (memGetByte buf (+ off 3)) 24)))))
 
 ; Eight bytes, little-endian, at byte `off` of `buf`: an ABI record is
@@ -1225,8 +1220,7 @@
       (if (< rc 0)
         (Err (mkError (- 0 rc) "termSize"))
         (Ok
-          (TermSize
-            (+ (memGetByte ws 0) (<< (memGetByte ws 1) 8))
+          (TermSize (+ (memGetByte ws 0) (<< (memGetByte ws 1) 8))
             (+ (memGetByte ws 2) (<< (memGetByte ws 3) 8))))))))
 
 ; Read one of the four flag words out of a saved state, or clear bits in
@@ -1270,9 +1264,7 @@
       (memCopy work (strData save) termiosBytes)
       (ioTermFlagClear work 0 (| tiosBrkint (| tiosIcrnl (| tiosIstrip tiosIxon))))
       (ioTermFlagClear work 1 tiosOpost)
-      (ioTermFlagClear
-        work
-        3
+      (ioTermFlagClear work 3
         (if keepSignals
           (| tiosEcho (| tiosIcanon tiosIexten))
           (| tiosEcho (| tiosIcanon (| tiosIexten tiosIsig)))))
@@ -1380,8 +1372,7 @@
 ; The byte offset of event `i`'s token.
 (:: pollerTokenOffset (-> Int Int))
 (fn (pollerTokenOffset i)
-  (+
-    (* i pollEventSize)
+  (+ (* i pollEventSize)
     (if (== pollUsesKqueue 1)
       24
       pollEventFdOffset)))
@@ -1398,14 +1389,8 @@
     (if (< pfd 0)
       (Err (mkError (- 0 pfd) "pollerNew"))
       (Ok
-        (Poller
-          (__resource_new fileDrop pfd)
-          (strAlloc (* cap pollEventSize))
-          cap
-          0
-          (strAlloc 16)
-          (- 0 1)
-          None
+        (Poller (__resource_new fileDrop pfd) (strAlloc (* cap pollEventSize)) cap 0 (strAlloc 16)
+          (- 0 1) None
           (strAlloc
             (if (< sigInfoSize 8)
               8
@@ -1456,8 +1441,7 @@
 ;@axiom:effect(io)
 (pub fn (pollerAdd p f token)
   (let ((fd (ioFd f)))
-    (ioAnswer
-      "pollerAdd"
+    (ioAnswer "pollerAdd"
       (pollerApply p fd (pollerRec fd pollReadFilter pollAddOp token) pollAddOp))))
 
 ;; Stop watching `f`: `(Ok 0)`, or `(Err e)` - ENOENT when it was not
@@ -1466,7 +1450,8 @@
 ;@axiom:effect(io)
 (pub fn (pollerRemove p f)
   (let ((fd (ioFd f)))
-    (ioAnswer "pollerRemove" (pollerApply p fd (pollerRec fd pollReadFilter pollDelOp 0) pollDelOp))))
+    (ioAnswer "pollerRemove"
+      (pollerApply p fd (pollerRec fd pollReadFilter pollDelOp 0) pollDelOp))))
 
 ;; Watch the signals in `mask` (bit N-1 for signal N, `Sys.sysSigBit`)
 ;; under `token`: `(Ok 0)`, or `(Err e)`. Block them with
@@ -1501,10 +1486,7 @@
       {
         (for signo in 1..32
           (if (!= (& mask (sysSigBit signo)) 0)
-            (let ((r (pollerApply
-                       p
-                       signo
-                       (pollerRec signo pollSignalFilter pollAddOp token)
+            (let ((r (pollerApply p signo (pollerRec signo pollSignalFilter pollAddOp token)
                        pollAddOp)))
               (if (< r 0)
                 (set rc r)))))
@@ -1533,7 +1515,8 @@
           (ioPutWord (strData p.ts) 8 (* (% timeoutMs 1000) 1000000))
           (__syscall6 sysPollWaitNum (pollerFd p) 0 0 (strData p.events) p.cap (strData p.ts))
         })
-      (__syscall6 sysPollWaitNum (pollerFd p) (strData p.events) p.cap timeoutMs 0 pollSigsetSize))))
+      (__syscall6 sysPollWaitNum (pollerFd p) (strData p.events) p.cap timeoutMs 0
+        pollSigsetSize))))
     (if (== r (- 0 4))
       {
         (set p.count 0)
@@ -1583,8 +1566,7 @@
         (b (strData p.events))
         (off (* i pollEventSize))
       )
-        (if (&&
-              (== (memGetByte b (+ off 8)) (& pollSignalFilter 255))
+        (if (&& (== (memGetByte b (+ off 8)) (& pollSignalFilter 255))
               (== (memGetByte b (+ off 9)) (& (>> pollSignalFilter 8) 255)))
           (Some (ioGetWord b off))
           None)))))
@@ -1649,9 +1631,7 @@
   (let ((fl (ioFcntl fd fGetFl 0)))
     (if (< fl 0)
       fl
-      (ioFcntl
-        fd
-        fSetFl
+      (ioFcntl fd fSetFl
         (if on
           (| fl oNonblock)
           (& fl (^ oNonblock (- 0 1))))))))
@@ -1698,8 +1678,7 @@
 (pub fn (socketBind s addr)
   (if (! (socketAddrOk addr))
     (socketBadAddr "socketBind")
-    (ioAnswer
-      "socketBind"
+    (ioAnswer "socketBind"
       (__syscall3 sysBindNum (ioFd s) (strData addr) (netAddrSize (strData addr))))))
 
 ;; Listen on a bound socket, queueing up to `backlog` connections.
@@ -1733,8 +1712,7 @@
 (pub fn (socketConnect s addr)
   (if (! (socketAddrOk addr))
     (socketBadAddr "socketConnect")
-    (ioAnswer
-      "socketConnect"
+    (ioAnswer "socketConnect"
       (__syscall3 sysConnectNum (ioFd s) (strData addr) (netAddrSize (strData addr))))))
 
 ;; Close one or both halves: `how` is 0 for reading, 1 for writing and 2
@@ -1769,8 +1747,7 @@
         ; and FreeBSD, so the low four bytes carry it either way.
         (ioPutWord (strData tv) 0 (/ micros 1000000))
         (ioPutWord (strData tv) 8 (% micros 1000000))
-        (ioAnswer
-          "socketSetTimeout"
+        (ioAnswer "socketSetTimeout"
           (__syscall5 sysSetSockOptNum (ioFd s) solSocket opt (strData tv) 16))
       })))
 
@@ -1791,9 +1768,7 @@
           (if peer
             sysGetPeerNameNum
             sysGetSockNameNum)
-          (ioFd s)
-          (strData a)
-          (strData lenb))))
+          (ioFd s) (strData a) (strData lenb))))
         (if (< r 0)
           (Err (ioFdError (- 0 r) "socketAddr"))
           (Ok a)))
@@ -1903,8 +1878,7 @@
                 r
                 (socketAwaitConnect fd ms))))
               (let ((back (ioSetNonBlocking fd false)))
-                (ioAnswer
-                  "socketConnectWithin"
+                (ioAnswer "socketConnectWithin"
                   (if (< res 0)
                     res
                     back))))))))))

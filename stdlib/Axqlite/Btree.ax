@@ -128,8 +128,7 @@
 (:: be32 (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (be32 a off)
-  (|
-    (| (<< (__load8 a off) 24) (<< (__load8 a (+ off 1)) 16))
+  (| (| (<< (__load8 a off) 24) (<< (__load8 a (+ off 1)) 16))
     (| (<< (__load8 a (+ off 2)) 8) (__load8 a (+ off 3)))))
 
 (:: put16 (-> Int Int Int Int))
@@ -266,8 +265,7 @@
                   (set eq (== c 0))
                   (set hi mid)
                 })))))
-      (+
-        (* 2 lo)
+      (+ (* 2 lo)
         (if (&& eq (< lo (nCount a)))
           1
           0))
@@ -676,8 +674,7 @@
                 (used (be16 c 2))
                 (next (be32 c 4))
               )
-                (if (||
-                      (!= (__load8 c 0) 5)
+                (if (|| (!= (__load8 c 0) 5)
                       (|| (== used 0) (|| (> used overflowRoom) (> used (- len done)))))
                   (set failed (Some (corruptError (pageMsg "overflow page " pg " is malformed"))))
                   {
@@ -717,12 +714,8 @@
       {
         (memCopy (strData out) (+ a (+ q (+ 6 klen))) local)
         (if (> vlen local)
-          (let ((_ (walkChain
-                     p
-                     (be32 a (+ q (+ 6 (+ klen local))))
-                     (+ (strData out) local)
-                     (- vlen local)
-                     false)?))
+          (let ((_ (walkChain p (be32 a (+ q (+ 6 (+ klen local)))) (+ (strData out) local)
+                     (- vlen local) false)?))
             (Ok out))
           (Ok out))
       })))
@@ -1055,8 +1048,7 @@
               )
               ((Ok a)
                 (let ((j
-                  (+
-                    (vecGet idxs level)
+                  (+ (vecGet idxs level)
                     (if forward
                       1
                       -1))))
@@ -1065,17 +1057,11 @@
                     (>= j 0))
                     {
                       (vecSet idxs level j)
-                      (match (descend
-                               p
-                               (childAt a j)
-                               kind
+                      (match (descend p (childAt a j) kind
                                (if forward
                                  1
                                  2)
-                               0
-                               0
-                               pages
-                               idxs)
+                               0 0 pages idxs)
                         ((Err e)
                           (set failed (Some e))
                         )
@@ -1142,17 +1128,11 @@
                   (match (match bound
                     ((Some b) (descend p root kind 0 (strData b) (strLen b) pages idxs))
                     ((None)
-                      (descend
-                        p
-                        root
-                        kind
+                      (descend p root kind
                         (if forward
                           1
                           2)
-                        0
-                        0
-                        pages
-                        idxs)
+                        0 0 pages idxs)
                     ))
                     ((Err e)
                       (set failed (Some e))
@@ -1356,13 +1336,11 @@
                     (let ((_ (pagerOpBegin p)))
                       (let ((w (node p pg true)?))
                         {
-                          (writeNode
-                            w
+                          (writeNode w
                             (if leaf
                               t
                               (- t 1))
-                            vecNew
-                            0)
+                            vecNew 0)
                           (Ok total)
                         }))
                     (let ((_ (pagerFree p pg)?))
@@ -1383,13 +1361,11 @@
     (if (! (pagerInWrite p))
       (writeRefused p "btreeCreate")
       (let ((_ (pagerOpBegin p)))
-        (newNode
-          p
+        (newNode p
           (if (== kind btreeTable)
             1
             3)
-          vecNew
-          0)))))
+          vecNew 0)))))
 
 ;; Free every page of the tree at `root`, the root included, and every
 ;; overflow chain; answers how many entries it held. Inside a write
@@ -1476,13 +1452,7 @@
 (pub fn (btreeFirstKey p root)
   (let ((box (KeyBox None)))
     (let ((_
-      (scanTree
-        p
-        root
-        None
-        None
-        true
-        false
+      (scanTree p root None None true false
         (lambda (k v)
           {
             (set box.key (Some k))
@@ -1498,13 +1468,7 @@
 (pub fn (btreeLastKey p root)
   (let ((box (KeyBox None)))
     (let ((_
-      (scanTree
-        p
-        root
-        None
-        None
-        false
-        false
+      (scanTree p root None None false false
         (lambda (k v)
           {
             (set box.key (Some k))
@@ -1548,8 +1512,7 @@
   (if (|| (<= pg 0) (>= pg (strLen ck.seen)))
     (corrupt (pageMsg (concat what " points at page ") pg ", outside the file") "btreeCheck")
     (if (!= (strByte ck.seen pg) 0)
-      (corrupt
-        (pageMsg "page " pg (concat " is reached twice, the second time as " what))
+      (corrupt (pageMsg "page " pg (concat " is reached twice, the second time as " what))
         "btreeCheck")
       {
         (__store8 (strData ck.seen) pg 1)
@@ -1575,8 +1538,7 @@
           )
           ((Ok c)
             (let ((used (be16 c 2)))
-              (if (||
-                    (!= (__load8 c 0) 5)
+              (if (|| (!= (__load8 c 0) 5)
                     (|| (== used 0) (|| (> used overflowRoom) (> used (- len done)))))
                 (set failed (Some (corruptError (pageMsg "overflow page " pg " is malformed"))))
                 {
@@ -1643,13 +1605,13 @@
                 (if (&& (isNone failed) (&& (== n 0) (|| (! leaf) (! isRoot))))
                   (set failed (Some
                                 (corruptError
-                                  (pageMsg "page " pg " is an empty node that should have been freed")))))
+                                  (pageMsg "page " pg
+                                    " is an empty node that should have been freed")))))
                 ; keys ascend, and lie within the bounds
                 (for i in 0..n
                   (if (! (isSome failed))
                     (let ((k (vecGet keys i)))
-                      (if (||
-                            (&& (> i 0) (<= (strCmp k (vecGet keys (- i 1))) 0))
+                      (if (|| (&& (> i 0) (<= (strCmp k (vecGet keys (- i 1))) 0))
                             (||
                               (match lo
                                 ((Some l) (< (strCmp k l) 0))
@@ -1658,7 +1620,8 @@
                                 ((Some h) (>= (strCmp k h) 0))
                                 ((None) false))))
                         (set failed (Some
-                                      (corruptError (pageMsg "page " pg " has keys out of order"))))))))
+                                      (corruptError
+                                        (pageMsg "page " pg " has keys out of order"))))))))
                 (for k in 0..(/ (vecLen chains) 2)
                   (if (! (isSome failed))
                     (match (checkChain p ck (vecGet chains (* 2 k)) (vecGet chains (+ (* 2 k) 1)))
@@ -1670,23 +1633,19 @@
                   (if (< ck.leafDepth 0)
                     (set ck.leafDepth depth)
                     (if (!= ck.leafDepth depth)
-                      (set failed (Some (corruptError "the tree's leaves are at different depths"))))))
+                      (set failed (Some
+                                    (corruptError "the tree's leaves are at different depths"))))))
                 (for j in 0..(vecLen kids)
                   (if (! (isSome failed))
                     (let ((r
-                      (checkTree
-                        p
-                        ck
-                        (vecGet kids j)
-                        kind
+                      (checkTree p ck (vecGet kids j) kind
                         (if (== j 0)
                           lo
                           (Some (vecGet keys (- j 1))))
                         (if (< j n)
                           (Some (vecGet keys j))
                           hi)
-                        (+ depth 1)
-                        false)))
+                        (+ depth 1) false)))
                       (match r
                         ((Err e)
                           (set failed (Some e))
@@ -1718,8 +1677,7 @@
           {
             (for root in roots
               (if (! (isSome failed))
-                (match (andThen
-                         (treeKind p root)
+                (match (andThen (treeKind p root)
                          (lambda (kind) (checkTree p (Check seen -1) root kind None None 0 true)))
                   ((Err e)
                     (set failed (Some e))
@@ -1740,8 +1698,7 @@
                   )
                     {
                       (while (&& (isNone bad) (&& (!= pg 0) (<= k want)))
-                        (match (andThen
-                                 (markPage ck pg "the free list")
+                        (match (andThen (markPage ck pg "the free list")
                                  (lambda (_) (pagerGetTransient p pg)))
                           ((Err e)
                             (set bad (Some e))
@@ -1750,7 +1707,8 @@
                             (if (!= (__load8 a 0) 6)
                               (set bad (Some
                                          (corruptError
-                                           (pageMsg "page " pg " is on the free list but isn't free"))))
+                                           (pageMsg "page " pg
+                                             " is on the free list but isn't free"))))
                               {
                                 (set k (+ k 1))
                                 (set pg (be32 a 4))
@@ -1767,8 +1725,7 @@
                                   (if (&& (< lost 0) (== (strByte seen i) 0))
                                     (set lost i)))
                                 (if (>= lost 0)
-                                  (corrupt
-                                    (pageMsg "page " lost " is reached from nothing")
+                                  (corrupt (pageMsg "page " lost " is reached from nothing")
                                     "btreeCheck")
                                   (Ok count))
                               }))

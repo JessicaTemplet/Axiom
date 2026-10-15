@@ -632,6 +632,14 @@ while its siblings go on. The stack is the task's own, so it's the same
 size wherever the pool started. Tested by
 `tests/stdlib/852-task-budgets.ax` and `tests/stdlib/920-task-stack.ax`.
 
+Cancellation is checked between every spawn attempt, including while a
+wide launch window is filling. An attempt already in progress can race
+the token. Once cancellation is observed, the pool starts no more work
+and gives running children their grace period before killing and reaping
+them. Unstarted slots answer `Err taskCancelledCode` in submit order.
+A deadline is per task, measured from its spawn. Tested by
+`tests/stdlib/960-task-launch-cancellation.ax`.
+
 `taskMapDecoded` and `taskMapDecodedWith` decode successful
 answers into typed values in the parent, in submit order; transport
 errors bypass the decoder. The byte limit covers the encoded answer,

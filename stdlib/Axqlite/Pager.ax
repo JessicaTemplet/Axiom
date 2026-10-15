@@ -137,14 +137,11 @@
 (:: dbOpenRw (-> Int Bool (Result Int Error)))
 ;@axiom:effect(io)
 (fn (dbOpenRw path create)
-  (sysResult
-    "sysOpenRw"
+  (sysResult "sysOpenRw"
     (if (== sysPreadNum 0)
       dbNoCall
-      (dbOpenMode
-        path
-        (|
-          (| oRdwr oCloexec)
+      (dbOpenMode path
+        (| (| oRdwr oCloexec)
           (if create
             oCreat
             0))
@@ -154,8 +151,7 @@
 (:: dbOpenRo (-> Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (dbOpenRo path)
-  (sysResult
-    "sysOpenRo"
+  (sysResult "sysOpenRo"
     (if (== sysPreadNum 0)
       dbNoCall
       (dbOpenMode path (| oRdonly oCloexec) 0))))
@@ -167,8 +163,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (dbPread fd buf count offset)
-  (sysResult
-    "sysPread"
+  (sysResult "sysPread"
     (if (== sysPreadNum 0)
       dbNoCall
       (__syscall4 sysPreadNum fd buf count offset))))
@@ -180,8 +175,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (dbPwrite fd buf count offset)
-  (sysResult
-    "sysPwrite"
+  (sysResult "sysPwrite"
     (if (== sysPwriteNum 0)
       dbNoCall
       (__syscall4 sysPwriteNum fd buf count offset))))
@@ -194,8 +188,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (dbFsync fd)
-  (sysResult
-    "sysFsync"
+  (sysResult "sysFsync"
     (if (== sysFsyncNum 0)
       dbNoCall
       (if (== fsyncUsesFullFsync 1)
@@ -211,8 +204,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (dbFtruncate fd len)
-  (sysResult
-    "sysFtruncate"
+  (sysResult "sysFtruncate"
     (if (== sysFtruncateNum 0)
       dbNoCall
       (__syscall2 sysFtruncateNum fd len))))
@@ -223,8 +215,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (dbFdSize fd)
-  (sysResult
-    "sysFdSize"
+  (sysResult "sysFdSize"
     (if (== sysPreadNum 0)
       dbNoCall
       (__syscall3 sysLseekNum fd 0 seekEnd))))
@@ -244,8 +235,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (dbFlock fd op)
-  (sysResult
-    "sysFlock"
+  (sysResult "sysFlock"
     (if (== sysFlockNum 0)
       dbNoCall
       (__syscall2 sysFlockNum fd op))))
@@ -418,8 +408,7 @@
           (set i (+ i 8))
         })
       (if (<= (+ i 4) len)
-        (let ((w (|
-                   (| (__load8 addr i) (<< (__load8 addr (+ i 1)) 8))
+        (let ((w (| (| (__load8 addr i) (<< (__load8 addr (+ i 1)) 8))
                    (| (<< (__load8 addr (+ i 2)) 16) (<< (__load8 addr (+ i 3)) 24)))))
           {
             (set h (+ (* (rotl (^ h (* w xP1)) 23) xP2) xP3))
@@ -756,8 +745,7 @@
 (:: ioErrOn (-> Error String String (Result a Error)))
 (fn (ioErrOn e subject where)
   (let ((why (errnoText (errCode e))))
-    (axqErr
-      axqIoFailed
+    (axqErr axqIoFailed
       (concat
         (concat
           (if (strIsEmpty subject)
@@ -1072,10 +1060,8 @@
               (dataLen (__load64 e 5))
             )
               {
-                (if (||
-                      (== fk 4)
-                      (==
-                        fd
+                (if (|| (== fk 4)
+                      (== fd
                         (if (== fk 5)
                           (st m wJFd)
                           (st m wDbFd))))
@@ -1397,7 +1383,8 @@
                 ((Err e) (Err e)))
               (if (< used (st m wMaxFrames))
                 (Ok used)
-                (axqErr axqTooBig "an operation needs more pages than the cache can hold" "pagerGet")))
+                (axqErr axqTooBig "an operation needs more pages than the cache can hold"
+                  "pagerGet")))
           }))))
       (match chosen
         ((Err e) (Err e))
@@ -1409,9 +1396,7 @@
               {
                 (__store64 meta 0 pgno)
                 (__store64 meta 1 0)
-                (__store64
-                  meta
-                  2
+                (__store64 meta 2
                   (if pin
                     epoch
                     0))
@@ -1461,8 +1446,7 @@
           }
           {
             (stAdd m (+ wStat0 4) 1)
-            (txnFail
-              m
+            (txnFail m
               (match (frameFor m pgno pin)
                 ((Err er) (Err er))
                 ((Ok f)
@@ -1745,7 +1729,9 @@
     ((Ok n) (Ok n))
     ((Err e)
       (if (|| (== (errCode e) eAgain) (== (errCode e) 4))
-        (axqErr axqBusy "another connection holds a lock on the database; nothing changed, so the statement can be tried again" "pagerLock")
+        (axqErr axqBusy
+          "another connection holds a lock on the database; nothing changed, so the statement can be tried again"
+          "pagerLock")
         (ioErr e "pagerLock"))
     )))
 
@@ -1772,7 +1758,8 @@
         (if (< n 4096)
           (corrupt "the file is shorter than its header page" "pagerOpen")
           (if (!= (pagerGetBe a 20 4) 1)
-            (axqErr axqNotADatabase "the file was written by an AXQLite format this library doesn't read" "pagerOpen")
+            (axqErr axqNotADatabase
+              "the file was written by an AXQLite format this library doesn't read" "pagerOpen")
             (if (!= (pagerGetBe a 4088 8) (pagerChecksum a 4088 0))
               (corrupt "the header page fails its checksum" "pagerOpen")
               (let (
@@ -1798,7 +1785,8 @@
                                   ((Err er) (Err er))
                                   ((Ok past)
                                     (if (|| (!= last 1) (!= past 0))
-                                      (corrupt "the file's length doesn't match its page count" "pagerOpen")
+                                      (corrupt "the file's length doesn't match its page count"
+                                        "pagerOpen")
                                       {
                                         (stSet m wCachedCounter counter)
                                         (Ok 0)
@@ -1859,7 +1847,9 @@
           (if (! hot)
             (Ok 0)
             (if (== (st m wReadOnly) 1)
-              (axqErr axqReadOnly "the database needs recovery from a hot journal, and this connection is read-only" "pagerBeginRead")
+              (axqErr axqReadOnly
+                "the database needs recovery from a hot journal, and this connection is read-only"
+                "pagerBeginRead")
               (match (flockOp m (| dbLockExclusive dbLockNonBlocking))
                 ((Err er1) (Err er1))
                 ((Ok _)
@@ -2026,7 +2016,9 @@
             (match (if (! hot)
               (Ok 0)
               (if (== (st m wReadOnly) 1)
-                (axqErr axqReadOnly "the database needs recovery from a hot journal, and this connection is read-only" "pagerOpen")
+                (axqErr axqReadOnly
+                  "the database needs recovery from a hot journal, and this connection is read-only"
+                  "pagerOpen")
                 (match (flockOp m (| dbLockExclusive dbLockNonBlocking))
                   ((Err er) (Err er))
                   ((Ok _) (recover m)))))
@@ -2038,7 +2030,9 @@
                     (if (! blank)
                       (loadHeader m)
                       (if (== (st m wReadOnly) 1)
-                        (axqErr axqNotADatabase "the file is empty, and a read-only connection can't make it a database" "pagerOpen")
+                        (axqErr axqNotADatabase
+                          "the file is empty, and a read-only connection can't make it a database"
+                          "pagerOpen")
                         (match (flockOp m (| dbLockExclusive dbLockNonBlocking))
                           ((Err er2) (Err er2))
                           ((Ok _)
@@ -2084,8 +2078,7 @@
       (match opened
         ((Err e)
           (if (== (errCode e) 2)
-            (axqErr
-              axqIoFailed
+            (axqErr axqIoFailed
               (if create
                 (concat (concat "can't create " path) ": its directory doesn't exist")
                 (concat (concat "no database file at " path) "; open it with create to make one"))
@@ -2104,7 +2097,8 @@
                           {
                             (let ((_ (dbClose fd)))
                               ())
-                            (axqErr axqTooBig "the kernel refused memory for the page cache" "pagerOpen")
+                            (axqErr axqTooBig "the kernel refused memory for the page cache"
+                              "pagerOpen")
                           }
                         )
                         ((Ok m)
@@ -2112,9 +2106,7 @@
                             (stSet m wLen total)
                             (stSet m wDbFd fd)
                             (stSet m wJFd -1)
-                            (stSet
-                              m
-                              wReadOnly
+                            (stSet m wReadOnly
                               (if readOnly
                                 1
                                 0))
@@ -2135,9 +2127,7 @@
                             (stSet m wFaultKind kind)
                             (stSet m wFaultAt at)
                             (stSet m wFaultArg arg)
-                            (stSet
-                              m
-                              wNoSync
+                            (stSet m wNoSync
                               (if durable
                                 0
                                 1))
@@ -2147,7 +2137,8 @@
                               (if (== h 0)
                                 {
                                   (release m 0)
-                                  (axqErr axqTooBig "the runtime's handle table is full" "pagerOpen")
+                                  (axqErr axqTooBig "the runtime's handle table is full"
+                                    "pagerOpen")
                                 }
                                 (match (prepareFile m)
                                   ((Ok _) (Ok (Pager h)))
@@ -2235,7 +2226,8 @@
   (let ((orig (st m wPageCount)))
     (let ((len (roundUp (+ (/ orig 8) 1) 4096)))
       (match (sysMapPrivate len)
-        ((Err e) (axqErr axqTooBig "the kernel refused memory for the journal's page set" "pagerBeginWrite"))
+        ((Err e) (axqErr axqTooBig "the kernel refused memory for the journal's page set"
+                   "pagerBeginWrite"))
         ((Ok b)
           {
             (stSet m wBitmap b)
@@ -2288,7 +2280,9 @@
                       ((Err er) (Err er))
                       ((Ok _)
                         (if (&& wasShared (!= (st m wCounter) seen))
-                          (axqErr axqBusy "another connection committed after this transaction read" "pagerBeginWrite")
+                          (axqErr axqBusy
+                            "another connection committed after this transaction read"
+                            "pagerBeginWrite")
                           (startTxn m))
                       ))
                   ))))
@@ -2450,7 +2444,8 @@
       (axqErr axqMisuse "there is no write transaction to commit" "pagerCommit")
       (if (== (st m wTxnError) 1)
         (let ((_ (rollbackTxn m)))
-          (axqErr axqIoFailed "an earlier failure in this transaction rolled it back" "pagerCommit"))
+          (axqErr axqIoFailed "an earlier failure in this transaction rolled it back"
+            "pagerCommit"))
         (if (== (st m wAnyChange) 0)
           {
             (endTxn m)
@@ -2482,7 +2477,8 @@
   (if (== (st m wInWrite) 0)
     (axqErr axqMisuse "a page can change only inside a write transaction" "pagerWrite")
     (if (== (st m wTxnError) 1)
-      (axqErr axqIoFailed "an earlier failure in this transaction means it must be rolled back" "pagerWrite")
+      (axqErr axqIoFailed "an earlier failure in this transaction means it must be rolled back"
+        "pagerWrite")
       (let ((f (fetch m pgno pin)?))
         (let ((a (fAddr m f)))
           (if (fDirty m f)
@@ -2570,8 +2566,7 @@
         (if (!= head 0)
           (let ((a (writablePage m head false)?))
             (if (!= (__load8 a 0) 6)
-              (txnFail
-                m
+              (txnFail m
                 (corrupt (pageMsg "page " head " is on the free list but isn't free") "pagerAlloc"))
               (let ((next (pagerGetBe a 4 4)))
                 (if (|| (>= next (st m wPageCount)) (== next head))
@@ -2788,9 +2783,7 @@
 ;; data anyone keeps.
 (pub :: pagerSetDurable (-> Pager Bool Int))
 (pub fn (pagerSetDurable p durable)
-  (stSet
-    (pm p)
-    wNoSync
+  (stSet (pm p) wNoSync
     (if durable
       0
       1)))

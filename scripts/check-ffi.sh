@@ -707,6 +707,43 @@ for line in sys.stdin:
     echo "FAIL could not build axiom-ffi with the host feature for the contract probes"
     status=1
   else
+    collision_log="$work/mangle-collision.log"
+    if "$axiom" --diagnostic-format=ai build tests/ffi/host/mangle-collision.ax \
+         --emit-staticlib --emit-rust-binding "$work/collision.rs" \
+         -o "$work/collision.a" >"$collision_log" 2>&1; then
+      echo "FAIL nominal host: distinct types shared generated accessor names"
+      status=1
+    elif ! grep -q '^E AX3006 ' "$collision_log"; then
+      echo "FAIL nominal host: accessor collision was not diagnosed as AX3006"
+      head -12 "$collision_log"
+      status=1
+    else
+      echo "ok   nominal host: colliding accessor names refuse the archive"
+    fi
+
+    nominal_dir="$work/nominal-host"
+    mkdir -p "$nominal_dir"
+    cp tests/ffi/host/nominal-host.rs "$nominal_dir/main.rs"
+    if ! "$axiom" --diagnostic-format=ai build tests/ffi/host/nominal.ax \
+         --emit-staticlib --emit-rust-binding "$nominal_dir/nominal.rs" \
+         -o "$nominal_dir/libaxiom_nominal.a" >"$nominal_dir/build.log" 2>&1; then
+      echo "FAIL nominal host: archive and bindings could not be generated"
+      head -12 "$nominal_dir/build.log"
+      status=1
+    elif ! rustc --edition 2024 "$nominal_dir/main.rs" -o "$nominal_dir/probe" \
+         -L "dependency=$(dirname "$ffi_rlib")" -L "dependency=$(dirname "$ffi_rlib")/deps" \
+         -L "native=$nominal_dir" -l static=axiom_nominal --extern "axiom_ffi=$ffi_rlib" \
+         >"$nominal_dir/rustc.log" 2>&1; then
+      echo "FAIL nominal host: generated Rust bindings do not compile"
+      head -12 "$nominal_dir/rustc.log"
+      status=1
+    elif ! nominal_out="$("$nominal_dir/probe" 2>&1)" || [[ "$nominal_out" != "nominal host bindings agree" ]]; then
+      echo "FAIL nominal host: local types, aliases and standard Result disagree: $nominal_out"
+      status=1
+    else
+      echo "ok   nominal host: aliases, homonymous imported types and both Result declarations agree"
+    fi
+
     probes="$work/contract"
     mkdir -p "$probes"
     # Both directories: cargo reports the UPLIFTED `target/debug/*.rlib`,

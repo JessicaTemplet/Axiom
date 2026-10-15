@@ -145,7 +145,7 @@ fn nested_fixture_shape() {
     assert!(fresh.contains("(ffiFreeStrList __p __n)"));
     assert!(fresh.contains("(totalRaw :: (-> Int Int) (symbol \"axffi_total\"))"));
     assert!(fresh.contains("(pub :: total (-> (Vec Int) Int))"));
-    assert!(fresh.contains("(__r \n    (totalRaw (as xs Int))))\n    __r))"));
+    assert!(fresh.contains("(__r\n    (totalRaw (as xs Int))))\n    __r))"));
     assert!(fresh.contains("(pub :: tryEvens (-> Int (Result (Vec Int) String)))"));
     assert!(fresh.contains("(pub :: maybePieces (-> String (Option (Vec String))))"));
     // A record is a `data` with one positional field per Rust field,
@@ -164,7 +164,7 @@ fn nested_fixture_shape() {
     assert!(fresh.contains("(pub :: pixelOff Pixel)"));
     assert!(fresh.contains(
         "(__c (ffiCellNewN 3))\n    (__st (pixelOffRaw __c))\n    (__w0 (ffiCellWord __c 0))\n    \
-         (__w1 (__floatFromBits (ffiCellWord __c 1) ))\n    (__w2 (as (ffiCellWord __c 2) Bool))\n    \
+         (__w1 (__floatFromBits (ffiCellWord __c 1)))\n    (__w2 (as (ffiCellWord __c 2) Bool))\n    \
          (__r (Pixel __w0 __w1 __w2))"
     ));
     // Two records and a handle in one call: fields numbered across the
@@ -207,11 +207,11 @@ fn nested_fixture_shape() {
     assert!(fresh.contains("(:: __pixelFromWords (-> (Vec Pixel) Int Int Int (Vec Pixel)))"));
     assert!(fresh.contains(
         "(fn (__pixelFromWords __v __p __n __i)\n  (if (>= __i __n)\n    __v\n    (let (\n      \
-         (__w0 (ffiWordAt __p (* __i 3)))\n      (__w1 (__floatFromBits (ffiWordAt __p (+ (* __i 3) 1)) ))\n      \
+         (__w0 (ffiWordAt __p (* __i 3)))\n      (__w1 (__floatFromBits (ffiWordAt __p (+ (* __i 3) 1))))\n      \
          (__w2 (as (ffiWordAt __p (+ (* __i 3) 2)) Bool))\n    )\n      {\n        \
          (vecPush __v (Pixel __w0 __w1 __w2))\n        (__pixelFromWords __v __p __n (+ __i 1))\n      })))"
     ));
-    // `__ps` carries `Pixel`, so the scrutinee needs no `cast` and the
+    // `__ps` carries `Pixel`, so the scrutinee needs no `as` and the
     // pattern is checked against the real type. The flattened vector is
     // a `(Vec Int)` of raw words, so the Float and Bool fields go in as
     // their bits - which is what `field_from_word` reads back above.
@@ -219,7 +219,7 @@ fn nested_fixture_shape() {
     assert!(fresh.contains(
         "(fn (__pixelToWords __ps __w __i)\n  (if (>= __i (vecLen __ps))\n    __w\n    \
          (match (vecGet __ps __i)\n      ((Pixel __f0 __f1 __f2)\n        {\n          \
-          (vecPush __w __f0)\n          (vecPush __w (as __f1 Int))\n          \
+          (vecPush __w __f0)\n          (vecPush __w (__floatToBits __f1))\n          \
           (vecPush __w (as __f2 Int))\n          \
          (__pixelToWords __ps __w (+ __i 1))"
     ));

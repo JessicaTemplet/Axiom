@@ -3,11 +3,12 @@
 // syntaxes/axiom.tmLanguage.json before the server answers, and from
 // the server's semantic tokens once it has.
 const vscode = require("vscode");
-const { LanguageClient, State } = require("vscode-languageclient/node");
+const { LanguageClient, State, LSPErrorCodes } = require("vscode-languageclient/node");
 
 let client;
 let output;
 let statusBar;
+let fileEvents = [];
 const terminals = new Map();
 
 function serverPath() {
@@ -43,6 +44,8 @@ function startClient() {
     {
       documentSelector: [{ scheme: "file", language: "axiom" }],
       outputChannel: output,
+      traceOutputChannel: output,
+      synchronize: { fileEvents },
     }
   );
   client.onDidChangeState((e) => setStatus(e.newState));
@@ -82,7 +85,7 @@ async function runFile(arg) {
     return;
   }
   const doc = vscode.workspace.textDocuments.find((d) => d.fileName === file);
-  if (doc && doc.isDirty) await doc.save();
+  if (doc && doc.isDirty && !await doc.save()) return;
   runInTerminal("axiom run", shellQuote(serverPath()) + " run " + shellQuote(file));
 }
 
@@ -101,11 +104,24 @@ async function expandMacro(uri, position) {
   if (!uri) return;
   let r;
   try {
-    r = await client.sendRequest("axiom/expandMacro", { textDocument: { uri }, position });
+    const c = client;
+    r = await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: "Axiom: Expanding macro",
+      cancellable: true,
+    }, async (_progress, token) => {
+      const result = await c.sendRequest("axiom/expandMacro", { textDocument: { uri }, position }, token);
+      return token.isCancellationRequested ? undefined : result;
+    });
   } catch (e) {
+    if (e instanceof vscode.CancellationError ||
+        e?.code === LSPErrorCodes.RequestCancelled ||
+        e?.code === LSPErrorCodes.ContentModified ||
+        e?.code === LSPErrorCodes.ServerCancelled) return;
     vscode.window.showErrorMessage("Axiom: could not expand the macro: " + (e && e.message ? e.message : e));
     return;
   }
+  if (r === undefined) return;
   if (!r) {
     vscode.window.showInformationMessage("Nothing to expand here");
     return;
@@ -124,11 +140,18 @@ async function restartServer() {
 }
 
 function activate(context) {
+  // The language client negotiates ranged edits, saves and semantic-token
+  // deltas. Workspace watchers cover dependencies changed outside an editor.
+  fileEvents = [
+    vscode.workspace.createFileSystemWatcher("**/*.ax"),
+    vscode.workspace.createFileSystemWatcher("**/axiom.pkg"),
+  ];
   output = vscode.window.createOutputChannel("Axiom");
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBar.command = "axiom.restartServer";
   setStatus(State.Starting);
   context.subscriptions.push(
+    ...fileEvents,
     output,
     statusBar,
     vscode.commands.registerCommand("axiom.run", runFile),

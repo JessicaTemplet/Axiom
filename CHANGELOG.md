@@ -16,6 +16,19 @@ its changelog too.
 
 ## Unreleased
 
+- Task pools check cancellation between spawn attempts while filling a
+  launch window. Refused spawns and answer-budget exhaustion start grace
+  from a fresh clock reading. Controlled interleaving and native ablation
+  tests cover both lowerings at optimisation levels 0 and 2, preserving
+  ordered results and child cleanup. Tests:
+  `tests/stdlib/960-task-launch-cancellation.ax` and
+  `tests/litmus/check-task-launch.py`.
+
+- AXQL select aliases use `(alias expression name)` in place of the
+  SQL DSL's `(as expression name)`. The emitted query still uses `AS`.
+  Axiom's `as` remains an explicit type conversion. Tested by
+  `tests/axqlite/620-macro-text.ax` and `tests/axqlite/625-macro-forms.ax`.
+
 - Removed `@r` signature region annotations and their parser, formatter
   and editor support. Lexical `region` scopes and inferred escape checks
   remain the memory-lifetime interface. `AX3061` and `AX3063` are retired;
@@ -741,6 +754,50 @@ unsaved files, malformed-source recovery and close/reopen.
   require a machine bound for every selected source entry, and retain
   program entries when extra roots are requested. Unknown IRQ stack
   instructions fail closed. Tested by `scripts/check-report.sh`.
+
+- Generic return types retain their parameters through containers, ADTs,
+  records and callback signatures. A concrete payload or callback cannot
+  satisfy an arbitrary caller-selected type. Compiler vector results and
+  metadata readers carry their concrete types. Tested by
+  `tests/diagnostics/1443-generic-result-rigidity.ax` and
+  `tests/stdlib/956-generic-result-rigidity.ax`.
+
+- Formatting packs complete call arguments within the line width and
+  preserves structural breaks and interior comments. The compiler and
+  Rust binding generator follow the same layout. Long constructor calls
+  keep their argument order. Tested by
+  `tests/stdlib/958-formatter-packed-calls.ax`.
+- `fmt` accepts multiple files, stdin with `-`, `--emit stdout` and
+  non-writing unified diffs with `--diff`. It prepares every batch input
+  before writing, and skips writes for unchanged files. Tested by
+  `tests/fmt/workflow.py`.
+
+- Runtime Result dispatch and Rust host bindings use the declaring type's
+  identity. Local Result and Error declarations cannot replace Err's
+  protocol or change an imported module's types. Binding accessors use
+  checked aliases and qualified constructor patterns. Tested by
+  `tests/stdlib/957-main-result-nominal.ax` and `tests/ffi/host/nominal.ax`.
+
+- The language server caches derived results within eight entries and
+  four MiB. Reuse validates exact dependency bytes, missing higher-priority
+  candidates and package roots. Saves and watched-file notifications
+  refresh open diagnostics and generated names. Tested by
+  `tests/lsp/semantic-cache.py`.
+
+### VS Code client synchronisation
+
+- The VS Code client watches workspace sources and package manifests,
+  forwards cancellation from macro expansion, suppresses obsolete previews
+  and respects a refused save before running a file. Client smoke tests
+  cover these workflows and watcher reuse across restarts.
+- The extension colours the pipeline as an operator and the removed `cast`
+  form as deprecated. Its source launch configuration, packaged licence
+  and formatting guide are included. The extension version is unchanged.
+
+- Rust bindings preserve Float bits explicitly through `__floatToBits` and
+  `__floatFromBits` in flattened records and fallible payloads. Generated
+  modules share the canonical formatter layout. The native record-vector
+  round trip and generator snapshots cover the numeric conversion boundary.
 
 ## 0.7.8 — 2026-10-07
 

@@ -325,7 +325,8 @@
 (pub fn (axqOpen path opts)
   (if (< opts.cachePages 1)
     (misuse "the page cache needs at least one page" "axqOpen")
-    (let ((pager (withContext (pagerOpen path opts.create opts.readOnly opts.cachePages) "axqOpen")?))
+    (let ((pager (withContext (pagerOpen path opts.create opts.readOnly opts.cachePages)
+                   "axqOpen")?))
       (match (sysMapPrivate connBytes)
         ((Err e)
           (let ((_ (pagerClose pager)))
@@ -506,8 +507,7 @@
 
 (:: columnRange (-> Row Int String (Result a Error)))
 (fn (columnRange r i where)
-  (axqErr
-    axqMisuse
+  (axqErr axqMisuse
     (concat (concat "no column " (fmtInt i)) (concat "; the row has " (fmtInt (vecLen r.values))))
     where))
 
@@ -528,8 +528,7 @@
           (set i (+ i 1))
         })
       (if (< found 0)
-        (axqErr
-          axqSchema
+        (axqErr axqSchema
           (concat (concat "no result column named " name) (axqlHint name r.names "result columns"))
           "rowIndex")
         (Ok found))
@@ -544,11 +543,9 @@
 
 (:: wrongType (-> Row Int String Value String (Result a Error)))
 (fn (wrongType r i want v where)
-  (axqErr
-    axqType
+  (axqErr axqType
     (concat
-      (concat
-        (concat (concat "column " (fmtInt i)) (concat (concat " (" (vecGet r.names i)) ")"))
+      (concat (concat (concat "column " (fmtInt i)) (concat (concat " (" (vecGet r.names i)) ")"))
         (concat (concat " is " (typeName (axqlValueType v))) (concat ", not " want)))
       (readerHint v))
     where))
@@ -683,8 +680,7 @@
 (fn (runParsed c parsed params sink onRow)
   (if (!= (vecLen params) parsed.paramCount)
     (misuse
-      (concat
-        (concat "the statement takes " (fmtInt parsed.paramCount))
+      (concat (concat "the statement takes " (fmtInt parsed.paramCount))
         (concat
           (if (== parsed.paramCount 1)
             " parameter and was given "
@@ -693,8 +689,7 @@
       "axqRun")
     (let ((nan (nanParam params)))
       (if (>= nan 0)
-        (axqErr
-          axqType
+        (axqErr axqType
           (concat (concat "parameter " (fmtInt (+ nan 1))) " is a NaN, which no statement can hold")
           "axqRun")
         (runChecked c parsed params sink onRow)))))
@@ -996,8 +991,7 @@
 (pub :: axqExec (-> Connection String (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (axqExec c text)
-  (unstashResult
-    c
+  (unstashResult c
     (region stmt
       (stashResult c (execText c (strDup text))))))
 
@@ -1016,8 +1010,7 @@
 (pub :: axqExecBatch (-> Connection String (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (axqExecBatch c script)
-  (unstashResult
-    c
+  (unstashResult c
     (region batch
       (stashResult c (execScript c (strDup script))))))
 
@@ -1027,9 +1020,9 @@
   (let ((stmts (inStatement (axqlParseScript script) script "axqExecBatch")?))
     (if (hasTxnControl stmts)
       (inStatement
-        (misuse "a batch runs in one transaction and can't hold BEGIN, COMMIT or ROLLBACK" "axqExecBatch")
-        script
-        "axqExecBatch")
+        (misuse "a batch runs in one transaction and can't hold BEGIN, COMMIT or ROLLBACK"
+          "axqExecBatch")
+        script "axqExecBatch")
       (if (inTxn c)
         (batchInside c stmts)
         (let ((_ (inStatement (txnOpen c 0) script "axqExecBatch")?))
@@ -1102,8 +1095,7 @@
                 {
                   (endTxn c)
                   (Err
-                    (errContextOf
-                      e
+                    (errContextOf e
                       (concat (errContext e) ", which then rolled back the transaction")))
                 })
             ))
@@ -1216,18 +1208,14 @@
           (let ((h (__handle_new stmtKind m)))
             (if (== h 0)
               (let ((_ (sysUnmapPrivate m len)))
-                (inStatement
-                  (misuse "the runtime's handle table is full" "axqPrepare")
-                  text
+                (inStatement (misuse "the runtime's handle table is full" "axqPrepare") text
                   "axqPrepare"))
               {
                 (__store64 m 0 len)
                 (__store64 m 1 c.slot)
                 (__store64 m 2 n)
                 (__store64 m 3 parsed.paramCount)
-                (__store64
-                  m
-                  4
+                (__store64 m 4
                   (if (stmtIsQuery parsed.stmt)
                     1
                     0))
@@ -1301,8 +1289,7 @@
         (if (< found 0)
           (inStatement
             (misuse (concat "the statement has no parameter named " name) "axqParamIndex")
-            parsed.text
-            "axqParamIndex")
+            parsed.text "axqParamIndex")
           (Ok found))
       })))
 
@@ -1313,8 +1300,7 @@
 ;@axiom:effect(io)
 (pub fn (axqRun s params)
   (let ((c (stmtConn s)))
-    (unstashResult
-      c
+    (unstashResult c
       (region stmt
         (stashResult c (runStatement c s (copyParams params)))))))
 
@@ -1323,10 +1309,8 @@
 (fn (runStatement c s params)
   (let ((parsed (reparse s "axqRun")?))
     (if (stmtIsQuery parsed.stmt)
-      (inStatement
-        (misuse "the statement returns rows: use axqQuery or axqQueryEach" "axqRun")
-        parsed.text
-        "axqRun")
+      (inStatement (misuse "the statement returns rows: use axqQuery or axqQueryEach" "axqRun")
+        parsed.text "axqRun")
       (inStatement (runParsed c parsed params (Sink vecNew) dropRows) parsed.text "axqRun"))))
 
 ;; Run a SELECT with `params` and answer all its rows.
@@ -1347,9 +1331,7 @@
       (sink (Sink vecNew))
     )
       (let ((_
-        (inStatement
-          (runParsed c parsed params sink (lambda (r) (collectRow acc r)))
-          parsed.text
+        (inStatement (runParsed c parsed params sink (lambda (r) (collectRow acc r))) parsed.text
           where)?))
         (Ok (Rows sink.names acc))))))
 
@@ -1422,8 +1404,7 @@
 (pub :: axqRunOn (-> Connection Query (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (axqRunOn c q)
-  (unstashResult
-    c
+  (unstashResult c
     (region stmt
       (stashResult c (runQuery c (Query (strDup q.text) (copyParams q.params)))))))
 
@@ -1432,10 +1413,8 @@
 (fn (runQuery c q)
   (let ((parsed (inStatement (axqlParse q.text) q.text "axqRunOn")?))
     (if (stmtIsQuery parsed.stmt)
-      (inStatement
-        (misuse "the query returns rows: use axqQueryOn or axqQueryEachOn" "axqRunOn")
-        q.text
-        "axqRunOn")
+      (inStatement (misuse "the query returns rows: use axqQueryOn or axqQueryEachOn" "axqRunOn")
+        q.text "axqRunOn")
       (inStatement (runParsed c parsed q.params (Sink vecNew) dropRows) q.text "axqRunOn"))))
 
 ;; Run a query and answer all its rows.
@@ -1513,9 +1492,7 @@
   (let ((got (axqQueryOne c q)?))
     (match got
       ((Some r) (inStatement (rowInt r 0) q.text "axqQueryInt"))
-      ((None) (inStatement
-                (axqErr axqNotFound "the query found no row" "axqQueryInt")
-                q.text
+      ((None) (inStatement (axqErr axqNotFound "the query found no row" "axqQueryInt") q.text
                 "axqQueryInt")))))
 
 ;; The TEXT in the first column of the first row a query answers.
@@ -1526,9 +1503,7 @@
   (let ((got (axqQueryOne c q)?))
     (match got
       ((Some r) (inStatement (rowText r 0) q.text "axqQueryText"))
-      ((None) (inStatement
-                (axqErr axqNotFound "the query found no row" "axqQueryText")
-                q.text
+      ((None) (inStatement (axqErr axqNotFound "the query found no row" "axqQueryText") q.text
                 "axqQueryText")))))
 
 ; ------------------------------------------------------------------
@@ -1578,17 +1553,12 @@
   (let ((out vecNew))
     {
       (for col in t.cols
-        (vecPush
-          out
-          (ColumnInfo
-            col.name
+        (vecPush out
+          (ColumnInfo col.name
             (if (strIsEmpty col.link)
               (typeName col.ctype)
               "LINK")
-            col.notNull
-            col.primaryKey
-            col.link
-            col.text)))
+            col.notNull col.primaryKey col.link col.text)))
       out
     }))
 
@@ -1597,9 +1567,7 @@
 (pub :: axqColumns (-> Connection String (Result (Vec ColumnInfo) Error)))
 ;@axiom:effect(io)
 (pub fn (axqColumns c table)
-  (withSchema
-    c
-    "axqColumns"
+  (withSchema c "axqColumns"
     (lambda (s)
       (let ((t (axqlTableDef s table)?))
         (Ok (columnInfos t)))
@@ -1624,9 +1592,7 @@
 (pub :: axqIndexes (-> Connection String (Result (Vec IndexInfo) Error)))
 ;@axiom:effect(io)
 (pub fn (axqIndexes c table)
-  (withSchema
-    c
-    "axqIndexes"
+  (withSchema c "axqIndexes"
     (lambda (s)
       (let ((t (axqlTableDef s table)?))
         (Ok (indexInfos t)))
@@ -1723,7 +1689,8 @@
               (set going (&& moved (< (vecLen done) (vecLen todo))))
             }))
         (if (< (vecLen done) (vecLen todo))
-          (axqErr axqSchema "tables link to each other in a cycle, which a dump can't order" "axqDump")
+          (axqErr axqSchema "tables link to each other in a cycle, which a dump can't order"
+            "axqDump")
           (Ok order))
       })))
 
@@ -1749,8 +1716,7 @@
 (:: dumpRow (-> DumpTable Int Row (Result Bool Error)))
 (fn (dumpRow d keep r)
   {
-    (vecPush
-      d.parts
+    (vecPush d.parts
       (if (== d.inRow 0)
         d.head
         ",\n  "))
@@ -1790,9 +1756,7 @@
       {
         (vecPush parts "-- An AXQLite dump: run it with axqExecBatch on an empty database.\n")
         (for t in tables
-          (match (withSchema
-                   c
-                   "axqDump"
+          (match (withSchema c "axqDump"
                    (lambda (s)
                      (match (axqlFindEntry s t.name)
                        ((Some e) (Ok e.text))
@@ -1819,34 +1783,26 @@
                   (vecPush names (axqlQuoteName col.name)))
                 (let (
                   (withId (&& hasRowid (< t.pk 0)))
-                  (head (concat
-                          (concat (concat "INSERT INTO " (axqlQuoteName t.name)) " (")
-                          (concat
-                            (joinParts (joinWith names ", "))
+                  (head (concat (concat (concat "INSERT INTO " (axqlQuoteName t.name)) " (")
+                          (concat (joinParts (joinWith names ", "))
                             (if (&& hasRowid (< t.pk 0))
                               ", rowid) VALUES\n  "
                               ") VALUES\n  "))))
-                  (d (DumpTable
-                       parts
-                       head
+                  (d (DumpTable parts head
                        (if (linksItself t)
                          0
                          1000)
                        0))
                   (select (concat
-                            (concat
-                              "SELECT *"
+                            (concat "SELECT *"
                               (if (&& hasRowid (< t.pk 0))
                                 ", rowid"
                                 ""))
                             (concat " FROM " (axqlQuoteName t.name))))
                 )
-                  (match (axqQueryEachOn
-                           c
-                           (Query select vecNew)
+                  (match (axqQueryEachOn c (Query select vecNew)
                            (lambda (r)
-                             (dumpRow
-                               d
+                             (dumpRow d
                                (if withId
                                  (+ keep 1)
                                  keep)

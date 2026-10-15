@@ -537,7 +537,7 @@ impl Surface {
             let mut note = String::from(
                 "; A `Vec` of words is a `(Vec Int)`, one word per element, and which\n\
                  ; scalar those words hold is whatever the program reads them as -\n\
-                 ; Float bits with `(__floatFromBits (vecGet v i) )`, a Bool as 0/1, a Char\n\
+                 ; Float bits with `(__floatFromBits (vecGet v i))`, a Bool as 0/1, a Char\n\
                  ; as its code point, every integer as the word (a u64 >= 2^63 reads\n\
                  ; negative):",
             );
@@ -860,6 +860,7 @@ fn param_is_vec(p: &Param) -> bool {
 fn field_from_word(scalar: Scalar, word: Ex) -> Ex {
     match scalar.axiom_type() {
         "Int" => word,
+        "Float" => app(vec![atom("__floatFromBits"), word]),
         other => Ex::Cast(other.to_string(), Box::new(word)),
     }
 }
@@ -870,6 +871,7 @@ fn field_from_word(scalar: Scalar, word: Ex) -> Ex {
 fn field_to_word(scalar: Scalar, field: Ex) -> Ex {
     match scalar.axiom_type() {
         "Int" => field,
+        "Float" => app(vec![atom("__floatToBits"), field]),
         _ => Ex::Cast("Int".into(), Box::new(field)),
     }
 }
@@ -1488,7 +1490,7 @@ impl Decl {
                 if matches!(p, Payload::Scalar(s) if s.is_float()) {
                     binds.push((
                         "__f".into(),
-                        Ex::Cast("Float".into(), Box::new(atom("__p"))),
+                        app(vec![atom("__floatFromBits"), atom("__p")]),
                     ));
                 }
                 if matches!(p, Payload::Scalar(Scalar::Char)) {

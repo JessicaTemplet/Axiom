@@ -1,0 +1,316 @@
+; Formatting workflow: prepare every input before any file is written.
+(import core)
+(import driver)
+(import format)
+(import IO (readAll readFile stdin stdout stderr writeFile writeStr))
+(import Err)
+(import Fmt)
+(import Str)
+(import Sys)
+(import Vec)
+
+(struct FormatInput
+  (path : String)
+  (source : String)
+  (text : String)
+  (valid : Bool))
+
+(:: fmtFailure (-> String Int))
+;@axiom:effect(io)
+(fn (fmtFailure message)
+  {
+    (writeStr stderr message)
+    1
+  })
+
+(:: fmtStdout (-> String Int))
+;@axiom:effect(io)
+(fn (fmtStdout text)
+  (let ((written (writeStr stdout text)))
+    (if (== written (strLen text))
+      0
+      (fmtFailure
+        (concat "error: could not write formatted output: "
+          (concat
+            (if (< written 0)
+              (errnoReason (- 0 written))
+              "short write")
+            "\n"))))))
+
+(:: fmtHasPath (-> (Vec String) String Int Bool))
+(fn (fmtHasPath paths path i)
+  (if (>= i (vecLen paths))
+    false
+    (if (strEq (vecGet paths i) path)
+      true
+      (fmtHasPath paths path (+ i 1)))))
+
+; Values after `--`, or belonging to another option, are operands.
+(:: fmtOptionValue (-> String Int String))
+;@axiom:effect(io)
+(fn (fmtOptionValue wanted i)
+  (if (>= i sysArgc)
+    ""
+    (let ((arg (sysArg i)))
+      (if (strEq arg "--")
+        ""
+        (if (looksLikeFlag arg)
+          (let ((name (flagNamePart arg)))
+            (if (strEq name wanted)
+              (if (flagHasValuePart arg)
+                (flagValuePart arg)
+                (sysArg (+ i 1)))
+              (fmtOptionValue wanted
+                (+ i
+                  (if (&& (== (flagArity name) 1) (! (flagHasValuePart arg)))
+                    2
+                    1)))))
+          (fmtOptionValue wanted (+ i 1)))))))
+
+(:: fmtPaths (Vec String))
+;@axiom:effect(io)
+(fn (fmtPaths)
+  (let (
+    (paths vecNew)
+    (mut i 1)
+    (command subcommandIndex)
+    (mut endOptions false)
+  )
+    {
+      (while (< i sysArgc)
+        (let ((arg (sysArg i)))
+          {
+            (if (== i command)
+              ()
+              (if (&& (! endOptions) (strEq arg "--"))
+                (set endOptions true)
+                (if (&& (! endOptions) (looksLikeFlag arg))
+                  (let ((name (flagNamePart arg)))
+                    {
+                      (if (strEq name "--input")
+                        (let ((path
+                          (if (flagHasValuePart arg)
+                            (flagValuePart arg)
+                            (sysArg (+ i 1)))))
+                          (if (! (fmtHasPath paths path 0))
+                            (vecPush paths path))))
+                      (if (&& (== (flagArity name) 1) (! (flagHasValuePart arg)))
+                        (set i (+ i 1)))
+                    })
+                  (if (! (fmtHasPath paths arg 0))
+                    (vecPush paths arg)))))
+            (set i (+ i 1))
+          }))
+      paths
+    }))
+
+(:: fmtPrepare (-> String FormatInput))
+;@axiom:effect(io)
+(fn (fmtPrepare path)
+  (match (if (strEq path "-")
+    (readAll stdin)
+    (readFile path))
+    ((Err error)
+      {
+        (fmtFailure (readFailMsg path (errCode error)))
+        (FormatInput path "" "" false)
+      }
+    )
+    ((Ok source)
+      (let ((result (fmtFormat source)))
+        (if (== (fzOk result) 0)
+          {
+            (if (strEq (fzText result) "AX2005")
+              (fmtFailure
+                "error[AX2005]: nesting is too deep for the formatter (limit is 1024); it counts each `.name` and `Mod::name` link as a level\n"))
+            (fmtFailure (concat path " was not rewritten: formatter refusal\n"))
+            (FormatInput path source "" false)
+          }
+          (FormatInput path source (fzText result) true)))
+    )))
+
+; Keep line terminators so a diff records a missing final newline exactly.
+(:: fmtDiffLines (-> String (Vec String)))
+(fn (fmtDiffLines text)
+  (let (
+    (lines vecNew)
+    (mut from 0)
+    (mut i 0)
+  )
+    {
+      (while (< i (strLen text))
+        {
+          (if (== (strByte text i) 10)
+            {
+              (vecPush lines (strSlice text from (+ (- i from) 1)))
+              (set from (+ i 1))
+            })
+          (set i (+ i 1))
+        })
+      (if (< from (strLen text))
+        (vecPush lines (strSlice text from (- (strLen text) from))))
+      lines
+    }))
+
+(:: fmtDiffLine (-> String String Int))
+;@axiom:effect(io)
+(fn (fmtDiffLine marker line)
+  (fmtStdout
+    (concat marker
+      (concat line
+        (if (|| (== (strLen line) 0) (!= (strByte line (- (strLen line) 1)) 10))
+          "\n\\ No newline at end of file\n"
+          "")))))
+
+(:: fmtDiffRange (-> Int Int String))
+(fn (fmtDiffRange from count)
+  (concat
+    (fmtInt
+      (if (== count 0)
+        from
+        (+ from 1)))
+    (concat "," (fmtInt count))))
+
+; One unified hunk, with three unchanged context lines at either boundary.
+; Work stays linear even when a generated file changes on every line.
+(:: fmtPrintDiff (-> FormatInput Int))
+;@axiom:effect(io)
+(fn (fmtPrintDiff input)
+  (let (
+    (before (fmtDiffLines input.source))
+    (after (fmtDiffLines input.text))
+    (n (vecLen before))
+    (m (vecLen after))
+    (mut prefix 0)
+    (mut suffix 0)
+    (mut failed 0)
+  )
+    {
+      (while (&& (< prefix n)
+               (&& (< prefix m) (strEq (vecGet before prefix) (vecGet after prefix))))
+        (set prefix (+ prefix 1)))
+      (while (&& (< suffix (- n prefix))
+               (&& (< suffix (- m prefix))
+                 (strEq (vecGet before (- (- n suffix) 1)) (vecGet after (- (- m suffix) 1)))))
+        (set suffix (+ suffix 1)))
+      (let (
+        (start (if (> prefix 3)
+          (- prefix 3)
+          0))
+        (context (if (> suffix 3)
+          3
+          suffix))
+        (oldEnd (+ (- n suffix)
+                  (if (> suffix 3)
+                    3
+                    suffix)))
+        (newEnd (+ (- m suffix)
+                  (if (> suffix 3)
+                    3
+                    suffix)))
+      )
+        {
+          (let ((header (concat "--- "
+                          (concat input.path
+                            (concat "\n+++ "
+                              (concat input.path
+                                (concat "\n@@ -"
+                                  (concat (fmtDiffRange start (- oldEnd start))
+                                    (concat " +"
+                                      (concat (fmtDiffRange start (- newEnd start))
+                                        " @@\n"))))))))))
+            (if (!= (fmtStdout header) 0)
+              (set failed 1)))
+          (let ((mut i start))
+            (while (&& (== failed 0) (< i prefix))
+              {
+                (if (!= (fmtDiffLine " " (vecGet before i)) 0)
+                  (set failed 1))
+                (set i (+ i 1))
+              }))
+          (let ((mut i prefix))
+            (while (&& (== failed 0) (< i (- n suffix)))
+              {
+                (if (!= (fmtDiffLine "-" (vecGet before i)) 0)
+                  (set failed 1))
+                (set i (+ i 1))
+              }))
+          (let ((mut i prefix))
+            (while (&& (== failed 0) (< i (- m suffix)))
+              {
+                (if (!= (fmtDiffLine "+" (vecGet after i)) 0)
+                  (set failed 1))
+                (set i (+ i 1))
+              }))
+          (let ((mut i (- n suffix)))
+            (while (&& (== failed 0) (< i (+ (- n suffix) context)))
+              {
+                (if (!= (fmtDiffLine " " (vecGet before i)) 0)
+                  (set failed 1))
+                (set i (+ i 1))
+              }))
+          failed
+        })
+    }))
+
+(:: fmtPublish (-> FormatInput Bool Bool Bool Int))
+;@axiom:effect(io)
+(fn (fmtPublish input check diff toStdout)
+  (let ((changed (! (strEq input.source input.text))))
+    (if diff
+      (if changed
+        {
+          (fmtPrintDiff input)
+          1
+        }
+        0)
+      (if check
+        (if changed
+          (fmtFailure (concat "Error: " (concat input.path " needs formatting\n")))
+          (fmtStdout (concat "OK: " (concat input.path " is already formatted\n"))))
+        (if toStdout
+          (fmtStdout input.text)
+          (if (&& changed (isErr (writeFile input.path input.text)))
+            (fmtFailure
+              (concat "error: could not write formatted file '" (concat input.path "'\n")))
+            (fmtStdout (concat "OK: " (concat input.path " formatted\n")))))))))
+
+(pub :: runFormatter Int)
+;@axiom:effect(io)
+(pub fn (runFormatter)
+  (let (
+    (paths fmtPaths)
+    (check (hasFlagAnywhere "fmt" "--check"))
+    (diff (hasFlagAnywhere "fmt" "--diff"))
+    (emit (fmtOptionValue "--emit" 1))
+    (fromStdin (fmtHasPath paths "-" 0))
+    (toStdout (|| fromStdin (strEq emit "stdout")))
+    (inputs vecNew)
+    (mut failed 0)
+  )
+    {
+      (if (&& check diff)
+        (usageError "error: choose --check or --diff"))
+      (if (&& (> (strLen emit) 0) (! (|| (strEq emit "stdout") (strEq emit "files"))))
+        (usageError "error: --emit takes files or stdout"))
+      (if (&& toStdout (!= (vecLen paths) 1))
+        (usageError "error: stdin and stdout formatting each require exactly one input"))
+      (if (&& (strEq emit "stdout") (|| check diff))
+        (usageError "error: --emit stdout cannot be combined with --check or --diff"))
+      (if (&& fromStdin (strEq emit "files"))
+        (usageError "error: stdin formatting writes to stdout; omit --emit files"))
+      (if (== (vecLen paths) 0)
+        (set failed (fmtFailure "error: fmt needs an input file\n")))
+      (for path in paths
+        (let ((input (fmtPrepare path)))
+          {
+            (if (! input.valid)
+              (set failed 1))
+            (vecPush inputs input)
+          }))
+      (if (== failed 0)
+        (for input in inputs
+          (if (!= (fmtPublish input check diff toStdout) 0)
+            (set failed 1))))
+      failed
+    }))

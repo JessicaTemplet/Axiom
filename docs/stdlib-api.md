@@ -316,7 +316,7 @@ Axqlite.AxqlMacro - AXQL statements written as Axiom forms.
 | `axqlFieldColumn` | macro |  |  |  | One `(name Type)` field of `axqlTable` as its column. |
 | `axqlTableRest` | macro |  |  |  | The second half of `axqlTable`, which it invokes: what it declares once the struct exists, because a struct's fields can be read by name only through `syntax/fields`, which answers only for a struct already declared. It is public because a declaration macro's own invocation is resolved where `axqlTable` is used; a program has no need to call it. |
 | `axqlSpread` | macro |  |  |  | Spread a parenthesised list into the arguments of a helper: `(axqlSpread k qb (a b c))` is `(k qb a b c)`. Public because the statement macros that use it are expanded where they are invoked. |
-| `axqlSelect` | macro |  |  |  | A SELECT from table `t`: its select list (`*`, one column, or a list of columns and `(as e name)` items), then its clauses in this order, each optional: `(where e)`, `(groupBy e ...)` with up to three terms, `(having e)`, `(orderBy term ...)`, `(limit n)`, and `(offset n)` after a `limit`. `n` is an Axiom `Int`, bound as a parameter. |
+| `axqlSelect` | macro |  |  |  | A SELECT from table `t`: its select list (`*`, one column, or a list of columns and `(alias e name)` items), then its clauses in this order, each optional: `(where e)`, `(groupBy e ...)` with up to three terms, `(having e)`, `(orderBy term ...)`, `(limit n)`, and `(offset n)` after a `limit`. `n` is an Axiom `Int`, bound as a parameter. |
 | `axqlFieldNames` | macro |  |  |  | `(names f ...)`, spread: names separated by `, `. Public, as the helpers `axqlTable` reaches are, because a declaration macro's expansion is resolved where it is used. |
 | `axqlMarks` | macro |  |  |  | `(names f ...)`, spread: one `?` per name. |
 | `axqlFieldColumns` | macro |  |  |  | `(fields (f t) ...)`, spread: each field as its column. |
@@ -2214,7 +2214,7 @@ Structured tasks with typed results across the process boundary
 |---|---|---|---|---|---|
 | `TaskOpts` | struct |  |  |  | `width` children at most (clamped to 1..n); `limit` bytes per answer (0 or more); `deadline` nanoseconds per task from its spawn, 0 for none; `grace` nanoseconds a running task gets after a cancellation; `failFast` cancels the pool at the first error; `token` is `Some` a token from `taskTokenNew`, or `None` for one private to the call; `keep` bytes of answers one call may hold, and `memory` bytes one task's arena may map, each 0 for no bound; `stack` bytes of stack each task runs on, 0 for `taskStackDefault`. |
 | `taskOpts` | value | `(-> Int Int TaskOpts)` | `Alloc` |  | No deadline, a 100 ms grace, no fail-fast, a private token, no `keep` or `memory` bound, and the default stack. |
-| `taskWithDeadline` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` |  | The options with a deadline of `nanos` nanoseconds for the whole run. |
+| `taskWithDeadline` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` |  | The options with a deadline of `nanos` nanoseconds for each task, measured from that task's spawn. |
 | `taskWithGrace` | value | `(-> TaskOpts Int TaskOpts)` | `Alloc` |  | The options with `nanos` nanoseconds of grace after cancellation before a task is abandoned. |
 | `taskWithFailFast` | value | `(-> TaskOpts Bool TaskOpts)` | `Alloc` |  | The options with fail-fast `on` or off: when on, the first failure cancels the rest. |
 | `taskWithToken` | value | `(-> TaskOpts CancelToken TaskOpts)` | `Alloc` |  | The options with `tok` as the cancel token: cancelling it cancels the run. |

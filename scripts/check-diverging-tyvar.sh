@@ -402,32 +402,41 @@ if (( rc == 0 )) && (( run == 5 )); then
 else
   bad "the witnessed spelling exited $rc and ran to $run (wanted 0 and 5)"
 fi
-# Variance also relaxes the rule. An arrow nested in a type argument of
-# the result puts its variable on a left side: whoever calls the
-# returned callback produces it, not the callee. A rule that reads only
-# sides refuses this correct program. `Holder` is a parameterised `data`
-# because an arrow can be a type argument to nothing else.
-cat > "$work/lenient.ax" <<'AX'
-(data Holder a
-  (H a))
-
+# A returned callback must accept the caller's chosen type. A concrete
+# Int callback cannot satisfy a promise to accept every `a`.
+cat > "$work/invalid-return-callback.ax" <<'AX'
+(data Holder a (H a))
 (:: mk (-> Int (Holder (-> a Int))))
-
 (fn (mk n) (H bump))
-
 (:: bump (-> Int Int))
-
 (fn (bump x) x)
-
 (:: main ())
-
 (fn (main) ())
 AX
-rc="$(check_of lenient.ax)"
-if (( rc == 0 )); then
-  ok "a callback in the RESULT is witnessed by its own caller: accepted"
+rc="$(check_of invalid-return-callback.ax)"
+if (( rc == 1 )) && grep -q 'AX3004' "$work/out"; then
+  ok "a concrete returned callback cannot promise an arbitrary parameter type"
 else
-  bad "the lenient direction exited $rc"; sed 's/^/     /' "$work/out" | head -6
+  bad "the invalid returned callback exited $rc (wanted AX3004)"
+  sed 's/^/     /' "$work/out" | head -6
+fi
+
+# A callback that ignores its parameter satisfies that same promise.
+# Its result carries the captured Int, with no invented value of `a`.
+cat > "$work/parametric-return-callback.ax" <<'AX'
+(data Holder a (H a))
+(:: mk (-> Int (Holder (-> a Int))))
+(fn (mk n) (H (lambda (ignored) n)))
+(:: main Int)
+(fn (main) (match (mk 42) ((H f) (f "ignored"))))
+AX
+rc="$(check_of parametric-return-callback.ax)"
+( cd "$work" && "$axc" run parametric-return-callback.ax ) >/dev/null 2>&1
+run=$?
+if (( rc == 0 )) && (( run == 42 )); then
+  ok "a parametric returned callback is accepted and answers $run"
+else
+  bad "the parametric returned callback exited $rc and ran to $run (wanted 0 and 42)"
 fi
 
 # Ordinary polymorphic higher-order code, at two different types in one

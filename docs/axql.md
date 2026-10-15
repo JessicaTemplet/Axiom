@@ -506,7 +506,7 @@ term := expr [ASC | DESC]
 ```
 
 ```scheme fragment
-(axqlSelect people (name (as (* age (int 12)) months)) (where (isNotNull age)) (orderBy (age desc) name) (limit 10) (offset 20))
+(axqlSelect people (name (alias (* age (int 12)) months)) (where (isNotNull age)) (orderBy (age desc) name) (limit 10) (offset 20))
 ```
 
 A result column is named by its `AS`, else by the column it names, else
@@ -535,7 +535,7 @@ SELECT team, count(*) AS n, avg(age) FROM people GROUP BY team HAVING count(*) >
 ```
 
 ```scheme fragment
-(axqlSelect people (team (as (count *) n) (as (avg age) mean)) (groupBy team) (having (> (count *) (int 1))) (orderBy (desc (count *))))
+(axqlSelect people (team (alias (count *) n) (alias (avg age) mean)) (groupBy team) (having (> (count *) (int 1))) (orderBy (desc (count *))))
 ```
 
 An aggregate works out one value from many rows:
@@ -725,7 +725,10 @@ to three terms, `(having e)`, `(orderBy term ...)`, `(limit n)` and
 An `ORDER BY` term is a column, `(column desc)` or `(column asc)`, or
 `(desc e)` or `(asc e)` for any expression. A select list is `*`, one
 column, or a list of columns, `(link l c)` and `(link l *)` paths, and
-`(as e name)` items; any other expression needs its `as`. `UPDATE`'s
+`(alias e name)` items; any other expression needs its `alias`.
+Use `as` for Axiom type conversions.
+
+`UPDATE`'s
 list is `(assign (column e) ...)`, because `set` is Axiom's own word.
 `axqlUpsert` is shaped as `axqlInsert` is. A column of
 `axqlCreateTable` is `(name TYPE ...)` or `(name LINK table)`, with or

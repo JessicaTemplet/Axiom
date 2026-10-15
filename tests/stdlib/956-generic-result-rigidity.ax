@@ -1,0 +1,103 @@
+; Parametric results preserve payloads, aliases and returned callbacks.
+(import IO)
+(import Str)
+(import Vec)
+(import Err)
+
+(data Box a
+  (Boxed a))
+
+(struct Record (a)
+  (value : a))
+
+(type Optional a = (Option a))
+
+(:: empty (-> a (Optional a)))
+(fn (empty witness)
+  None)
+
+(:: wrap (-> a (Optional a)))
+(fn (wrap value)
+  (Some value))
+
+(:: wrapVector (-> a (Vec a)))
+(fn (wrapVector value)
+  (vecPush vecNew value))
+
+(:: wrapRecord (-> a (Record a)))
+(fn (wrapRecord value)
+  (Record value))
+
+(:: wrapBox (-> a (Box a)))
+(fn (wrapBox value)
+  (Boxed value))
+
+(:: unwrapBox (-> (Box a) a))
+(fn (unwrapBox value)
+  (match value
+    ((Boxed item) item)))
+
+(:: success (-> a (Result a Error)))
+(fn (success value)
+  (Ok value))
+
+(:: constant (-> a b a))
+(fn (constant value)
+  (lambda (ignored) value))
+
+(:: mapOptional (-> (-> a b) (Optional a) (Optional b)))
+(fn (mapOptional f value)
+  (match value
+    ((Some item) (Some (f item)))
+    ((None) None)))
+
+(:: halfMore (-> Float Float))
+(fn (halfMore value)
+  (+ value 0.5))
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println
+      (match (empty "witness")
+        ((None) "polymorphic empty result: correct")
+        ((Some _) "wrong")))
+    (println
+      (match (wrap "kept")
+        ((Some value)
+          (if (strEq value "kept")
+            "generic String result: correct"
+            "wrong")
+        )
+        ((None) "wrong")))
+    (println
+      (let ((record (wrapRecord "record")))
+        (if (&& (== (vecGet (wrapVector 7) 0) 7) (strEq record.value "record"))
+          "generic containers and fields: correct"
+          "wrong")))
+    (println
+      (if (strEq (unwrapBox (wrapBox "boxed")) "boxed")
+        "generic ADT result: correct"
+        "wrong"))
+    (println
+      (match (mapOptional halfMore (wrap 2.0))
+        ((Some value)
+          (if (== value 2.5)
+            "generic Float mapping: correct"
+            "wrong")
+        )
+        ((None) "wrong")))
+    (println
+      (match (success "success")
+        ((Ok value)
+          (if (strEq value "success")
+            "generic Result payload: correct"
+            "wrong")
+        )
+        ((Err _) "wrong")))
+    (println
+      (if (&& (strEq (constant "callback" 42) "callback") (== (constant 3.0 "ignored") 3.0))
+        "returned generic callbacks: correct"
+        "wrong"))
+  })

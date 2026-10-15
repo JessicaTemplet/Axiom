@@ -35,7 +35,8 @@ didn't, the *Output* panel's *Axiom* channel shows the server's stderr.
 | `axiom.serverPath` | `axiom` | The executable the extension runs as `axiom lsp`. Give an absolute path when `axiom` isn't on VS Code's `PATH`. |
 | `axiom.trace.server` | `off` | Log the messages between VS Code and the server in the *Axiom* channel: `messages` or `verbose`. |
 
-Changing `axiom.serverPath` restarts the server.
+Changing `axiom.serverPath` restarts the server. Trace output includes
+transport messages and the server's cache and worker events.
 
 ## Commands
 
@@ -48,12 +49,43 @@ the server.
 | Command | What it does |
 |---|---|
 | Axiom: Run file | Runs `axiom run` on the current file in a terminal, saving it first. The code lens above `main` runs the same command. |
-| Axiom: Expand macro at cursor | Opens the expansion of the macro invocation at the cursor in a new tab. The code lens above an invocation does the same. |
+| Axiom: Expand macro at cursor | Opens the expansion at the cursor in a new tab. The progress notification lets you cancel a long expansion. |
 | Axiom: Open the documentation | Runs `axiom doc` in a terminal. |
 | Axiom: Restart the language server | Stops and restarts `axiom lsp`. |
 
 Snippets cover the shapes you write most: type `fn`, `main`, `let`,
 `match`, `data` or `import` in a `.ax` file and press Tab.
+
+## Format a document
+
+Use VS Code's **Format Document** command. It formats the unsaved document
+through the language server, using the same formatter as `axiom fmt`.
+To format Axiom files when you save, add this to your settings:
+
+```json
+{
+  "[axiom]": {
+    "editor.defaultFormatter": "axiom-lang.axiom-language",
+    "editor.formatOnSave": true
+  }
+}
+```
+
+## Work with live dependencies
+
+Unsaved imported modules feed diagnostics, hover and navigation. The client
+sends ranged UTF-16 edits and save notifications. It also watches `.ax`
+files and `axiom.pkg` within your workspace, so external edits, created
+modules and dependency search changes refresh open documents.
+
+With a server that supports background analysis, edits cancel obsolete
+work and only the current revision publishes results. Macro expansion has
+a cancel button; cancelled or outdated expansions leave the editor unchanged.
+Restarting the server starts a fresh session.
+
+The client negotiates full, range and delta semantic tokens with the server.
+VS Code uses those results to refine highlighting as you edit.
+[The LSP guide](../../docs/lsp.md) describes the supported requests and limits.
 
 ## Where each feature comes from
 

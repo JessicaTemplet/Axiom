@@ -5607,7 +5607,7 @@ _lexsrc = open(os.path.join(REPO, "self_host", "lexicon.ax"), encoding="utf-8").
 
 
 def hl_lexicon_row(kind):
-    m = re.search(r'\(if \(lexIn w "([^"]+)"\)\n\s+"' + kind + '"', _lexsrc)
+    m = re.search(r'\(if\s+\(lexIn\s+w\s+"([^"]+)"\)\s+"' + kind + '"', _lexsrc)
     if not m:
         sys.exit(f"FAIL: could not read the `{kind}` row of lexKind out of lexicon.ax")
     return set(m.group(1).split())

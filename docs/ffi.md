@@ -1139,6 +1139,17 @@ binding names each one in a comment at the end of the file:
 // `identity`: `(-> a a)` names `a`, which the binding does not carry
 ```
 
+Transparent aliases keep their underlying types in the binding. Local
+`Result` declarations keep their own constructors; `Err::Result` maps to
+Rust's standard `Result`. Imported declarations cannot replace an entry
+file's type of the same name.
+
+Generated accessor names must be distinct. A collision is refused as
+`AX3006`; rename one source type to give its accessors distinct names.
+
+Tested by `tests/ffi/host/nominal.ax` and
+`tests/ffi/host/mangle-collision.ax`.
+
 The build runs `rustfmt` on the file when one is on `PATH`, as it runs
 `cargo`. Without it, the unformatted text compiles just the same.
 

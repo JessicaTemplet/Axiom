@@ -83,8 +83,8 @@
 ;     pool itself - and wakes every pool sleeping on it;
 ;     `taskCancelled` is the poll a cooperative task makes. It is
 ;     declared `shared`, so a `parallel` form lends it to its bindings.
-;     Once a pool sees it set, it starts
-;     nothing more (every unstarted task answers `taskCancelledCode`),
+;     The pool checks it between every spawn attempt. Once it sees the
+;     flag set, it starts nothing more (every unstarted task answers `taskCancelledCode`),
 ;     gives running tasks `grace` nanoseconds to finish, then SIGKILLs
 ;     and reaps what is left. A token the caller passes is shared state:
 ;     cancelling it cancels every pool using it.
@@ -174,8 +174,8 @@
 (pub fn (taskOpts width limit)
   (TaskOpts width limit 0 100000000 false None 0 0 0))
 
-;; The options with a deadline of `nanos` nanoseconds for the whole
-;; run.
+;; The options with a deadline of `nanos` nanoseconds for each task,
+;; measured from that task's spawn.
 (pub :: taskWithDeadline (-> TaskOpts Int TaskOpts))
 (pub fn (taskWithDeadline o nanos)
   (TaskOpts o.width o.limit nanos o.grace o.failFast o.token o.keep o.memory o.stack))
@@ -547,8 +547,7 @@
     (status (taskSt st s 1))
     (why (taskSt st s 2))
   )
-    (if (&&
-          (!= why 4)
+    (if (&& (!= why 4)
           (&& (|| (== status 0) (&& (== status 137) (>= why 2))) (== (taskLoadAt slot) 2)))
       (memGetWord slot 1)
       0)))
@@ -798,10 +797,7 @@
               (if (< t w)
                 (vecPush hs h)
                 (vecSet hs s h)))
-            (taskSetSt
-              st
-              s
-              0
+            (taskSetSt st s 0
               (if (> deadlineUs 0)
                 (+ (sysTimeoutMicros clk) deadlineUs)
                 0))
@@ -891,31 +887,30 @@
               })
             ; Start what the window allows. A refused spawn cancels the
             ; pool as a cancellation does, and leaves the token alone.
-            (while (&& (== cancelling 0) (&& (< next n) (< (- next head) w)))
+            (while (&& (== cancelling 0)
+                     (&& (! (taskCancelledAt tok)) (&& (< next n) (< (- next head) w))))
               {
                 (if (!= (taskStart st hs wrapper spawnMark next w slab slotBytes clk deadlineUs) 0)
                   {
                     (set cancelling 1)
-                    (set graceEnd (+ now graceUs))
+                    (set graceEnd (+ (sysTimeoutMicros clk) graceUs))
                   })
                 (set next (+ next 1))
+                (set progress 1)
+              })
+            ; Cancellation may arrive during the launch window. Observe it
+            ; before joining or delivering, and grant grace from this point.
+            (if (&& (== cancelling 0) (taskCancelledAt tok))
+              {
+                (set cancelling 1)
+                (set graceEnd (+ (sysTimeoutMicros clk) graceUs))
                 (set progress 1)
               })
             ; Join what has ended; kill and join what ran out of time.
             (for t in head..next
               (let ((s (% t w)))
                 (if (== (taskSt st s 2) 0)
-                  (let ((r (taskCheck
-                             st
-                             hs
-                             s
-                             now
-                             cancelling
-                             graceEnd
-                             canPoll
-                             cell
-                             slab
-                             slotBytes
+                  (let ((r (taskCheck st hs s now cancelling graceEnd canPoll cell slab slotBytes
                              pbuf)))
                     (if (== r (- 0 2))
                       (set canPoll 0)
@@ -935,7 +930,7 @@
                     (if (&& (< k 0) (&& (>= kept 0) (== cancelling 0)))
                       {
                         (set cancelling 1)
-                        (set graceEnd (+ now graceUs))
+                        (set graceEnd (+ (sysTimeoutMicros clk) graceUs))
                       })
                     (set kept k)
                   })
@@ -953,17 +948,7 @@
             ; Nothing moved: sleep until something can. The exit backoff
             ; grows with each empty look and starts again on progress.
             (if (== progress 0)
-              (let ((wake (taskWakeBy
-                            st
-                            head
-                            next
-                            w
-                            now
-                            canPoll
-                            cancelling
-                            graceEnd
-                            slab
-                            slotBytes
+              (let ((wake (taskWakeBy st head next w now canPoll cancelling graceEnd slab slotBytes
                             nap)))
                 {
                   (set nap (taskNapNext nap))
@@ -1060,15 +1045,7 @@
           ; with this arm. The call is not in tail position, so no jump
           ; ends the arm's scope before the pool does.
           ((Ok tok)
-            (let ((done (taskWithSlab
-                          f
-                          n
-                          opts
-                          sink
-                          scoped
-                          w
-                          limit
-                          (+ 32 (* 8 (/ (+ limit 7) 8)))
+            (let ((done (taskWithSlab f n opts sink scoped w limit (+ 32 (* 8 (/ (+ limit 7) 8)))
                           (taskTokenAt tok))))
               done)
           ))))))
@@ -1092,10 +1069,7 @@
 (pub fn (taskMapWith f n opts)
   (let ((out vecNew))
     {
-      (taskRun
-        f
-        n
-        opts
+      (taskRun f n opts
         (lambda (r)
           {
             (vecPush out r)
@@ -1126,16 +1100,13 @@
         (lambda (i)
           (let ((start (* i size)))
             (let ((remaining (- count start)))
-              (worker
-                start
-                (+
-                  start
+              (worker start
+                (+ start
                   (if (< remaining size)
                     remaining
                     size)))))
         )
-        (+ 1 (/ (- count 1) size))
-        opts))))
+        (+ 1 (/ (- count 1) size)) opts))))
 
 ;; Decode each successful answer in the parent, in submit order. Task
 ;; failures pass through unchanged and never call `decode`. The encoded
@@ -1159,10 +1130,7 @@
 (pub fn (taskMapDecodedWith f decode n opts)
   (let ((out vecNew))
     {
-      (taskRun
-        f
-        n
-        opts
+      (taskRun f n opts
         (lambda (r)
           {
             (vecPush out (taskDecodeResult decode r))
@@ -1406,7 +1374,8 @@
               (set joined (+ joined 1))
             })
           (for k in next..n
-            (vecPush out (Err (mkError refused "parallel slot not started: its spawn was refused"))))
+            (vecPush out
+              (Err (mkError refused "parallel slot not started: its spawn was refused"))))
         })
       (__release cell)
       out

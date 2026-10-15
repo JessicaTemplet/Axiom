@@ -77,9 +77,15 @@ else
   bad "extension.js: $(head -1 "$work/js.err")"
 fi
 
-for f in README.md .vscodeignore scripts/sync-keywords.mjs icon.png icons/axiom.svg snippets/axiom.json; do
+for f in README.md LICENSE .vscodeignore .vscode/launch.json scripts/client-smoke.mjs scripts/sync-keywords.mjs icon.png icons/axiom.svg snippets/axiom.json; do
   [[ -f "$ext/$f" ]] && ok "$f is present" || bad "$f is missing"
 done
+
+if "$node" "$ext/scripts/client-smoke.mjs" >"$work/client.out" 2>"$work/client.err"; then
+  ok "client lifecycle, dependency watchers and cancellation: $(cat "$work/client.out")"
+else
+  bad "client behaviour: $(cat "$work/client.err")"
+fi
 
 # --------------------------------------------------------------------
 echo "--- the Axiom icon is on the extension and on the file ---"
@@ -150,12 +156,12 @@ derive_keywords() {
     # The heads the grammar must colour whatever the sources say.
     printf '%s\n' fn let if match data struct macro pub import extern effect \
       handle region parallel while for lambda set type subtype syntax/for
-  } | LC_ALL=C sort -u
+  } | grep -E '^[A-Za-z]' | LC_ALL=C sort -u
 }
 
 # The heads the parser names only to refuse (AX2004), coloured as the
 # error they will be. The same list sits in sync-keywords.mjs.
-removed_expected="$(printf '%s\n' union foreign trait impl cond begin alloc consume define try emacro | LC_ALL=C sort)"
+removed_expected="$(printf '%s\n' union foreign trait impl cond begin alloc consume define try emacro cast | LC_ALL=C sort)"
 
 # Print a rule's alternation, one word per line. The match is
 # `\G\s*(?:(pub)\s+)?(a|b|c)(?!...)`, and the group after `)?` is it.
@@ -230,6 +236,19 @@ elif compare_keywords "$work/doctored.json" >/dev/null; then
   bad "ablation: a grammar missing 'while' passed the comparison"
 else
   ok "ablation: a grammar missing 'while' is caught"
+fi
+
+# Symbolic forms are operators, rather than identifier keywords. Verify
+# the new pipeline as a whole token and refuse an empty regex alternative.
+if "$node" -e '
+  const grammar = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const expression = new RegExp(grammar.repository["operator-head"].match.replace("\\G", "^"));
+  const pipeline = expression.exec("|> value");
+  if (!pipeline || pipeline[1] !== "|>" || expression.test("name")) process.exit(1);
+' "$grammar"; then
+  ok "the pipeline is one operator token and operator-head rejects an identifier"
+else
+  bad "operator-head does not recognise the pipeline exactly"
 fi
 
 # --------------------------------------------------------------------

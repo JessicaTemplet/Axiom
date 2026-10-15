@@ -812,8 +812,9 @@ the `context` when it is non-empty, to fd 2 and exits **70**. An `Ok`
 payload is the exit status. 70 sits next to two statuses the runtime
 already owns: 71 is the unhandled-operation trap and 72 the division
 trap. Exit codes 1–69 stay your program's own. The
-dispatch understands exactly `(Result Int Error)` with `errorText` in
-scope, and any other `main` shape behaves as before. The reference
+dispatch uses exactly `Err::Result`, `Err::Error`, `Err::Ok`, `Err::Err`
+and `Err::errorText`. Local declarations with matching names do not change
+that protocol. Other `main` shapes keep their own behaviour. The reference
 shows it in use under [Fallible main](reference.md#fallible-main).
 
 Tested by `tests/stdlib/490-main-result-ok.ax` (an `Ok` payload answers

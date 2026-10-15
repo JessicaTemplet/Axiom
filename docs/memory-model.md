@@ -6660,10 +6660,17 @@ slot into one word. Tested by `tests/stdlib/941-task-index-and-size.ax`.
 arena is its own process's. A call still answers one `Result` per task,
 so `taskMap`'s answer is O(n) words however small `keep` is.
 
-*Shutdown.* A cancellation, from the token, `failFast`, a refused spawn
-or the `keep` budget, starts nothing more. Every task not yet started
-answers 1002, every running task gets `grace` and is then killed and
-reaped, and every slot is delivered once, in submit order. The pool
+*Shutdown.* The pool MUST check the token before each spawn attempt,
+including while it fills a launch window. Cancellation may race an
+attempt whose check has already completed. Once observed, cancellation
+from the token, `failFast`, a refused spawn or the `keep` budget MUST
+start nothing more. The grace period begins when the pool observes that
+cancellation or failure, using a fresh clock reading after a launch
+attempt or result delivery. Every task not yet started answers 1002,
+every running task gets `grace` and is then killed and reaped, and every
+slot is delivered once, in submit order. Tested by
+`tests/stdlib/960-task-launch-cancellation.ax` and
+`tests/litmus/check-task-launch.py`. The pool
 then returns through its normal path: the slab is unmapped, a private
 token let go, and the closure that held the caller's function, with
 everything it captured, released.

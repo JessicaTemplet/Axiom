@@ -22,7 +22,7 @@ const grammarPath = join(here, "..", "syntaxes", "axiom.tmLanguage.json");
 
 // Heads the parser names only to refuse (AX2004). They parse, so the
 // editor marks them as what the compiler will say they are.
-const REMOVED = ["union", "foreign", "trait", "impl", "cond", "begin", "alloc", "consume", "define", "emacro"];
+const REMOVED = ["union", "foreign", "trait", "impl", "cond", "begin", "alloc", "consume", "define", "emacro", "cast"];
 
 // Heads the grammar colours whatever the two sources say. They are all
 // in the sources today; the list keeps a renamed call site from
@@ -53,7 +53,7 @@ export function derivedKeywords() {
   const body = lsp.slice(lsp.indexOf("(pub fn (lspKeywords)"));
   const end = body.indexOf("\n(");
   for (const m of body.slice(0, end < 0 ? undefined : end).matchAll(/\(vecPush v "([^"]+)"\)/g)) words.add(m[1]);
-  return [...words].sort();
+  return [...words].filter((word) => /^[A-Za-z]/.test(word)).sort();
 }
 
 export function alternation(words) {

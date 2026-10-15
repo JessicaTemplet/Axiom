@@ -1,0 +1,131 @@
+; Cancellation during a wide launch window preserves ordered slots and reaps
+; every started child. The exact count started depends on scheduling.
+(import IO)
+(import Str)
+(import Fmt)
+(import Mem)
+(import Sys)
+(import Vec)
+(import Err)
+(import Task)
+
+(:: enter (-> Int Int Int))
+;@axiom:effect(unsafe)
+;@axiom:effect(io)
+(fn (enter page i)
+  {
+    (__atomic_add page 1)
+    (memSetWord page (+ i 1) sysPid)
+    0
+  })
+
+(:: cancelledWork (-> Int CancelToken Bool Int String))
+;@axiom:effect(io)
+(fn (cancelledWork page token stubborn i)
+  {
+    (enter page i)
+    (if (== i 0)
+      (taskCancel token))
+    (if (&& stubborn (> i 0))
+      (while true
+        ()))
+    (while (! (taskCancelled token))
+      ())
+    (fmtInt i)
+  })
+
+(:: checkSlots (-> (Vec (Result String Error)) Int Int))
+;@axiom:effect(io)
+(fn (checkSlots results count)
+  {
+    (if (!= (vecLen results) count)
+      (sysExitWith 1))
+    (for i in 0..count
+      (match (vecGet results i)
+        ((Ok text)
+          (if (! (strEq text (fmtInt i)))
+            (sysExitWith 2))
+        )
+        ((Err error)
+          (if (!= error.code taskCancelledCode)
+            (sysExitWith 3))
+        )))
+    0
+  })
+
+(:: checkGone (-> Int Int Int))
+;@axiom:effect(io)
+(fn (checkGone page count)
+  {
+    (for i in 0..count
+      (let ((pid (memGetWord page (+ i 1))))
+        (if (> pid 0)
+          (match (sysKill pid 0)
+            ((Ok value) (sysExitWith 4))
+            ((Err error)
+              (if (!= error.code 3)
+                (sysExitWith 5))
+            )))))
+    0
+  })
+
+(:: run (-> String Bool Bool Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (run label before stubborn)
+  (match taskTokenNew
+    ((Err error) (sysExitWith 6))
+    ((Ok token)
+      (match (sysMapShared 4096)
+        ((Err error) (sysExitWith 7))
+        ((Ok page)
+          (let (
+            (count 64)
+            (clock (memAlloc 16))
+            (start (sysTimeoutMicros clock))
+          )
+            {
+              (if before
+                (taskCancel token))
+              (let ((results
+                (taskMapWith (lambda (i) (cancelledWork page token stubborn i)) count
+                  (taskWithGrace (taskWithToken (taskOpts count 32) token)
+                    (if stubborn
+                      0
+                      100000000)))))
+                {
+                  (checkSlots results count)
+                  (checkGone page count)
+                  (let (
+                    (started (memGetWord page 0))
+                    (elapsed (- (sysTimeoutMicros clock) start))
+                  )
+                    {
+                      (if (if before
+                        (!= started 0)
+                        (|| (< started 1) (> started count)))
+                        (sysExitWith 8))
+                      (if (strEq (sysArg 1) "bench")
+                        (println "{label} {started} {elapsed}")
+                        (println "{label}: ordered slots, children reaped"))
+                    })
+                })
+              (match (sysUnmapShared page 4096)
+                ((Ok value) 0)
+                ((Err error) (sysExitWith 9)))
+            })
+        ))
+    )))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  {
+    (run "pre-cancel" true false)
+    (run "mid-launch" false false)
+    (run "zero-grace" false true)
+    0
+  })

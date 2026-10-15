@@ -553,7 +553,7 @@ cuts = {
   "grace": [("Task.ax", "(if (&& (== cancelling 1) (>= now graceEnd))", "(if (&& (== cancelling 2) (>= now graceEnd))")],
   # A guard's release no longer asks whose lock it is: a forked copy of
   # a guard then lets go of the lock its parent holds.
-  "pid": [("Sync.ax", '(if (||\n          (!= (/ (syncLoad m 0) 4) (/ syncMe 4))\n          (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial)))', "(if (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial))")],
+  "pid": [("Sync.ax", '(if (|| (!= (/ (syncLoad m 0) 4) (/ syncMe 4))\n          (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial)))', "(if (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial))")],
   # A guard a trap abandoned lets go without poisoning the mutex.
   "poison": [("Sync.ax", "        (if syncUnwinding\n          (syncStore m 3 1))", "        0")],
   # A task is joined on its answer alone, as it first was.
@@ -561,7 +561,7 @@ cuts = {
   # A refused spawn traps past the pool again: no recovery point.
   "spawnrp": [("Task.ax", ';@axiom:effect(unsafe)\n(fn (taskSpawn wrapper arg mark)\n  (if (== mark 0)\n    (region r\n      (__axiom_recover __axiom_arena_mark (lambda (x) (taskWordOf (__proc_spawn wrapper arg)))))\n    {\n      (__axiom_arena_mark_into mark)\n      (__axiom_recover mark (lambda (x) (taskWordOf (__proc_spawn wrapper arg))))\n    }))', "(fn (taskSpawn wrapper arg mark)\n  (taskWordOf (__proc_spawn wrapper arg)))")],
   # A refused spawn no longer cancels the pool.
-  "refusecancel": [("Task.ax", "                  {\n                    (set cancelling 1)\n                    (set graceEnd (+ now graceUs))\n                  })", "                  ())")],
+  "refusecancel": [("Task.ax", "                  {\n                    (set cancelling 1)\n                    (set graceEnd (+ (sysTimeoutMicros clk) graceUs))\n                  })", "                  ())")],
   # The checked pool no longer kills its running slots on a refusal.
   "parkill": [("Task.ax", "(taskWordsKill (vecGet hs (% k w)))", "0")],
   # The microseconds conversion rounds without saturating.
@@ -1422,6 +1422,13 @@ if run_ablation stackcut "$repo_root/tests/stdlib/920-task-stack.ax" 60 "$work/a
   else
     bad "stackcut threads: the ablated copy did not build under --threads"; sed 's/^/    /' "$dir/threads.log" | head -6
   fi
+fi
+
+echo "== 14. cancellation is observed between spawn attempts =="
+if python3 "$repo_root/tests/litmus/check-task-launch.py" "$axc" "$repo_root"; then
+  ok "per-spawn cancellation: controlled interleaving and native ablation pass in both lowerings at --opt 0 and 2"
+else
+  bad "per-spawn cancellation: controlled interleaving or ablation failed"
 fi
 
 echo

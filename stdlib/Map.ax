@@ -698,7 +698,8 @@
                 (memSetWord vals h value)
                 0
               }
-              (mapInsertLoop m keys vals states cap key value (mapNextSlot h cap) (- 0 1) (- cap 1)))
+              (mapInsertLoop m keys vals states cap key value (mapNextSlot h cap) (- 0 1)
+                (- cap 1)))
             (mapInsertLoop m keys vals states cap key value (mapNextSlot h cap) h (- cap 1))))))))
 
 (:: mapInsertLoop (-> (Map v) Int Int Int Int Int Int Int Int Int Int))
@@ -725,30 +726,13 @@
               (memSetWord vals i value)
               0
             }
-            (mapInsertLoop
-              m
-              keys
-              vals
-              states
-              cap
-              key
-              value
-              (mapNextSlot i cap)
-              firstTomb
+            (mapInsertLoop m keys vals states cap key value (mapNextSlot i cap) firstTomb
               (- left 1)))
           ; A tombstone. Remember the first one and keep scanning:
           ; reusing it now, before the run has been searched to its
           ; end, would risk storing a second entry for a key that
           ; is already live further along.
-          (mapInsertLoop
-            m
-            keys
-            vals
-            states
-            cap
-            key
-            value
-            (mapNextSlot i cap)
+          (mapInsertLoop m keys vals states cap key value (mapNextSlot i cap)
             (if (< firstTomb 0)
               i
               firstTomb)
@@ -854,17 +838,8 @@
         (set m.keys newKeys)
         (set m.vals newVals)
         (set m.states newStates)
-        (let ((n (mapReinsertLoop
-                   newKeys
-                   newVals
-                   newStates
-                   newCap
-                   oldKeys
-                   oldVals
-                   oldStates
-                   oldCap
-                   0
-                   0)))
+        (let ((n (mapReinsertLoop newKeys newVals newStates newCap oldKeys oldVals oldStates oldCap
+                   0 0)))
           {
             (set m.len n)
             (set m.used n)
@@ -889,37 +864,12 @@
     cnt
     (if (== (memGetByte oldStates i) mapStateLive)
       {
-        (mapPlaceLoop
-          newKeys
-          newVals
-          newStates
-          newCap
-          (memGetWord oldKeys i)
-          (memGetWord oldVals i)
-          (mapSlotOf (memGetWord oldKeys i) newCap)
-          newCap)
-        (mapReinsertLoop
-          newKeys
-          newVals
-          newStates
-          newCap
-          oldKeys
-          oldVals
-          oldStates
-          oldCap
-          (+ i 1)
+        (mapPlaceLoop newKeys newVals newStates newCap (memGetWord oldKeys i)
+          (memGetWord oldVals i) (mapSlotOf (memGetWord oldKeys i) newCap) newCap)
+        (mapReinsertLoop newKeys newVals newStates newCap oldKeys oldVals oldStates oldCap (+ i 1)
           (+ cnt 1))
       }
-      (mapReinsertLoop
-        newKeys
-        newVals
-        newStates
-        newCap
-        oldKeys
-        oldVals
-        oldStates
-        oldCap
-        (+ i 1)
+      (mapReinsertLoop newKeys newVals newStates newCap oldKeys oldVals oldStates oldCap (+ i 1)
         cnt))))
 
 ; Place `key`/`value` at the first empty slot of a probe starting at
@@ -1059,9 +1009,7 @@
 (fn (mapSumValsFrom m i acc)
   (if (>= i (mapCap m))
     acc
-    (mapSumValsFrom
-      m
-      (+ i 1)
+    (mapSumValsFrom m (+ i 1)
       (if (== (mapStateAt m i) mapStateLive)
         (+ acc (mapValAt m i))
         acc))))
@@ -1075,9 +1023,7 @@
 (fn (mapSumKeysFrom m i acc)
   (if (>= i (mapCap m))
     acc
-    (mapSumKeysFrom
-      m
-      (+ i 1)
+    (mapSumKeysFrom m (+ i 1)
       (if (== (mapStateAt m i) mapStateLive)
         (+ acc (mapKeyAt m i))
         acc))))

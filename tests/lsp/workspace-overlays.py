@@ -131,6 +131,16 @@ def run(compiler):
         direct = '(import Fresh)\n(:: consume String)\n(fn (consume) value)\n'
         client.change(uri, direct, 2)
         assert not client.latest(uri)['diagnostics'], client.latest(uri)
+        links = client.request('textDocument/documentLink', {'textDocument': {'uri': uri}})
+        assert len(links) == 1 and links[0]['target'] == fresh_uri, links
+        refs = client.request('textDocument/references', {
+            'textDocument': {'uri': fresh_uri}, 'position': {'line': 1, 'character': 10},
+            'context': {'includeDeclaration': False}})
+        assert any(item['uri'] == uri for item in refs), refs
+        rename = client.request('textDocument/rename', {
+            'textDocument': {'uri': fresh_uri}, 'position': {'line': 1, 'character': 10},
+            'newName': 'renewed'})
+        assert uri in rename['changes'], rename
         client.change(fresh_uri, '', 2)
         assert 'AX3001' in [d['code'] for d in client.latest(uri)['diagnostics']]
         assert not fresh.exists(), 'unsaved module acquired a disk file'

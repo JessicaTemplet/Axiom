@@ -59,11 +59,11 @@ mod raw {
         pub fn axh_Option_Int_None() -> i64;
         pub fn axh_Option_Int_Some(a0: i64) -> i64;
         pub fn axh_Option_Int_Some_0(a0: i64) -> i64;
-        pub fn axh_Result_Int_String_tag(a0: i64) -> i64;
-        pub fn axh_Result_Int_String_Ok(a0: i64) -> i64;
-        pub fn axh_Result_Int_String_Ok_0(a0: i64) -> i64;
-        pub fn axh_Result_Int_String_Err(a0: i64) -> i64;
-        pub fn axh_Result_Int_String_Err_0(a0: i64) -> i64;
+        pub fn axh_Err_Result_Int_String_tag(a0: i64) -> i64;
+        pub fn axh_Err_Result_Int_String_Ok(a0: i64) -> i64;
+        pub fn axh_Err_Result_Int_String_Ok_0(a0: i64) -> i64;
+        pub fn axh_Err_Result_Int_String_Err(a0: i64) -> i64;
+        pub fn axh_Err_Result_Int_String_Err_0(a0: i64) -> i64;
         pub fn axh_Pair_tag(a0: i64) -> i64;
         pub fn axh_Pair_Pair(a0: i64, a1: i64) -> i64;
         pub fn axh_Pair_Pair_0(a0: i64) -> i64;
@@ -181,17 +181,17 @@ fn __to_Option_Int(v: &Option<i64>) -> AxWord {
     }
 }
 
-unsafe fn __from_Result_Int_String(word: AxWord) -> Result<i64, AxString> {
+unsafe fn __from_Err_Result_Int_String(word: AxWord) -> Result<i64, AxString> {
     // SAFETY: the caller promises `word` is a live value of this type it owns;
     // every accessor answers an owned share, released here or adopted by the value.
-    let __tag = unsafe { raw::axh_Result_Int_String_tag(word) };
+    let __tag = unsafe { raw::axh_Err_Result_Int_String_tag(word) };
     let __v = match __tag {
         0 => {
-            let __f0 = unsafe { raw::axh_Result_Int_String_Ok_0(word) };
+            let __f0 = unsafe { raw::axh_Err_Result_Int_String_Ok_0(word) };
             Ok(__f0)
         }
         1 => {
-            let __f0 = unsafe { raw::axh_Result_Int_String_Err_0(word) };
+            let __f0 = unsafe { raw::axh_Err_Result_Int_String_Err_0(word) };
             Err(unsafe { AxString::from_owned(__f0) })
         }
         _ => unreachable!("a constructor index the type does not have"),
@@ -200,14 +200,14 @@ unsafe fn __from_Result_Int_String(word: AxWord) -> Result<i64, AxString> {
     __v
 }
 
-fn __to_Result_Int_String(v: &Result<i64, AxString>) -> AxWord {
+fn __to_Err_Result_Int_String(v: &Result<i64, AxString>) -> AxWord {
     match v {
         Ok(a0) => {
-            let __w = unsafe { raw::axh_Result_Int_String_Ok(*a0) };
+            let __w = unsafe { raw::axh_Err_Result_Int_String_Ok(*a0) };
             __w
         }
         Err(a0) => {
-            let __w = unsafe { raw::axh_Result_Int_String_Err(a0.as_word()) };
+            let __w = unsafe { raw::axh_Err_Result_Int_String_Err(a0.as_word()) };
             __w
         }
     }
@@ -588,11 +588,11 @@ pub fn first_even(rt: AxRuntime, a: i64, b: i64) -> Option<i64> {
     unsafe { __from_Option_Int(__r) }
 }
 
-/// `(pub :: safeDiv (-> Int Int (Result Int String)))`
+/// `(pub :: safeDiv (-> Int Int (Err::Result Int String)))`
 pub fn safe_div(rt: AxRuntime, a: i64, b: i64) -> Result<i64, AxString> {
     // SAFETY: the archive defines the symbol with exactly this shape (one word each way).
     let __r = unsafe { raw::safeDiv(a, b) };
-    unsafe { __from_Result_Int_String(__r) }
+    unsafe { __from_Err_Result_Int_String(__r) }
 }
 
 /// `(pub :: pairSum (-> Pair Int))`

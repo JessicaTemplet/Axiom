@@ -54,7 +54,8 @@ status:
 
 `main` may return `(Result Int Error)` instead. Import `Err`: `(Ok n)`
 exits with `n`; `(Err e)` prints `axiom: ` followed by `errorText e` and
-exits 70. Use `?` to propagate failures (below). See [error handling](stdlib.md#err-and-fallible).
+exits 70. These are `Err::Result`, `Err::Error` and Err's constructors;
+local declarations with those names keep their own meanings. Use `?` to propagate failures (below). See [error handling](stdlib.md#err-and-fallible).
 
 Tested by `tests/stdlib/490-main-result-ok.ax` and `tests/stdlib/491-main-result-err.ax`.
 
@@ -547,7 +548,7 @@ Tested by `tests/stdlib/466-for-loop.ax`.
 (fn (main)
   (let ((byte (as 255 UInt8)))
     {
-      (println (+ byte (as 1 UInt8)))
+      (println (as (+ byte (as 1 UInt8)) Int))
       (println (as byte Int))
     }))
 ```
@@ -631,6 +632,14 @@ every type that `a` can represent. Arithmetic on an unconstrained `a`,
 or returning an `Int` as `a`, is refused. Repeated parameters must agree
 within a call; separate calls can choose different types.
 
+Parameters stay rigid inside returned containers, ADTs, records and
+callbacks. A function promising `(Option a)` must preserve `a`; returning
+`(Some 42)` is refused unless `a` is known to be `Int`. Empty containers
+can remain polymorphic.
+
+Tested by `tests/diagnostics/1443-generic-result-rigidity.ax` and
+`tests/stdlib/956-generic-result-rigidity.ax`.
+
 A caller's concrete argument witnesses a type parameter. A result-only
 parameter requires the explicit low-level contract described in
 [diagnostics](diagnostics.md). Tested by
@@ -694,7 +703,8 @@ Tested by `tests/stdlib/946-generic-aliases.ax` and
 `A::Thing` and `B::Thing` are different types even when their layouts
 match. Aliases and generic arguments preserve that identity. You can
 use a bare name in its declaring module; qualify a name shared by
-several imports.
+several imports. Entry-file declarations cannot change an imported module's types.
+Qualified constructor patterns select the same declaration as qualified calls.
 
 Tested by `tests/stdlib/954-nominal-identity.ax` and
 `tests/diagnostics/1438-nominal-module-boundaries.ax`.
@@ -1188,6 +1198,34 @@ compilation. `Pre` supplies two derivers, `deriveEq` and
 `deriveArity`. Read the
 [macro specification](macro-system.md) for declaration templates,
 `syntax` queries, pattern matching and expansion limits.
+
+## Source formatting
+
+```bash
+axiom fmt Main.ax Helpers.ax
+axiom fmt --check Main.ax
+axiom fmt --diff Main.ax
+axiom fmt --emit stdout Main.ax
+cat Main.ax | axiom fmt -
+```
+
+`fmt` gives your source one canonical layout: two-space indentation and
+a 100-column target. Calls stay together when they fit. Longer calls pack
+complete arguments into rows; control flow and multiline arguments keep
+their structural breaks. Comments stay beside the arguments they describe.
+Long strings and other indivisible tokens remain whole.
+
+Every batch input is prepared and verified before writing starts. A
+formatting refusal leaves all batch files untouched. Unchanged files keep
+their modification time. `--check` and `--diff` write no source files and
+exit 1 when formatting would change them. `--diff` prints a unified diff.
+Use `-` to read stdin, or `--emit stdout` to format one file into a pipe.
+
+The editor uses the same formatter. Formatting verifies comment
+preservation and a fixed point before returning its output.
+
+Tested by `tests/fmt/workflow.py` and
+`tests/stdlib/958-formatter-packed-calls.ax`.
 
 ## Printing and formatting
 
@@ -1895,6 +1933,12 @@ accumulator. Its checked `scoped(step)` contract refuses callbacks that
 retain an answer or a fresh allocation in captured state. Pass a lambda
 directly, a non-nullary function declaration, or a parameter carrying the
 same scoped contract.
+
+The pool checks cancellation before every spawn attempt. An attempt
+already in progress can race cancellation; once observed, no later attempt
+starts. Running tasks get their grace period from that observation before
+being killed and reaped. A deadline applies to each task from its own
+spawn. Tested by `tests/stdlib/960-task-launch-cancellation.ax`.
 
 Width is clamped to the input count, with a minimum of one for non-empty
 inputs. A slab size that exceeds the `Int` range returns `Err` 22 before

@@ -303,6 +303,22 @@ fi
 # ---------------------------------------------------------------
 # 4. The parity bank: refusals and rewrites, status and bytes.
 # ---------------------------------------------------------------
+echo "== formatter CLI workflows =="
+if python3 "$repo_root/tests/fmt/workflow.py" "$axc"; then
+  echo "ok   batch preflight, pipes and non-writing diffs"
+else
+  echo "FAIL formatter workflows"
+  failed=$((failed + 1))
+fi
+
+echo "== call-comment ownership =="
+if python3 "$repo_root/tests/fmt/comment-layout.py" "$axc"; then
+  echo "ok   comments keep their call and argument"
+else
+  echo "FAIL call-comment ownership"
+  failed=$((failed + 1))
+fi
+
 echo "== parity bank: tests/fmt/parity.golden =="
 parity_golden="$repo_root/tests/fmt/parity.golden"
 mkdir -p "$work/parity-out"
