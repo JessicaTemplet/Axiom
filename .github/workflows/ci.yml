@@ -48,7 +48,8 @@ on:
 
 # Every job gets `contents: read`. Without this block a job holds the
 # repository default, which can be read/write. No job pushes, comments,
-# releases, reads a secret or uploads an artifact; the one token use is
+# releases, reads a secret or uploads an artifact. Gate results use the
+# branch-scoped Actions cache; the one GitHub API token use is
 # `scope`'s read-only `gh api` calls with `github.token`. Outside this
 # comment, `grep -nE 'GITHUB_TOKEN|secrets\.|id-token|packages:'` over
 # this file and .github/actions/provision/action.yml matches nothing.
@@ -155,6 +156,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/gate-cache
       # The CLI the grammar gate shells out to (npm wrapper as locked,
       # native binary against a recorded hash). The `docs` job installs it
       # too: it runs the same gate where this job is skipped, and a gate
@@ -165,14 +167,14 @@ jobs:
       # check parses checked-in sources, so only the tree-sitter CLI is
       # needed.
       - name: Every .ax file parses under the checked-in grammar
-        run: ./scripts/check-tree-sitter.sh
+        run: ./scripts/ci-gate.py ./scripts/check-tree-sitter.sh
 
       # The VS Code extension restates the parser's keywords and the
       # server's semantic token legend. The gate reads sources and the
       # extension's JSON with node, which the tree-sitter step installed,
       # and builds no compiler.
       - name: The VS Code extension agrees with the compiler
-        run: ./scripts/check-vscode.sh
+        run: ./scripts/ci-gate.py ./scripts/check-vscode.sh
 
       # This file names its gates one at a time, because it also decides
       # each gate's job and platform, so it can drift. `run-gates.sh`
@@ -182,11 +184,18 @@ jobs:
       - name: Every gate in the tree is run by a step in this file
         run: ./scripts/check-ci-coverage.sh
 
+      - name: Preserve successful gates even when another gate fails
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/gate-cache
+        with:
+          mode: save
+
   # The other half of `scope`: on a documentation-only change, the gates
   # that read documents run here, on one runner. A gate belongs here when
   # its subject is a document, as with `check-doc-drift.sh`,
   # `check-version.sh`, `check-stdlib-api.sh` and `check-tree-sitter.sh`.
   # It builds the compiler, because most of them need one.
+
   docs:
     name: Documentation gates
     needs: scope
@@ -199,6 +208,7 @@ jobs:
       AXIOM_AXC: ${{ github.workspace }}/.axiom-shared/axc
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/gate-cache
       - uses: ./.github/actions/provision
 
       - name: Build the compiler under test once
@@ -206,31 +216,37 @@ jobs:
 
       # The prose documents against the tree they describe.
       - name: The documents state what the tree does
-        run: ./scripts/check-doc-drift.sh
+        run: ./scripts/ci-gate.py ./scripts/check-doc-drift.sh
 
       # Several of the version sites are documents: README.md, SECURITY.md
       # and docs/.
       - name: Every site states the same version
-        run: ./scripts/check-version.sh
+        run: ./scripts/ci-gate.py ./scripts/check-version.sh
 
       # `docs/stdlib-api.md` is `axdoc`'s output, so a hand edit to it is
       # drift this catches.
       - name: The stdlib API reference is what the library says
-        run: ./scripts/check-stdlib-api.sh
+        run: ./scripts/ci-gate.py ./scripts/check-stdlib-api.sh
 
       # The documents carry `.ax` blocks, and the grammar must parse them.
       # `grammar` is skipped on this path, so the CLI is installed here.
       - uses: ./.github/actions/tree-sitter
       - name: Every .ax file parses under the checked-in grammar
-        run: ./scripts/check-tree-sitter.sh
+        run: ./scripts/ci-gate.py ./scripts/check-tree-sitter.sh
 
       # README.md carries the supported-target list and the rule that
       # defines "supported"; `install.sh`'s refusals are held to it.
       - name: The release matrix and the installer's refusals agree
-        run: ./scripts/check-release-targets.sh
+        run: ./scripts/ci-gate.py ./scripts/check-release-targets.sh
 
       - name: The installer installs, and refuses what it should
-        run: ./scripts/check-install.sh
+        run: ./scripts/ci-gate.py ./scripts/check-install.sh
+
+      - name: Preserve successful gates even when another gate fails
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/gate-cache
+        with:
+          mode: save
 
   test:
     name: Tests (${{ matrix.name }})
@@ -257,6 +273,7 @@ jobs:
       AXIOM_AXC: ${{ github.workspace }}/.axiom-shared/axc
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/gate-cache
 
       # `llc` isn't on the default PATH on either runner image, and the
       # compiler shells out to it by name. `llvm-readobj` comes from the
@@ -290,7 +307,7 @@ jobs:
       # literals must match.
       - name: Every site states the same version
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-version.sh
+        run: ./scripts/ci-gate.py ./scripts/check-version.sh
 
       # `check-version.sh` holds every site that states the version, a
       # promise about an interface. This holds the binary to naming the
@@ -298,7 +315,7 @@ jobs:
       # of different trees at one version can't be told apart.
       - name: A shipped binary names the tree it was built from
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-build-id.sh
+        run: ./scripts/ci-gate.py ./scripts/check-build-id.sh
 
       # The seed's supply chain. It runs here, not beside
       # `seed-provenance`, because it needs no compiler, `llc` or history,
@@ -320,7 +337,7 @@ jobs:
       # build it records is checked by hand in podman, not in this step.
       - name: The bootstrap needs no maintainer to run
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-offline-bootstrap.sh
+        run: ./scripts/ci-gate.py ./scripts/check-offline-bootstrap.sh
 
       # Every case in `tests/stdlib/`, compiled, run and compared with its
       # `.out`, `.exit` and `.err` goldens.
@@ -336,7 +353,7 @@ jobs:
       # FAIL line: a test runner whose tests can't fail checks nothing.
       - name: The test runner, its assertions and their isolation
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-test-runner.sh
+        run: ./scripts/ci-gate.py ./scripts/check-test-runner.sh
 
       # AX3040 is an error, which rests on an analysis that tells a
       # diverging function from a cast. This checks the distinction; the
@@ -346,7 +363,7 @@ jobs:
       # pass every acceptance check.
       - name: A fabricated value is refused and a diverging one is not
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-diverging-tyvar.sh
+        run: ./scripts/ci-gate.py ./scripts/check-diverging-tyvar.sh
 
       # `fldClass` has three answers. The third, unclassifiable, forces
       # the whole block to the leaf shape, so an unknown field type
@@ -356,7 +373,7 @@ jobs:
       # vacuously: two must differ.
       - name: A Vec field maps exactly as the Int it replaces
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-vec-field-shape.sh
+        run: ./scripts/ci-gate.py ./scripts/check-vec-field-shape.sh
 
       # `(region r body)` is a checked scope: the waterline comes back
       # when the body ends, the value and every store out of it must be a
@@ -366,7 +383,7 @@ jobs:
       # reading the next allocation's bytes.
       - name: A region is a checked scope, and the refusal is not vacuous
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-region-scope.sh
+        run: ./scripts/ci-gate.py ./scripts/check-region-scope.sh
 
       # A type placeholder from instantiation binds. An unbound one
       # matches anything, so a let-bound box written at `Int` and read at
@@ -376,7 +393,7 @@ jobs:
       # still be accepted, so a checker that refused everything fails.
       - name: A bound type placeholder stays bound
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-type-pinning.sh
+        run: ./scripts/ci-gate.py ./scripts/check-type-pinning.sh
 
       # A signature may name the region a reference lives in, and the
       # escape rule refuses a store, return or capture whose place
@@ -385,7 +402,7 @@ jobs:
       # compiler lets one read reclaimed memory.
       - name: Region annotations change nothing, and the escape rule refuses
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-region-escape.sh
+        run: ./scripts/ci-gate.py ./scripts/check-region-escape.sh
 
       # S4's first slice: a value a region body constructs needs no
       # release, because the reset reclaims it. Six release sites leave
@@ -393,35 +410,35 @@ jobs:
       # ablation brings them back.
       - name: In-region constructions are reset-reclaimed
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-region-reclaim.sh
+        run: ./scripts/ci-gate.py ./scripts/check-region-reclaim.sh
 
       # S4's second slice, args path: a fresh call result passed to a call
       # in a region body needs no release. Seven sites leave a second
       # fixture's IR, RSS stays flat, and the ablation brings them back.
       - name: Fresh call results are reset-reclaimed as arguments
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-region-fresh.sh
+        run: ./scripts/ci-gate.py ./scripts/check-region-fresh.sh
 
       # S4's second slice, scope-end path: a `let` bound to a fresh call
       # needs no scope-end release. Eight sites leave a third fixture's
       # IR, RSS stays flat, and the ablation brings them back.
       - name: Let-bound fresh results are reset-reclaimed at scope end
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-region-fresh-let.sh
+        run: ./scripts/ci-gate.py ./scripts/check-region-fresh-let.sh
 
       # S4's third slice, args path: a join (`if`, `cond`, `match`) whose
       # every arm is fresh needs no release. Seven sites leave a fourth
       # fixture's IR, RSS stays flat, and the ablation brings them back.
       - name: Fresh joins are reset-reclaimed as arguments
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-region-phi.sh
+        run: ./scripts/ci-gate.py ./scripts/check-region-phi.sh
 
       # S4's third slice, scope-end path: a `let` bound to a fresh join
       # needs no scope-end release. Eight sites leave a fifth fixture's
       # IR, RSS stays flat, and the ablation brings them back.
       - name: Let-bound fresh joins are reset-reclaimed at scope end
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-region-phi-let.sh
+        run: ./scripts/ci-gate.py ./scripts/check-region-phi-let.sh
 
       # S4's fourth slice, scrutinee path: a `match` on a fresh scrutinee
       # needs no merge-path release for its temporary. Eight sites leave a
@@ -429,14 +446,14 @@ jobs:
       # back.
       - name: Fresh scrutinee temporaries are reset-reclaimed
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-region-scrutinee.sh
+        run: ./scripts/ci-gate.py ./scripts/check-region-scrutinee.sh
 
       # S4's success criterion, the §1.1 ablation: the binary win with the
       # RSS win intact, three workloads against one fully ablated
       # compiler.
       - name: S4 verdict holds end to end
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-region-verdict.sh
+        run: ./scripts/ci-gate.py ./scripts/check-region-verdict.sh
 
       # The executable model's half of R-E1: `runtime-model.py`
       # generates allocator/arena traces whose every transition is a
@@ -444,7 +461,7 @@ jobs:
       # two IR mutations of the emitted runtime must both fail.
       - name: Executable allocator model agrees with the emitted runtime
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-runtime-model.sh
+        run: ./scripts/ci-gate.py ./scripts/check-runtime-model.sh
 
       # R-C3: the five atomic primitives in machine code for all seven
       # targets at -O0..-O3, each ordering instruction counted, with IR
@@ -454,7 +471,7 @@ jobs:
       # outcomes the zeros exclude. The LSE lowering is counted and run.
       - name: Atomics lower to their ordering instructions and hold on two threads
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-atomics.sh
+        run: ./scripts/ci-gate.py ./scripts/check-atomics.sh
 
       # R-C2's first half, MM-PAR-10: `stdlib/Chan.ax` under load. Three
       # producers feed three consumers in both lowerings, every word
@@ -464,7 +481,7 @@ jobs:
       # red.
       - name: A bounded channel carries every word once, in both lowerings
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-chan.sh
+        run: ./scripts/ci-gate.py ./scripts/check-chan.sh
 
       # MM-PAR-8's typed handles: a freed or forged channel or mutex traps
       # 85 at every --opt and in both lowerings. The handle table holds
@@ -474,7 +491,7 @@ jobs:
       # retirement, the free's compare) each turn it red.
       - name: A freed or forged handle traps, and the handle table holds under concurrency
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-handles.sh
+        run: ./scripts/ci-gate.py ./scripts/check-handles.sh
 
       # R-C2's second half, MM-PAR-11..13: `stdlib/Sync.ax`'s mutex keeps
       # increments exact beside an unlocked control that must lose some,
@@ -484,7 +501,7 @@ jobs:
       # examples/concurrency/ runs.
       - name: A mutex excludes, timed waits keep time, and tasks fail, time out and cancel in their slots
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-task.sh
+        run: ./scripts/ci-gate.py ./scripts/check-task.sh
 
       # R-E1's schedule exploration and R-C2's liveness limits.
       # `scripts/lib/protocol-model.py` explores every interleaving of the
@@ -496,7 +513,7 @@ jobs:
       # timed calls and stay deadlocked under a watchdog without them.
       - name: The protocols hold in every interleaving explored, and deadlock is measured apart from races
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-protocol-model.sh
+        run: ./scripts/ci-gate.py ./scripts/check-protocol-model.sh
 
       # R-E1's race detector: ThreadSanitizer over `--threads` programs.
       # The unlocked control must be reported, the synchronised programs
@@ -509,7 +526,7 @@ jobs:
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
         env:
           AXIOM_TSAN_REQUIRED: '1'
-        run: ./scripts/check-race.sh
+        run: ./scripts/ci-gate.py ./scripts/check-race.sh
 
       # The fuzzing half of R-E1: 600 mutants of the corpus from a fixed
       # seed. `check` must answer with a code or exit 0, never a signal,
@@ -519,11 +536,11 @@ jobs:
       # recorded.
       - name: Seeded compiler fuzzing finds no crash, and can see one
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-fuzz.sh
+        run: ./scripts/ci-gate.py ./scripts/check-fuzz.sh
 
       - name: Numeric operands agree from type checking through native execution
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-numeric-operands.sh
+        run: ./scripts/ci-gate.py ./scripts/check-numeric-operands.sh
 
       # R-A10: an unused declaration changes nothing else the compiler
       # says. Every program the corpora hold that the compiler accepts
@@ -532,7 +549,7 @@ jobs:
       # with one name-resolution fix taken out must fail it.
       - name: An unused declaration changes nothing, and three fixes are watched
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-metamorphic.sh
+        run: ./scripts/ci-gate.py ./scripts/check-metamorphic.sh
 
       # R-D1: `scripts/axiom-report.py`, the per-function resource report,
       # and the restricted profile's refusals (recursion, indirect calls,
@@ -541,7 +558,7 @@ jobs:
       # sum of its path and to llvm-readobj's reading.
       - name: The resource report and the restricted profile refuse what they claim to
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-report.sh
+        run: ./scripts/ci-gate.py ./scripts/check-report.sh
 
       # The FFI boundary is a C ABI: `declare i64 @sym(i64, ...)` and a
       # `-l` flag. `check-ffi.sh` tests the Rust client (cargo,
@@ -550,7 +567,7 @@ jobs:
       # so the ABI keeps a test whatever happens to the Rust workspace.
       - name: A plain C archive binds through the ABI, with no Rust
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-c-abi.sh
+        run: ./scripts/ci-gate.py ./scripts/check-c-abi.sh
 
       # The standard library's API reference is generated by an Axiom
       # program; this regenerates it and diffs. `check-doc-drift.sh`
@@ -559,7 +576,7 @@ jobs:
       # worked example of a real program.
       - name: The stdlib API reference is what the library says
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-stdlib-api.sh
+        run: ./scripts/ci-gate.py ./scripts/check-stdlib-api.sh
 
       # The version number is a claim about compatibility.
       # `check-version.sh` checks it is stated consistently; this checks
@@ -568,7 +585,7 @@ jobs:
       # name fails unless `compat/BREAKING` declares it.
       - name: The public surface agrees with the last release's baseline
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-compat.sh
+        run: ./scripts/ci-gate.py ./scripts/check-compat.sh
 
       # `axiom.pkg`: a project declares its dependencies, and two of them
       # may not provide one module. Every module answers a distinct
@@ -577,7 +594,7 @@ jobs:
       # found.
       - name: A project declares what it depends on
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-packages.sh
+        run: ./scripts/ci-gate.py ./scripts/check-packages.sh
 
       # `install.sh` is the script users pipe into bash. This serves a
       # release built from this tree over loopback, installs it, and
@@ -588,7 +605,7 @@ jobs:
       # verifies nothing is testing something else.
       - name: The installer installs, and refuses what it should
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-install.sh
+        run: ./scripts/ci-gate.py ./scripts/check-install.sh
 
       # What ships and what is supported are two lists: `release.yml`'s
       # build matrix and `install.sh`'s refusal arms. A target in both
@@ -598,7 +615,7 @@ jobs:
       # build-from-source sentence.
       - name: The release matrix and the installer's refusals agree
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-release-targets.sh
+        run: ./scripts/ci-gate.py ./scripts/check-release-targets.sh
 
       # The acceptance measurement for the socket work: a pre-forked
       # server must hold its heap flat across ten thousand connections
@@ -608,23 +625,23 @@ jobs:
       # takes a few seconds.
       - name: Server memory holds across ten thousand connections
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-net.sh
+        run: ./scripts/ci-gate.py ./scripts/check-net.sh
       # The cryptography suite's known answers and negative cases, each
       # test also run against corrupted vectors to show it can fail
       # (docs/crypto.md).
       - name: Cryptography known answers, and each test can fail
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-crypto.sh
+        run: ./scripts/ci-gate.py ./scripts/check-crypto.sh
       - name: Optional binary and asset obfuscation
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-obfuscation.sh
+        run: ./scripts/ci-gate.py ./scripts/check-obfuscation.sh
       # AXQLite: the file format's known answers, crash recovery at every
       # write, two connections and two processes on one file, and AXQL's
       # statements, each test in an empty directory of its own
       # (docs/axqlite.md).
       - name: AXQLite stores, recovers, and answers AXQL
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-axqlite.sh
+        run: ./scripts/ci-gate.py ./scripts/check-axqlite.sh
       # Sweeps examples/: every tracked file is a source or a static
       # asset, none is executable, every program is named in
       # examples/README.md, and README.md links there. Content gates can't
@@ -632,7 +649,7 @@ jobs:
       # program and builds no compiler.
       - name: examples/ holds sources, and every program in it is documented
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-examples.sh
+        run: ./scripts/ci-gate.py ./scripts/check-examples.sh
 
       # A raw-mode terminal must come back byte for byte. It runs on every
       # leg because the layout is per-target: `struct termios` is 72 bytes
@@ -643,14 +660,14 @@ jobs:
       # that doesn't exist.
       - name: A raw-mode terminal is restored byte for byte
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-terminal-restore.sh
+        run: ./scripts/ci-gate.py ./scripts/check-terminal-restore.sh
 
       # Both halves on every leg: no libc on this host, and every
       # windows-x86_64 and windows-aarch64 declare on the reviewed
       # allowlist. The Windows IR is emitted cross, so each leg reads it.
       - name: Freestanding check
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-freestanding.sh
+        run: ./scripts/ci-gate.py ./scripts/check-freestanding.sh
 
       # The subset half of the same claim: the standard-library modules a
       # bare-metal program may import, with closed imports, no extern
@@ -658,7 +675,7 @@ jobs:
       # world doesn't. Runs on every target.
       - name: Freestanding subset check
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-nostd-subset.sh
+        run: ./scripts/ci-gate.py ./scripts/check-nostd-subset.sh
 
       # Also answered by `nm` on a real executable: a hello world contains
       # only what the gate's own walk reaches from `main`, and an
@@ -666,14 +683,14 @@ jobs:
       # turns the pass off and requires the dropped symbols back.
       - name: A program contains only what it uses
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-dead-code.sh
+        run: ./scripts/ci-gate.py ./scripts/check-dead-code.sh
 
       # Runs in the matrix because it compiles, assembles and runs the
       # self-hosted compiler's output, and both the syscall numbers and
       # the object format are platform-specific.
       - name: Self-hosted compiler conformance
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-self-host.sh
+        run: ./scripts/ci-gate.py ./scripts/check-self-host.sh
 
       # The compiler's command line. Other gates drive stage1 as
       # `stage1 emit-llvm FILE` and run llc and cc themselves, so this is
@@ -684,7 +701,7 @@ jobs:
       # not.
       - name: Self-hosted compiler driver
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-driver.sh
+        run: ./scripts/ci-gate.py ./scripts/check-driver.sh
 
       # The differential gate: every case in both corpora compiled by both
       # compilers, each one's IR put through the identical llc/cc pipeline
@@ -693,7 +710,7 @@ jobs:
       # two pipelines.
       - name: Differential behaviour between the compilers
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-stdlib-selfhost.sh
+        run: ./scripts/ci-gate.py ./scripts/check-stdlib-selfhost.sh
 
       # The AXDL corpus against checked-in goldens, plus the half a
       # re-bless can't satisfy: verify-axdl-spans.py recomputes every span
@@ -703,7 +720,7 @@ jobs:
       # compiling itself.
       - name: The AXDL corpus, and every span against the fixtures
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-diagnostics.sh
+        run: ./scripts/ci-gate.py ./scripts/check-diagnostics.sh
 
       # Set equality is not reachability: a diagnostic the compiler
       # constructs but no fixture fires stays green in both the
@@ -713,7 +730,7 @@ jobs:
       # one or an UNCOVERED line with a reason.
       - name: Every constructed diagnostic has a primary golden or an UNCOVERED line
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-diagnostic-coverage.sh
+        run: ./scripts/ci-gate.py ./scripts/check-diagnostic-coverage.sh
 
       # `;@axiom:restrict(...)` is a claim the checker refuses when its
       # own analysis contradicts it. The gate tags every fn of the corpus
@@ -724,7 +741,7 @@ jobs:
       # answering.
       - name: Restriction claims are answered, and a restricted corpus does not move
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-restrictions.sh
+        run: ./scripts/ci-gate.py ./scripts/check-restrictions.sh
 
       # `;@axiom:isr` marks an interrupt entry point: no parameters, no
       # allocation, exported beside a plain function under
@@ -732,7 +749,7 @@ jobs:
       # restriction gate because it is checked as one.
       - name: Interrupt entry points take no parameters and do not allocate
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-isr.sh
+        run: ./scripts/ci-gate.py ./scripts/check-isr.sh
 
       # `;@axiom:pre(...)` and `post(...)` are claims the checker can't
       # refuse, because it has no value analysis. So they are compiled
@@ -742,7 +759,7 @@ jobs:
       # hook and the checking hook, must each go red.
       - name: Contracts are compiled in and checked, and a failure says which
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-contracts.sh
+        run: ./scripts/ci-gate.py ./scripts/check-contracts.sh
 
       # Every trap owns its exit status, and the table says which. Two
       # traps sharing a status would leave both their gates green. This
@@ -750,7 +767,7 @@ jobs:
       # documents, runs seven traps and requires seven distinct statuses.
       - name: Every trap exits its own status, and the table agrees
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-trap-statuses.sh
+        run: ./scripts/ci-gate.py ./scripts/check-trap-statuses.sh
 
       # Degenerate input, such as `(fn (main) ())`, answers with a
       # diagnostic, not a signal. Much of it reaches `check`, which
@@ -760,7 +777,7 @@ jobs:
       # about the process.
       - name: Degenerate input is diagnosed, not fatal
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-degenerate.sh
+        run: ./scripts/ci-gate.py ./scripts/check-degenerate.sh
 
       # A name the frontend accepts is a name the backend can emit.
       # `foo'`, `a+b` and `set!` are legal Axiom names, and LLVM needs
@@ -770,7 +787,7 @@ jobs:
       # probe must be refused with a span or run to 42.
       - name: Every legal name is an emittable name
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-symbol-names.sh
+        run: ./scripts/ci-gate.py ./scripts/check-symbol-names.sh
 
       # Which function died. A trapping program prints its frames from
       # emitted text alone: `"frame-pointer"="all"`, an address-to-name
@@ -781,7 +798,7 @@ jobs:
       # are never pushed, so frame counts aren't asserted there.
       - name: A dying program names the frames it died in
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-backtrace.sh
+        run: ./scripts/ci-gate.py ./scripts/check-backtrace.sh
 
       # How much stack the compiler needs, bisected and reported. This
       # backend eliminates only self tail calls, and a `let` body isn't a
@@ -792,7 +809,7 @@ jobs:
       # gate reports the need against the 8 MiB default.
       - name: Checking the compiler fits in a small stack
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-stack-depth.sh
+        run: ./scripts/ci-gate.py ./scripts/check-stack-depth.sh
 
       # MM-EXEC-6b, pinned rather than fixed. A `match` on a direct call
       # to a pair-returning function loses tail position when the payload
@@ -805,7 +822,7 @@ jobs:
       # gate.
       - name: A match on a direct call still loses tail position
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-tail-position.sh
+        run: ./scripts/ci-gate.py ./scripts/check-tail-position.sh
 
       # The static half: "this binary needs at most N bytes", computed
       # from the call graph because a microcontroller can't be bisected. A
@@ -816,7 +833,7 @@ jobs:
       # cross-check skips loudly on the apt llvm-18 legs.
       - name: A no-recursion program's stack need is computed, and checked against a measurement
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-stack-bound.sh
+        run: ./scripts/ci-gate.py ./scripts/check-stack-bound.sh
 
       # The allocator assumptions in docs/embedded-guide.md. The arena's
       # chunk size is a per-target constant, and a target with no MMU gets
@@ -836,7 +853,7 @@ jobs:
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
         env:
           AXIOM_REQUIRE_QEMU: ${{ runner.os == 'macOS' && '1' || '0' }}
-        run: ./scripts/check-embedded.sh
+        run: ./scripts/ci-gate.py ./scripts/check-embedded.sh
 
       # A tail call runs in constant stack at `--opt 0`: self calls, and
       # mutual calls with matching prototypes, which `emitPlainCall` marks
@@ -847,14 +864,14 @@ jobs:
       # calls.
       - name: A mutual tail call runs in constant stack at --opt 0, and the marker is proved to be why
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-tail-calls.sh
+        run: ./scripts/ci-gate.py ./scripts/check-tail-calls.sh
 
       # A module's private declarations must cost no more to resolve than
       # its public ones. `findFnEnt` is indexed, and the private-name path
       # is the one that would go linear unwatched.
       - name: Private names resolve as cheaply as public ones
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-name-scale.sh
+        run: ./scripts/ci-gate.py ./scripts/check-name-scale.sh
 
       # A type name means what its own module says. Type declarations
       # aren't rewritten to `Mod$Name` the way functions are, so a lookup
@@ -867,7 +884,7 @@ jobs:
       # all the program's types.
       - name: A type name resolves by module, and in constant time
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-type-namespace.sh
+        run: ./scripts/ci-gate.py ./scripts/check-type-namespace.sh
 
       # A trap inside a recovery point is an answer; outside one it still
       # stops the process. `__axiom_recover` gives the three traps an
@@ -878,7 +895,7 @@ jobs:
       # broken measurement also reads flat.
       - name: A trap inside a recovery point is an answer, not an exit
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-recover.sh
+        run: ./scripts/ci-gate.py ./scripts/check-recover.sh
 
       # A dropped container gives its elements back in a program that
       # never resets: a server, an agent loop, a compiler pass run twice.
@@ -888,7 +905,7 @@ jobs:
       # instrument sees it.
       - name: A dropped container gives its elements back
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-container-reclaim.sh
+        run: ./scripts/ci-gate.py ./scripts/check-container-reclaim.sh
 
       # A bounded live set has bounded memory in a process that frees no
       # container and resets no arena. Three magnitudes (20k, 200k, 2M),
@@ -897,7 +914,7 @@ jobs:
       # counts tombstones is the kind of leak this catches.
       - name: A bounded live set has bounded memory
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-steady-state.sh
+        run: ./scripts/ci-gate.py ./scripts/check-steady-state.sh
 
       # Reclamation and reuse (R-B7 to R-B9): million-deep chains
       # released under a 64 KiB stack, a mixed-size reset-free soak that
@@ -907,7 +924,7 @@ jobs:
       # must move; the 10^7 soak runs in `long-evidence`.
       - name: Reclamation and reuse hold under depth, churn, cycles and resets
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-reclaim-soak.sh
+        run: ./scripts/ci-gate.py ./scripts/check-reclaim-soak.sh
 
       # The block a call returning `Result` answers must be reclaimed
       # (docs/error-model.md ERR-MEM-4), or every fallible call leaks 32
@@ -917,7 +934,7 @@ jobs:
       # can bend is no evidence.
       - name: A fallible call's block is reclaimed, and one word is what does it
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-fallible-reclaim.sh
+        run: ./scripts/ci-gate.py ./scripts/check-fallible-reclaim.sh
 
       # The same for an application through a closure: the record a
       # curried chain's first step answers must be given back, as a direct
@@ -928,7 +945,7 @@ jobs:
       # leak.
       - name: A closure chain's intermediate record is reclaimed, and one word in each walker is what does it
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-closure-reclaim.sh
+        run: ./scripts/ci-gate.py ./scripts/check-closure-reclaim.sh
 
       # Proven type-preserving casts keep the operand's ownership and
       # evidence. Compare release counts with the uncast spelling and
@@ -937,7 +954,7 @@ jobs:
       # type from `symbols`, may only fall.
       - name: Type-preserving casts keep ownership, scalar casts take no share, and erasures only fall
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-cast-arg-root.sh
+        run: ./scripts/ci-gate.py ./scripts/check-cast-arg-root.sh
 
       # What an `Option` costs, counted in the emitted module rather than
       # timed. `optFind` builds one block and its consumer performs one
@@ -946,7 +963,7 @@ jobs:
       # the construction elsewhere must leave this function at zero.
       - name: What an Option construction costs, in blocks
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-unboxed-sums.sh
+        run: ./scripts/ci-gate.py ./scripts/check-unboxed-sums.sh
 
       # What LLVM's vectorizer does with an Axiom loop, counted in the IR
       # at `opt -O2`: a read-only `(Vec Int)` loop and a String byte scan
@@ -956,7 +973,7 @@ jobs:
       # copies back inside the loop.
       - name: The loops that vectorize still do, and the trap stays out of line
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-simd.sh
+        run: ./scripts/ci-gate.py ./scripts/check-simd.sh
 
       # A release of a static string literal does nothing (its count word
       # is the sentinel -1), so `isStaticSentinelNode` drops it at compile
@@ -967,7 +984,7 @@ jobs:
       # that. The ablation requires the count back in the thousands.
       - name: A release on a static string literal is not emitted, and one predicate is what does it
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-static-release.sh
+        run: ./scripts/ci-gate.py ./scripts/check-static-release.sh
 
       # The effect fixpoint's worklist. Without it, the declaration order
       # a generator produces (a helper beside each caller) takes one round
@@ -977,7 +994,7 @@ jobs:
       # shows up as one missing effect, not a crash.
       - name: The effect fixpoint is a worklist, and the frontier is what makes it one
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-effect-fixpoint.sh
+        run: ./scripts/ci-gate.py ./scripts/check-effect-fixpoint.sh
 
       # `#effects-incomplete` marks a row as a lower bound, where AX3037,
       # AX3038 and AX3051 are warnings rather than verdicts. The mark
@@ -988,7 +1005,7 @@ jobs:
       # lower bounds.
       - name: An unfollowed argument is a hole only where the signature says it could be one
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-effect-argpos.sh
+        run: ./scripts/ci-gate.py ./scripts/check-effect-argpos.sh
 
       # The runtime's mutable globals: private after a `fork`,
       # thread-local under threads (MM-PAR-3). A program that spawns no
@@ -1000,7 +1017,7 @@ jobs:
       # whose markers differ.
       - name: The runtime's mutable globals move in a program that spawns a thread, and nothing else does
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-thread-local.sh
+        run: ./scripts/ci-gate.py ./scripts/check-thread-local.sh
 
       # `parallel`, one surface and two lowerings: the same fixtures
       # built as processes and as threads answer the same bytes and the
@@ -1009,7 +1026,7 @@ jobs:
       # where nothing spawns; the targets that cannot say so.
       - name: parallel answers the same bytes as processes and as threads
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-parallel.sh
+        run: ./scripts/ci-gate.py ./scripts/check-parallel.sh
 
       # The mid-level IR in `self_host/mir.ax`. Printer goldens alone would
       # only repeat what the lowering last printed, so each fixture runs
@@ -1021,7 +1038,7 @@ jobs:
       # dominance rule.
       - name: The mid-level IR lowers, prints, verifies and evaluates to what the compiler answers
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-mir.sh
+        run: ./scripts/ci-gate.py ./scripts/check-mir.sh
 
       # The `.axir` record file that carries that IR out of the compiler.
       # Round trip: emit, read back and emit again, byte-identical over
@@ -1031,7 +1048,7 @@ jobs:
       # would fail.
       - name: The .axir record file survives its own reader
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-mir-roundtrip.sh
+        run: ./scripts/ci-gate.py ./scripts/check-mir-roundtrip.sh
 
       # The projection: every `#mir-*` key `symbols --mir` prints is
       # re-derivable from the raw region words of the record whose whole
@@ -1041,7 +1058,7 @@ jobs:
       # depth 5 and at depth 60, with the escape carried up to f0's row.
       - name: Every published dataflow key is the record's own words
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-mir-projection.sh
+        run: ./scripts/ci-gate.py ./scripts/check-mir-projection.sh
 
       # What a reset costs, the roadmap's P8. Timing gates here assert
       # ratios, which a slow runner can't fail, so this one makes rate a
@@ -1051,7 +1068,7 @@ jobs:
       # twenty short runs.
       - name: What an arena reset costs, and that the scrub is what costs it
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-arena-reset-rate.sh
+        run: ./scripts/ci-gate.py ./scripts/check-arena-reset-rate.sh
 
       # Two `axiom run`s in one directory must not corrupt each other. A
       # shared scratch name makes one program return another's result, at
@@ -1060,21 +1077,21 @@ jobs:
       # it. Any parallel job pool depends on it.
       - name: Concurrent runs in one directory do not collide
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-concurrent-run.sh
+        run: ./scripts/ci-gate.py ./scripts/check-concurrent-run.sh
 
       # Formats a copy of the whole repository and re-runs the suites
       # against it, so a formatter change that alters what a program means
       # fails here.
       - name: Formatter round-trip
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-fmt.sh
+        run: ./scripts/ci-gate.py ./scripts/check-fmt.sh
 
       # The formatter, pinned by a checked-in corpus golden keyed by
       # source hash, plus the idempotence and preservation properties and
       # the `tests/fmt/parity/*.axp` refusal bank.
       - name: Formatter goldens, idempotence and refusals
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-fmt-selfhost.sh
+        run: ./scripts/ci-gate.py ./scripts/check-fmt-selfhost.sh
 
       # `explain` and `symbols`, pinned without a second compiler: every
       # code the corpus emits must be one `explain --list` lists, and
@@ -1083,7 +1100,7 @@ jobs:
       # live rather than against a hard-coded number.
       - name: explain and symbols against their goldens
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-tools-selfhost.sh
+        run: ./scripts/ci-gate.py ./scripts/check-tools-selfhost.sh
 
       # The standard library performs exactly the effects it declares, and
       # the set of declarations performing any is the one on file
@@ -1093,7 +1110,7 @@ jobs:
       # probe, here over the AXSYM stream.
       - name: The standard library declares what it performs
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-agent-policy.sh
+        run: ./scripts/ci-gate.py ./scripts/check-agent-policy.sh
 
       # The other half of the same walk. `symbols --calls` prints the call
       # edge behind each effect `inferEffects` attributes. This asserts
@@ -1103,7 +1120,7 @@ jobs:
       # golden doesn't move.
       - name: The call graph explains the effect rows
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-agent-calls.sh
+        run: ./scripts/ci-gate.py ./scripts/check-agent-calls.sh
 
       # The distribution behind "only IO is required": `Alloc` and `Mut`
       # stay ambient because requiring them would tag nearly every
@@ -1112,7 +1129,7 @@ jobs:
       # in the diff instead of retuning it here.
       - name: The ambient-effect distribution sits where measured
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-effect-distribution.sh
+        run: ./scripts/ci-gate.py ./scripts/check-effect-distribution.sh
 
       # Syscall numbers are written twice: in `self_host/codegen.ax` for
       # the emitted runtime, and in `stdlib/Sys/Platform.*.ax` for the
@@ -1122,7 +1139,7 @@ jobs:
       # it runs, so source-only targets are covered too.
       - name: The two tables of syscall numbers agree
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-platform-constants.sh
+        run: ./scripts/ci-gate.py ./scripts/check-platform-constants.sh
 
       # The Windows entry shim's command-line and environment parsers, cut
       # out of the emitted Windows IR and run on this host against known
@@ -1130,7 +1147,7 @@ jobs:
       # run, and their wrong answers look plausible instead of crashing.
       - name: The Windows entry shim's parsers answer on this host
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-windows-entry.sh
+        run: ./scripts/ci-gate.py ./scripts/check-windows-entry.sh
 
       # The native human and JSON diagnostic renderers: checked-in
       # goldens, cross-checked against the AXDL goldens, exit statuses
@@ -1139,7 +1156,7 @@ jobs:
       # the palette `self_host/style.ax` declares.
       - name: Human and JSON diagnostic renderers
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-render-selfhost.sh
+        run: ./scripts/ci-gate.py ./scripts/check-render-selfhost.sh
 
       # The REPL, pinned without a second compiler: piped session by
       # piped session against checked-in goldens, byte-exact for every
@@ -1148,7 +1165,7 @@ jobs:
       # stderr required empty and the exit code pinned.
       - name: REPL sessions against their goldens
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-repl-selfhost.sh
+        run: ./scripts/ci-gate.py ./scripts/check-repl-selfhost.sh
 
       # The three surfaces the piped-session gate above can't reach,
       # because each exists only in front of a terminal.
@@ -1160,7 +1177,7 @@ jobs:
       # boundary and away from it.
       - name: The REPL on a real terminal
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-repl-tui.sh
+        run: ./scripts/ci-gate.py ./scripts/check-repl-tui.sh
 
       # History, asserted as a floor rather than a total. Its D3 arm forks
       # six REPLs that each append 200 entries and compact a shared file.
@@ -1170,18 +1187,18 @@ jobs:
       # serialises it locally; a CI job runs its steps one at a time.
       - name: REPL history, across concurrent sessions
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-repl-history.sh
+        run: ./scripts/ci-gate.py ./scripts/check-repl-history.sh
 
       # Completion and the highlighter. The highlighter is a second
       # implementation of a rule the tree-sitter queries carry, so it is
       # pinned rather than trusted.
       - name: REPL completion
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-replcomp.sh
+        run: ./scripts/ci-gate.py ./scripts/check-replcomp.sh
 
       - name: REPL highlighting
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-repl-highlight.sh
+        run: ./scripts/ci-gate.py ./scripts/check-repl-highlight.sh
 
       # The language server: a checked-in golden for the framed session
       # bytes, plus every published diagnostic checked against what
@@ -1191,7 +1208,7 @@ jobs:
       # a line-number comparison alone would miss.
       - name: Language server
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-lsp-selfhost.sh
+        run: ./scripts/ci-gate.py ./scripts/check-lsp-selfhost.sh
 
       # Tree-sitter colours each token the way VS Code does: the server's
       # semantic tokens over the extension's TextMate grammar, compared
@@ -1204,7 +1221,7 @@ jobs:
         run: npm ci --prefix scripts/lib/highlight-parity --ignore-scripts
       - name: Highlighting parity between tree-sitter and VS Code
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-highlight-parity.sh
+        run: ./scripts/ci-gate.py ./scripts/check-highlight-parity.sh
 
       # The measurement that re-opens MAC-TOOL-3: editor requests read the
       # raw parse tree, so a name only the expansion knows goes
@@ -1222,7 +1239,7 @@ jobs:
       # emitted-to-listed check.
       - name: Documentation agrees with the tree
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-doc-drift.sh
+        run: ./scripts/ci-gate.py ./scripts/check-doc-drift.sh
 
       # The frontend has five consumers (check, symbols, fmt, the REPL's
       # :load and the language server), each reaching
@@ -1233,7 +1250,7 @@ jobs:
       # exit 0 and differ only in what the program computes.
       - name: Frontend parity across its five consumers
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-frontend-parity.sh
+        run: ./scripts/ci-gate.py ./scripts/check-frontend-parity.sh
 
       # Diverse double-compile: the seed-built compiler and an independent
       # Python interpreter run the subset corpus and must agree with each
@@ -1243,7 +1260,7 @@ jobs:
       # gate's header and bootstrap/THREATS.md row 12.
       - name: Diverse double-compile of the subset corpus
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-ddc.sh
+        run: ./scripts/ci-gate.py ./scripts/check-ddc.sh
 
       # The P2 memory-model exit criterion: a Life board advanced 2000
       # generations stays under 4 MiB with the explicit mark/copy/reset
@@ -1252,12 +1269,18 @@ jobs:
       # unsoundness class.
       - name: Memory baseline (managed flat, unmanaged linear)
         if: ${{ !cancelled() && steps.compiler.outcome == 'success' }}
-        run: ./scripts/check-memory-baseline.sh
+        run: ./scripts/ci-gate.py ./scripts/check-memory-baseline.sh
+      - name: Preserve successful gates even when another gate fails
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/gate-cache
+        with:
+          mode: save
 
   # `rust/` is a cargo workspace with a trybuild suite and a bindgen
   # snapshot suite. `scripts/check-ffi.sh` is the gate
   # `docs/memory-model.md` MM-FFI-5 requires: it enumerates the external
   # symbols the FFI opens rather than forbidding all of them.
+
   ffi:
     name: FFI (${{ matrix.name }})
     needs: grammar
@@ -1370,6 +1393,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/gate-cache
       - uses: ./.github/actions/provision
 
       # Every target's IR must at least assemble from a single host: the
@@ -1378,7 +1402,7 @@ jobs:
       # that platform.
 
       - name: Assemble every target from one host
-        run: ./scripts/check-cross-targets.sh
+        run: ./scripts/ci-gate.py ./scripts/check-cross-targets.sh
 
       # The Windows hello, emitted for windows-x86_64 and windows-aarch64
       # where the tree's compiler runs. Both are source-only (README,
@@ -1387,6 +1411,12 @@ jobs:
       # would take.
       - name: Emit the Windows hello
         run: ./scripts/check-windows-hello.sh --emit windows-hello
+
+      - name: Preserve successful gates even when another gate fails
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/gate-cache
+        with:
+          mode: save
 
   bootstrap:
     name: Self-hosting fixpoint

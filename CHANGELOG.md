@@ -34,6 +34,11 @@ and selected entry roots; they do not establish aviation or space certification.
 
 <!-- release-notes: end of highlights -->
 
+- CI preserves successful gate results across retries and reuses them
+  when their inputs match. Changed sources, fixtures, compiler binaries,
+  toolchains and gate switches invalidate results; failures run again.
+  Tested by `tests/ci/gate-cache.py` through `scripts/check-ci-coverage.sh`.
+
 - Alias expansion reuses canonical type trees during repeated checks,
   reducing self-compilation memory without changing the emitted IR.
   Tested by `tests/selfhost/1020-canonical-type-space.ax` and

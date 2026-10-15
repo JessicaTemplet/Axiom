@@ -319,6 +319,14 @@ else
          "scripts/check-macro-demand.sh is on disk and no CI step runs it"
 fi
 
+# The reuse wrapper is part of coverage: a hit must represent a matching
+# successful run, and a miss must propagate the gate's actual status.
+if python3 tests/ci/gate-cache.py; then
+  ok "gate reuse checks inputs and propagates failures"
+else
+  bad "gate reuse invalidation or failure propagation failed"
+fi
+
 # --------------------------------------------------------------------
 echo
 if (( failed )); then

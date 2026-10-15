@@ -17,7 +17,7 @@ only when ALL of these hold:
   - it is invoked in a step's own `run:` (an action's `with: run:` is
     that action's business and is not read);
   - the invocation is a whole command line of the deliberately narrow
-    form `[VAR=value ...] ./scripts/check-<name>.sh [plain args]`, with
+    form `[VAR=value ...] [./scripts/ci-gate.py] ./scripts/check-<name>.sh [plain args]`, with
     no `|`, `;`, `&`, `&&` or `||` on it, and the line before it does
     not continue onto it with `\\`;
   - the `run` script it sits in is straight-line: no `if`/`for`/`while`/
@@ -222,7 +222,7 @@ def continues_on_error(v):
 GATE = re.compile(r"scripts/(check-[a-z0-9-]+\.sh)")
 INVOCATION = re.compile(
     r"""^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s"';&|<>()`]*)\s+)*"""
-    r"""(?:bash\s+)?\.?/?scripts/(check-[a-z0-9-]+\.sh)(?:\s+[A-Za-z0-9_./=:+-]+)*\s*$"""
+    r"""(?:(?:bash\s+)|(?:\./scripts/ci-gate\.py\s+))?\.?/?scripts/(check-[a-z0-9-]+\.sh)(?:\s+[A-Za-z0-9_./=:+-]+)*\s*$"""
 )
 COMPOUND = re.compile(
     r"""^(?:if|then|else|elif|fi|for|while|until|do|done|case|esac|function|select)\b"""

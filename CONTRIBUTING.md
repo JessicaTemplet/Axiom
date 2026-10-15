@@ -265,6 +265,23 @@ The compiler lives in `self_host/` and is written in Axiom.
 Axiom's tests are gates: shell scripts in `scripts/`, one per property.
 Before you open a pull request, run the ones your change could affect.
 
+### Reuse successful CI gates
+
+GitHub CI keeps successful gate results for unchanged inputs for seven days.
+It checks source files, fixtures, compiler binaries, toolchain versions and
+runner images before reusing a result. Reviewed fixture boundaries let a
+change to one suite preserve passes from unrelated suites. Other gates use
+the whole tree, and compiler source changes invalidate every cached gate.
+
+Passing gates are saved even when another gate fails. Failed gates run again;
+the job summary names each reused pass and its original run. Bootstrap,
+seed provenance, reproducibility and cache audits run fresh. Pull requests
+can read the cache; only pushes to trunk save results.
+
+Local gate commands always run fresh. To bypass reuse when invoking
+`scripts/ci-gate.py`, set `AXIOM_CI_FRESH=1`. Tested by
+`tests/ci/gate-cache.py` through `scripts/check-ci-coverage.sh`.
+
 <a id="there-are-no-unit-tests-in-the-compiler-and-that-is-deliberate"></a>
 ### Why the compiler has no unit tests
 
