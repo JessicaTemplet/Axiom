@@ -1,0 +1,177 @@
+; Transparent aliases preserve type arguments, representation and scope.
+(import IO)
+(import Vec)
+(import Str)
+(import AliasTypes)
+
+(data Pair (a b)
+  (Paired a b))
+
+(type Swapped (a b) = (Pair b a))
+
+(type Nested (a b) = (Pair (Swapped a b) (Swapped b a)))
+
+(type Items a = (Vec a))
+
+(type Optional a = (Option a))
+
+(type Identity a = a)
+
+(type Chain a = (Identity (Identity a)))
+
+(type Step (a b) = (-> a b))
+
+(type Local = String)
+
+(type Real = (Chain Float))
+
+(type Deep0 = Int)
+
+(type Deep1 = Deep0)
+
+(type Deep2 = Deep1)
+
+(type Deep3 = Deep2)
+
+(type Deep4 = Deep3)
+
+(type Deep5 = Deep4)
+
+(type Deep6 = Deep5)
+
+(type Deep7 = Deep6)
+
+(type Deep8 = Deep7)
+
+(type Deep9 = Deep8)
+
+(type Deep10 = Deep9)
+
+(type Deep11 = Deep10)
+
+(type Deep12 = Deep11)
+
+(type Deep13 = Deep12)
+
+(type Deep14 = Deep13)
+
+(type Deep15 = Deep14)
+
+(type Deep16 = Deep15)
+
+(type Deep17 = Deep16)
+
+(type Deep18 = Deep17)
+
+(type Deep19 = Deep18)
+
+(type Deep20 = Deep19)
+
+(type Deep21 = Deep20)
+
+(type Deep22 = Deep21)
+
+(type Deep23 = Deep22)
+
+(type Deep24 = Deep23)
+
+(type Deep25 = Deep24)
+
+(type Deep26 = Deep25)
+
+(type Deep27 = Deep26)
+
+(type Deep28 = Deep27)
+
+(type Deep29 = Deep28)
+
+(type Deep30 = Deep29)
+
+(type Deep31 = Deep30)
+
+(type Deep32 = Deep31)
+
+(type Deep33 = Deep32)
+
+(struct Record (a)
+  (item : (Optional a)))
+
+(:: pair (-> a b (Swapped b a)))
+(fn (pair x y)
+  (Paired x y))
+
+(:: preserve (-> b Int (Swapped b Int)))
+(fn (preserve x n)
+  (Paired n x))
+
+(:: preserved (-> (Swapped String Int) Bool))
+(fn (preserved value)
+  (match value
+    ((Paired n s) (&& (== n 9) (strEq s "kept")))))
+
+(:: both (-> a b (Nested a b)))
+(fn (both x y)
+  (Paired (pair y x) (pair x y)))
+
+(:: apply (-> (Step a b) a b))
+(fn (apply f x)
+  (f x))
+
+(:: next (Step Real Real))
+(fn (next x)
+  (+ x 1.0))
+
+(:: first (-> (Items a) a))
+(fn (first values)
+  (vecGet values 0))
+
+(:: scoped (-> (AliasTypes::Identity Local) Local))
+(fn (scoped x)
+  x)
+
+(:: imported (-> AliasTypes::PublicReal Real))
+(fn (imported x)
+  x)
+
+(:: nested (-> (Nested Int String) Bool))
+(fn (nested value)
+  (match value
+    ((Paired (Paired s n) (Paired m t)) (&&
+                                          (&& (strEq s "ok") (== n 7))
+                                          (&& (== m 7) (strEq t "ok"))))))
+
+(:: recordFloat (-> (Record Real) Bool))
+(fn (recordFloat value)
+  (match value.item
+    ((Some n) (== n 3.0))
+    ((None) false)))
+
+(:: deep Deep33)
+(fn (deep)
+  42)
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println
+      (if (&& (nested (both 7 "ok")) (preserved (preserve "kept" 9)))
+        "simultaneous alias substitution: correct"
+        "wrong substitution"))
+    (println
+      (if (&& (== (apply next 2.0) 3.0) (== (first (vecPush vecNew 4.0)) 4.0))
+        "alias Float calls and evidence: correct"
+        "wrong Float alias"))
+    (println
+      (if (&& (strEq (scoped "scope") "scope") (== (imported 5.0) 5.0))
+        "alias module scope: correct"
+        "wrong scope"))
+    (println
+      (if (recordFloat (Record (Some 3.0)))
+        "alias fields and patterns: correct"
+        "wrong field"))
+    (println
+      (if (&& (== (as (as 42 Real) Int) 42) (== deep 42))
+        "alias conversion target: correct"
+        "wrong conversion"))
+  })

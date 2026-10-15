@@ -521,9 +521,15 @@ types are removed. `Int` and `Float` are the numeric types; sized
 integer and float names are refused.
 
 Lowercase type parameters describe polymorphism. For example,
-`(-> a a)` returns the same type it takes. A caller's concrete argument
-witnesses a type parameter; a result-only parameter requires the
-explicit low-level contract described in [diagnostics](diagnostics.md).
+`(-> a a)` returns the same type it takes. The body is checked for
+every type that `a` can represent. Arithmetic on an unconstrained `a`,
+or returning an `Int` as `a`, is refused. Repeated parameters must agree
+within a call; separate calls can choose different types.
+
+A caller's concrete argument witnesses a type parameter. A result-only
+parameter requires the explicit low-level contract described in
+[diagnostics](diagnostics.md). Tested by
+`tests/diagnostics/1423-generic-rigidity.ax`.
 
 `(as value Type)` makes an explicit conversion. Numeric conversions
 operate on values; reference conversions preserve the existing lifetime.
@@ -548,11 +554,33 @@ The current enforcement and remaining gaps are in the
 
 ## Type aliases
 
-`(type Name = String)` gives another name to `String`; the two are
-interchangeable. An alias takes no type parameters: `(type Pair (a) =
-(Vec a))` is refused with `AX3096` where you declare it. Write the
-target type where you use it, or declare a `struct` or `data` type.
-Tested by `tests/diagnostics/1133-alias-params.axbad`.
+```scheme
+(type Name = String)
+(type Items a = (Vec a))
+(type Mapping a b = (-> a b))
+
+(:: apply (-> (Mapping a b) a b))
+(fn (apply f x) (f x))
+```
+
+`Name` and `String` are interchangeable. `(Items Int)` expands to
+`(Vec Int)`, and `(Mapping Int String)` expands to `(-> Int String)`.
+An alias gives an existing type another name; it creates no wrapper
+or separate identity.
+
+Declare each lowercase parameter once, before `=`, and supply exactly
+that many arguments at each use. Every variable in the target must be
+one of those parameters, and every alias parameter must appear in the
+target. Parameters substitute simultaneously, so a
+replacement cannot capture another parameter's name.
+
+Aliases work in signatures, fields, nested type arguments and explicit
+conversion targets. A target's names resolve in its declaring module.
+Targets must name declared types. Direct and indirect recursive aliases
+are refused, including unused ones. Use `data` or `struct` for recursive types.
+
+Tested by `tests/stdlib/946-generic-aliases.ax` and
+`tests/diagnostics/1422-recursive-alias.ax`.
 
 ### Range-constrained subtypes
 
@@ -594,7 +622,9 @@ Tested by `tests/selfhost/973-type-alias.ax` and `tests/selfhost/134-subtype-che
 
 Construct a value with `(Just 42)` or `(Cons 1 (Nil))`. Nullary
 constructors can also be written bare. The `(a)` declares a type
-parameter. Constructors can refer to the type recursively.
+parameter. Constructors can refer to the type recursively. Type parameters are
+unique, and every variable in a field must be declared on the type.
+A type use supplies exactly the declared number of arguments.
 
 A variant may name its fields, for example `(Circle { r : Int })`.
 Construction remains positional; named fields support the variant's

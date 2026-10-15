@@ -1130,7 +1130,7 @@ first. Three rules keep the numbering straight:
 - A new code takes the next number above the highest one in use, the
   *free end*, and never a number from the reserved block.
 - A retired number **MUST NOT** be reused. `AX3008`, `AX3032`,
-  `AX3075`, `AX3079` and `AX3080` are retired. `AX3081`, `AX3082`,
+  `AX3075`, `AX3079`, `AX3080` and `AX3096` are retired. `AX3081`, `AX3082`,
   `AX3083`, `AX3087` and `AX3088` were skipped and never assigned, and
   the same rule covers them.
 
@@ -1193,6 +1193,9 @@ This section records the codes below. All of them are built, and
 | `AX3091` `inline-asm` | an `asm` form the compiler can't lower: an unknown architecture, operand kind or option, a second arm for one architecture, a template naming no operand or defining a named label, a second answered output, a `const` it can't fold, a `sym` with no symbol, or a register an arm can't name | An error, where the form is written. `tests/diagnostics/1044-inline-asm.ax`, `tests/diagnostics/1280-inline-asm-forms.ax` |
 | `AX3095` `precondition-removed` | a `;@axiom:precondition(...)` tag, which the language no longer has | An error wherever the tag stands. `tests/diagnostics/1043-precondition-removed.ax` |
 | `AX3123` `propagate-position` | a `?` with no tail to propagate to: inside a branch, a `let` body, a loop, a region or a handler whose value an expression around it still uses | `tests/diagnostics/1300-propagate-position.ax` |
+| `AX3124` `type-argument-arity` | a type used with a different number of arguments from its declaration | `tests/diagnostics/1420-generic-alias-arity.ax` |
+| `AX3125` `type-parameter` | an invalid, repeated or undeclared type parameter, or an unused alias parameter | `tests/diagnostics/1421-generic-alias-parameters.axbad` |
+| `AX3126` `recursive-alias` | a direct or indirect recursive alias, including unused declarations | `tests/diagnostics/1422-recursive-alias.ax` |
 | `AX3116` `result-claim` | a `result(...)` claim the compiler cannot read: a value other than `owned`, or the claim on a function that is not a trusted encapsulation | `tests/diagnostics/1259-result-claim.ax` |
 | `AX3110` `axtag-never-checked` | an `effect(div)` claim, which names an effect nothing infers | An error, because no body can ever support it. `tests/diagnostics/359-div-not-inferred.ax` |
 | `AX3117` `inline-asm-rejected` | a line of an `asm` template the assembler rejects, or whose operands the register allocator can't place | An error when the program is built, at the template line, with status 1. `tests/embedded/asm-rejected.ax` |

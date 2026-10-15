@@ -411,7 +411,7 @@ The walk meets three shapes, and only the last one is closable:
 |---|---|
 | a head that isn't a name; an opaque `let`; a pattern binder; over-application; a lambda's own parameter | **no**. This is `MM-EXEC-9b`'s flow analysis. Dispatch through a field whose stores are all named functions is followed (below), and the shapes left are a field that holds a lambda or a value passed in, and a `data` payload read by a pattern, such as the codecs `stdlib/Cereal.ax` matches in `cerealToValue` |
 | an unfollowable value in a position whose declared type is a type variable | **no, and correctly**: a caller may instantiate it to an arrow. `tests/selfhost/999-placeholder-under-arrow.ax`'s `twice` is `(-> (-> a a) a a)`, with the same body as the `(-> (-> Int Int) Int Int)` version in `tests/stdlib/140-function-values.ax`, and only the second one closed |
-| an unfollowable value in a position whose declared type can't hold a function | **closed**. No well-typed program can put a function there: applying a nominal type is `AX3004`, and so is handing an arrow to one. An alias, `(type F = ...)`, is expanded before checking, and an alias with type parameters is refused (`AX3096`) |
+| an unfollowable value in a position whose declared type can't hold a function | **closed**. No well-typed program can put a function there: applying a nominal type is `AX3004`, and so is handing an arrow to one. Aliases are expanded at their type arguments before checking |
 
 `scripts/check-effect-argpos.sh` holds this. Its four controls are the
 shapes that must keep the mark, and its ablation drops the type test

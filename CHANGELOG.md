@@ -620,6 +620,12 @@ calling a converted function checks its remaining arguments. Tested by
 `tests/diagnostics/1411-as-boundaries.ax`.
 
 
+- Generic aliases expand their explicit type arguments with simultaneous
+  substitution and declaration-module name resolution. The checker refuses
+  recursive aliases, unused or duplicate alias parameters, unbound data
+  parameters and type-constructor arity mismatches, including conversion
+  and layout targets. Float aliases retain function argument evidence.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

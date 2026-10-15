@@ -89,6 +89,8 @@ integrator would still need.
 | Imports form the module header and cannot appear later or inside expressions | Done | `tests/diagnostics/1400-late-import.axbad`, `tests/diagnostics/1401-nested-import.axbad`, `tests/diagnostics/1402-lambda-import.axbad` |
 | REPL uses the brand palette and shares diagnostic and language help with the CLI | Done | `scripts/check-repl-tui.sh`, `tests/repl/170-explain-shape.txt` |
 | Editor and REPL completion exclude retired syntax | Done | `tests/lsp/drive.py`, `scripts/check-replcomp.sh` |
+| Transparent type aliases support parameters, simultaneous substitution and finite expansion | Done | `tests/stdlib/946-generic-aliases.ax`, `tests/diagnostics/1420-generic-alias-arity.ax`, `tests/diagnostics/1421-generic-alias-parameters.axbad`, `tests/diagnostics/1422-recursive-alias.ax` |
+| Generic bodies are checked for their declared types; each call constrains repeated parameters independently | Done | `tests/diagnostics/1423-generic-rigidity.ax` |
 | Numeric conversions are explicit; mixed numeric operands and incompatible ADT parameters are refused | Done | `tests/diagnostics/1117-mixed-numeric-operands.ax`, `tests/diagnostics/1410-explicit-numeric-boundaries.ax` |
 | Refine explicit numeric conversion APIs, with clear precision, rounding and range behaviour | Planned | |
 | Legacy CLI and syntax removed: `axiom FILE`, expression `fn`, keyword struct construction, format aliases | Done | `compat/BREAKING` |

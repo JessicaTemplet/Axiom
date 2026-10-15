@@ -3048,7 +3048,8 @@
 (pub struct DataEnt
   (name : String)
   (ctors : (Vec Int))
-  (module : Int))
+  (module : Int)
+  (arity : Int))
 
 (pub struct StructEnt
   (name : Int)
@@ -4225,7 +4226,7 @@
                   (mkTArr (mkTVar "a") optRes)
                   0) Int))
           (vecPush optCtors (as (CtorEnt "None" vecNew optRes optRes 0) Int))
-          (vecPush datas (as (DataEnt "Option" optCtors 0) Int))
+          (vecPush datas (as (DataEnt "Option" optCtors 0 1) Int))
           ; `Vec`, ABSTRACT AND PARAMETERISED. No constructors: a `Vec`
           ; is made by `vecNew` and read by `vecGet`, never matched, so
           ; there is nothing for a pattern to name. What the entry buys
@@ -4238,7 +4239,7 @@
           ; type-level change only, which is what makes it separable
           ; from the reference-class question - `fldClass` answers for
           ; `Vec` exactly what it answered for the `Int` it replaces.
-          (vecPush datas (as (DataEnt "Vec" vecNew 0) Int))
+          (vecPush datas (as (DataEnt "Vec" vecNew 0 1) Int))
         })
       ; The exact-name index, before collection rather than after:
       ; collection itself looks a name up per declaration.
@@ -4330,9 +4331,13 @@
           ; fixes, one level up. Expanding before collection means there
           ; is no second reader to keep in step.
           (tcCollectAliasDecls tc allDecls 0)
+          (tcCheckAliasDecls tc allDecls 0)
+          (tcCheckAliasCycles tc allDecls 0)
+          (tcCheckTypeParams tc allDecls 0)
           (tcCollectSubtypeDecls tc allDecls 0)
           (tcExpandFieldAliases tc allDecls 0)
           (tcCollect tc allDecls 0)
+          (tcCheckDeclaredTypeUses tc allDecls 0)
           ; Type constructors named in signatures, once collection has
           ; seen every `data`/`struct`/`type` - a signature may name a
           ; type declared later in the file or in another module.
@@ -4972,7 +4977,13 @@
           {
             (tcCollectCtors (nodeBVec d) resTy ctors 0)
             (let ((dent
-              (as (DataEnt (nodeAName d) ctors (nodeModule d)) Int)))
+              (as (DataEnt
+                    (nodeAName d)
+                    ctors
+                    (nodeModule d)
+                    (if (== (as tvs Int) 0)
+                      0
+                      (vecLen tvs))) Int)))
               {
                 (vecPush (tcDatasVec tc) dent)
                 (tyIdxAddData tc dent)
@@ -6961,20 +6972,13 @@
 ; defect. They are one bit per arrow position - is it a bare `Float` -
 ; and codegen reads them because by emission time there is no checker
 ; to ask. Recomputing them from the expanded NODE reproduces
-; `sigFloatFlags` exactly as long as the vector keeps its ORIGINAL
-; length: position k is the k-th peel's parameter for every k but the
-; last, and the last is whatever is left, which is precisely how
-; `spineFlags` reads the token spine. Walking the node to exhaustion
-; instead would give `(-> Int (-> Float Float))` three flags where the
-; parser gives two.
+; `sigFloatFlags` at the definition's arity plus its result: an alias
+; can hide the entire arrow spine from the parser. Position k is the
+; k-th parameter and the last position is the declared result. A
+; function returning another function keeps that result as one word.
 ;
-; A cyclic alias - `(type A = B)` beside `(type B = A)` - stops at the
-; depth cap and stays nominal, which is what it was before. Recorded,
-; not diagnosed.
-(pub :: aliasMaxDepth Int)
-(pub fn (aliasMaxDepth)
-  32)
-
+; Alias expansion follows a declaration path. A repeated declaration
+; is recursive; a long finite chain remains valid.
 (pub :: tyHasAliasCon (-> Int Int Int))
 (pub fn (tyHasAliasCon tc t)
   (if (== t 0)
@@ -7006,42 +7010,79 @@
 
 (pub :: tyExpandAliases (-> Int Int Int Int))
 (pub fn (tyExpandAliases tc t depth)
+  (tyExpandAliasPath tc t vecNew))
+
+; Expand arguments in the caller's scope, the target in the alias's
+; scope, then substitute once. Inserted arguments are not revisited,
+; so swapping `a` and `b` cannot capture either source variable.
+(pub :: tyExpandAliasPath (-> Int Int (Vec Int) Int))
+(pub fn (tyExpandAliasPath tc t seen)
   (if (== t 0)
     0
-    (if (>= depth aliasMaxDepth)
-      t
-      (let ((tg (nodeTag t)))
-        (if (== tg TAG_T_CON)
-          (let ((al (tcAliasFind tc (nodeAName t))))
-            (if (== al 0)
-              (mkTCon (nodeAName t) (tyExpandAliasesVec tc (nodeBVec t) depth vecNew 0))
-              ; An alias's TARGET may itself name one, so the
-              ; expansion is re-entered rather than returned. An
-              ; alias declaring parameters is refused at its
-              ; declaration (AX3096), and its uses are poison so
-              ; that refusal is the only report.
-              (if (== (aliasHasParams al) 1)
-                mkTErr
-                (if (!= (vecLen (nodeBVec t)) 0)
-                  t
-                  (tyExpandAliases tc (nodeB al) (+ depth 1))))))
-          (if (== tg TAG_T_ARR)
-            (mkTArr (tyExpandAliases tc (nodeA t) depth) (tyExpandAliases tc (nodeB t) depth))
-            (if (== tg TAG_T_TUP)
-              (mkTTup (tyExpandAliasesVec tc (nodeAVec t) depth vecNew 0))
-              (if (== tg TAG_T_PTR)
-                (mkTPtr (tyExpandAliases tc (nodeA t) depth))
-                t))))))))
+    (let ((tg (nodeTag t)))
+      (if (== tg TAG_T_CON)
+        (let (
+          (args (tyExpandAliasPathVec tc (nodeBVec t) seen vecNew 0))
+          (al (tcAliasFind tc (nodeAName t)))
+        )
+          (if (== al 0)
+            (mkTCon (nodeAName t) args)
+            (if (|| (== (aliasPathHas seen al 0) 1) (!= (vecLen args) (aliasParamCount al)))
+              mkTErr
+              (let (
+                (saved (memGetWord tc 16))
+                (next (vecAppendFrom seen vecNew 0))
+              )
+                {
+                  (vecPush next al)
+                  (memSetWord tc 16 (nodeModule al))
+                  (let ((target (tyExpandAliasPath tc (nodeB al) next)))
+                    {
+                      (memSetWord tc 16 saved)
+                      (tyEnvSubst target (aliasSubstEnv (nodeCVec al) args vecNew 0))
+                    })
+                }))))
+        (if (== tg TAG_T_ARR)
+          (mkTArr (tyExpandAliasPath tc (nodeA t) seen) (tyExpandAliasPath tc (nodeB t) seen))
+          (if (== tg TAG_T_TUP)
+            (mkTTup (tyExpandAliasPathVec tc (nodeAVec t) seen vecNew 0))
+            (if (== tg TAG_T_PTR)
+              (mkTPtr (tyExpandAliasPath tc (nodeA t) seen))
+              t)))))))
 
-(pub :: tyExpandAliasesVec (-> Int (Vec Int) Int (Vec Int) Int (Vec Int)))
-(pub fn (tyExpandAliasesVec tc xs depth acc i)
+(pub :: aliasParamCount (-> Int Int))
+(pub fn (aliasParamCount al)
+  (if (== (nodeC al) 0)
+    0
+    (vecLen (nodeCVec al))))
+
+(pub :: aliasSubstEnv (-> (Vec Int) (Vec Int) (Vec Int) Int (Vec Int)))
+(pub fn (aliasSubstEnv names args env i)
+  (if (>= i (vecLen args))
+    env
+    {
+      (vecPush env (vecGet names i))
+      (vecPush env (vecGet args i))
+      (aliasSubstEnv names args env (+ i 1))
+    }))
+
+(pub :: aliasPathHas (-> (Vec Int) Int Int Int))
+(pub fn (aliasPathHas seen al i)
+  (if (>= i (vecLen seen))
+    0
+    (if (== (vecGet seen i) al)
+      1
+      (aliasPathHas seen al (+ i 1)))))
+
+(pub :: tyExpandAliasPathVec (-> Int (Vec Int) (Vec Int) (Vec Int) Int (Vec Int)))
+(pub fn (tyExpandAliasPathVec tc xs seen acc i)
   (if (== (as xs Int) 0)
     acc
     (if (>= i (vecLen xs))
       acc
       {
-        (vecPush acc (tyExpandAliases tc (vecGet xs i) depth))
-        (tyExpandAliasesVec tc xs depth acc (+ i 1))
+        (vecPush acc (tyExpandAliasPath tc (vecGet xs i) seen))
+        (tyExpandAliasPathVec tc xs seen acc (+ i 1))
       })))
 
 ; 1 when this type is a bare `Float`, which is the only thing a float
@@ -7059,8 +7100,8 @@
           1
           0)))))
 
-; The flag vector `sigFloatFlags` would have produced for `t`, at the
-; length the parser already chose.
+; One flag per emitted parameter and one for its result. An alias
+; can hide arrows from the parser, so the definition supplies the arity.
 (pub :: tyFloatFlags (-> Int Int (Vec Int)))
 (pub fn (tyFloatFlags t n)
   (tyFloatFlagsFrom t n 0 vecNew))
@@ -7075,10 +7116,8 @@
         acc
       }
       (if (!= (nodeTag t) TAG_T_ARR)
-        ; Fewer arrows than flags cannot happen for a type this
-        ; pass expanded - the length came from the same spine -
-        ; but answering the flags already collected is the
-        ; conservative end rather than reading off a non-arrow.
+        ; An invalid signature can run out of arrows. Stop rather
+        ; than read the parameter slot of a non-arrow.
         acc
         {
           (vecPush acc (tyIsBareFloat (nodeA t)))
@@ -7131,50 +7170,458 @@
           {
             (vecPush (tcAliasesVec tc) d)
             (tyIdxPut tc (nodeAName d) TY_ALIAS (nodeModule d) d 0)
-            (if (== (aliasHasParams d) 1)
-              (emitAliasParams tc d))
           }))
       (tcCollectAliasDecls tc decls (+ i 1))
     }))
 
-; 1 when an alias declares type parameters: `(type Pair (a) = (Vec a))`
-; or `(type Pair a = (Vec a))`. `(type Names () = ...)` declares none.
-(pub :: aliasHasParams (-> Int Int))
-(pub fn (aliasHasParams d)
-  (let ((tvs (nodeCVec d)))
-    (if (== (as tvs Int) 0)
-      0
-      (if (> (vecLen tvs) 0)
-        1
-        0))))
+; Validate every alias, including unused declarations, before any
+; field or signature is expanded. Invalid targets become poison, so
+; their uses do not repeat the declaration's error.
+(pub :: tcCheckAliasDecls (-> Int (Vec Int) Int Int))
+(pub fn (tcCheckAliasDecls tc decls i)
+  (if (>= i (vecLen decls))
+    0
+    {
+      (let ((d (vecGet decls i)))
+        (if (== (nodeTag d) TAG_D_ALIAS)
+          (let (
+            (saved (memGetWord tc 16))
+            (params (nodeCVec d))
+          )
+            {
+              (memSetWord tc 16 (nodeModule d))
+              (let ((badParam (aliasBadParam params 0)))
+                (if (>= badParam 0)
+                  {
+                    (emitTypeParameter
+                      tc
+                      d
+                      (concat
+                        "invalid or repeated type parameter `"
+                        (concat (vecGetStr params badParam) "`")))
+                    (memSetWord d 2 mkTErr)
+                  }
+                  (let ((free (aliasFreeVar (nodeB d) params)))
+                    (if (!= free 0)
+                      {
+                        (emitTypeParameter
+                          tc
+                          d
+                          (concat "undeclared type parameter `" (concat (nodeAName free) "`")))
+                        (memSetWord d 2 mkTErr)
+                      }))))
+              (if (!= (nodeTag (nodeB d)) TAG_T_ERR)
+                (let ((unused (aliasUnusedParam (nodeB d) params)))
+                  (if (>= unused 0)
+                    {
+                      (emitTypeParameter
+                        tc
+                        d
+                        (concat
+                          "unused alias type parameter `"
+                          (concat (vecGetStr params unused) "`")))
+                      (memSetWord d 2 mkTErr)
+                    })))
+              (if (== (tyCheckAliasArity tc (nodeB d) (nodeSpan d)) 0)
+                (memSetWord d 2 mkTErr))
+              (memSetWord tc 16 saved)
+            })))
+      (tcCheckAliasDecls tc decls (+ i 1))
+    }))
 
-; AX3096: an alias with type parameters, refused where it is declared.
-;
-; An alias is replaced by its target wherever it is written
-; (`tyExpandAliases`), and there is no substitution for an alias's
-; parameters, so the form was accepted and never expanded: every use
-; failed AX3004 against its own target, far from the declaration that
-; caused it. Its uses expand to poison instead, so the one report here
-; is the whole report.
-(pub :: emitAliasParams (-> Int Int Int))
-(pub fn (emitAliasParams tc d)
+(pub :: aliasBadParam (-> (Vec Int) Int Int))
+(pub fn (aliasBadParam params i)
+  (if (== (as params Int) 0)
+    (- 0 1)
+    (if (>= i (vecLen params))
+      (- 0 1)
+      (let ((name (vecGetStr params i)))
+        (if (|| (== (lexStartsLower name) 0) (== (aliasParamBefore params name i 0) 1))
+          i
+          (aliasBadParam params (+ i 1)))))))
+
+(pub :: aliasParamBefore (-> (Vec Int) String Int Int Int))
+(pub fn (aliasParamBefore params name end i)
+  (if (>= i end)
+    0
+    (if (strEq (vecGetStr params i) name)
+      1
+      (aliasParamBefore params name end (+ i 1)))))
+
+(pub :: aliasUnusedParam (-> Int (Vec Int) Int))
+(pub fn (aliasUnusedParam target params)
+  (let ((used vecNew))
+    {
+      (sigTyVarsInto target used)
+      (aliasFirstUnused params used 0)
+    }))
+
+(pub :: aliasFirstUnused (-> (Vec Int) (Vec Int) Int Int))
+(pub fn (aliasFirstUnused params used i)
+  (if (== (as params Int) 0)
+    (- 0 1)
+    (if (>= i (vecLen params))
+      (- 0 1)
+      (if (== (strVecHas used (vecGetStr params i)) 0)
+        i
+        (aliasFirstUnused params used (+ i 1))))))
+
+(pub :: aliasFreeVar (-> Int (Vec Int) Int))
+(pub fn (aliasFreeVar t params)
+  (if (== t 0)
+    0
+    (let ((tg (nodeTag t)))
+      (if (== tg TAG_T_VAR)
+        (if (strEq (nodeAName t) "")
+          0
+          (if (== (as params Int) 0)
+            t
+            (if (== (strInVec params (nodeAName t) 0) 1)
+              0
+              t)))
+        (if (== tg TAG_T_CON)
+          (aliasFreeVarVec (nodeBVec t) params 0)
+          (if (== tg TAG_T_ARR)
+            (let ((bad (aliasFreeVar (nodeA t) params)))
+              (if (!= bad 0)
+                bad
+                (aliasFreeVar (nodeB t) params)))
+            (if (== tg TAG_T_TUP)
+              (aliasFreeVarVec (nodeAVec t) params 0)
+              (if (== tg TAG_T_PTR)
+                (aliasFreeVar (nodeA t) params)
+                0))))))))
+
+(pub :: aliasFreeVarVec (-> (Vec Int) (Vec Int) Int Int))
+(pub fn (aliasFreeVarVec xs params i)
+  (if (== (as xs Int) 0)
+    0
+    (if (>= i (vecLen xs))
+      0
+      (let ((bad (aliasFreeVar (vecGet xs i) params)))
+        (if (!= bad 0)
+          bad
+          (aliasFreeVarVec xs params (+ i 1)))))))
+
+(pub :: emitTypeParameter (-> Int Int String Int))
+(pub fn (emitTypeParameter tc d message)
   (if (== (nodeSpan d) 0)
     0
     (emitDiag
       tc
-      (diagSetLabel
-        (mkDiag
-          SEV_ERROR
-          "AX3096"
-          "parameterised-alias"
-          (nodeSpan d)
-          (concat
-            (concat "type alias `" (bareOf (nodeAName d)))
-            "` declares type parameters, and an alias takes none")
-          0
-          0
-          "write the target type where you use it, or declare a `struct` or `data` type with these parameters for a new type of your own")
-        "an alias names one existing type"))))
+      (mkDiag
+        SEV_ERROR
+        "AX3125"
+        "type-parameter"
+        (nodeSpan d)
+        message
+        0
+        0
+        "declare each lowercase type parameter once on the type; every variable in its target or fields must be declared there"))))
+
+; The first recursive alias on a declaration path, or zero. Arguments
+; are walked before entering the target; `Id (Id Int)` is finite.
+(pub :: aliasCycle (-> Int Int (Vec Int) Int))
+(pub fn (aliasCycle tc t seen)
+  (if (== t 0)
+    0
+    (let ((tg (nodeTag t)))
+      (if (== tg TAG_T_CON)
+        (let ((alias (tcAliasFind tc (nodeAName t))))
+          (if (&& (!= alias 0) (== (nodeTag (nodeB alias)) TAG_T_ERR))
+            0
+            (let ((argCycle (aliasCycleVec tc (nodeBVec t) seen 0)))
+              (if (!= argCycle 0)
+                argCycle
+                (let ((al (tcAliasFind tc (nodeAName t))))
+                  (if (== al 0)
+                    0
+                    (if (== (aliasPathHas seen al 0) 1)
+                      al
+                      (let (
+                        (saved (memGetWord tc 16))
+                        (next (vecAppendFrom seen vecNew 0))
+                      )
+                        {
+                          (vecPush next al)
+                          (memSetWord tc 16 (nodeModule al))
+                          (let ((bad (aliasCycle tc (nodeB al) next)))
+                            {
+                              (memSetWord tc 16 saved)
+                              bad
+                            })
+                        }))))))))
+        (if (== tg TAG_T_ARR)
+          (let ((bad (aliasCycle tc (nodeA t) seen)))
+            (if (!= bad 0)
+              bad
+              (aliasCycle tc (nodeB t) seen)))
+          (if (== tg TAG_T_TUP)
+            (aliasCycleVec tc (nodeAVec t) seen 0)
+            (if (== tg TAG_T_PTR)
+              (aliasCycle tc (nodeA t) seen)
+              0)))))))
+
+(pub :: aliasCycleVec (-> Int (Vec Int) (Vec Int) Int Int))
+(pub fn (aliasCycleVec tc xs seen i)
+  (if (== (as xs Int) 0)
+    0
+    (if (>= i (vecLen xs))
+      0
+      (let ((bad (aliasCycle tc (vecGet xs i) seen)))
+        (if (!= bad 0)
+          bad
+          (aliasCycleVec tc xs seen (+ i 1)))))))
+
+(pub :: tcCheckAliasCycles (-> Int (Vec Int) Int Int))
+(pub fn (tcCheckAliasCycles tc decls i)
+  (if (>= i (vecLen decls))
+    0
+    {
+      (let ((d (vecGet decls i)))
+        (if (== (nodeTag d) TAG_D_ALIAS)
+          (let (
+            (saved (memGetWord tc 16))
+            (seen vecNew)
+          )
+            {
+              (memSetWord tc 16 (nodeModule d))
+              (vecPush seen d)
+              (if (!= (aliasCycle tc (nodeB d) seen) 0)
+                (if (!= (nodeSpan d) 0)
+                  (emitDiag
+                    tc
+                    (mkDiag
+                      SEV_ERROR
+                      "AX3126"
+                      "recursive-alias"
+                      (nodeSpan d)
+                      (concat
+                        "type alias `"
+                        (concat (bareOf (nodeAName d)) "` expands recursively"))
+                      0
+                      0
+                      "use a `data` or `struct` declaration for a recursive type; an alias must expand to a finite existing type"))))
+              (memSetWord tc 16 saved)
+            })))
+      (tcCheckAliasCycles tc decls (+ i 1))
+    }))
+
+; Check written uses before expansion erases their alias names.
+(pub :: tyCheckAliasArity (-> Int Int Int Int))
+(pub fn (tyCheckAliasArity tc t span)
+  (if (== t 0)
+    1
+    (let ((tg (nodeTag t)))
+      (if (== tg TAG_T_CON)
+        (let ((arity (tyDeclaredArity tc (nodeAName t))))
+          (if (&& (>= arity 0) (!= (vecLen (nodeBVec t)) arity))
+            {
+              (if (!= span 0)
+                (emitDiag
+                  tc
+                  (mkDiag
+                    SEV_ERROR
+                    "AX3124"
+                    "type-argument-arity"
+                    span
+                    (concat
+                      (concat "type `" (concat (nodeAName t) "` takes "))
+                      (concat
+                        (fmtInt arity)
+                        (concat " type argument(s), found " (fmtInt (vecLen (nodeBVec t))))))
+                    0
+                    0
+                    "supply exactly the declared number of type arguments")))
+              0
+            }
+            (tyCheckAliasArityVec tc (nodeBVec t) span 0)))
+        (if (== tg TAG_T_ARR)
+          (let ((left (tyCheckAliasArity tc (nodeA t) span)))
+            (if (== left 0)
+              0
+              (tyCheckAliasArity tc (nodeB t) span)))
+          (if (== tg TAG_T_TUP)
+            (tyCheckAliasArityVec tc (nodeAVec t) span 0)
+            (if (== tg TAG_T_PTR)
+              (tyCheckAliasArity tc (nodeA t) span)
+              1)))))))
+
+; Declared arity, including empty data types and abstract builtins.
+; Unknown constructors are left to AX3002's resolver.
+(pub :: tyDeclaredArity (-> Int String Int))
+(pub fn (tyDeclaredArity tc name)
+  (let ((al (tcAliasFind tc name)))
+    (if (!= al 0)
+      (aliasParamCount al)
+      (let ((de (findDataAnyVis tc name)))
+        (if (!= de 0)
+          (memGetWord de 3)
+          (let ((st (findStructAnyVis tc name)))
+            (if (!= st 0)
+              (if (== (memGetWord st 3) 0)
+                0
+                (vecLen (memGetWordVec st 3)))
+              (if (|| (!= (as (typeKeywordCanon name) Int) 0) (!= (tyFind tc TY_SUBTYPE name 0) 0))
+                0
+                (- 0 1)))))))))
+
+(pub :: tyCheckAliasArityVec (-> Int (Vec Int) Int Int Int))
+(pub fn (tyCheckAliasArityVec tc xs span i)
+  (if (== (as xs Int) 0)
+    1
+    (if (>= i (vecLen xs))
+      1
+      (if (== (tyCheckAliasArity tc (vecGet xs i) span) 0)
+        0
+        (tyCheckAliasArityVec tc xs span (+ i 1))))))
+
+; Preserve arrow shape while poisoning an invalid type use. Its
+; parameters then suppress downstream mismatches at each call.
+(pub :: tyPoisonBadArity (-> Int Int Int))
+(pub fn (tyPoisonBadArity tc t)
+  (if (== t 0)
+    0
+    (let ((tg (nodeTag t)))
+      (if (== tg TAG_T_CON)
+        (let ((arity (tyDeclaredArity tc (nodeAName t))))
+          (if (&& (>= arity 0) (!= arity (vecLen (nodeBVec t))))
+            mkTErr
+            (mkTCon (nodeAName t) (tyPoisonBadArityVec tc (nodeBVec t) vecNew 0))))
+        (if (== tg TAG_T_ARR)
+          (mkTArr (tyPoisonBadArity tc (nodeA t)) (tyPoisonBadArity tc (nodeB t)))
+          (if (== tg TAG_T_TUP)
+            (mkTTup (tyPoisonBadArityVec tc (nodeAVec t) vecNew 0))
+            (if (== tg TAG_T_PTR)
+              (mkTPtr (tyPoisonBadArity tc (nodeA t)))
+              t)))))))
+
+(pub :: tyPoisonBadArityVec (-> Int (Vec Int) (Vec Int) Int (Vec Int)))
+(pub fn (tyPoisonBadArityVec tc xs out i)
+  (if (== (as xs Int) 0)
+    out
+    (if (>= i (vecLen xs))
+      out
+      {
+        (vecPush out (tyPoisonBadArity tc (vecGet xs i)))
+        (tyPoisonBadArityVec tc xs out (+ i 1))
+      })))
+
+; Data and struct parameters are explicit binders too. Their fields
+; cannot introduce a second, unwitnessed set of type variables.
+(pub :: tcCheckTypeParams (-> Int (Vec Int) Int Int))
+(pub fn (tcCheckTypeParams tc decls i)
+  (if (>= i (vecLen decls))
+    0
+    {
+      (let ((d (vecGet decls i)))
+        (if (|| (== (nodeTag d) TAG_D_DATA) (== (nodeTag d) TAG_D_STRUCT))
+          (let ((params (nodeTyVec d)))
+            (let ((badParam (aliasBadParam params 0)))
+              (if (>= badParam 0)
+                (emitTypeParameter
+                  tc
+                  d
+                  (concat
+                    "invalid or repeated type parameter `"
+                    (concat (vecGetStr params badParam) "`")))
+                (let ((free
+                  (if (== (nodeTag d) TAG_D_DATA)
+                    (dataFreeVar (nodeBVec d) params 0)
+                    (structFreeVar (nodeBVec d) params 0))))
+                  (if (!= free 0)
+                    (emitTypeParameter
+                      tc
+                      d
+                      (concat "undeclared type parameter `" (concat (nodeAName free) "`"))))))))))
+      (tcCheckTypeParams tc decls (+ i 1))
+    }))
+
+(pub :: dataFreeVar (-> (Vec Int) (Vec Int) Int Int))
+(pub fn (dataFreeVar ctors params i)
+  (if (>= i (vecLen ctors))
+    0
+    (let ((bad (aliasFreeVarVec (nodeTyVec (vecGet ctors i)) params 0)))
+      (if (!= bad 0)
+        bad
+        (dataFreeVar ctors params (+ i 1))))))
+
+(pub :: structFreeVar (-> (Vec Int) (Vec Int) Int Int))
+(pub fn (structFreeVar fields params i)
+  (if (>= i (vecLen fields))
+    0
+    (let ((bad (aliasFreeVar (nodeTy (vecGet fields i)) params)))
+      (if (!= bad 0)
+        bad
+        (structFreeVar fields params (+ i 1))))))
+
+(pub :: tcCheckDeclaredTypeUses (-> Int (Vec Int) Int Int))
+(pub fn (tcCheckDeclaredTypeUses tc decls i)
+  (if (>= i (vecLen decls))
+    0
+    {
+      (let (
+        (d (vecGet decls i))
+        (saved (memGetWord tc 16))
+      )
+        {
+          (memSetWord tc 16 (nodeModule d))
+          (if (== (nodeTag d) TAG_D_ALIAS)
+            {
+              (if (== (checkAmbiguousSigTy tc d (nodeB d)) 1)
+                (memSetWord d 2 mkTErr))
+              (tcCheckAliasTargetKnown tc d)
+              (if (== (tyCheckAliasArity tc (nodeB d) (nodeSpan d)) 0)
+                (memSetWord d 2 mkTErr))
+            }
+            (if (== (nodeTag d) TAG_D_DATA)
+              (tcCheckDataTypeUses tc (nodeBVec d) 0)
+              (if (== (nodeTag d) TAG_D_STRUCT)
+                (tcCheckStructTypeUses tc (nodeBVec d) 0))))
+          (memSetWord tc 16 saved)
+        })
+      (tcCheckDeclaredTypeUses tc decls (+ i 1))
+    }))
+
+(pub :: tcCheckAliasTargetKnown (-> Int Int Int))
+(pub fn (tcCheckAliasTargetKnown tc d)
+  (if (== (tyUnknownCon tc (nodeB d)) 0)
+    0
+    {
+      (if (!= (nodeSpan d) 0)
+        (emitDiag
+          tc
+          (mkDiag
+            SEV_ERROR
+            "AX3002"
+            "undefined-type"
+            (nodeSpan d)
+            (concat "undefined type `" (concat (tyUnknownConName tc (nodeB d)) "`"))
+            0
+            0
+            (tyRemovedBuiltinHelp (tyUnknownConName tc (nodeB d))))))
+      (memSetWord d 2 mkTErr)
+    }))
+
+(pub :: tcCheckDataTypeUses (-> Int (Vec Int) Int Int))
+(pub fn (tcCheckDataTypeUses tc ctors i)
+  (if (>= i (vecLen ctors))
+    0
+    {
+      (let ((c (vecGet ctors i)))
+        (tyCheckAliasArityVec tc (nodeTyVec c) (nodeSpan c) 0))
+      (tcCheckDataTypeUses tc ctors (+ i 1))
+    }))
+
+(pub :: tcCheckStructTypeUses (-> Int (Vec Int) Int Int))
+(pub fn (tcCheckStructTypeUses tc fields i)
+  (if (>= i (vecLen fields))
+    0
+    {
+      (let ((f (vecGet fields i)))
+        (tyCheckAliasArity tc (nodeTy f) (nodeSpan f)))
+      (tcCheckStructTypeUses tc fields (+ i 1))
+    }))
 
 ; Collect TAG_D_SUBTYPE declarations into tcSubtypes for lookup by name.
 ; Registered in the type index like aliases so signatures may name
@@ -7230,7 +7677,10 @@
     {
       (let ((c (vecGet ctors i)))
         (if (! (== (nodeTy c) 0))
-          (tcExpandTyVecAliases tc (nodeTyVec c) 0)))
+          {
+            (tyCheckAliasArityVec tc (nodeTyVec c) (nodeSpan c) 0)
+            (tcExpandTyVecAliases tc (nodeTyVec c) 0)
+          }))
       (tcExpandCtorAliases tc ctors (+ i 1))
     }))
 
@@ -7255,8 +7705,11 @@
     {
       (let ((f (vecGet fields i)))
         (if (! (== (nodeTy f) 0))
-          (if (! (== (tyHasAliasCon tc (nodeTy f)) 0))
-            (setNodeTy f (tyExpandAliases tc (nodeTy f) 0)))))
+          {
+            (tyCheckAliasArity tc (nodeTy f) (nodeSpan f))
+            (if (! (== (tyHasAliasCon tc (nodeTy f)) 0))
+              (setNodeTy f (tyExpandAliases tc (nodeTy f) 0)))
+          }))
       (tcExpandFieldAliasesOf tc fields (+ i 1))
     }))
 
@@ -7287,6 +7740,16 @@
               ; unknown type, and an alias is a known one.
               {
                 (checkAmbiguousSigTy tc d (nodeTy d))
+                (if (== (tyCheckAliasArity tc (nodeTy d) (nodeSpan d)) 0)
+                  (let (
+                    (poisoned (tyPoisonBadArity tc (nodeTy d)))
+                    (ent (fnEntExact tc (nodeAName d)))
+                  )
+                    {
+                      (setNodeTy d poisoned)
+                      (if (!= ent 0)
+                        (memSetWord ent 1 poisoned))
+                    }))
                 (tcExpandSigAliases tc d)
                 (tcCheckSigTypeOf tc d)
               }
@@ -7431,9 +7894,12 @@
     0
     (let (
       (ex (tyExpandAliases tc (nodeTy d) 0))
-      (n (if (== (nodeB d) 0)
-        0
-        (vecLen (nodeBVec d))))
+      (ent (fnEntExact tc (nodeAName d)))
+      (n (if (&& (!= ent 0) (>= (memGetWord ent 2) 0))
+        (+ (memGetWord ent 2) 1)
+        (if (== (nodeB d) 0)
+          0
+          (vecLen (nodeBVec d)))))
     )
       {
         (setNodeTy d ex)
@@ -14039,219 +14505,226 @@
 ; the named type; sizeof/alignof answer Int.
 (pub :: checkCastForm (-> Int Int String Int))
 (pub fn (checkCastForm tc e hname)
-  ; The value's type is kept for the forging rule. `checkCastArgs`
-  ; stamps nothing at index 1, so checking it here first and the
-  ; surplus from index 2 checks the same nodes in the same order.
-  ; The cast erases the value's type, so a pending lambda there
-  ; is never grounded by a use: inferred standalone (the
-  ; forging rule below requires a TYPE, never a pending node) -
-  ; which also verifies the body (462: the cast spine's closure
-  ; keeps its evidence).
-  (let (
-    (args (spineArgVec e vecNew))
-    (srcTy (let ((srcTy0
-      (if (>= (vecLen args) 2)
-        (let (
-          (value (vecGet args 1))
-          (target (castTargetTy tc (vecGet args 0)))
-        )
-          (if (&& (== (nodeTag value) TAG_E_LAM) (== (nodeTag target) TAG_T_ARR))
-            (checkLamAgainst tc value target)
-            (groundArgByDecl tc (checkExprH tc value 0) target (spanOf value))))
-        0)))
-      (if (== (isPendingNode srcTy0) 1)
-        (groundStandalone tc srcTy0 (spanOf (vecGet args 1)))
-        srcTy0)))
-  )
-    {
-      (checkCastArgs tc args e 2 (vecLen args))
-      ; `sizeof` and `alignof` take one TYPE and answer a constant, so
-      ; a surplus argument has nowhere to go: the emitter dropped it in
-      ; silence and `(sizeof Int 99)` answered 8. `cast` is exempt -
-      ; its result is routinely a function value, and a surplus
-      ; argument there is an application of it.
-      (if (&&
-            (if (isValueCastForm hname)
-              false
-              true)
-            (> (vecLen args) 1))
-        (emitDiag
-          tc
-          (diagSetLabel
-            (mkDiagNote
-              SEV_ERROR
-              "AX3069"
-              "sizeof-arity"
-              (spanOf (vecGet args 1))
-              (concat
-                (concat "`" hname)
-                "` takes one type and answers a constant, so this argument has nowhere to go")
-              0
-              0
-              "remove the extra argument"
-              "it used to be discarded in silence")
-            "extra argument")))
-      ; The other side of the same count: `(cast T)` with its VALUE
-      ; missing. `isCastLike` keeps `cast` out of `checkSaturation`,
-      ; which is right for the surplus it exempts above and left the
-      ; shortfall unasked - it checked OK and the emitter lowered the
-      ; TYPE name as a variable, `%Int`, which `llc` refused as an
-      ; undefined value (`tests/fuzz/cast-missing-operand.axfuzz`,
-      ; found by the seeded fuzzer 2026-09-27). The code is the one
-      ; a missing argument gets everywhere else. `sizeof`/`alignof`
-      ; cannot reach this with none: `(sizeof)` is the bare name,
-      ; which `checkBareValue` refuses. A lone LITERAL is not asked:
-      ; AX3002 below already refuses it as "not a type", with the
-      ; same `(cast Int e)` advice, and two reports would be one
-      ; mistake said twice.
-      (if (&&
-            (isValueCastForm hname)
-            (&&
-              (< (vecLen args) 2)
-              (|| (== (vecLen args) 0) (== (castTypeIsLiteral (vecGet args 0)) 0))))
-        (emitDiag
-          tc
-          (diagSetLabel
-            (mkDiagNote
-              SEV_ERROR
-              "AX3013"
-              "partial-application"
-              (spanOf (spineHead e))
-              (concat
-                (concat
-                  "partial application of `as`: it takes 2 argument(s) and "
-                  (fmtInt (vecLen args)))
-                " were supplied")
-              0
-              0
-              "write the value to convert before the target type - `(as e Int)` - or, for a function value, `(lambda (x) (as x Int))`"
-              "`as` is a form and not a function: with its value missing there was nothing to convert, and the emitter read the type name as a variable the native toolchain refused")
-            "`as` takes a value and a target type; an operand is missing")))
-      (if (&& (>= (vecLen args) 1) (!= (castTypeBadPart (vecGet args 0)) 0))
-        ; A LITERAL cannot name a type, and `exprToType`
-        ; answers the SILENT WILDCARD for every shape it
-        ; cannot convert - a type that unifies with anything,
-        ; so nothing downstream ever objects. Measured:
-        ; `(cast "hello" 7)` and `(cast 4 helper)` both check
-        ; clean, and the second returns a closure address
-        ; from a function declaring `Int` - 32, whatever the
-        ; argument. Type ascription `(:: e T)` desugars to
-        ; `(cast T e)`, so `(::helper 4)` reached it too.
-        ;
-        ; The wildcard stays for shapes that MIGHT be a type
-        ; this pass cannot resolve; a literal is not one of
-        ; those, and saying so costs nothing that was working.
-        ;
-        ; `sizeof` and `alignof` share this refusal. They never
-        ; reached it - the check sat inside the `cast` arm, and
-        ; both answered `Int` for any operand, so `(alignof 00)`
-        ; checked clean while `fmt` refused it (the seeded
-        ; fuzzer's m00120). The operand was ignored, not
-        ; wildcarded, so their help and note say that instead.
+  (let ((written (spineArgVec e vecNew)))
+    (if (&&
+          (> (vecLen written) 0)
+          (== (tyCheckAliasArity tc (exprToType (vecGet written 0)) (spanOf (vecGet written 0))) 0))
+      mkTErr
+      ; The value's type is kept for the forging rule. `checkCastArgs`
+      ; stamps nothing at index 1, so checking it here first and the
+      ; surplus from index 2 checks the same nodes in the same order.
+      ; The cast erases the value's type, so a pending lambda there
+      ; is never grounded by a use: inferred standalone (the
+      ; forging rule below requires a TYPE, never a pending node) -
+      ; which also verifies the body (462: the cast spine's closure
+      ; keeps its evidence).
+      (let (
+        (args (spineArgVec e vecNew))
+        (srcTy (let ((srcTy0
+          (if (>= (vecLen args) 2)
+            (let (
+              (value (vecGet args 1))
+              (target (castTargetTy tc (vecGet args 0)))
+            )
+              (if (&& (== (nodeTag value) TAG_E_LAM) (== (nodeTag target) TAG_T_ARR))
+                (checkLamAgainst tc value target)
+                (groundArgByDecl tc (checkExprH tc value 0) target (spanOf value))))
+            0)))
+          (if (== (isPendingNode srcTy0) 1)
+            (groundStandalone tc srcTy0 (spanOf (vecGet args 1)))
+            srcTy0)))
+      )
         {
-          (emitDiag
-            tc
-            (diagSetLabel
-              (mkDiagNote
-                SEV_ERROR
-                "AX3002"
-                "undefined-type"
-                (spanOf (castTypeBadPart (vecGet args 0)))
+          (checkCastArgs tc args e 2 (vecLen args))
+          ; `sizeof` and `alignof` take one TYPE and answer a constant, so
+          ; a surplus argument has nowhere to go: the emitter dropped it in
+          ; silence and `(sizeof Int 99)` answered 8. `cast` is exempt -
+          ; its result is routinely a function value, and a surplus
+          ; argument there is an application of it.
+          (if (&&
                 (if (isValueCastForm hname)
-                  (if (== (castTypeIsLiteral (castTypeBadPart (vecGet args 0))) 1)
-                    "a literal is not a type, and `as` takes a target type after the value"
-                    "this expression is not a type, and `as` takes a target type after the value")
-                  (if (== (castTypeIsLiteral (castTypeBadPart (vecGet args 0))) 1)
-                    (concat (concat "a literal is not a type, and `" hname) "` takes a type")
-                    (concat (concat "this expression is not a type, and `" hname) "` takes a type")))
-                0
-                0
-                (if (isValueCastForm hname)
-                  "write the type to cast TO - `(as e Int)` - or, for an ascription, `(:: e Int)`"
-                  (concat (concat "write the type to measure - `(" hname) " Int)`"))
-                (if (isValueCastForm hname)
-                  "an unconvertible shape here used to answer a silent wildcard, which unifies with everything: the cast was performed, the result had no type anyone could object to, and a function returning it satisfied any declaration"
+                  false
+                  true)
+                (> (vecLen args) 1))
+            (emitDiag
+              tc
+              (diagSetLabel
+                (mkDiagNote
+                  SEV_ERROR
+                  "AX3069"
+                  "sizeof-arity"
+                  (spanOf (vecGet args 1))
                   (concat
-                    (concat "the operand used to be ignored in silence: `(" hname)
-                    " 99)` answered 8")))
-              "not a type"))
-          (mkNode TAG_T_ERR 0 0 0)
-        }
-        (if (isValueCastForm hname)
-          (if (>= (vecLen args) 1)
-            (let ((targetTy (castTargetTy tc (vecGet args 0))))
-              (let ((subBase
-                (if (&& (!= targetTy 0) (== (nodeTag targetTy) TAG_T_CON))
-                  (tySubtypeBase tc targetTy)
-                  0)))
-                (if (== subBase 0)
-                  {
-                    ; 3 is a proof of a type-preserving cast, distinct
-                    ; from a word answer (1) and region freshness (2).
-                    ; No proof is minted for surplus applications.
-                    (setNodeResWord
-                      e
-                      (if (&& (== (vecLen args) 2) (== (castSameTy tc targetTy srcTy) 1))
-                        3
-                        0))
-                    ; the target as written, so AX3073 names the alias
-                    ; the program spelled; `castMayForge` expands it
-                    (if (>= (vecLen args) 2)
-                      (castNoteForge tc e (exprToType (vecGet args 0)) srcTy (vecGet args 1)))
-                    (if (== (asNumericKind tc targetTy) 2)
-                      (memSetWord (nodeA e) 2 (mkEVarAt "Float" (spanOf (vecGet args 0)))))
-                    (if (strEq hname "__ascribe")
-                      (if (== (tyCompat tc srcTy targetTy) 0)
-                        (emitMismatchTy tc targetTy srcTy (spanOf (vecGet args 1))))
-                      (if (strEq hname "__as_numeric")
-                        (rewriteNumericAs tc e targetTy srcTy)))
-                    targetTy
-                  }
-                  ; `(cast Subtype v)` is a CHECKED conversion: the value
-                  ; is evaluated once by SUBCHECK emission (value, bounds
-                  ; and message travel separately, so a side-effecting
-                  ; value is never emitted twice). `args` is
-                  ; innermost-first [type, value, ...surplus], where
-                  ; surplus is an application of the cast result.
-                  (if (< (vecLen args) 2)
-                    targetTy
-                    (let ((boundsH (tySubtypeBounds tc targetTy)))
-                      (if (== boundsH 0)
+                    (concat "`" hname)
+                    "` takes one type and answers a constant, so this argument has nowhere to go")
+                  0
+                  0
+                  "remove the extra argument"
+                  "it used to be discarded in silence")
+                "extra argument")))
+          ; The other side of the same count: `(cast T)` with its VALUE
+          ; missing. `isCastLike` keeps `cast` out of `checkSaturation`,
+          ; which is right for the surplus it exempts above and left the
+          ; shortfall unasked - it checked OK and the emitter lowered the
+          ; TYPE name as a variable, `%Int`, which `llc` refused as an
+          ; undefined value (`tests/fuzz/cast-missing-operand.axfuzz`,
+          ; found by the seeded fuzzer 2026-09-27). The code is the one
+          ; a missing argument gets everywhere else. `sizeof`/`alignof`
+          ; cannot reach this with none: `(sizeof)` is the bare name,
+          ; which `checkBareValue` refuses. A lone LITERAL is not asked:
+          ; AX3002 below already refuses it as "not a type", with the
+          ; same `(cast Int e)` advice, and two reports would be one
+          ; mistake said twice.
+          (if (&&
+                (isValueCastForm hname)
+                (&&
+                  (< (vecLen args) 2)
+                  (|| (== (vecLen args) 0) (== (castTypeIsLiteral (vecGet args 0)) 0))))
+            (emitDiag
+              tc
+              (diagSetLabel
+                (mkDiagNote
+                  SEV_ERROR
+                  "AX3013"
+                  "partial-application"
+                  (spanOf (spineHead e))
+                  (concat
+                    (concat
+                      "partial application of `as`: it takes 2 argument(s) and "
+                      (fmtInt (vecLen args)))
+                    " were supplied")
+                  0
+                  0
+                  "write the value to convert before the target type - `(as e Int)` - or, for a function value, `(lambda (x) (as x Int))`"
+                  "`as` is a form and not a function: with its value missing there was nothing to convert, and the emitter read the type name as a variable the native toolchain refused")
+                "`as` takes a value and a target type; an operand is missing")))
+          (if (&& (>= (vecLen args) 1) (!= (castTypeBadPart (vecGet args 0)) 0))
+            ; A LITERAL cannot name a type, and `exprToType`
+            ; answers the SILENT WILDCARD for every shape it
+            ; cannot convert - a type that unifies with anything,
+            ; so nothing downstream ever objects. Measured:
+            ; `(cast "hello" 7)` and `(cast 4 helper)` both check
+            ; clean, and the second returns a closure address
+            ; from a function declaring `Int` - 32, whatever the
+            ; argument. Type ascription `(:: e T)` desugars to
+            ; `(cast T e)`, so `(::helper 4)` reached it too.
+            ;
+            ; The wildcard stays for shapes that MIGHT be a type
+            ; this pass cannot resolve; a literal is not one of
+            ; those, and saying so costs nothing that was working.
+            ;
+            ; `sizeof` and `alignof` share this refusal. They never
+            ; reached it - the check sat inside the `cast` arm, and
+            ; both answered `Int` for any operand, so `(alignof 00)`
+            ; checked clean while `fmt` refused it (the seeded
+            ; fuzzer's m00120). The operand was ignored, not
+            ; wildcarded, so their help and note say that instead.
+            {
+              (emitDiag
+                tc
+                (diagSetLabel
+                  (mkDiagNote
+                    SEV_ERROR
+                    "AX3002"
+                    "undefined-type"
+                    (spanOf (castTypeBadPart (vecGet args 0)))
+                    (if (isValueCastForm hname)
+                      (if (== (castTypeIsLiteral (castTypeBadPart (vecGet args 0))) 1)
+                        "a literal is not a type, and `as` takes a target type after the value"
+                        "this expression is not a type, and `as` takes a target type after the value")
+                      (if (== (castTypeIsLiteral (castTypeBadPart (vecGet args 0))) 1)
+                        (concat (concat "a literal is not a type, and `" hname) "` takes a type")
+                        (concat
+                          (concat "this expression is not a type, and `" hname)
+                          "` takes a type")))
+                    0
+                    0
+                    (if (isValueCastForm hname)
+                      "write the type to cast TO - `(as e Int)` - or, for an ascription, `(:: e Int)`"
+                      (concat (concat "write the type to measure - `(" hname) " Int)`"))
+                    (if (isValueCastForm hname)
+                      "an unconvertible shape here used to answer a silent wildcard, which unifies with everything: the cast was performed, the result had no type anyone could object to, and a function returning it satisfied any declaration"
+                      (concat
+                        (concat "the operand used to be ignored in silence: `(" hname)
+                        " 99)` answered 8")))
+                  "not a type"))
+              (mkNode TAG_T_ERR 0 0 0)
+            }
+            (if (isValueCastForm hname)
+              (if (>= (vecLen args) 1)
+                (let ((targetTy (castTargetTy tc (vecGet args 0))))
+                  (let ((subBase
+                    (if (&& (!= targetTy 0) (== (nodeTag targetTy) TAG_T_CON))
+                      (tySubtypeBase tc targetTy)
+                      0)))
+                    (if (== subBase 0)
+                      {
+                        ; 3 is a proof of a type-preserving cast, distinct
+                        ; from a word answer (1) and region freshness (2).
+                        ; No proof is minted for surplus applications.
+                        (setNodeResWord
+                          e
+                          (if (&& (== (vecLen args) 2) (== (castSameTy tc targetTy srcTy) 1))
+                            3
+                            0))
+                        ; the target as written, so AX3073 names the alias
+                        ; the program spelled; `castMayForge` expands it
+                        (if (>= (vecLen args) 2)
+                          (castNoteForge tc e (exprToType (vecGet args 0)) srcTy (vecGet args 1)))
+                        (if (== (asNumericKind tc targetTy) 2)
+                          (memSetWord (nodeA e) 2 (mkEVarAt "Float" (spanOf (vecGet args 0)))))
+                        (if (strEq hname "__ascribe")
+                          (if (== (tyCompat tc srcTy targetTy) 0)
+                            (emitMismatchTy tc targetTy srcTy (spanOf (vecGet args 1))))
+                          (if (strEq hname "__as_numeric")
+                            (rewriteNumericAs tc e targetTy srcTy)))
                         targetTy
-                        (if (== (vecLen args) 2)
-                          {
-                            (memSetWord e 0 TAG_E_SUBCHECK)
-                            (memSetWord e 1 (vecGet args 1))
-                            (memSetWord e 2 boundsH)
-                            (memSetWord
-                              e
-                              3
-                              (mkNodeAt
-                                TAG_E_STR
-                                "\"axiom: subtype check failed\\n\""
-                                0
-                                0
-                                (spanOf e)))
-                            (memSetWord e 6 targetTy)
+                      }
+                      ; `(cast Subtype v)` is a CHECKED conversion: the value
+                      ; is evaluated once by SUBCHECK emission (value, bounds
+                      ; and message travel separately, so a side-effecting
+                      ; value is never emitted twice). `args` is
+                      ; innermost-first [type, value, ...surplus], where
+                      ; surplus is an application of the cast result.
+                      (if (< (vecLen args) 2)
+                        targetTy
+                        (let ((boundsH (tySubtypeBounds tc targetTy)))
+                          (if (== boundsH 0)
                             targetTy
-                          }
-                          ; Surplus application of a subtype conversion:
-                          ; wrap the VALUE in place and keep the spine.
-                          (let ((inner (castAppNodeAt e (- (vecLen args) 2))))
-                            {
-                              (memSetWord
-                                inner
-                                2
-                                (mkSubtypeCheckNode
-                                  (vecGet args 1)
-                                  boundsH
+                            (if (== (vecLen args) 2)
+                              {
+                                (memSetWord e 0 TAG_E_SUBCHECK)
+                                (memSetWord e 1 (vecGet args 1))
+                                (memSetWord e 2 boundsH)
+                                (memSetWord
+                                  e
+                                  3
+                                  (mkNodeAt
+                                    TAG_E_STR
+                                    "\"axiom: subtype check failed\\n\""
+                                    0
+                                    0
+                                    (spanOf e)))
+                                (memSetWord e 6 targetTy)
+                                targetTy
+                              }
+                              ; Surplus application of a subtype conversion:
+                              ; wrap the VALUE in place and keep the spine.
+                              (let ((inner (castAppNodeAt e (- (vecLen args) 2))))
+                                {
+                                  (memSetWord
+                                    inner
+                                    2
+                                    (mkSubtypeCheckNode
+                                      (vecGet args 1)
+                                      boundsH
+                                      targetTy
+                                      (spanOf (vecGet args 1))))
                                   targetTy
-                                  (spanOf (vecGet args 1))))
-                              targetTy
-                            }))))))))
-            mkSilentWild)
-          mkIntTy))
-    }))
+                                }))))))))
+                mkSilentWild)
+              mkIntTy))
+        }))))
 
 ; `cast`'s arguments, and the SURPLUS ones stamped with the evidence
 ; class an ordinary application records for itself.
@@ -16890,8 +17363,8 @@
 ;                                 signature already holds the arrow and
 ;                                 `tyIsCallable` sees it - the row is
 ;                                 still a lower bound;
-;   (type Fn2 a = (-> a a))       refused at its declaration
-;                                 (AX3096), and its uses are poison.
+;   (type Fn2 a = (-> a a))       expanded at its type arguments;
+;                                 the row follows the resulting arrow.
 ;
 ; A `data` or `struct` name is nominal: applying one is `AX3004
 ; expected function type`, and handing an arrow to one is `AX3004`
