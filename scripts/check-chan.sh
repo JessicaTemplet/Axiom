@@ -373,8 +373,8 @@ s = open(p, encoding="utf-8").read()
 unblock = (";@axiom:effect(block)\n(fn (chanHolderDead w me)", "(fn (chanHolderDead w me)")
 cuts = {
   # The dead-holder test never finds one: kill's ESRCH and the look ignored.
-  "holder": [("        ((Ok r) (chanChildEnded owner))\n        ((Err e) (== (errCode e) 3))))))",
-              "        ((Ok r) false)\n        ((Err e) false)))))"), unblock],
+  "holder": [("((Ok r) (chanChildEnded owner))\n        ((Err e) (== (errCode e) 3))",
+              "((Ok r) false)\n        ((Err e) false)"), unblock],
   # Only the look at the waiter's own child goes: a zombie looks alive.
   "look": [("        ((Ok r) (chanChildEnded owner))", "        ((Ok r) false)"), unblock],
 }[kind]

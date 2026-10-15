@@ -297,7 +297,8 @@ ok_clean al one.ax "control: one import, the same reference resolves"
 echo "== the escape: a narrowed import leaves the other declaration behind =="
 mk esc
 cp "$work/two/TeamA.ax" "$work/two/TeamB.ax" "$work/esc/"
-printf '(import TeamA (aPort))\n(import TeamB)\n(:: pick (-> Config Int))\n(fn (pick c) c.port)\n(:: main Int)\n(fn (main) (pick (Config 3 99)))\n' > "$work/esc/narrow.ax"
+# Anchor the value to TeamB so the parameter must read TeamB's layout.
+printf '(import TeamA (aPort))\n(import TeamB)\n(:: pick (-> Config Int))\n(fn (pick c) c.port)\n(:: main Int)\n(fn (main) (pick (TeamB::Config :retries 3 :port 99)))\n' > "$work/esc/narrow.ax"
 ok_exit esc narrow.ax 99 "\`(import TeamA (aPort))\` resolves the reference to TeamB"
 
 # The other escape the help text names: `Mod::Name` in type position

@@ -36,8 +36,8 @@
 #       `self_host/main.ax`: the ablated IR carries thousands more
 #       releases, every restored one on a `@strhdr_*` literal (the
 #       region kills are inert where no region form stands), the IR
-#       diff is release lines and nothing else, and the emitting
-#       compiler's own peak RSS holds its ratio. The elisions delete
+#       diff is release traffic and dependent ownership guards. The
+#       emitting compiler's own peak RSS holds its ratio. The elisions delete
 #       calls that free nothing, so the emit cannot cost memory.
 #   W2. THE SIX FIXTURES PLUS THE LITERAL PROBE. Per program: the
 #       release delta equals the pin, the IR diff is release lines
@@ -146,7 +146,7 @@ cp -R "$repo_root/self_host" "$repo_root/stdlib" "$abl/" || {
   echo "FAIL: could not copy the tree to ablate" >&2; exit 1; }
 
 if ! python3 - "$abl/self_host/codegen.ax" "$abl/self_host/typecheck.ax" <<'PY'
-import sys
+import re, sys
 cgp, tcp = sys.argv[1], sys.argv[2]
 cg = open(cgp, encoding="utf-8").read()
 tc = open(tcp, encoding="utf-8").read()
@@ -161,17 +161,12 @@ i = cg.index(head)
 j = cg.index("(pairSlot cg 9)", i)
 cg = cg[:j] + "0" + cg[j + len("(pairSlot cg 9)"):]
 
-# Kill 3, slice 5: the static-release gate's own anchor, verbatim.
-old = """(pub fn (isStaticSentinelNode cg e)
-  (if (== e 0)
-    0
-    (if (== (nodeTag e) TAG_E_STR)
-      1
-      0)))"""
-new = old.replace("\n      1\n", "\n      0\n")
-if cg.count(old) != 1:
-    sys.exit("kill 3: sentinel predicate found %d times, wanted 1" % cg.count(old))
-cg = cg.replace(old, new)
+# Kill 3, slice 5: turn off only the literal branch. Named function
+# descriptors keep their static sentinel, isolating the string traffic.
+pat = re.compile(r"(\(pub fn \(isStaticSentinelNode cg e\)\s+\(if \(== e 0\)\s+0\s+\(if \(== \(nodeTag e\) TAG_E_STR\)\s+)1(?=\s)")
+if len(pat.findall(cg)) != 1:
+    sys.exit("kill 3: literal sentinel branch found %d times, wanted 1" % len(pat.findall(cg)))
+cg = pat.sub(r"\g<1>0", cg, count=1)
 open(cgp, "w", encoding="utf-8").write(cg)
 
 # Kill 2, slices 2-4: `rgnStamping` (TC word 40) is never set, so the
@@ -227,18 +222,58 @@ if [[ -f "$work/axc-ablated" ]]; then
       # `@__axiom_line*` rows - the file/line/col table, the block
       # addresses, the table size with its bound check - which scale
       # with the release count (one entry per site). Anything OUTSIDE that
-      # vocabulary is the ablation moving something else. The
-      # residual looseness - a breakage spelled entirely
+      # vocabulary is the ablation moving something else. A forwarded
+      # call result also needs a retain before an argument is released.
+      # Normalise that guard only when the adjacent call, result and
+      # restored literal release establish the dependency.
+      # The residual looseness - a breakage spelled entirely
       # in flip words - is stated, and is covered from the other
       # side by the static-equality above (every restored release
       # is on a literal) and the answers-identity of W2/W3 below.
+      other_rc=0
       other="$(python3 - "$work/host-abl.ll" "$work/host.ll" <<'PY'
 import re, subprocess, sys
 from collections import Counter
+def literal_result_guards(lines):
+    literals, guards = set(), set()
+    for i, line in enumerate(lines):
+        if line.startswith('define '):
+            literals.clear()
+        literal = re.match(r'\s*(%[.\w]+) = ptrtoint .*@strhdr_\d+\b', line)
+        if literal:
+            literals.add(literal.group(1))
+        retain = re.fullmatch(r'\s*call void @axiom_retain\(i64 (%[.\w]+)\)\s*', line)
+        if not retain or i == 0 or i + 1 == len(lines):
+            continue
+        call = re.fullmatch(r'\s*(%[.\w]+) = (?:tail )?call i64 @[^ (]+\((.*)\)\s*', lines[i - 1])
+        release = re.fullmatch(r'\s*call void @axiom_release\(i64 (%[.\w]+)\)\s*', lines[i + 1])
+        if (call and release and retain.group(1) == call.group(1)
+                and release.group(1) in literals
+                and re.search(r'\bi64 ' + re.escape(release.group(1)) + r'(?=[,)])', call.group(2) + ')')):
+            guards.add(i)
+    return guards
+
+# A copied result needs this guard; unrelated retains must survive.
+probe = ['define i64 @probe(i64 %heap) {',
+         '  %lit = ptrtoint ptr @strhdr_1 to i64',
+         '  %result = call i64 @forward(i64 %heap, i64 %lit)',
+         '  call void @axiom_retain(i64 %result)',
+         '  call void @axiom_release(i64 %lit)', '}']
+assert literal_result_guards(probe) == {3}
+for index, replacement in [(2, '  %result = call i64 @forward(i64 %heap)'),
+                           (3, '  call void @axiom_retain(i64 %heap)'),
+                           (4, '  call void @axiom_release(i64 %heap)'),
+                           (4, '  ret i64 %result')]:
+    mutant = probe.copy()
+    mutant[index] = replacement
+    assert not literal_result_guards(mutant), (index, replacement)
+
 def norm(p):
     out = []
-    for L in open(p, encoding="utf-8", errors="replace"):
-        if "call void @axiom_release" in L:
+    lines = open(p, encoding="utf-8", errors="replace").readlines()
+    guards = literal_result_guards(lines)
+    for i, L in enumerate(lines):
+        if i in guards or "call void @axiom_release" in L:
             continue
         L = re.sub(r"%t\d+", "%tN", L)
         L = re.sub(r"%\.\w*\d+", "%RN", L)
@@ -264,13 +299,15 @@ for L in bad[:10]:
     print("RESID: " + L)
 print("COUNT: %d" % len(bad))
 PY
-)"
+)" || other_rc=$?
       other_n="$(echo "$other" | sed -n 's/^COUNT: //p')"
-      if (( other_n != 0 )); then
+      if (( other_rc != 0 )) || [[ ! "$other_n" =~ ^[0-9]+$ ]]; then
+        bad "the self_host IR comparison did not produce a verdict"
+      elif (( other_n != 0 )); then
         bad "the two self_host IRs differ by $other_n line(s) outside the release+flip vocabulary"
         echo "$other" | grep '^RESID: ' | head -10 | sed 's/^/     /'
       else
-        ok "self_host: $((n_abl - n_new)) releases restored, every one on a literal ($hd_abl headers), rest flip-only"
+        ok "self_host: $((n_abl - n_new)) releases restored, every one on a literal ($hd_abl headers), other changes depend on those releases"
       fi
     fi
     rss_new="$(max_rss_kb "$axc" emit-llvm "$repo_root/self_host/main.ax" -o "$work/host.rss.ll")" || rss_new=""

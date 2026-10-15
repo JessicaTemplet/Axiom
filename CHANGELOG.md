@@ -40,6 +40,14 @@ counted environments.
 
 <!-- release-notes: end of highlights -->
 
+- Reclamation and channel mutation tests follow canonical block scopes.
+  Literal-release mutations preserve static function descriptors, and
+  dead-holder mutations leave the surrounding channel scope intact.
+  Region comparisons account for retains tied to restored literal releases
+  while rejecting unrelated ownership traffic. Namespace and handle layout
+  probes use named fields.
+  Tested by `scripts/check-region-verdict.sh` and `scripts/check-chan.sh`.
+
 - MIR mutation checks target named instruction fields, keeping operand
   order and boolean values covered after the syntax migration.
   Tested by `scripts/check-mir.sh`.

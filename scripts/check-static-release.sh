@@ -189,26 +189,14 @@ cp -R "$repo_root/self_host" "$repo_root/stdlib" "$abl/" || {
 # Flip the one answer the fix turns on. The predicate still exists and
 # still runs, so a broken build reads differently from a restored defect.
 python3 - "$abl/self_host/codegen.ax" <<'PY'
-import sys
+import re, sys
 p = sys.argv[1]
 s = open(p, encoding="utf-8").read()
-# `old` follows the formatter's spelling, closers folded onto the last
-# line. Only the `1` for TAG_E_STR changes.
-old = """(pub fn (isStaticSentinelNode cg e)
-  (if (== e 0)
-    0
-    (if (== (nodeTag e) TAG_E_STR)
-      1
-      0)))"""
-new = """(pub fn (isStaticSentinelNode cg e)
-  (if (== e 0)
-    0
-    (if (== (nodeTag e) TAG_E_STR)
-      0
-      0)))"""
-if s.count(old) != 1:
-    sys.exit("the ablation matched %d times, wanted 1" % s.count(old))
-open(p, "w", encoding="utf-8").write(s.replace(old, new))
+# Flip only the literal branch; named function descriptors stay static.
+pat = re.compile(r"(\(pub fn \(isStaticSentinelNode cg e\)\s+\(if \(== e 0\)\s+0\s+\(if \(== \(nodeTag e\) TAG_E_STR\)\s+)1(?=\s)")
+if len(pat.findall(s)) != 1:
+    sys.exit("the literal sentinel branch matched %d times, wanted 1" % len(pat.findall(s)))
+open(p, "w", encoding="utf-8").write(pat.sub(r"\g<1>0", s, count=1))
 PY
 if [[ $? -ne 0 ]]; then
   bad "could not apply the ablation - isStaticSentinelNode has moved, and this gate is asserting nothing"

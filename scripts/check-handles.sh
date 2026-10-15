@@ -260,7 +260,7 @@ AX
   awk '/^define .*@mk\(/ {on = 1} on && /@axiom_alloc\(i64 24\)/ {seen = 1; next}
        seen && /store i64 [0-9]+, ptr/ {print $3; exit}' "$work/shape.ll" | tr -d ','
 }
-word_shape="$(shape_of W '(W i)')"
+word_shape="$(shape_of W '(W :slot i)')"
 int_shape="$(shape_of Int i)"
 str_shape="$(shape_of String '"u"')"
 if [[ -n "$word_shape" && "$word_shape" == "$int_shape" && -n "$str_shape" && "$str_shape" != "$word_shape" ]]; then
