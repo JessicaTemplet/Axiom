@@ -19844,29 +19844,33 @@
     }
   })
 
-; One dirty pass over `work`, a list of declaration indexes in
-; ASCENDING order. Runs `inferEffectsOne` on each and collects the
+; One dirty pass over `work`. Runs `inferEffectsOne` on each and collects the
 ; callers of every one that grew into `next`. Answers 1 when anything
 ; grew.
 ;
-; Ascending is the same order `inferEffectsPassFwd` walks, so a
-; declaration still sees its earlier siblings' rows first; and it is
-; what makes the walk independent of the order the reverse index
-; happens to have collected callers in.
+; Visit the frontier from its last element, preserving the recursive
+; walk's unwind order. A loop keeps the stack independent of the
+; frontier size: the initial pass can contain every declaration in
+; the compiler. Processing the body after a recursive call retained
+; one frame per entry, even at --opt 1.
 (pub :: inferEffectsDirtyPass
   (-> Int (Vec Int) (Vec (Vec Int)) (Vec Int) (Vec Int) (Vec Int) Int Int))
 (pub fn (inferEffectsDirtyPass tc decls bs work marks next i)
-  (if (>= i (vecLen work))
-    0
-    {
-      (let rest (inferEffectsDirtyPass tc decls bs work marks next (+ i 1)))
-      (if (== (inferEffectsOne tc (vecGet decls (vecGet work i))) 0)
-        rest
-        {
-          (markCallers tc bs marks next (vecGet decls (vecGet work i)))
-          1
-        })
-    }))
+  {
+    (let mut j (- (vecLen work) 1))
+    (let mut changed 0)
+    (while (>= j i)
+      {
+        (let d (vecGet decls (vecGet work j)))
+        (if (!= (inferEffectsOne tc d) 0)
+          {
+            (markCallers tc bs marks next d)
+            (set changed 1)
+          })
+        (set j (- j 1))
+      })
+    changed
+  })
 
 ; The callers of the function `d` declares, added to the next
 ; frontier. A declaration whose entry has gone is not an error here -

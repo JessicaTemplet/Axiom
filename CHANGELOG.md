@@ -49,6 +49,16 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- Effect inference walks its frontier iteratively, preserving processing
+  order while avoiding one stack frame per declaration. Language-server
+  disconnects answer active and queued requests before reaping their worker.
+  EOF, broken framing and exit without shutdown retain the required exit status.
+  Tested by `scripts/check-stack-depth.sh` and `tests/lsp/abrupt-close.py`.
+
+- The effect census accounts for migration helpers and ownership analysis
+  changes using both source trees and the same compiler. Required IO rows
+  retain their measured effects. Tested by `scripts/check-effect-distribution.sh`.
+
 - Editor highlighting recognises discard locals, builtin types and
   expression-template iteration. Top-level signatures colour later function
   uses; macro templates keep their syntactic colours. Tree-sitter and

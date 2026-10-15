@@ -643,6 +643,9 @@ fi
 if ! python3 tests/lsp/background-analysis.py "$work/stage1"; then
   status=1
 fi
+if ! python3 tests/lsp/abrupt-close.py "$work/stage1"; then
+  status=1
+fi
 
 echo "swept $fixtures fixtures (floor $floor), $rows manifest rows, $orows outline rows"
 
