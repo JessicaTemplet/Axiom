@@ -111,7 +111,88 @@ def apply_delta(data, response):
     return result
 
 
+def structured_tokens(compiler):
+    """Bucket lookups keep their owners across semantic requests and edits."""
+    source = """(struct Point (x : UInt8) (y : UInt8))
+(type Count = UInt8)
+(:: main Int)
+(fn (main)
+  {
+    (let point (Point :y (as 2 UInt8) :x (as 1 UInt8)))
+    (let mut count (as point.x Count))
+    (set count (+ count (as 1 Count)))
+    (as count Int)
+  })
+"""
+    with tempfile.TemporaryDirectory(prefix="axiom-lsp-buckets-") as directory:
+        server = Server(compiler, directory)
+        try:
+            legend = server.request("initialize", {})["capabilities"]["semanticTokensProvider"]["legend"]
+            types = {name: index for index, name in enumerate(legend["tokenTypes"])}
+            bits = {name: 1 << index for index, name in enumerate(legend["tokenModifiers"])}
+            uri = (Path(directory) / "main.ax").as_uri()
+            document = {"textDocument": {"uri": uri}}
+            server.send("textDocument/didOpen", {"textDocument": {
+                "uri": uri, "languageId": "axiom", "version": 1, "text": source}})
+
+            def expect_roles(text, data):
+                tokens = decode(data)
+                actual = {(line, column, length): (kind, modifiers)
+                          for line, column, length, kind, modifiers in tokens}
+                wanted = [
+                    ("(type Count", 6, "Count", "type", bits["declaration"]),
+                    ("point (Point", 0, "point", "variable", bits["declaration"] | bits["readonly"]),
+                    ("(Point :y", 1, "Point", "enumMember", 0),
+                    (":y", 1, "y", "property", 0),
+                    (":x", 1, "x", "property", 0),
+                    ("mut count", 0, "mut", "keyword", 0),
+                    ("mut count", 4, "count", "variable", bits["declaration"]),
+                    ("point.x", 6, "x", "property", 0),
+                    ("point.x Count", 8, "Count", "type", 0),
+                    ("(set count", 5, "count", "variable", bits["modification"]),
+                    ("(as 1 Count", 6, "Count", "type", 0),
+                ]
+                for needle, skip, word, kind, modifiers in wanted:
+                    offset = text.index(needle) + skip
+                    assert text[offset:offset + len(word)] == word
+                    pos = position(text, offset)
+                    key = (pos["line"], pos["character"], len(word))
+                    assert actual.get(key) == (types[kind], modifiers), (word, key, actual.get(key))
+                return tokens
+
+            first = server.request("textDocument/semanticTokens/full", document)
+            expect_roles(source, first["data"])
+            changed = "\n" + source.replace(":y (as 2 UInt8)", ":y (as 22 UInt8)")
+            server.send("textDocument/didChange", {"textDocument": {"uri": uri, "version": 2},
+                                                   "contentChanges": [{"text": changed}]})
+            delta = server.request("textDocument/semanticTokens/full/delta",
+                                   {**document, "previousResultId": first["resultId"]})
+            rebuilt = apply_delta(first["data"], delta)
+            decoded = expect_roles(changed, rebuilt)
+            full = server.request("textDocument/semanticTokens/full", document)
+            assert full["data"] == rebuilt
+            start = position(changed, changed.index("(let mut"))
+            end = position(changed, changed.index("    (as count Int)"))
+            ranged = server.request("textDocument/semanticTokens/range",
+                                    {**document, "range": {"start": start, "end": end}})
+            expected = [token for token in decoded
+                        if (token[0], token[1] + token[2]) > (start["line"], start["character"])
+                        and (token[0], token[1]) < (end["line"], end["character"])]
+            assert ranged == {"data": encode(expected)}, (ranged, expected)
+            server.close()
+            assert {p["version"] for p in server.publications} == {1, 2}, server.publications
+            assert all(not [d for d in p["diagnostics"] if d["severity"] < 4]
+                       for p in server.publications), server.publications
+        finally:
+            if server.process.poll() is None:
+                server.process.kill()
+                server.process.wait()
+    print("ok   structured semantic tokens (named fields, UInt8 alias, mutable locals, "
+          "field reads, exact roles and revised full/delta/range)")
+
+
 def run(compiler):
+    structured_tokens(compiler)
     with tempfile.TemporaryDirectory(prefix="axiom-lsp-tokens-") as directory:
         server = Server(compiler, directory)
         capabilities = server.request("initialize", {})["capabilities"]["semanticTokensProvider"]

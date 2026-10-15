@@ -73,6 +73,30 @@
 (import doccomment)
 (import nolint)
 
+; Each index owns its bucket vectors; an empty slot is a typed null.
+(type LspBuckets = (Vec (Vec Int)))
+
+; A null slot has no bucket to inspect.
+(pub :: lspBucketMissing (-> (Vec Int) Bool))
+(pub fn (lspBucketMissing bucket)
+  (== (as bucket Int) 0))
+
+; Null slots are only tested or replaced before a bucket is read.
+(pub :: lspBucketsNew (-> Int LspBuckets))
+;@axiom:effect(unsafe)
+(pub fn (lspBucketsNew slots)
+  {
+    (let empty (as 0 (Vec Int)))
+    (let buckets vecNew)
+    (let mut i 0)
+    (while (< i slots)
+      {
+        (vecPush buckets empty)
+        (set i (+ i 1))
+      })
+    buckets
+  })
+
 ; ------------------------------------------------------------------
 ; Positions
 ; ------------------------------------------------------------------
@@ -5786,7 +5810,7 @@
 ; byte offsets: every occurrence in those declarations whose key is
 ; local, keyed by its start.
 ; ------------------------------------------------------------------
-(pub :: lspNavLocalIndex (-> String (Vec Int) Int Int (Vec Int)))
+(pub :: lspNavLocalIndex (-> String (Vec Int) Int Int LspBuckets))
 (pub fn (lspNavLocalIndex src decls rs re)
   {
     (let nv (lspNavContext src decls 0))
@@ -5833,19 +5857,13 @@
 
 ; The bucket table: `fnIdxBuckets` slots, each 0 or a Vec of the byte
 ; offsets that hash there.
-(pub :: lspNavLocalStarts (-> (Vec Int) (Vec Int)))
+(pub :: lspNavLocalStarts (-> (Vec Int) LspBuckets))
 (pub fn (lspNavLocalStarts occs)
   {
     (let nb (fnIdxBuckets (vecLen occs)))
-    (let bs vecNew)
+    (let bs (lspBucketsNew nb))
     (let mut i 0)
     {
-      (while (< i nb)
-        {
-          (vecPush bs 0)
-          (set i (+ i 1))
-        })
-      (set i 0)
       (while (< i (vecLen occs))
         {
           (let o (vecGet occs i))
@@ -5859,28 +5877,28 @@
     }
   })
 
-(pub :: lspNavIntPut (-> (Vec Int) Int Int))
+(pub :: lspNavIntPut (-> LspBuckets Int Int))
 (pub fn (lspNavIntPut bs v)
   {
     (let b (% v (vecLen bs)))
     {
-      (if (== (vecGet bs b) 0)
-        (vecSet bs b (as vecNew Int)))
-      (vecPush (vecGetVec bs b) v)
+      (if (lspBucketMissing (vecGet bs b))
+        (vecSet bs b vecNew))
+      (vecPush (vecGet bs b) v)
       0
     }
   })
 
-(pub :: lspNavLocalIndexHas (-> (Vec Int) Int Bool))
+(pub :: lspNavLocalIndexHas (-> LspBuckets Int Bool))
 (pub fn (lspNavLocalIndexHas bs off)
   (if (== (vecLen bs) 0)
     false
     {
       (let b (% off (vecLen bs)))
-      (if (== (vecGet bs b) 0)
+      (if (lspBucketMissing (vecGet bs b))
         false
         {
-          (let v (vecGetVec bs b))
+          (let v (vecGet bs b))
           (let mut i 0)
           (let mut found false)
           {
@@ -5932,19 +5950,13 @@
   ; separate question and still does not list one.
   (|| (lspWantsSymbol tag) (|| (== tag TAG_D_ALIAS) (== tag TAG_D_SUBTYPE))))
 
-(pub :: lspNavTopBuild (-> (Vec Int) (Vec Int)))
+(pub :: lspNavTopBuild (-> (Vec Int) LspBuckets))
 (pub fn (lspNavTopBuild decls)
   {
     (let nb (fnIdxBuckets (vecLen decls)))
-    (let bs vecNew)
+    (let bs (lspBucketsNew nb))
     (let mut i 0)
     {
-      (while (< i nb)
-        {
-          (vecPush bs 0)
-          (set i (+ i 1))
-        })
-      (set i 0)
       (while (< i (vecLen decls))
         {
           (let d (vecGet decls i))
@@ -5969,7 +5981,7 @@
 (pub fn (lspNavIsNamedDecl d)
   (&& (lspNavDeclares (nodeTag d)) (&& (!= (nodeSpan d) 0) (== (expIsJoinMarker (nodeAName d)) 0))))
 
-(pub :: lspNavTopPutCtors (-> (Vec Int) String (Vec Int) Int Int))
+(pub :: lspNavTopPutCtors (-> LspBuckets String (Vec Int) Int Int))
 (pub fn (lspNavTopPutCtors bs dat ctors i)
   (if (>= i (vecLen ctors))
     0
@@ -5991,19 +6003,13 @@
 ; occurrence carries, so a type position and the declaration it names
 ; are one name. Kept apart from the table above because a type
 ; position must never resolve to a `fn`.
-(pub :: lspNavTypeBuild (-> (Vec Int) (Vec Int)))
+(pub :: lspNavTypeBuild (-> (Vec Int) LspBuckets))
 (pub fn (lspNavTypeBuild decls)
   {
     (let nb (fnIdxBuckets (vecLen decls)))
-    (let bs vecNew)
+    (let bs (lspBucketsNew nb))
     (let mut i 0)
     {
-      (while (< i nb)
-        {
-          (vecPush bs 0)
-          (set i (+ i 1))
-        })
-      (set i 0)
       (while (< i (vecLen decls))
         {
           (let d (vecGet decls i))
@@ -6024,21 +6030,21 @@
     (|| (== tag TAG_D_STRUCT) (|| (== tag TAG_D_ALIAS) (== tag TAG_D_SUBTYPE)))))
 
 ; An entry is (name, key); a bucket is a Vec of entries or 0.
-(pub :: lspNavTopPut (-> (Vec Int) String String Int))
+(pub :: lspNavTopPut (-> LspBuckets String String Int))
 (pub fn (lspNavTopPut bs name key)
   {
     (let b (% (fnIdxHash name) (vecLen bs)))
     {
       (let v
-        (if (== (vecGet bs b) 0)
+        (if (lspBucketMissing (vecGet bs b))
           {
             (let fresh vecNew)
             {
-              (vecSet bs b (as fresh Int))
+              (vecSet bs b fresh)
               fresh
             }
           }
-          (vecGetVec bs b)))
+          (vecGet bs b)))
       {
         (let at (lspNavTopSlot v name 0))
         (if (< at 0)
@@ -6069,16 +6075,16 @@
 
 ; The key `name` is declared under, or "" when this document does not
 ; declare it.
-(pub :: lspNavTopGet (-> (Vec Int) String String))
+(pub :: lspNavTopGet (-> LspBuckets String String))
 (pub fn (lspNavTopGet bs name)
   (if (== (vecLen bs) 0)
     ""
     {
       (let b (% (fnIdxHash name) (vecLen bs)))
-      (if (== (vecGet bs b) 0)
+      (if (lspBucketMissing (vecGet bs b))
         ""
         {
-          (let v (vecGetVec bs b))
+          (let v (vecGet bs b))
           {
             (let at (lspNavTopSlot v name 0))
             (if (< at 0)
@@ -8911,21 +8917,15 @@
 ; comment, because `(  ; why\n  f x)` still has `f` as its head, and
 ; survives blank space for the same reason; every other byte clears
 ; it, so the `1` of `(1 2)` and the `(` of `((g 1) 2)` are not heads.
-(pub :: lspChHeads (-> String (Vec Int)))
+(pub :: lspChHeads (-> String LspBuckets))
 (pub fn (lspChHeads src)
   {
     (let offs (lspChHeadOffsets src))
     {
       (let nb (fnIdxBuckets (vecLen offs)))
-      (let bs vecNew)
+      (let bs (lspBucketsNew nb))
       (let mut i 0)
       {
-        (while (< i nb)
-          {
-            (vecPush bs 0)
-            (set i (+ i 1))
-          })
-        (set i 0)
         (while (< i (vecLen offs))
           {
             (lspNavIntPut bs (vecGet offs i))
@@ -10565,20 +10565,9 @@
 (pub fn (LSP_VIEW_IDX_SLOTS)
   1024)
 
-(pub :: lspViewIdxNew (Vec Int))
+(pub :: lspViewIdxNew LspBuckets)
 (pub fn (lspViewIdxNew)
-  {
-    (let v vecNew)
-    (let mut i 0)
-    {
-      (while (< i LSP_VIEW_IDX_SLOTS)
-        {
-          (vecPush v 0)
-          (set i (+ i 1))
-        })
-      v
-    }
-  })
+  (lspBucketsNew LSP_VIEW_IDX_SLOTS))
 
 ; djb2 over the bytes, reduced modulo 2^24 at every step: `h * 33 + b`
 ; then stays under 2^30, so the arithmetic never wraps and the slot is
@@ -10599,21 +10588,21 @@
     }
   })
 
-(pub :: lspViewIdxAdd (-> (Vec Int) String Int Int))
+(pub :: lspViewIdxAdd (-> LspBuckets String Int Int))
 (pub fn (lspViewIdxAdd idx name node)
   {
     (let slot (lspViewIdxSlot name))
     {
       (let bucket
-        (if (== (vecGet idx slot) 0)
+        (if (lspBucketMissing (vecGet idx slot))
           {
             (let b vecNew)
             {
-              (vecSet idx slot (as b Int))
+              (vecSet idx slot b)
               b
             }
           }
-          (vecGetVec idx slot)))
+          (vecGet idx slot)))
       {
         (vecPushStr bucket name)
         (vecPush bucket node)
@@ -10622,11 +10611,11 @@
     }
   })
 
-(pub :: lspViewIdxFind (-> (Vec Int) String Int))
+(pub :: lspViewIdxFind (-> LspBuckets String Int))
 (pub fn (lspViewIdxFind idx name)
   {
-    (let bucket (vecGetVec idx (lspViewIdxSlot name)))
-    (if (== (as bucket Int) 0)
+    (let bucket (vecGet idx (lspViewIdxSlot name)))
+    (if (lspBucketMissing bucket)
       0
       {
         (let n (vecLen bucket))
@@ -10652,7 +10641,7 @@
 ; The `fn` declarations a call can name, by bare name: this document's
 ; and, when its imports resolve, every module's. A failed preflight -
 ; a half-typed import - is this document alone.
-(pub :: lspViewFnIndexFor (-> LspWorkspace String String (Vec Int) (Vec Int)))
+(pub :: lspViewFnIndexFor (-> LspWorkspace String String (Vec Int) LspBuckets))
 ;@axiom:effect(io)
 (pub fn (lspViewFnIndexFor workspace path src decls)
   {
@@ -10663,7 +10652,7 @@
         (memGetWordVec r 0)))
   })
 
-(pub :: lspViewFnIndex (-> (Vec Int) (Vec Int)))
+(pub :: lspViewFnIndex (-> (Vec Int) LspBuckets))
 (pub fn (lspViewFnIndex list)
   {
     (let idx lspViewIdxNew)
@@ -10686,7 +10675,7 @@
 ; The `::` signatures of this document, by name, for the header hints
 ; - the same question `lspFindSig` answers, asked once per `fn` rather
 ; than by a walk per `fn`.
-(pub :: lspViewSigIndex (-> (Vec Int) (Vec Int)))
+(pub :: lspViewSigIndex (-> (Vec Int) LspBuckets))
 (pub fn (lspViewSigIndex decls)
   {
     (let idx lspViewIdxNew)
@@ -10947,7 +10936,7 @@
       ((Some _) 1))))
 
 (pub :: lspViewHintsExpr
-  (-> Int String (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int) Int Int Int Int))
+  (-> Int String (Vec Int) LspBuckets LspBuckets (Vec Int) (Vec Int) Int Int Int Int))
 (pub fn (lspViewHintsExpr out src ix fns locals decls occs e rs re)
   (if (== e 0)
     0
@@ -11015,7 +11004,7 @@
     }))
 
 (pub :: lspViewHintsVec
-  (-> Int String (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int) Int Int Int))
+  (-> Int String (Vec Int) LspBuckets LspBuckets (Vec Int) (Vec Int) (Vec Int) Int Int Int))
 (pub fn (lspViewHintsVec out src ix fns locals decls occs xs rs re)
   (if (== (as xs Int) 0)
     0
@@ -11035,7 +11024,7 @@
 ; (`cond` clauses used to walk here too, tests included; `cond` is
 ; AX2004 now, so the flag that distinguished them is gone with it.)
 (pub :: lspViewHintsArms
-  (-> Int String (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int) Int Int Int))
+  (-> Int String (Vec Int) LspBuckets LspBuckets (Vec Int) (Vec Int) (Vec Int) Int Int Int))
 (pub fn (lspViewHintsArms out src ix fns locals decls occs arms rs re)
   (if (== (as arms Int) 0)
     0
@@ -11061,7 +11050,7 @@
 ; walked as an expression. Every argument is walked afterwards, since
 ; each may hold calls of its own.
 (pub :: lspViewHintsApp
-  (-> Int String (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int) Int Int Int Int))
+  (-> Int String (Vec Int) LspBuckets LspBuckets (Vec Int) (Vec Int) Int Int Int Int))
 (pub fn (lspViewHintsApp out src ix fns locals decls occs e rs re)
   {
     (let args vecNew)
@@ -11103,7 +11092,7 @@
 ; The hints for one call: the declaration's parameter names, each at
 ; the start of the item the bytes hold at that position, for as many
 ; arguments as the call has and the declaration names.
-(pub :: lspViewHintsCall (-> Int String (Vec Int) (Vec Int) (Vec Int) Int (Vec Int) Int Int Int))
+(pub :: lspViewHintsCall (-> Int String (Vec Int) LspBuckets LspBuckets Int (Vec Int) Int Int Int))
 (pub fn (lspViewHintsCall out src ix fns locals head args rs re)
   ; A head that is a local is not a call to the `fn` it is
   ; spelled like; the walk that knows the scopes says which.
@@ -12257,7 +12246,7 @@
 ; declarations) and 1.87x with no signatures at all (2,000 walks of
 ; the checker's table), against 0.72x for a one-line range.
 (pub :: lspSigAssists
-  (-> Int (Vec Int) (Vec Int) (Vec Int) (Vec Int) String String (Vec Int) Int Int))
+  (-> Int (Vec Int) (Vec Int) LspBuckets LspBuckets String String (Vec Int) Int Int))
 (pub fn (lspSigAssists out decls rawVis sigs entries src uri ix want)
   {
     (let n (vecLen rawVis))
@@ -12295,7 +12284,7 @@
 ; only case this is asked about. The same bucket table the hint
 ; request keys its `fn` index by, and its own find, because an entry
 ; is not a node and has no module word to prefer by.
-(pub :: lspFixEntryIndex (-> (Vec Int) (Vec Int)))
+(pub :: lspFixEntryIndex (-> (Vec Int) LspBuckets))
 (pub fn (lspFixEntryIndex fns)
   {
     (let idx lspViewIdxNew)
@@ -12311,11 +12300,11 @@
     }
   })
 
-(pub :: lspFixEntryFind (-> (Vec Int) String Int))
+(pub :: lspFixEntryFind (-> LspBuckets String Int))
 (pub fn (lspFixEntryFind idx name)
   {
-    (let bucket (vecGetVec idx (lspViewIdxSlot name)))
-    (if (== (as bucket Int) 0)
+    (let bucket (vecGet idx (lspViewIdxSlot name)))
+    (if (lspBucketMissing bucket)
       0
       {
         (let n (vecLen bucket))
@@ -17074,34 +17063,22 @@
 ; ------------------------------------------------------------------
 ; The indexes, each `fnIdxBuckets` slots of 0 or a Vec.
 ; ------------------------------------------------------------------
-(pub :: lspHlBuckets (-> Int (Vec Int)))
+(pub :: lspHlBuckets (-> Int LspBuckets))
 (pub fn (lspHlBuckets count)
-  {
-    (let nb (fnIdxBuckets count))
-    (let bs vecNew)
-    (let mut i 0)
-    {
-      (while (< i nb)
-        {
-          (vecPush bs 0)
-          (set i (+ i 1))
-        })
-      bs
-    }
-  })
+  (lspBucketsNew (fnIdxBuckets count)))
 
-(pub :: lspHlBucketPut (-> (Vec Int) Int Int Int))
+(pub :: lspHlBucketPut (-> LspBuckets Int Int Int))
 (pub fn (lspHlBucketPut bs slot v)
   {
-    (if (== (vecGet bs slot) 0)
-      (vecSet bs slot (as vecNew Int)))
-    (vecPush (vecGetVec bs slot) v)
+    (if (lspBucketMissing (vecGet bs slot))
+      (vecSet bs slot vecNew))
+    (vecPush (vecGet bs slot) v)
     0
   })
 
 ; Occurrences by the byte their span starts at. Spans never overlap,
 ; so a start names one occurrence.
-(pub :: lspHlOccIndex (-> (Vec Int) (Vec Int)))
+(pub :: lspHlOccIndex (-> (Vec Int) LspBuckets))
 (pub fn (lspHlOccIndex occs)
   {
     (let bs (lspHlBuckets (vecLen occs)))
@@ -17128,13 +17105,13 @@
   (if (== (memGetWord st 11) 0)
     0
     {
-      (let bs (memGetWordVec st 11))
+      (let bs (:: (memGetWordVec st 11) LspBuckets))
       {
         (let slot (vecGet bs (% off (vecLen bs))))
-        (if (== slot 0)
+        (if (lspBucketMissing slot)
           0
           {
-            (let v (vecGetVec bs (% off (vecLen bs))))
+            (let v (vecGet bs (% off (vecLen bs))))
             (let mut i 0)
             (let mut found 0)
             {
@@ -17155,7 +17132,7 @@
 ; Binder occurrences by their key, so a READ of a local learns what
 ; kind of binder it refers to - the walk records the kind on the
 ; binder alone - without `lspNavBinderOf`'s scan per reference.
-(pub :: lspHlBinderIndex (-> (Vec Int) (Vec Int)))
+(pub :: lspHlBinderIndex (-> (Vec Int) LspBuckets))
 (pub fn (lspHlBinderIndex occs)
   {
     (let bs (lspHlBuckets (vecLen occs)))
@@ -17182,13 +17159,13 @@
   (if (== (memGetWord st 12) 0)
     0
     {
-      (let bs (memGetWordVec st 12))
+      (let bs (:: (memGetWordVec st 12) LspBuckets))
       {
         (let slot (vecGet bs (% (fnIdxHash key) (vecLen bs))))
-        (if (== slot 0)
+        (if (lspBucketMissing slot)
           0
           {
-            (let v (vecGetVec bs (% (fnIdxHash key) (vecLen bs))))
+            (let v (vecGet bs (% (fnIdxHash key) (vecLen bs))))
             (let mut i 0)
             (let mut found 0)
             {
@@ -17212,7 +17189,7 @@
 ; name - so a top-level key learns whether it is a `fn`, a type or a
 ; macro in one bucket rather than one walk of the declaration list
 ; per identifier.
-(pub :: lspHlKinds (-> (Vec Int) (Vec Int)))
+(pub :: lspHlKinds (-> (Vec Int) LspBuckets))
 (pub fn (lspHlKinds decls)
   {
     (let idx lspViewIdxNew)

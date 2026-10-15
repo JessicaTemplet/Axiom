@@ -40,6 +40,10 @@ counted environments.
 
 <!-- release-notes: end of highlights -->
 
+- Semantic highlighting retains its index buckets through typed containers.
+  Type aliases, named struct construction and field reads work after edits.
+  Tested by `tests/lsp/semantic-token-updates.py`.
+
 - Dead-code elimination follows live references through private global
   initialisers, removing unused function descriptors and callbacks.
   Thread backtraces reference an entry point only when it survives pruning.
