@@ -1106,6 +1106,37 @@
       out
     }))
 
+;; Run `worker start end` on contiguous half-open ranges covering
+;; `0 .. count`. `grain` is the maximum items per range, clamped to one.
+;; Each range runs in a fresh child and answers one `Result` in range
+;; order. Captures are isolated between ranges; work inside one range
+;; shares that child's state. All options and budgets apply per range.
+(pub :: taskMapRanges (-> (-> Int Int String) Int Int TaskOpts (Vec (Result String Error))))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (taskMapRanges worker count grain opts)
+  (if (<= count 0)
+    vecNew
+    (let ((size
+      (if (< grain 1)
+        1
+        grain)))
+      (taskMapWith
+        (lambda (i)
+          (let ((start (* i size)))
+            (let ((remaining (- count start)))
+              (worker
+                start
+                (+
+                  start
+                  (if (< remaining size)
+                    remaining
+                    size)))))
+        )
+        (+ 1 (/ (- count 1) size))
+        opts))))
+
 ;; Decode each successful answer in the parent, in submit order. Task
 ;; failures pass through unchanged and never call `decode`. The encoded
 ;; answers keep `taskMap`'s byte limit; decoded storage is the decoder's

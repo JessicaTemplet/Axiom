@@ -235,6 +235,45 @@ for low in ("processes", "threads"):
         print("  %-10d %-16s %-16s %-16s %-16s" % tuple([k] + cells))
 PY
 
+# ---- explicit task grain --------------------------------------------------
+# N items each hash I distinct inputs. Grain 1 uses one fresh process
+# per item; larger grains keep the same work and bounded width while
+# reducing process starts. No timing threshold: report this host's result.
+N_RANGES="${N_RANGES:-1024}"
+I_RANGES="${I_RANGES:-65536}"
+want="$("$work/cb-processes" work "$((N_RANGES * I_RANGES))" | awk '{print $2}')"
+spec="$work/ranges.spec"
+: > "$spec"
+for lowering in processes threads; do
+  b="$work/cb-$lowering"
+  printf 'nop-%s\t\t%s nop\n' "$lowering" "$b" >> "$spec"
+  printf 'seq-%s\twork %s [0-9]+\t%s work %s\n' "$lowering" "$want" "$b" "$((N_RANGES * I_RANGES))" >> "$spec"
+  for grain in 1 16 64; do
+    printf 'grain%s-%s\tranges %s [0-9]+\t%s ranges %s %s 8 %s\n' "$grain" "$lowering" "$want" "$b" "$N_RANGES" "$grain" "$I_RANGES" >> "$spec"
+  done
+done
+echo
+echo "== explicit task grain: $N_RANGES items, $I_RANGES hash inputs each, width 8 =="
+python3 "$bench" --reps "$REPS2" "$spec" > "$work/ranges.tsv" || exit 1
+python3 - "$work/ranges.tsv" "$REPS2" "$N_RANGES" <<'PYRANGES'
+import sys
+rows = {f[0]: list(map(float, f[1:3])) + f[3:] for f in
+        (line.rstrip("\n").split("\t") for line in open(sys.argv[1]))}
+print("%s interleaved runs, whole-process startup subtracted; best (median)" % sys.argv[2])
+print("  build       grain   processes   milliseconds       vs sequential     vs grain 1")
+for low in ("processes", "threads"):
+    startup = rows["nop-" + low]
+    seq = [max(1e-9, a - b) for a, b in zip(rows["seq-" + low][:2], startup[:2])]
+    one = [max(1e-9, a - b) for a, b in zip(rows["grain1-" + low][:2], startup[:2])]
+    for grain in (1, 16, 64):
+        r = rows["grain%d-%s" % (grain, low)]
+        elapsed = [max(1e-9, a - b) for a, b in zip(r[:2], startup[:2])]
+        count = (int(sys.argv[3]) + grain - 1) // grain
+        print("  %-11s %-7d %-11d %6.2f (%6.2f)   %5.2fx (%5.2fx)   %5.2fx (%5.2fx)" %
+              (low, grain, count, elapsed[0] * 1000, elapsed[1] * 1000,
+               seq[0] / elapsed[0], seq[1] / elapsed[1], one[0] / elapsed[0], one[1] / elapsed[1]))
+PYRANGES
+
 # ---- latency --------------------------------------------------------------
 # A pool of one task, and a word handed to a sibling binding and back on
 # two channels, each timed alone. REPS2 runs of N; each percentile is

@@ -1,0 +1,112 @@
+; Range jobs preserve the canonical Task pool's budgets and shutdown.
+(import IO)
+(import Fmt)
+(import Vec)
+(import Str)
+(import Err)
+(import Mem)
+(import Sys)
+(import Task)
+
+(:: showResults (-> String (Vec (Result String Error)) Int))
+;@axiom:effect(io)
+(fn (showResults label rs)
+  {
+    (for i in 0..(vecLen rs)
+      (match (vecGet rs i)
+        ((Ok s) (println (concat label (concat " ok " s))))
+        ((Err e) (println (concat label (concat " err " (fmtInt e.code)))))))
+    0
+  })
+
+(:: brokenRange (-> Int Int String))
+(fn (brokenRange start end)
+  (if (== start 3)
+    (fmtInt (/ 7 (- start start)))
+    (fmtInt end)))
+
+(:: alwaysBroken (-> Int Int String))
+(fn (alwaysBroken start end)
+  (fmtInt (/ 7 (- start start))))
+
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  {
+    (showResults "limit" (taskMapRanges (lambda (start end) "long") 7 3 (taskOpts 2 1)))
+    (showResults
+      "trap"
+      (taskMapRanges (lambda (start end) (brokenRange start end)) 8 3 (taskOpts 2 32)))
+    (showResults
+      "fail"
+      (taskMapRanges
+        (lambda (start end) (alwaysBroken start end))
+        10
+        2
+        (taskWithFailFast (taskOpts 1 32) true)))
+    (showResults
+      "keep"
+      (taskMapRanges (lambda (start end) "123456") 10 2 (taskWithKeep (taskOpts 1 8) 10)))
+    (showResults
+      "slab"
+      (taskMapRanges
+        (lambda (start end) (alwaysBroken start end))
+        4
+        2
+        (taskOpts 2 9223372036854775807)))
+    (showResults
+      "memory"
+      (taskMapRanges
+        (lambda (start end)
+          (fmtInt
+            (strLen
+              (strAlloc
+                (if (== start 0)
+                  1048576
+                  67108864))))
+        )
+        4
+        2
+        (taskWithMemory (taskOpts 2 32) 16777216)))
+    (match taskTokenNew
+      ((Err e) (println "token failed"))
+      ((Ok tok)
+        {
+          (taskCancel tok)
+          (showResults
+            "cancel"
+            (taskMapRanges
+              (lambda (start end) (alwaysBroken start end))
+              9
+              4
+              (taskWithToken (taskOpts 2 32) tok)))
+        }
+      ))
+    (match (sysMapShared 4096)
+      ((Err e) (println "pid page failed"))
+      ((Ok page)
+        {
+          (showResults
+            "deadline"
+            (taskMapRanges
+              (lambda (start end)
+                {
+                  (memSetWord page (/ start 2) sysPid)
+                  (while true
+                    ())
+                  "unreachable"
+                }
+              )
+              6
+              2
+              (taskWithDeadline (taskOpts 2 32) 200000000)))
+          (for i in 0..3
+            (match (sysKill (memGetWord page i) 0)
+              ((Ok n) (println "child alive"))
+              ((Err e) (println "child reaped"))))
+          (sysUnmapShared page 4096)
+        }
+      ))
+    0
+  })

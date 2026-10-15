@@ -2200,7 +2200,7 @@ target being compiled for (this one is `darwin`).
 
 ## `Task`
 
-`stdlib/Task.ax` — 28 public names
+`stdlib/Task.ax` — 29 public names
 
 Structured tasks with typed results across the process boundary
 (R-C2, docs/memory-model.md MM-PAR-13).
@@ -2227,6 +2227,7 @@ Structured tasks with typed results across the process boundary
 | `taskCancelled` | value | `(-> CancelToken Bool)` |  |  | Whether the token is set: the poll a cooperative task makes. |
 | `taskMap` | value | `(-> (-> Int String) Int Int Int (Vec (Result String Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | `f i` for every `i` in `0 .. n`, at most `width` at once, each answer at most `limit` bytes: one `Result` per task in submit order. No deadline, no fail-fast, a private token. |
 | `taskMapWith` | value | `(-> (-> Int String) Int TaskOpts (Vec (Result String Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | `taskMap` with every option (`TaskOpts`). |
+| `taskMapRanges` | value | `(-> (-> Int Int String) Int Int TaskOpts (Vec (Result String Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | Run `worker start end` on contiguous half-open ranges covering `0 .. count`. `grain` is the maximum items per range, clamped to one. Each range runs in a fresh child and answers one `Result` in range order. Captures are isolated between ranges; work inside one range shares that child's state. All options and budgets apply per range. |
 | `taskMapDecoded` | value | `(-> (-> Int String) (-> String (Result a Error)) Int Int Int (Vec (Result a Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | Decode each successful answer in the parent, in submit order. Task failures pass through unchanged and never call `decode`. The encoded answers keep `taskMap`'s byte limit; decoded storage is the decoder's responsibility and the result vector holds n values. |
 | `taskMapDecodedWith` | value | `(-> (-> Int String) (-> String (Result a Error)) Int TaskOpts (Vec (Result a Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | All task options, with parent-side decoding. Decoder errors belong to their result slots; `failFast` concerns worker failures, not decoding. Delivery calls `decode` before starting more work, so a slow decoder can delay submission and deadline/cancellation handling. |
 | `taskFold` | value | `(-> (-> Int String) Int TaskOpts Int (-> Int Int (Result String Error) Int) Int)` | `Alloc,Block,IO,Mut,Spawn` |  | Fold the answers in submit order without keeping them: `step acc i r` for each task, starting from `init`, answering the last `acc`. Each answer and everything the step allocates are reclaimed on return. A retained mark cell is refreshed before delivery, then reset after it. The pool's state and the accumulator were allocated before that mark. |

@@ -369,6 +369,35 @@
 (fn (poolWork parts w)
   (vecSum (taskMapWords (lambda (k) (part 0 w parts k)) parts parts)))
 
+; Explicit range grain: n items, each of terms hash inputs. Every
+; variant sums the same n * terms inputs and verifies against `work`.
+(:: rangeWork (-> Int Int Int Int Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (rangeWork n grain width terms)
+  (let (
+    (answers (taskMapRanges
+               (lambda (start end) (fmtInt (workRange (* start terms) (* end terms))))
+               n
+               grain
+               (taskOpts width 32)))
+    (mut sum 0)
+  )
+    {
+      (for i in 0..(vecLen answers)
+        (match (vecGet answers i)
+          ((Err e) (sysExitWith 1))
+          ((Ok s)
+            (match (strParseInt s)
+              ((None) (sysExitWith 1))
+              ((Some n)
+                (set sum (+ sum n))
+              ))
+          )))
+      sum
+    }))
+
 ; R forms of K bindings, binding k of round r summing the W terms from
 ; (r * K + k) * W: the same terms `grainSeq` sums in one loop, so the
 ; two answer the same sum and no round repeats another's work.
@@ -551,31 +580,34 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (moreModes buf mode)
-  (if (strEq mode "nop")
-    0
-    (if (strEq mode "work")
-      (let ((t0 (sysTimeoutMicros buf)))
-        (timed "work" buf t0 (workRange 0 (argInt 2))))
-      (if (strEq mode "bind")
+  (if (strEq mode "ranges")
+    (let ((t0 (sysTimeoutMicros buf)))
+      (timed "ranges" buf t0 (rangeWork (argInt 2) (argInt 3) (argInt 4) (argInt 5))))
+    (if (strEq mode "nop")
+      0
+      (if (strEq mode "work")
         (let ((t0 (sysTimeoutMicros buf)))
-          (timed "bind" buf t0 (bindWork (argInt 2) 0 (argInt 3))))
-        (if (strEq mode "pool")
+          (timed "work" buf t0 (workRange 0 (argInt 2))))
+        (if (strEq mode "bind")
           (let ((t0 (sysTimeoutMicros buf)))
-            (timed "pool" buf t0 (poolWork (argInt 2) (argInt 3))))
-          (if (strEq mode "grain")
+            (timed "bind" buf t0 (bindWork (argInt 2) 0 (argInt 3))))
+          (if (strEq mode "pool")
             (let ((t0 (sysTimeoutMicros buf)))
-              (timed "grain" buf t0 (grainPar (argInt 2) (argInt 3) (argInt 4))))
-            (if (strEq mode "grainseq")
+              (timed "pool" buf t0 (poolWork (argInt 2) (argInt 3))))
+            (if (strEq mode "grain")
               (let ((t0 (sysTimeoutMicros buf)))
-                (timed "grainseq" buf t0 (grainSeq (argInt 2) (argInt 3) (argInt 4))))
-              (if (strEq mode "fshare")
-                (fshareRun buf (argInt 2) (argInt 3) (argInt 4))
-                (if (strEq mode "pingpong")
-                  (pingpongRun (argInt 2))
-                  {
-                    (println "usage: conc-bench spawn N | tasks N W B | mutex N K | chan N | chan1 N | latency N | nop | work W | bind K W | pool K W | grain K W R | grainseq K W R | fshare K S N | pingpong N")
-                    2
-                  })))))))))
+                (timed "grain" buf t0 (grainPar (argInt 2) (argInt 3) (argInt 4))))
+              (if (strEq mode "grainseq")
+                (let ((t0 (sysTimeoutMicros buf)))
+                  (timed "grainseq" buf t0 (grainSeq (argInt 2) (argInt 3) (argInt 4))))
+                (if (strEq mode "fshare")
+                  (fshareRun buf (argInt 2) (argInt 3) (argInt 4))
+                  (if (strEq mode "pingpong")
+                    (pingpongRun (argInt 2))
+                    {
+                      (println "usage: conc-bench spawn N | tasks N W B | mutex N K | chan N | chan1 N | latency N | nop | work W | bind K W | pool K W | ranges N G W I | grain K W R | grainseq K W R | fshare K S N | pingpong N")
+                      2
+                    }))))))))))
 
 (:: main Int)
 ;@axiom:effect(io)

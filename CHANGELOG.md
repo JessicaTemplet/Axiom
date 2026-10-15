@@ -648,6 +648,12 @@ calling a converted function checks its remaining arguments. Tested by
   and resource budgets retain regression coverage in
   `tests/stdlib/950-task-unified.ax`.
 
+- Added `Task.taskMapRanges` for explicit batches of contiguous work.
+  Each range runs in a fresh isolated child, using the existing ordered
+  pool, cancellation, deadlines and resource budgets. Range arithmetic
+  avoids overflow. Tested by `tests/stdlib/951-task-ranges.ax` and
+  `tests/stdlib/952-task-ranges-lifecycle.ax`.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

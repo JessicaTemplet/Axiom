@@ -136,6 +136,7 @@ ADT instantiation.
 | Channels, mutexes and cancel tokens are owners, so disposal can't race a use | Done | `MM-PAR-15`, `MM-PAR-16`, `tests/stdlib/803-shared-owner.ax` |
 | Typed promotion of owned task inputs and results across joins, with cleanup on cancellation and failure | In progress | `MM-PAR-6`, `MM-RGN-7` |
 | Task slab sizes are checked before mapping or spawning; indices cross without overflow-prone packing | Done | `tests/stdlib/941-task-index-and-size.ax` |
+| Explicit task grain with bounded range jobs, ordered answers and per-range budgets | Done | `tests/stdlib/951-task-ranges.ax`, `tests/stdlib/952-task-ranges-lifecycle.ax` |
 | Scale multicore work with bounded worker reuse and scheduling, preserving isolation, submit order and cancellation | Planned | `MM-PAR-3`, `MM-PAR-5`, `MM-PAR-17` |
 | A `parallel` form keeps no arena storage once it returns, in both lowerings | Done | `tests/litmus/par-forms.ax`, `scripts/check-parallel.sh` |
 | Fixed worker, queue, memory and stack budgets, with exhaustion and shutdown tests | Done | `MM-PAR-17`, `tests/stdlib/920-task-stack.ax` |

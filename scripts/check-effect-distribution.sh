@@ -129,6 +129,8 @@ have "$(grep -c '#effect-params' "$work/main.axsym" || true)" 11 "effect-params 
 echo
 # Par -> Task shares the handle helpers: one Unsafe and two pure rows
 # disappear; every remaining migrated function keeps its measured effects.
+# Explicit range batching adds one Alloc,Block,IO,Mut,Spawn row and one
+# callback effect-parameter row; it delegates to the existing Task pool.
 echo "== stdlib view: one probe importing every module =="
 : > "$work/modfiles"
 for f in stdlib/*.ax stdlib/*/*.ax; do
@@ -170,7 +172,7 @@ have "$(bucket "$work/lib.axsym" 'Alloc,IO,Mut,Spawn,Unsafe')" 3 "Alloc,IO,Mut,S
 have "$(bucket "$work/lib.axsym" 'Alloc,Block,IO,Mut')" 25 "Alloc,Block,IO,Mut"
 have "$(bucket "$work/lib.axsym" 'Alloc,Block,IO,Unsafe')" 0 "Alloc,Block,IO,Unsafe"
 have "$(bucket "$work/lib.axsym" 'Block,IO,Mut,Unsafe')" 0 "Block,IO,Mut,Unsafe"
-have "$(bucket "$work/lib.axsym" 'Alloc,Block,IO,Mut,Spawn')" 15 "Alloc,Block,IO,Mut,Spawn"
+have "$(bucket "$work/lib.axsym" 'Alloc,Block,IO,Mut,Spawn')" 16 "Alloc,Block,IO,Mut,Spawn"
 have "$(bucket "$work/lib.axsym" 'Alloc,Block,IO,Mut,Spawn,Unsafe')" 2 "Alloc,Block,IO,Mut,Spawn,Unsafe"
 have "$(bucket "$work/lib.axsym" 'Fallible')" 1 "exactly Fallible"
 have "$(bucket "$work/lib.axsym" 'Assert')" 1 "exactly Assert"
@@ -191,7 +193,7 @@ have "$(bucket "$work/lib.axsym" 'Block,IO,Mut')" 1 "Block,IO,Mut"
 have "$(grep '^F ' "$work/lib.axsym" | grep -vc '#effects=\|#effects-incomplete' || true)" 1084 "pure (neither row nor mark)"
 have "$(grep '^F ' "$work/lib.axsym" | grep -o '#effects=[^ #]*' | LC_ALL=C sort -u | wc -l | tr -d ' ')" 37 "distinct stdlib effect rows"
 have "$(grep -c '#effects-incomplete' "$work/lib.axsym" || true)" 17 "incomplete rows"
-have "$(grep -c '#effect-params' "$work/lib.axsym" || true)" 57 "effect-params rows"
+have "$(grep -c '#effect-params' "$work/lib.axsym" || true)" 58 "effect-params rows"
 
 echo
 echo "== the pins refuse doctored counts =="

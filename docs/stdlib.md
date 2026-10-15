@@ -636,6 +636,55 @@ Decoder errors stay in their result slots; `failFast` applies to worker
 failures. A slow decoder can delay submission and deadline handling.
 Tested by `tests/stdlib/704-task-decoded.ax`.
 
+Group small jobs into explicit ranges to reduce process starts:
+
+```scheme
+(import IO)
+(import Fmt)
+(import Vec)
+(import Task)
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  (let ((rs (taskMapRanges
+              (lambda (start end) (fmtInt (- end start)))
+              10
+              4
+              (taskOpts 2 8))))
+    {
+      (for i in 0..(vecLen rs)
+        (match (vecGet rs i)
+          ((Ok answer) (println answer))
+          ((Err error) (println error.code))))
+      0
+    }))
+```
+
+```text
+4
+4
+2
+```
+
+`taskMapRanges worker count grain opts` covers `0 .. count` once, in
+contiguous half-open ranges of at most `grain` items. A non-positive
+count starts nothing; a grain below one becomes one. Width bounds
+concurrent ranges. Every range runs in a fresh process; work inside
+that range shares its child's state. Results stay in range order.
+
+The callback answers one `String` per range. Deadlines, stack and memory
+budgets apply to a whole range, and `limit` bounds its answer bytes.
+A trapped range answers one `Err`. Choose grain with those costs and
+failure boundaries in mind. The range arithmetic accepts the largest
+positive `Int` without wrapping. Tested by `tests/stdlib/951-task-ranges.ax`
+and `tests/stdlib/952-task-ranges-lifecycle.ax`.
+
+For Float reductions, keep the arithmetic grouping fixed: changing grain
+can change rounding.
+
 `taskMapWords` runs word workers and raises the lowest failing index's
 status. `taskMapWordsChecked` returns every failure in its own `Result`
 slot. Both accept a count and a width, and fork each invocation with its

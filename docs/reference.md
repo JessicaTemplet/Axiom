@@ -1805,6 +1805,11 @@ Width is clamped to the input count, with a minimum of one for non-empty
 inputs. A slab size that exceeds the `Int` range returns `Err` 22 before
 mapping the answer slab or starting tasks.
 
+Use `taskMapRanges worker count grain opts` for small jobs that benefit
+from sharing a process start. `worker` receives the start and exclusive
+end of a contiguous range, at most `grain` items. Each range runs in a
+fresh child and returns one result. Options and budgets apply per range.
+
 `taskMapWords` returns word results, while `taskMapWordsChecked`
 returns a `Result` for each word. `taskRunCommand` runs one argument
 vector; `taskRunCommands` runs a bounded command pool. The
