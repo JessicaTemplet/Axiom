@@ -117,32 +117,23 @@
 ;@axiom:effect(io)
 (pub fn (mkKeyIn in active)
   (if (== active 0)
-    (KeyIn
-      in
-      (readBufferNew 1)
-      ""
-      0
-      0
-      None
-      None
-      0
-      0
-      0)
+    (KeyIn in (readBufferNew 1) "" 0 0 None None 0 0 0)
     (KeyIn
       in
       (readBufferNew termBufBytes)
       ""
       0
       0
-      ; A poller that cannot be made, or cannot watch `in`, is `None`:
-      ; the fill below then blocks on the read, which is the degraded
-      ; path it already takes for a refused wait.
       (match (pollerNew 4)
+        ; A poller that cannot be made, or cannot watch `in`, is `None`:
+        ; the fill below then blocks on the read, which is the degraded
+        ; path it already takes for a refused wait.
         ((Err e) None)
         ((Ok p)
           (match (pollerAdd p in 0)
             ((Err e) None)
-            ((Ok _) (Some p)))))
+            ((Ok _) (Some p)))
+        ))
       None
       0
       0
@@ -178,13 +169,14 @@
       (- 0 1)
       (if (>= pending (readBufferLen kin.rb))
         (- 0 2)
-        (let ((ready
+        (let ((ready 
           (if (>= timeoutMs 0)
             (match kin.poller
               ((Some p)
                 (match (pollerWait p timeoutMs)
                   ((Ok k) k)
-                  ((Err e) (- 0 (errCode e)))))
+                  ((Err e) (- 0 (errCode e))))
+              )
               ((None) 1))
             1)))
           (if (== ready 0)
@@ -202,7 +194,9 @@
                   ; The undecoded tail of the old view, then the new
                   ; bytes: one copy of what arrived, as the old
                   ; compaction moved it.
-                  (set kin.view (concat (strSlice kin.view kin.pos pending) (readBufferText kin.rb 0 n)))
+                  (set kin.view (concat
+                                  (strSlice kin.view kin.pos pending)
+                                  (readBufferText kin.rb 0 n)))
                   (set kin.len (+ pending n))
                   (set kin.pos 0)
                   n
@@ -287,13 +281,15 @@
         (set kin.rows sz.rows)
         (set kin.cols sz.cols)
         0
-      })
+      }
+    )
     ((Err _)
       {
         (set kin.rows 0)
         (set kin.cols 0)
         0
-      })))
+      }
+    )))
 
 ;; Columns, or 80. A pty that has never been sized answers 0 with a
 ;; successful ioctl, so the fallback is on the value and not only on
@@ -325,7 +321,8 @@
       {
         (set kin.guard (Some g))
         0
-      })
+      }
+    )
     ((Err e) (- 0 e.code))))
 
 ;; Leave raw mode, restoring what `termRawEnter` saved. 0, or the
@@ -342,7 +339,8 @@
         (match (termRestore g)
           ((Ok _) 0)
           ((Err e) (- 0 e.code)))
-      })
+      }
+    )
     ((None) 0)))
 
 ; ------------------------------------------------------------------
@@ -399,9 +397,7 @@
       (while (== state 0)
         (let ((ev (keyNext kin)))
           (if (== ev.kind KEY_EOF)
-            {
-              (set state 2)
-            }
+            (set state 2)
             (if (! (== ev.kind KEY_NONE))
               (let ((d (ledApply ed ev out)))
                 (if (== d LED_DONE)
@@ -412,9 +408,7 @@
                     (set state 1)
                   }
                   (if (== d LED_EOF)
-                    {
-                      (set state 2)
-                    }
+                    (set state 2)
                     (if (== d LED_ABORT)
                       ; `^C` then a fresh line. `replMain` already
                       ; treats an empty line as a no-op, and as the

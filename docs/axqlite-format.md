@@ -21,13 +21,21 @@ This program makes a new database and asks how many pages it has:
 ;@axiom:effect(io)
 (fn (main)
   (match (pagerOpen "notes.db" true false 64)
-    ((Err e) { (println (errorText e)) 1 })
+    ((Err e)
+      {
+        (println (errorText e))
+        1
+      }
+    )
     ((Ok p)
-      (let ((pages (unwrapOr (andThen (pagerBeginRead p) (lambda (_) (pagerPageCount p))) 0)))
+      (let ((pages 
+        (unwrapOr (andThen (pagerBeginRead p) (lambda (_) (pagerPageCount p))) 0)))
         {
           (println "{pages} pages")
-          (let ((_ (pagerClose p))) 0)
-        }))))
+          (let ((_ (pagerClose p)))
+            0)
+        })
+    )))
 ```
 
 ```text

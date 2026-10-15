@@ -13,7 +13,7 @@ p = sys.argv[1]
 s = open(p).read()
 # The anchor follows the formatter's layout of the arm. If the formatter
 # moves it, re-derive the anchor from self_host/typecheck.ax.
-old = '        {\n          (setNodeBinderTy\n            arg\n            (cast Int ""))\n          0\n        }'
+old = '        {\n          (setNodeBinderTy arg (cast Int ""))\n          0\n        }'
 new = '        {\n          (setNodeBinderTy\n            arg\n            now)\n          0\n        }'
 if s.count(old) != 1:
     sys.stderr.write("the poison arm is not where this expects it (%d matches)\n" % s.count(old))

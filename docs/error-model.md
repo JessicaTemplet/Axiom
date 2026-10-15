@@ -236,9 +236,12 @@ conversion between error types is explicit.**
 
 ```scheme
 (pub struct Error
-  (code : Int)          ; a stable AXERR number, never reused
-  (message : String)    ; what happened, no trailing punctuation
-  (context : String))   ; what the caller was doing, "" when none
+  (code : Int)
+  (message : String)
+  (context : String))
+; a stable AXERR number, never reused
+; what happened, no trailing punctuation
+; what the caller was doing, "" when none
 ```
 
 `code` holds an errno when the kernel refused a call, and one of the
@@ -273,17 +276,24 @@ caller supplies, and nothing searches for one:
 (fn (mapErrWith c r)
   (match r
     ((Ok x) (Ok x))
-    ((Err y) (Err ((c.convert) y)))))       ; dispatch is application
+    ((Err y) (Err (c.convert y)))))
 
+; dispatch is application
 (:: errOfInt (-> Int Error))
-(fn (errOfInt n) (mkError n "low-level failure"))
+(fn (errOfInt n)
+  (mkError n "low-level failure"))
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
   (match (mapErrWith (ConvertOf errOfInt) (Err 5))
     ((Ok x) x)
-    ((Err e) { (println (errorText e)) (errCode e) })))
+    ((Err e)
+      {
+        (println (errorText e))
+        (errCode e)
+      }
+    )))
 ```
 
 It prints this and exits with status 5, the error's code:
@@ -322,7 +332,12 @@ is gone:
 (fn (main)
   (match (reContext (divChecked 10 0) "splitting the bill")
     ((Ok n) n)
-    ((Err e) { (println (errorText e)) 1 })))
+    ((Err e)
+      {
+        (println (errorText e))
+        1
+      }
+    )))
 ```
 
 It prints this and exits with status 1:
@@ -436,10 +451,10 @@ an arm, so the compiler turns the function into a loop:
 ```scheme
 (fn (total n acc)
   (if (== n 0)
-      (Ok acc)
-      (match (step n)
-        ((Err e) (Err e))
-        ((Ok v) (total (- n 1) (+ acc v))))))
+    (Ok acc)
+    (match (step n)
+      ((Err e) (Err e))
+      ((Ok v) (total (- n 1) (+ acc v))))))
 ```
 
 And the unsafe one. The `match` waits on the self call, so it isn't a
@@ -449,10 +464,10 @@ stack frame:
 ```scheme
 (fn (total n acc)
   (if (== n 0)
-      (Ok acc)
-      (match (total (- n 1) (+ acc 1))
-        ((Err e) (Err e))
-        ((Ok x) (Ok x)))))
+    (Ok acc)
+    (match (total (- n 1) (+ acc 1))
+      ((Err e) (Err e))
+      ((Ok x) (Ok x)))))
 ```
 
 At the default `--opt 1` with an 8 MiB stack, the unsafe shape costs
@@ -577,10 +592,14 @@ call answering a `Result` allocates one block. It is released after the
 `match`, whether you match the call directly or bind it first:
 
 ```scheme
-(match (step i) ((Ok v) v) ((Err e) 0))
+(match (step i)
+  ((Ok v) v)
+  ((Err e) 0))
 
 (let ((r (step i)))
-  (match r ((Ok v) v) ((Err e) 0)))
+  (match r
+    ((Ok v) v)
+    ((Err e) 0)))
 ```
 
 A `match` scrutinee is released after the merge only when no arm's
@@ -819,10 +838,8 @@ fd 2 and exiting:
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((status
-    (__axiom_recover
-      __axiom_arena_mark
-      (lambda (x) (divide 10 0)))))
+  (let ((status 
+    (__axiom_recover __axiom_arena_mark (lambda (x) (divide 10 0)))))
     {
       (println "recovered {status}")
       (divide 10 0)
@@ -999,8 +1016,16 @@ the record nothing.**
 ;@axiom:effect(io)
 (fn (main)
   {
-    (println (cast Int (handle (total 20) (Fallible) fallibleSkip)))
-    (println (cast Int (handle (total 20) (Fallible) (fallibleDefault 100))))
+    (println
+      (cast Int (handle
+        (total 20)
+        (Fallible)
+        fallibleSkip)))
+    (println
+      (cast Int (handle
+        (total 20)
+        (Fallible)
+        (fallibleDefault 100))))
   })
 ```
 
@@ -1336,8 +1361,10 @@ function or lambda answers that `Err` unchanged, and nothing after the
 
 (:: halveTwice (-> Int (Result Int Error)))
 (fn (halveTwice n)
-  (let ((a (divChecked n 2)?)
-        (b (divChecked a 2)?))
+  (let (
+    (a (divChecked n 2)?)
+    (b (divChecked a 2)?)
+  )
     (Ok b)))
 
 (:: main Int)
@@ -1404,8 +1431,12 @@ reads through the *same* parameter worked, because both of the
 template's `x`s resolved to the gensym:
 
 ```scheme
-(macro (bindSelf! x e) (let ((x e)) x))
-(fn (main) (bindSelf! v 42))     ; exits 42
+(macro (bindSelf! x e) (let ((x e))
+  x))
+
+(fn (main)
+  (bindSelf! v 42))
+; exits 42
 ```
 
 That right answer for the wrong reason kept the defect hidden. It
@@ -2206,10 +2237,11 @@ before it crosses a boundary:
 (:: parseAll (-> Int Int (Result Int Error)))
 (fn (parseAll toks acc)
   (if (== (vecLen toks) 0)
-      (Ok acc)
-      (let ((v (parseOne (vecGet toks 0))?))
-        (parseAll (vecTail toks) (+ acc v)))))   ; ERR-PROP-3: the arm
+    (Ok acc)
+    (let ((v (parseOne (vecGet toks 0))?))
+      (parseAll (vecTail toks) (+ acc v)))))
 
+; ERR-PROP-3: the arm
 ; The caller says what it was doing. `withContext` takes the whole
 ; `Result`, not the error, so nothing here reads an `Err` binder's
 ; fields, which the retired ERR-TYPE-3a once forbade.

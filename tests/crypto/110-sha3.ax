@@ -45,12 +45,17 @@
 ; throwaway message, whose final resets it.
 (:: streamOf (-> Int String Int Bool String))
 (fn (streamOf alg msg c viaAddr)
-  (let ((h (newOf alg)) (n (strLen msg)) (p (strData msg)) (mut off 0))
+  (let (
+    (h (newOf alg))
+    (n (strLen msg))
+    (p (strData msg))
+    (mut off 0)
+  )
     {
       (sha3Update h "throwaway")
       (sha3Final h)
       (while (< off n)
-        (let ((k
+        (let ((k 
           (if (< c (- n off))
             c
             (- n off))))
@@ -66,7 +71,10 @@
 ; `msg`'s digest from a copy of a state that absorbed its first half.
 (:: copiedOf (-> Int String String))
 (fn (copiedOf alg msg)
-  (let ((h (newOf alg)) (n (strLen msg)))
+  (let (
+    (h (newOf alg))
+    (n (strLen msg))
+  )
     {
       (sha3Update h (strSlice msg 0 (/ n 2)))
       (let ((g (sha3Copy h)))
@@ -94,7 +102,7 @@
   )
     {
       (while (< off n)
-        (let ((k
+        (let ((k 
           (if (< a (- n off))
             a
             (- n off))))
@@ -109,14 +117,14 @@
             (set off (+ off k))
             (set turn (+ turn 1))
           }))
-      (let ((y128
-        (if fromCopy
+      (let (
+        (y128 (if fromCopy
           (shake128Copy x128)
           x128))
-        (y256
-          (if fromCopy
-            (shake256Copy x256)
-            x256)))
+        (y256 (if fromCopy
+          (shake256Copy x256)
+          x256))
+      )
         {
           (if fromCopy
             {
@@ -126,7 +134,7 @@
             })
           (set off 0)
           (while (< off outLen)
-            (let ((k
+            (let ((k 
               (if (< s (- outLen off))
                 s
                 (- outLen off))))
@@ -149,31 +157,36 @@
 ; `seed`, through the address forms and two buffers.
 (:: monte (-> Int String String))
 (fn (monte alg seed)
-  (let ((d (strLen seed)) (a (bytesFromAddr (strData seed) (strLen seed))) (b (bytesNew (strLen seed))))
-    (let ((pa (strData a)) (pb (strData b)))
+  (let (
+    (d (strLen seed))
+    (a (bytesFromAddr (strData seed) (strLen seed)))
+    (b (bytesNew (strLen seed)))
+  )
+    (let (
+      (pa (strData a))
+      (pb (strData b))
+    )
       {
         (for i in 0..500
-          {
-            (if (== alg 224)
+          (if (== alg 224)
+            {
+              (sha3_224Addr pa d pb)
+              (sha3_224Addr pb d pa)
+            }
+            (if (== alg 256)
               {
-                (sha3_224Addr pa d pb)
-                (sha3_224Addr pb d pa)
+                (sha3_256Addr pa d pb)
+                (sha3_256Addr pb d pa)
               }
-              (if (== alg 256)
+              (if (== alg 384)
                 {
-                  (sha3_256Addr pa d pb)
-                  (sha3_256Addr pb d pa)
+                  (sha3_384Addr pa d pb)
+                  (sha3_384Addr pb d pa)
                 }
-                (if (== alg 384)
-                  {
-                    (sha3_384Addr pa d pb)
-                    (sha3_384Addr pb d pa)
-                  }
-                  {
-                    (sha3_512Addr pa d pb)
-                    (sha3_512Addr pb d pa)
-                  })))
-          })
+                {
+                  (sha3_512Addr pa d pb)
+                  (sha3_512Addr pb d pa)
+                }))))
         a
       })))
 
@@ -182,10 +195,14 @@
 ; before, zero-padded, at a length the one before chose.
 (:: shakeMonte (-> Int Int Int Int String String))
 (fn (shakeMonte alg minLen maxLen outLen0 prev)
-  (let ((m (bytesNew 16)) (mut cur prev) (mut outLen outLen0))
+  (let (
+    (m (bytesNew 16))
+    (mut cur prev)
+    (mut outLen outLen0)
+  )
     {
       (for i in 0..1000
-        (let ((take
+        (let ((take 
           (if (< (strLen cur) 16)
             (strLen cur)
             16)))
@@ -194,7 +211,11 @@
             (ctCopy (strData m) (strData cur) take)
             (set cur (shakeOf alg m outLen))
             (let ((n (strLen cur)))
-              (set outLen (+ minLen (% (| (<< (strByte cur (- n 2)) 8) (strByte cur (- n 1))) (+ (- maxLen minLen) 1)))))
+              (set outLen (+
+                            minLen
+                            (%
+                              (| (<< (strByte cur (- n 2)) 8) (strByte cur (- n 1)))
+                              (+ (- maxLen minLen) 1)))))
           }))
       cur
     }))
@@ -239,58 +260,138 @@
     {
       (for line in (katLines "sha3-cavp-msg.txt")
         (let ((f (katFields line)))
-          (tallyBytes cavp (katBytes f 2) (digestOf (katInt f 0) (katBytes f 1)) (concat "SHA3-" (katText f 0)))))
+          (tallyBytes
+            cavp
+            (katBytes f 2)
+            (digestOf (katInt f 0) (katBytes f 1))
+            (concat "SHA3-" (katText f 0)))))
       (for line in (katLines "sha3-cavp-monte.txt")
         (let ((f (katFields line)))
-          (tallyBytes monteT (katBytes f 2) (monte (katInt f 0) (katBytes f 1)) (concat "SHA3-" (katText f 0)))))
+          (tallyBytes
+            monteT
+            (katBytes f 2)
+            (monte (katInt f 0) (katBytes f 1))
+            (concat "SHA3-" (katText f 0)))))
       (for line in (katLines "shake-cavp-msg.txt")
         (let ((f (katFields line)))
-          (tallyBytes scavp (katBytes f 3) (shakeOf (katInt f 0) (katBytes f 2) (katInt f 1)) (concat "SHAKE" (katText f 0)))))
+          (tallyBytes
+            scavp
+            (katBytes f 3)
+            (shakeOf (katInt f 0) (katBytes f 2) (katInt f 1))
+            (concat "SHAKE" (katText f 0)))))
       (for line in (katLines "shake-cavp-monte.txt")
         (let ((f (katFields line)))
-          (tallyBytes smonte (katBytes f 5) (shakeMonte (katInt f 0) (katInt f 1) (katInt f 2) (katInt f 3) (katBytes f 4)) (concat "SHAKE" (katText f 0)))))
+          (tallyBytes
+            smonte
+            (katBytes f 5)
+            (shakeMonte (katInt f 0) (katInt f 1) (katInt f 2) (katInt f 3) (katBytes f 4))
+            (concat "SHAKE" (katText f 0)))))
       (for line in (katLines "sha3-diff.txt")
         (let ((f (katFields line)))
-          (let ((alg (katInt f 0)) (msg (katBytes f 1)) (md (katBytes f 2)))
+          (let (
+            (alg (katInt f 0))
+            (msg (katBytes f 1))
+            (md (katBytes f 2))
+          )
             {
               (tallyBytes diff md (digestOf alg msg) (concat "SHA3-" (katText f 0)))
               (tallyBytes stream md (streamOf alg msg (+ 1 (% row 173)) false) "pieces")
-              (tallyBytes stream md (streamOf alg msg (+ 1 (% (* row 7) 301)) true) "pieces by address")
+              (tallyBytes
+                stream
+                md
+                (streamOf alg msg (+ 1 (% (* row 7) 301)) true)
+                "pieces by address")
               (tallyBytes stream md (copiedOf alg msg) "copied state")
               (set row (+ row 1))
             })))
       (for line in (katLines "shake-diff.txt")
         (let ((f (katFields line)))
-          (let ((alg (katInt f 0)) (outLen (katInt f 1)) (msg (katBytes f 2)) (out (katBytes f 3)))
+          (let (
+            (alg (katInt f 0))
+            (outLen (katInt f 1))
+            (msg (katBytes f 2))
+            (out (katBytes f 3))
+          )
             {
               (tallyBytes sdiff out (shakeOf alg msg outLen) (concat "SHAKE" (katText f 0)))
-              (tallyBytes xof out (xofOf alg msg outLen (+ 1 (% row 170)) (+ 1 (% (* row 11) 211)) false) "pieces")
-              (tallyBytes xof out (xofOf alg msg outLen (+ 1 (% (* row 5) 400)) (+ 1 (% (* row 3) 17)) true) "copied state")
+              (tallyBytes
+                xof
+                out
+                (xofOf alg msg outLen (+ 1 (% row 170)) (+ 1 (% (* row 11) 211)) false)
+                "pieces")
+              (tallyBytes
+                xof
+                out
+                (xofOf alg msg outLen (+ 1 (% (* row 5) 400)) (+ 1 (% (* row 3) 17)) true)
+                "copied state")
               (set row (+ row 1))
             })))
       ; the permutation, and the refusals
       (tallyCheck api (permutationHolds) "Keccak-f[1600] of the zero state")
-      (tallyCheck api (== (sha3Update (Sha3 "short") "abc") -1) "a SHA-3 blob of the wrong size is refused")
+      (tallyCheck
+        api
+        (== (sha3Update (Sha3 "short") "abc") -1)
+        "a SHA-3 blob of the wrong size is refused")
       (tallyCheck api (strEq (sha3Final (Sha3 "short")) "") "and finishes empty")
-      (tallyCheck api (== (sha3Update (Sha3 (bytesNew 232)) "abc") -1) "a SHA-3 blob with a rate of 0 is refused")
-      (tallyCheck api (== (shake128Absorb (Shake128 (bytesNew 232)) "abc") -1) "a SHAKE128 blob with the wrong rate is refused")
-      (tallyCheck api (strEq (shake256Squeeze (Shake256 (bytesNew 7)) 8) "") "a SHAKE256 blob of the wrong size squeezes nothing")
-      (tallyCheck api (== (shake128Absorb (Shake128 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567") "abc") -1) "a state over a string literal is refused")
-      (tallyCheck api (== (shake128Wipe (Shake128 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567")) -1) "and a wipe writes nothing")
-      (tallyCheck api (== (shake128Absorb (forgedPosition) "abc") -1) "a position past the block is refused")
+      (tallyCheck
+        api
+        (== (sha3Update (Sha3 (bytesNew 232)) "abc") -1)
+        "a SHA-3 blob with a rate of 0 is refused")
+      (tallyCheck
+        api
+        (== (shake128Absorb (Shake128 (bytesNew 232)) "abc") -1)
+        "a SHAKE128 blob with the wrong rate is refused")
+      (tallyCheck
+        api
+        (strEq (shake256Squeeze (Shake256 (bytesNew 7)) 8) "")
+        "a SHAKE256 blob of the wrong size squeezes nothing")
+      (tallyCheck
+        api
+        (==
+          (shake128Absorb
+            (Shake128 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567")
+            "abc")
+          -1)
+        "a state over a string literal is refused")
+      (tallyCheck
+        api
+        (==
+          (shake128Wipe
+            (Shake128 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567"))
+          -1)
+        "and a wipe writes nothing")
+      (tallyCheck
+        api
+        (== (shake128Absorb (forgedPosition) "abc") -1)
+        "a position past the block is refused")
       (tallyCheck api (strEq (shake128Squeeze (forgedPosition) 4) "") "and squeezes nothing")
-      (tallyCheck api (== (shake256Absorb (Shake256 sha3_256New.state) "abc") 0) "a SHA3-256 blob has SHAKE256's rate and is accepted")
+      (tallyCheck
+        api
+        (== (shake256Absorb (Shake256 sha3_256New.state) "abc") 0)
+        "a SHA3-256 blob has SHAKE256's rate and is accepted")
       (let ((x shake128New))
         {
           (shake128Absorb x "abc")
           (let ((first (shake128Squeeze x 10)))
             {
-              (tallyCheck api (== (shake128Absorb x "more") -1) "absorbing after a squeeze is refused")
-              (tallyCheck api (strEq (shake128Squeeze x -1) "") "a negative squeeze answers nothing")
-              (tallyCheck api (strEq (concat first (shake128Squeeze x 6)) (shake128 "abc" 16)) "the refusals changed nothing")
+              (tallyCheck
+                api
+                (== (shake128Absorb x "more") -1)
+                "absorbing after a squeeze is refused")
+              (tallyCheck
+                api
+                (strEq (shake128Squeeze x -1) "")
+                "a negative squeeze answers nothing")
+              (tallyCheck
+                api
+                (strEq (concat first (shake128Squeeze x 6)) (shake128 "abc" 16))
+                "the refusals changed nothing")
               (shake128Wipe x)
               (shake128Absorb x "abc")
-              (tallyCheck api (strEq (shake128Squeeze x 16) (shake128 "abc" 16)) "a wipe leaves a fresh XOF")
+              (tallyCheck
+                api
+                (strEq (shake128Squeeze x 16) (shake128 "abc" 16))
+                "a wipe leaves a fresh XOF")
             })
         })
       (tallyCheck api (strEq (shake256 "abc" -5) "") "a negative one-shot length answers nothing")
@@ -300,11 +401,22 @@
           (sha3Update h "partial")
           (sha3Wipe h)
           (sha3Update h "abc")
-          (tallyCheck api (strEq (sha3Final h) (sha3_384 "abc")) "a SHA-3 wipe leaves a fresh hash of the same size")
+          (tallyCheck
+            api
+            (strEq (sha3Final h) (sha3_384 "abc"))
+            "a SHA-3 wipe leaves a fresh hash of the same size")
           (sha3Update h "abc")
           (tallyCheck api (strEq (sha3Final h) (sha3_384 "abc")) "a final resets to the same size")
         })
-      (tallyCheck api (strEq (hexEncode (sha3_256 "abc")) "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532") "FIPS 202 example, SHA3-256 of abc")
-      (+ (+ (+ (tallyReport cavp) (tallyReport monteT)) (+ (tallyReport scavp) (tallyReport smonte)))
-        (+ (+ (tallyReport diff) (tallyReport stream)) (+ (+ (tallyReport sdiff) (tallyReport xof)) (tallyReport api))))
+      (tallyCheck
+        api
+        (strEq
+          (hexEncode (sha3_256 "abc"))
+          "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
+        "FIPS 202 example, SHA3-256 of abc")
+      (+
+        (+ (+ (tallyReport cavp) (tallyReport monteT)) (+ (tallyReport scavp) (tallyReport smonte)))
+        (+
+          (+ (tallyReport diff) (tallyReport stream))
+          (+ (+ (tallyReport sdiff) (tallyReport xof)) (tallyReport api))))
     }))

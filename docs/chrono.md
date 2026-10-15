@@ -27,7 +27,8 @@ to use it and what it assumes.
             ((Ok end) (println (datetimeToString end)))
             ((Err e) (println (errorText e))))
           (println (unwrapOr (datetimeFormat "%A %d %B %Y, %H:%M" start) ""))
-        }))))
+        })
+    )))
 ```
 
 ```text
@@ -229,7 +230,8 @@ replaced, and every other byte is copied as it is:
         (match (datetimeFormat "%Y-%m-%d %q" dt)
           ((Ok s) (println s))
           ((Err e) (println (errorText e))))
-      })))
+      }
+    )))
 ```
 
 ```text
@@ -297,11 +299,14 @@ long something took and to set deadlines, and `sleepFor` or
           (unwrapOr (sleepFor pause) 0)
           (match (instantElapsed start)
             ((Ok took)
-              (println (if (>= (durationCompare took pause) 0)
-                "slept at least 250 ms"
-                "woke early")))
+              (println
+                (if (>= (durationCompare took pause) 0)
+                  "slept at least 250 ms"
+                  "woke early"))
+            )
             ((Err e) (println (errorText e))))
-        }))))
+        })
+    )))
 ```
 
 ```text

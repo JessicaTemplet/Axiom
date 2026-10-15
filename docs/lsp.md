@@ -478,8 +478,7 @@ quoted come from the release binary.
 (import IO)
 
 ; A tag function for the data it is given.
-(pub macro deriveTag
-  ((deriveTag T)
+(pub macro deriveTag ((deriveTag T)
    (pub :: (syntax/join tag T) Int)
    (pub fn ((syntax/join tag T)) 7)))
 
@@ -491,7 +490,8 @@ quoted come from the release binary.
 
 ; Add one.
 (:: bump (-> Int Int))
-(fn (bump x) (+ x 1))
+(fn (bump x)
+  (+ x 1))
 
 ;@axiom:effect(io)
 (fn (main)
@@ -535,7 +535,8 @@ written twice:
 
 ```scheme
 (:: bump (-> Int Int))
-(fn (bump x) (+ x 1))
+(fn (bump x)
+  (+ x 1))
 ```
 
 The parser keeps both forms, each with its own name span. So
@@ -1235,7 +1236,9 @@ signature or the `fn`:
 ;@axiom:nolint(lint-dead-branch)
 (:: quietIf (-> Int Int))
 (fn (quietIf n)
-  (if true n 0))
+  (if true
+    n
+    0))
 ```
 
 `;@axiom:nolint(RULE)` quiets one rule, `nolint(hints)` quiets all

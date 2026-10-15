@@ -46,10 +46,10 @@
 (fn (main)
   (let ((t tallyNew))
     {
-      ; a new database
       (let ((p (openOrDie "kat.db" 16)))
         (let ((_ (pagerClose p)))
           ()))
+      ; a new database
       (let ((f (unwrapOr (readFile "kat.db") "")))
         {
           (dump (page f 0) 0 128 "page 0, bytes 0-127 (header):")
@@ -64,13 +64,27 @@
           (let ((root (unwrapOr (btreeCreate p btreeTable) 0)))
             {
               (check t (== root 2) "the first tree's root is page 2")
-              (check t (== (codeOf (btreePut p root (keyRowid 1) (unwrapOr (recEncode (vecPush (vecPush vecNew (VInt 42)) (VText "hi"))) ""))) 0) "put row 1")
+              (check
+                t
+                (==
+                  (codeOf
+                    (btreePut
+                      p
+                      root
+                      (keyRowid 1)
+                      (unwrapOr (recEncode (vecPush (vecPush vecNew (VInt 42)) (VText "hi"))) "")))
+                  0)
+                "put row 1")
               (check t (== (codeOf (pagerCommit p)) 0) "commit")
               (let ((f (unwrapOr (readFile "kat.db") "")))
                 {
                   (dump (page f 0) 0 64 "after the commit, page 0 bytes 0-63:")
                   (dump (page f 2) 0 14 "page 2 (a table leaf, one cell), bytes 0-13:")
-                  (dump (page f 2) 4056 4088 "page 2, bytes 4056-4087 (its one cell: key length, value length, key, record):")
+                  (dump
+                    (page f 2)
+                    4056
+                    4088
+                    "page 2, bytes 4056-4087 (its one cell: key length, value length, key, record):")
                   (dump (page f 2) 4088 4096 "page 2, bytes 4088-4095 (checksum):")
                 })
               (check t (== (codeOf (pagerBeginWrite p)) 0) "begin")
@@ -106,11 +120,25 @@
             })
         })
       ; values and keys
-      (match (recEncode (vecPush (vecPush (vecPush (vecPush (vecPush vecNew VNull) (VInt -2)) (VReal 1.5)) (VText "ab")) (VBlob "")))
+      (match (recEncode
+               (vecPush
+                 (vecPush
+                   (vecPush (vecPush (vecPush vecNew VNull) (VInt -2)) (VReal 1.5))
+                   (VText "ab"))
+                 (VBlob "")))
         ((Ok r) (dump r 0 (strLen r) "record [NULL, -2, 1.5, 'ab', x'']:"))
         ((Err e) (check t false "record")))
-      (match (keyEncode (vecPush (vecPush (vecPush (vecPush (vecPush vecNew VNull) (VInt -2)) (VReal 1.5)) (VText "a\0b")) (VBlob "")))
-        ((Ok k) (dump (keyWithRowid k 7) 0 (+ (strLen k) 8) "index key [NULL, -2, 1.5, 'a\\0b', x''] + rowid 7:"))
+      (match (keyEncode
+               (vecPush
+                 (vecPush
+                   (vecPush (vecPush (vecPush vecNew VNull) (VInt -2)) (VReal 1.5))
+                   (VText "a\0b"))
+                 (VBlob "")))
+        ((Ok k) (dump
+                  (keyWithRowid k 7)
+                  0
+                  (+ (strLen k) 8)
+                  "index key [NULL, -2, 1.5, 'a\\0b', x''] + rowid 7:"))
         ((Err e) (check t false "key")))
       ; the journal: a transaction abandoned after changing page 2
       (let ((p (openOrDie "kat.db" 16)))
@@ -131,7 +159,8 @@
                   {
                     (println (concat "  " (strSlice h 0 32)))
                     (println (concat "  " (strSlice h 32 32)))
-                    (println (concat "  " (concat (strSlice h 64 16) "ssssssssssssssssssssssssssssssss")))
+                    (println
+                      (concat "  " (concat (strSlice h 64 16) "ssssssssssssssssssssssssssssssss")))
                   })
                 (dump j 48 64 "journal bytes 48-63:")
                 (dump j 512 516 "journal record 0, its page number:")
@@ -140,8 +169,14 @@
                   (rec (strSlice j 512 (+ 512 4108)))
                 )
                   {
-                    (check t (== (pagerGetBe (strData rec) 4100 8) (pagerChecksum (strData rec) 4100 salt)) "the record's checksum is XXH64 of its first 4100 bytes, seeded with the salt")
-                    (check t (== (pagerGetBe (strData j) 40 8) (pagerChecksum (strData j) 40 0)) "the journal header's checksum is XXH64 of bytes 0-39")
+                    (check
+                      t
+                      (== (pagerGetBe (strData rec) 4100 8) (pagerChecksum (strData rec) 4100 salt))
+                      "the record's checksum is XXH64 of its first 4100 bytes, seeded with the salt")
+                    (check
+                      t
+                      (== (pagerGetBe (strData j) 40 8) (pagerChecksum (strData j) 40 0))
+                      "the journal header's checksum is XXH64 of bytes 0-39")
                   })
                 (let (
                   (n (/ (- (strLen j) 512) 4108))

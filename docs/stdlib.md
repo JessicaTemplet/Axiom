@@ -81,8 +81,10 @@ processes, the environment, the clock and signals.
 (fn (main)
   {
     (writeFile "note.txt" "hello\n")?
-    (let ((f (openPath "note.txt" oRdonly)?)
-          (text (readAll f)?))
+    (let (
+      (f (openPath "note.txt" oRdonly)?)
+      (text (readAll f)?)
+    )
       {
         (writeStr stdout text)
         (removeFile "note.txt")?
@@ -191,7 +193,8 @@ This server echoes each line a client sends until the client hangs up:
     ((Ok (Some line))
       (match (tcpWrite conn (concat line "\n"))
         ((Ok _) (serve conn))
-        ((Err e) (report "write" e))))
+        ((Err e) (report "write" e)))
+    )
     ((Ok (None)) 0)
     ((Err e) (report "read" e))))
 
@@ -208,7 +211,8 @@ This server echoes each line a client sends until the client hangs up:
             ((Ok conn) (serve conn))
             ((Err e) (report "accept" e))))
         0
-      })))
+      }
+    )))
 ```
 
 `tcpListen` and `tcpConnect` take an address as text, and
@@ -241,7 +245,9 @@ A client sends a line and waits up to a second for the reply:
         ((Err e)
           (match (errorKind e)
             ((TimedOut) "no answer within a second")
-            (_ (errorText e))))))))
+            (_ (errorText e)))
+        ))
+    )))
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -253,12 +259,15 @@ A client sends a line and waits up to a second for the reply:
           {
             (eprintln "nothing is listening on port 7878")
             1
-          })
+          }
+        )
         (_
           {
             (eprintln (errorText e))
             1
-          })))
+          }
+        ))
+    )
     ((Ok conn)
       (let (
         (_ (tcpSetReadTimeout conn (Some 1000)))
@@ -267,7 +276,8 @@ A client sends a line and waits up to a second for the reply:
         {
           (println reply)
           0
-        }))))
+        })
+    )))
 ```
 
 Run against the echo server, it prints:
@@ -305,12 +315,14 @@ are ready:
     ((Ok (Some line))
       (if (isOk (tcpWrite conn (concat line "\n")))
         (drain conn)
-        false))
+        false)
+    )
     ((Ok (None)) false)
     ((Err e)
       (match (errorKind e)
         ((WouldBlock) true)
-        (_ false)))))
+        (_ false))
+    )))
 
 ; Accept every waiting client and watch it under its slot plus one.
 (:: acceptAll (-> TcpListener Poller (Vec (Option TcpStream)) Int))
@@ -325,13 +337,16 @@ are ready:
         {
           (vecPush conns (Some conn))
           (acceptAll lsn p conns)
-        }))
+        })
+    )
     ((Err e)
       (match (errorKind e)
         ((WouldBlock) 0)
         (_
           (let ((why (errorText e)))
-            (eprintln "accept: {why}")))))))
+            (eprintln "accept: {why}"))
+        ))
+    )))
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -341,14 +356,16 @@ are ready:
       {
         (eprintln (errorText e))
         1
-      })
+      }
+    )
     ((Ok lsn)
       (match (pollerNew 64)
         ((Err e)
           {
             (eprintln (errorText e))
             1
-          })
+          }
+        )
         ((Ok p)
           (let (
             (conns vecNew)
@@ -369,10 +386,13 @@ are ready:
                               {
                                 (vecSet conns (- token 1) None)
                                 0
-                              }))
+                              })
+                          )
                           ((None) 0)))))))
               0
-            }))))))
+            })
+        ))
+    )))
 ```
 
 A non-blocking read with nothing to answer fails with `WouldBlock`, so
@@ -429,14 +449,37 @@ codec, and encode it again in any of the three formats.
 ;@axiom:effect(io)
 (fn (main)
   (match (cerealDecode CerealToml "name = \"axiom\"\nport = 8080\n")
-    ((Err e) { (eprintln (errorText e)) 1 })
+    ((Err e)
+      {
+        (eprintln (errorText e))
+        1
+      }
+    )
     ((Ok doc)
       (match (cerealField cerealIntCodec doc "port")
-        ((Err e) { (eprintln (errorText e)) 1 })
+        ((Err e)
+          {
+            (eprintln (errorText e))
+            1
+          }
+        )
         ((Ok port)
           (match (cerealEncode CerealJson doc)
-            ((Err e) { (eprintln (errorText e)) 1 })
-            ((Ok json) { (println "port {port}") (println json) 0 })))))))
+            ((Err e)
+              {
+                (eprintln (errorText e))
+                1
+              }
+            )
+            ((Ok json)
+              {
+                (println "port {port}")
+                (println json)
+                0
+              }
+            ))
+        ))
+    )))
 ```
 
 ```text
@@ -501,8 +544,10 @@ with `internFind`, and recover bytes with `internLookup`.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((names internNew)
-        (id (internIntern names "compile")))
+  (let (
+    (names internNew)
+    (id (internIntern names "compile"))
+  )
     {
       (println id)
       (println (internLookup names id))

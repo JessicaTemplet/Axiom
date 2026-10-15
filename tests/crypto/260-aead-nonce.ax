@@ -24,14 +24,10 @@
       (for i in 0..steps
         (match (nonceSequenceNext seq)
           ((Ok n)
-            {
-              (set last (aeadNonceBytes n))
-            }
+            (set last (aeadNonceBytes n))
           )
           ((Err _)
-            {
-              (set ok false)
-            }
+            (set ok false)
           )))
       (if ok
         last
@@ -73,7 +69,10 @@
               ((Ok seq)
                 {
                   (tallyBytes t nonce (draw seq steps) (concat "draws from " (katText f 1)))
-                  (tallyCheck t (== (nonceSequencePosition seq) position) (concat "position after " (katText f 1)))
+                  (tallyCheck
+                    t
+                    (== (nonceSequencePosition seq) position)
+                    (concat "position after " (katText f 1)))
                 }
               )))))
       ; a fresh sequence starts at counter 0
@@ -82,7 +81,10 @@
         ((Ok seq)
           {
             (tallyCheck api (== (nonceSequencePosition seq) 0) "a new sequence is at 0")
-            (tallyCheck api (strEq (draw seq 1) "abcd\0\0\0\0\0\0\0\0") "the first nonce is the prefix and a zero counter")
+            (tallyCheck
+              api
+              (strEq (draw seq 1) "abcd\0\0\0\0\0\0\0\0")
+              "the first nonce is the prefix and a zero counter")
             (tallyCheck api (== (nonceSequencePosition seq) 1) "one draw moves it to 1")
           }
         ))
@@ -94,24 +96,53 @@
             (tallyCheck api (> (strLen (draw seq 1)) 0) "the last counter is given out")
             (tallyCheck api (nextRefused seq cryptoLimitExceeded) "then the sequence is used up")
             (tallyCheck api (nextRefused seq cryptoLimitExceeded) "and stays used up")
-            (tallyCheck api (== (nonceSequencePosition seq) 9223372036854775807) "at position 2^63 - 1")
+            (tallyCheck
+              api
+              (== (nonceSequencePosition seq) 9223372036854775807)
+              "at position 2^63 - 1")
           }
         ))
       (match (nonceSequenceResume "abcd" 9223372036854775807)
         ((Err _) (tallyCheck api false "resume at the end"))
-        ((Ok seq) (tallyCheck api (nextRefused seq cryptoLimitExceeded) "a sequence resumed at the end gives nothing")))
-      (tallyCheck api (refusedWith (nonceSequenceResume "abcd" -1) cryptoLimitExceeded) "a negative position is refused")
-      (tallyCheck api (refusedWith (nonceSequenceNew "abc") cryptoInvalidLength) "a 3-byte prefix is refused")
-      (tallyCheck api (refusedWith (nonceSequenceNew "abcde") cryptoInvalidLength) "a 5-byte prefix is refused")
-      (tallyCheck api (nextRefused (NonceSequence "short") cryptoInvalidLength) "a forged short state is refused")
-      (tallyCheck api (== (nonceSequencePosition (NonceSequence "")) -1) "a forged state has no position")
+        ((Ok seq) (tallyCheck
+                    api
+                    (nextRefused seq cryptoLimitExceeded)
+                    "a sequence resumed at the end gives nothing")))
+      (tallyCheck
+        api
+        (refusedWith (nonceSequenceResume "abcd" -1) cryptoLimitExceeded)
+        "a negative position is refused")
+      (tallyCheck
+        api
+        (refusedWith (nonceSequenceNew "abc") cryptoInvalidLength)
+        "a 3-byte prefix is refused")
+      (tallyCheck
+        api
+        (refusedWith (nonceSequenceNew "abcde") cryptoInvalidLength)
+        "a 5-byte prefix is refused")
+      (tallyCheck
+        api
+        (nextRefused (NonceSequence "short") cryptoInvalidLength)
+        "a forged short state is refused")
+      (tallyCheck
+        api
+        (== (nonceSequencePosition (NonceSequence "")) -1)
+        "a forged state has no position")
       ; a forged state whose counter has the top bit set is used up, not reused
-      (tallyCheck api (nextRefused (NonceSequence (unwrapOr (hexDecode "61626364ff00000000000000") "")) cryptoLimitExceeded) "a counter at or above 2^63 is refused")
+      (tallyCheck
+        api
+        (nextRefused
+          (NonceSequence (unwrapOr (hexDecode "61626364ff00000000000000") ""))
+          cryptoLimitExceeded)
+        "a counter at or above 2^63 is refused")
       ; nonces taken from bytes are copies
       (let ((b (bytesNew 12)))
         (match (aeadNonceFromBytes b)
           ((Err _) (tallyCheck api false "aeadNonceFromBytes"))
-          ((Ok n) (tallyCheck api (strEq (aeadNonceBytes n) (bytesNew 12)) "a nonce keeps its own copy"))))
+          ((Ok n) (tallyCheck
+                    api
+                    (strEq (aeadNonceBytes n) (bytesNew 12))
+                    "a nonce keeps its own copy"))))
       (tallyCheck api (isErr (aeadNonceFromBytes "")) "an empty nonce is refused")
       ; random nonces
       (let (
@@ -123,22 +154,16 @@
           (for i in 0..64
             (match (aeadNonceRandom)
               ((Err _)
-                {
-                  (set sized false)
-                }
+                (set sized false)
               )
               ((Ok n)
                 (let ((b (aeadNonceBytes n)))
                   {
                     (if (!= (strLen b) 12)
-                      {
-                        (set sized false)
-                      })
+                      (set sized false))
                     (for s in seen
                       (if (strEq s b)
-                        {
-                          (set distinct false)
-                        }))
+                        (set distinct false)))
                     (vecPush seen b)
                   })
               )))

@@ -56,9 +56,7 @@
           (while (&& same (< i n))
             (if (== (lowerByte (strByte a i)) (lowerByte (strByte b i)))
               (set i (+ i 1))
-              {
-                (set same false)
-              }))
+              (set same false)))
           same
         }))))
 
@@ -128,19 +126,16 @@
 ;@axiom:effect(io)
 (pub fn (axqlLoadSchema pager)
   (let ((ld (Loader vecNew)))
-    (let ((_ (btreeScan
-               pager
-               btreeSchemaRoot
-               None
-               None
-               true
-               (lambda (k v) (loadEntry ld k v)))?))
+    (let ((_ 
+      (btreeScan pager btreeSchemaRoot None None true (lambda (k v) (loadEntry ld k v)))?))
       (Ok (Schema ld.entries)))))
 
 (:: loadEntry (-> Loader String String (Result Bool Error)))
 (fn (loadEntry ld k v)
-  (let ((rowid (keyRowidOf k)?)
-        (vals (recDecode v)?))
+  (let (
+    (rowid (keyRowidOf k)?)
+    (vals (recDecode v)?)
+  )
     (if (!= (vecLen vals) 5)
       (corrupt "an entry without five values")
       (match (vecGet vals 0)
@@ -154,13 +149,7 @@
                       (match (vecGet vals 4)
                         ((VText text)
                           {
-                            (vecPush ld.entries (SchemaEntry
-                              rowid
-                              kind
-                              name
-                              table
-                              root
-                              text))
+                            (vecPush ld.entries (SchemaEntry rowid kind name table root text))
                             (Ok true)
                           }
                         )
@@ -188,9 +177,7 @@
         (let ((e (vecGet es i)))
           {
             (if (axqlNameEq e.name name)
-              {
-                (set found (Some e))
-              })
+              (set found (Some e)))
             (set i (+ i 1))
           }))
       found
@@ -209,9 +196,7 @@
         (let ((c (vecGet cols i)))
           {
             (if (axqlNameEq c.name name)
-              {
-                (set found i)
-              })
+              (set found i))
             (set i (+ i 1))
           }))
       found
@@ -250,9 +235,7 @@
     {
       (for (c i) in cols
         (if (&& (< pk 0) c.primaryKey)
-          {
-            (set pk i)
-          }))
+          (set pk i)))
       pk
     }))
 
@@ -289,7 +272,9 @@
                 (set bestD d)
               })
             (if (< i 12)
-              (set list (if (== i 0) n (concat list (concat ", " n))))
+              (set list (if (== i 0)
+                n
+                (concat list (concat ", " n))))
               list)
           }))
       (if (> (vecLen names) 12)
@@ -306,20 +291,22 @@
 (pub :: axqlTableDef (-> Schema String (Result TableDef Error)))
 (pub fn (axqlTableDef s name)
   (match (axqlFindEntry s name)
-    ((None) (axqErr axqSchema (concat (concat "no such table: " name) (axqlHint name (axqlTableNames s) "tables")) "axqlTableDef"))
+    ((None) (axqErr
+              axqSchema
+              (concat (concat "no such table: " name) (axqlHint name (axqlTableNames s) "tables"))
+              "axqlTableDef"))
     ((Some e)
       (if (! (strEq e.kind kindTable))
-        (axqErr axqSchema (concat (concat "no such table: " name) " (it names an index)") "axqlTableDef")
-        (let ((cols (tableColumns e.text)?)
-              (idx (tableIndexes s e.name cols)?)
-              (links (tableLinks s e cols)?))
-          (Ok (TableDef
-e.name
-e.root
-cols
-(axqlPrimaryKey cols)
-idx
-links))))
+        (axqErr
+          axqSchema
+          (concat (concat "no such table: " name) " (it names an index)")
+          "axqlTableDef")
+        (let (
+          (cols (tableColumns e.text)?)
+          (idx (tableIndexes s e.name cols)?)
+          (links (tableLinks s e cols)?)
+        )
+          (Ok (TableDef e.name e.root cols (axqlPrimaryKey cols) idx links))))
     )))
 
 ;; The table named `name` without its indices or links: what a LINK
@@ -330,13 +317,7 @@ links))))
     ((Some e)
       (if (strEq e.kind kindTable)
         (let ((cols (tableColumns e.text)?))
-          (Ok (TableDef
-e.name
-e.root
-cols
-(axqlPrimaryKey cols)
-vecNew
-vecNew)))
+          (Ok (TableDef e.name e.root cols (axqlPrimaryKey cols) vecNew vecNew)))
         (corrupt (concat "a link names an index: " name)))
     )
     ((None) (corrupt (concat "a link names a missing table: " name)))))
@@ -352,15 +333,9 @@ vecNew)))
       (for (c i) in cols
         (if (! (|| (isSome failure) (strIsEmpty c.link)))
           (match (axqlBareTableDef s c.link)
-            ((Ok t)
-              {
-                (vecPush out (LinkDef i t))
-              }
-            )
+            ((Ok t) (vecPush out (LinkDef i t)))
             ((Err err)
-              {
-                (set failure (Some err))
-              }
+              (set failure (Some err))
             ))))
       (match failure
         ((Some err) (Err err))
@@ -380,17 +355,13 @@ vecNew)))
         (if (! (|| (isSome failure) (|| (! (strEq e.kind kindTable)) (axqlNameEq e.name name))))
           (match (tableColumns e.text)
             ((Ok cols)
-              {
-                (for c in cols
-                  (if (&& (! (strIsEmpty c.link)) (axqlNameEq c.link name))
-                    (vecPush out (concat (concat e.name ".") c.name))
-                    out))
-              }
+              (for c in cols
+                (if (&& (! (strIsEmpty c.link)) (axqlNameEq c.link name))
+                  (vecPush out (concat (concat e.name ".") c.name))
+                  out))
             )
             ((Err err)
-              {
-                (set failure (Some err))
-              }
+              (set failure (Some err))
             ))))
       (match failure
         ((Some err) (Err err))
@@ -422,25 +393,20 @@ vecNew)))
                   (for cn in shape.cols
                     (let ((ci (axqlColumnIndex cols cn)))
                       (if (< ci 0)
-                        {
-                          (set bad true)
-                        }
-                        {
-                          (vecPush nums ci)
-                        })))
+                        (set bad true)
+                        (vecPush nums ci))))
                   (if bad
-                    {
-                      (set failure (Some (mkError axqCorrupt (concat "the schema table is damaged: index names a missing column: " e.name))))
-                    }
-                    {
-                      (vecPush out (IndexDef e.name e.root shape.unique nums))
-                    })
+                    (set failure (Some
+                                   (mkError
+                                     axqCorrupt
+                                     (concat
+                                       "the schema table is damaged: index names a missing column: "
+                                       e.name))))
+                    (vecPush out (IndexDef e.name e.root shape.unique nums)))
                 })
             )
             ((Err err)
-              {
-                (set failure (Some err))
-              }
+              (set failure (Some err))
             ))))
       (match failure
         ((Some err) (Err err))
@@ -474,7 +440,10 @@ vecNew)))
 (pub fn (axqlRowValues t rec rowid)
   (let ((vals (recDecode rec)?))
     (if (!= (vecLen vals) (vecLen t.cols))
-      (axqErr axqCorrupt (concat "a row of " (concat t.name " has the wrong number of values")) "axqlRowValues")
+      (axqErr
+        axqCorrupt
+        (concat "a row of " (concat t.name " has the wrong number of values"))
+        "axqlRowValues")
       (let ((mut ok true))
         {
           (for (c i) in t.cols
@@ -488,7 +457,10 @@ vecNew)))
                 })))
           (if ok
             (Ok vals)
-            (axqErr axqCorrupt (concat "a row of " (concat t.name " holds a value its column's type doesn't allow")) "axqlRowValues"))
+            (axqErr
+              axqCorrupt
+              (concat "a row of " (concat t.name " holds a value its column's type doesn't allow"))
+              "axqlRowValues"))
         }))))
 
 ; Whether `v` may be stored in a column of type `ty`.
@@ -521,9 +493,7 @@ vecNew)))
       (for ci in ix.cols
         (match (vecGet values ci)
           ((VNull)
-            {
-              (set found true)
-            }
+            (set found true)
           )
           (_ ())))
       found

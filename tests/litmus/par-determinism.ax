@@ -359,95 +359,71 @@
     (w (argInt 3))
     (jit (argInt 4))
   )
-    {
-      (if (strEq mode "seq")
-        (let (
-          (s (seqSum 0 n))
-          (r (revSum n))
-          (t (bitsOf (treeSum 0 n)))
-        )
-          (println "seq {s} rev {r} tree {t}"))
-        (if (strEq mode "dot")
-          (say "dot" (dotSum n))
-          (if (strEq mode "fold")
-            (say
-              "fold"
-              (taskFold
-                (lambda (i) (taskText jit i))
-                n
-                (taskOpts w 32)
-                0
-                (lambda (acc i r) (addText acc r))))
-            (if (strEq mode "map")
+    (if (strEq mode "seq")
+      (let (
+        (s (seqSum 0 n))
+        (r (revSum n))
+        (t (bitsOf (treeSum 0 n)))
+      )
+        (println "seq {s} rev {r} tree {t}"))
+      (if (strEq mode "dot")
+        (say "dot" (dotSum n))
+        (if (strEq mode "fold")
+          (say
+            "fold"
+            (taskFold
+              (lambda (i) (taskText jit i))
+              n
+              (taskOpts w 32)
+              0
+              (lambda (acc i r) (addText acc r))))
+          (if (strEq mode "map")
+            (let (
+              (rs (taskMap (lambda (i) (taskText jit i)) n w 32))
+              (mut acc 0)
+            )
+              {
+                (for i in 0..(vecLen rs)
+                  (set acc (addText acc (vecGet rs i))))
+                (say "map" acc)
+              })
+            (if (strEq mode "words")
               (let (
-                (rs (taskMap
-                  (lambda (i) (taskText jit i))
-                  n
-                  w
-                  32))
+                (ws (parMapWords (lambda (i) (taskWord jit i)) n w))
                 (mut acc 0)
               )
                 {
-                  (for i in 0..(vecLen rs)
-                    (set acc (addText acc (vecGet rs i))))
-                  (say "map" acc)
+                  (for i in 0..(vecLen ws)
+                    (set acc (add2 acc (vecGet ws i))))
+                  (say "words" acc)
                 })
-              (if (strEq mode "words")
+              (if (strEq mode "checked")
                 (let (
-                  (ws (parMapWords
-                    (lambda (i) (taskWord jit i))
-                    n
-                    w))
+                  (rs (parMapWordsChecked (lambda (i) (taskWord jit i)) n w))
                   (mut acc 0)
                 )
                   {
-                    (for i in 0..(vecLen ws)
-                      (set acc (add2 acc (vecGet ws i))))
-                    (say "words" acc)
+                    (for i in 0..(vecLen rs)
+                      (set acc (addWord acc (vecGet rs i))))
+                    (say "checked" acc)
                   })
-                (if (strEq mode "checked")
-                  (let (
-                    (rs (parMapWordsChecked
-                      (lambda (i) (taskWord jit i))
-                      n
-                      w))
-                    (mut acc 0)
-                  )
-                    {
-                      (for i in 0..(vecLen rs)
-                        (set acc (addWord acc (vecGet rs i))))
-                      (say "checked" acc)
-                    })
-                  (if (strEq mode "bind")
-                    ; `bind K N`: the width is argument 2 here.
-                    (say "bind" (bind n w))
-                    (if (strEq mode "chunked")
-                      (say "chunked" (chunked w n))
-                      (if (strEq mode "fail-words")
-                        (let ((ws 
-                          (parMapWords
-                            (lambda (i) (failWord i))
-                            n
-                            w)))
-                          (say "unreachable" (vecLen ws)))
-                        (if (strEq mode "fail-checked")
-                          (showWords
-                            (parMapWordsChecked
-                              (lambda (i) (failWord i))
-                              n
-                              w))
-                          (if (strEq mode "fail-tasks")
+                (if (strEq mode "bind")
+                  ; `bind K N`: the width is argument 2 here.
+                  (say "bind" (bind n w))
+                  (if (strEq mode "chunked")
+                    (say "chunked" (chunked w n))
+                    (if (strEq mode "fail-words")
+                      (let ((ws 
+                        (parMapWords (lambda (i) (failWord i)) n w)))
+                        (say "unreachable" (vecLen ws)))
+                      (if (strEq mode "fail-checked")
+                        (showWords (parMapWordsChecked (lambda (i) (failWord i)) n w))
+                        (if (strEq mode "fail-tasks")
+                          (showTexts (taskMap (lambda (i) (failText i)) n w 32))
+                          (if (strEq mode "fail-fast")
                             (showTexts
-                              (taskMap
+                              (taskMapWith
                                 (lambda (i) (failText i))
                                 n
-                                w
-                                32))
-                            (if (strEq mode "fail-fast")
-                              (showTexts
-                                (taskMapWith
-                                  (lambda (i) (failText i))
-                                  n
-                                  (taskWithGrace (taskWithFailFast (taskOpts w 32) true) 1000000)))
-                              (println "usage: par-determinism seq N | dot N | fold|map|words|checked N W J | bind|chunked K N | fail-words|fail-checked|fail-tasks|fail-fast N W")))))))))))))
-    }))
+                                (taskWithGrace (taskWithFailFast (taskOpts w 32) true) 1000000)))
+                            (println "usage: par-determinism seq N | dot N | fold|map|words|checked N W J | bind|chunked K N | fail-words|fail-checked|fail-tasks|fail-fast N W")))))))))))))))

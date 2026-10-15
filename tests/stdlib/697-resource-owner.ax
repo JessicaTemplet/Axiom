@@ -2,17 +2,28 @@
 (import IO)
 (import Vec)
 
-(struct Owner sealed (handle : Handle))
+(struct Owner sealed
+  (handle : Handle))
 
 ; A data result can carry cleanup in any constructor, even when its
 ; first constructor contains only words.
-(data DataOwner (DataOwner Int) (ResourceOwner Handle))
+(data DataOwner
+  (DataOwner Int)
+  (ResourceOwner Handle))
 
 (:: makeDataOwner (-> Int DataOwner))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (makeDataOwner n)
-  (ResourceOwner (__resource_new (lambda (v) { (println v) 0 }) n)))
+  (ResourceOwner
+    (__resource_new
+      (lambda (v)
+        {
+          (println v)
+          0
+        }
+      )
+      n)))
 
 (:: useDataOwner (-> DataOwner Int))
 ;@axiom:effect(unsafe)
@@ -25,16 +36,28 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (makeOwner hits n)
-  (Owner (__resource_new (lambda (v) { (vecPush hits v) 0 }) n)))
+  (Owner
+    (__resource_new
+      (lambda (v)
+        {
+          (vecPush hits v)
+          0
+        }
+      )
+      n)))
 
 (:: useOwner (-> Owner Int))
 ;@axiom:effect(unsafe)
-(fn (useOwner o) (__resource_get o.handle))
+(fn (useOwner o)
+  (__resource_get o.handle))
 
 (:: scoped (-> (Vec Int) Int))
 ;@axiom:effect(io)
 (fn (scoped hits)
-  (let ((a (makeOwner hits 7)) (alias a))
+  (let (
+    (a (makeOwner hits 7))
+    (alias a)
+  )
     (+ (useOwner a) (useOwner alias))))
 
 (:: closed (-> (Vec Int) Int))
@@ -42,7 +65,11 @@
 ;@axiom:effect(unsafe)
 (fn (closed hits)
   (let ((a (makeOwner hits 8)))
-    { (__resource_close a.handle) (__resource_close a.handle) 0 }))
+    {
+      (__resource_close a.handle)
+      (__resource_close a.handle)
+      0
+    }))
 
 (:: disarmed (-> (Vec Int) Int))
 ;@axiom:effect(io)
@@ -60,24 +87,43 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (makeLoudOwner n)
-  (Owner (__resource_new (lambda (v) { (println v) 0 }) n)))
+  (Owner
+    (__resource_new
+      (lambda (v)
+        {
+          (println v)
+          0
+        }
+      )
+      n)))
 
 (:: regionDrop Int)
 ;@axiom:effect(io)
 (fn (regionDrop)
-  { (region r (let ((a (makeLoudOwner 9))) (useOwner a)))
-    0 })
+  {
+    (region r
+      (let ((a (makeLoudOwner 9)))
+        (useOwner a)))
+    0
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((hits vecNew))
-    { (println (scoped hits))
+    {
+      (println (scoped hits))
       (println (vecGet hits 0))
       (closed hits)
       (disarmed hits)
       (println (vecLen hits))
       (println (vecGet hits 1))
       (println regionDrop)
-      (println (region r (useDataOwner (makeDataOwner 10))))
-      (println (region r (let ((a (makeDataOwner 11))) (useDataOwner a)))) }))
+      (println
+        (region r
+          (useDataOwner (makeDataOwner 10))))
+      (println
+        (region r
+          (let ((a (makeDataOwner 11)))
+            (useDataOwner a))))
+    }))

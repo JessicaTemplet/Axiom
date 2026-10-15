@@ -89,12 +89,7 @@
 ;@axiom:effect(unsafe)
 (fn (sysOpenPathMode path flags mode)
   (if (== openNeedsDirFd 1)
-    (__syscall4
-      sysOpenNum
-      atFdCwd
-      path
-      flags
-      mode)
+    (__syscall4 sysOpenNum atFdCwd path flags mode)
     (__syscall3 sysOpenNum path flags mode)))
 
 ; Close a descriptor.
@@ -291,13 +286,7 @@
           ; on `sysPosixSpawnNum` in the Darwin platform module for what the
           ; six-argument spelling does instead, and why it is nearly
           ; invisible.
-          (let ((rc (__syscall5
-            sysPosixSpawnNum
-            pidbuf
-            path
-            0
-            argv
-            envp)))
+          (let ((rc (__syscall5 sysPosixSpawnNum pidbuf path 0 argv envp)))
             (if (< rc 0)
               rc
               (memGetWord pidbuf 0)))
@@ -324,9 +313,8 @@
           probe
           {
             (if (>= probe 0)
-              {
-                (let ((_ (sysCloseFd probe))) ())
-              })
+              (let ((_ (sysCloseFd probe)))
+                ()))
             ; Through `sysForkProcess` rather than the raw syscall, because
             ; the test below is `pid == 0` and that is only the child on a
             ; platform where `fork` answers 0 to one of them. Darwin does
@@ -368,12 +356,7 @@
         ; half is whatever was there before. Zeroing first is what makes
         ; the read below the status rather than the status plus garbage.
         (memSetWord statbuf 0 0)
-        (let ((w (__syscall4
-          sysWait4Num
-          pid
-          statbuf
-          0
-          0)))
+        (let ((w (__syscall4 sysWait4Num pid statbuf 0 0)))
           (if (< w 0)
             w
             (memGetWord statbuf 0)))
@@ -518,12 +501,7 @@
     (let ((path (sysEnv "PATH")))
       (if (== (strLen path) 0)
         (Err (mkError 2 "sysRunPath: PATH is empty"))
-        (sysRunSearch
-          name
-          argv
-          envp
-          path
-          0)))))
+        (sysRunSearch name argv envp path 0)))))
 
 ; Try `name` in each `:`-separated entry of `path` starting at `from`.
 ;
@@ -566,12 +544,7 @@
         ((Some colon) colon))))
       (let ((dir (strSlice path from (- end from))))
         (if (== (strLen dir) 0)
-          (sysRunSearch
-            name
-            argv
-            envp
-            path
-            (+ end 1))
+          (sysRunSearch name argv envp path (+ end 1))
           ; `concat` copies, so the candidate is
           ; NUL-terminated even though `dir` - a slice sharing
           ; the environment's bytes - is not.
@@ -585,14 +558,10 @@
             (let ((cpath (strCStr cand)))
               (let ((fd (sysOpenRaw cpath oRdonly)))
                 (if (< fd 0)
-                  (sysRunSearch
-                    name
-                    argv
-                    envp
-                    path
-                    (+ end 1))
+                  (sysRunSearch name argv envp path (+ end 1))
                   {
-                    (let ((_ (sysCloseFd fd))) ())
+                    (let ((_ (sysCloseFd fd)))
+                      ())
                     ; `Ok` here means the child RAN, whatever it
                     ; answered - a non-zero exit is this entry's
                     ; result and ends the walk. Only a spawn failure
@@ -602,12 +571,7 @@
                     (let ((rc (sysRun cpath argv envp)))
                       (if (isOk rc)
                         rc
-                        (sysRunSearch
-                          name
-                          argv
-                          envp
-                          path
-                          (+ end 1))))
+                        (sysRunSearch name argv envp path (+ end 1))))
                   })))))))))
 
 ;; Run `name` as `sysRunPath` does, with the child's standard error
@@ -684,14 +648,26 @@
               (__syscall1 sysCloseNum ofd)
               (Err (mkError (- 0 efd) (concat "sysSpawnOutErrTo: " errPath)))
             }
-            (let ((savedOut (__syscall3 sysFcntlNum 1 fDupFdCloexec 3)) (savedErr (__syscall3 sysFcntlNum 2 fDupFdCloexec 3)))
+            (let (
+              (savedOut (__syscall3 sysFcntlNum 1 fDupFdCloexec 3))
+              (savedErr (__syscall3 sysFcntlNum 2 fDupFdCloexec 3))
+            )
               (if (|| (< savedOut 0) (< savedErr 0))
                 {
                   (__syscall1 sysCloseNum ofd)
                   (__syscall1 sysCloseNum efd)
-                  (if (>= savedOut 0) (__syscall1 sysCloseNum savedOut))
-                  (if (>= savedErr 0) (__syscall1 sysCloseNum savedErr))
-                  (Err (mkError (- 0 (if (< savedOut 0) savedOut savedErr)) "sysSpawnOutErrTo: saving descriptors"))
+                  (if (>= savedOut 0)
+                    (__syscall1 sysCloseNum savedOut))
+                  (if (>= savedErr 0)
+                    (__syscall1 sysCloseNum savedErr))
+                  (Err
+                    (mkError
+                      (-
+                        0
+                        (if (< savedOut 0)
+                          savedOut
+                          savedErr))
+                      "sysSpawnOutErrTo: saving descriptors"))
                 }
                 {
                   (__syscall1 sysCloseNum 1)
@@ -860,20 +836,19 @@
 (pub fn (sysNowRealtimeNanos buf)
   (if (== sysClockNum 0)
     (Err (mkError 78 "sysNowRealtimeNanos"))
-    (let ((r
+    ; CLOCK_REALTIME is 0 on Linux and on FreeBSD alike, unlike
+    ; the monotonic clock's id.
+    (let ((r 
       (if (== clockIsGettimeofday 1)
         (__syscall3 sysClockNum buf 0 0)
-        ; CLOCK_REALTIME is 0 on Linux and on FreeBSD alike, unlike
-        ; the monotonic clock's id.
         (__syscall3 sysClockNum 0 buf 0))))
       (if (< r 0)
         (Err (mkError (- 0 r) "sysNowRealtimeNanos"))
         (let (
           (secs (memGetWord buf 0))
-          (ns
-            (if (== clockIsGettimeofday 1)
-              (* (& (memGetWord buf 1) 4294967295) 1000)
-              (memGetWord buf 1)))
+          (ns (if (== clockIsGettimeofday 1)
+            (* (& (memGetWord buf 1) 4294967295) 1000)
+            (memGetWord buf 1)))
         )
           (if (|| (>= secs 9223372036) (<= secs -9223372036))
             (Err (mkError errOverflow "sysNowRealtimeNanos"))
@@ -1098,7 +1073,9 @@
 
 (:: netAddrText4 (-> Int String))
 (fn (netAddrText4 addr)
-  (concat (concat (concat (fmtInt (memGetByte addr 4)) ".") (concat (fmtInt (memGetByte addr 5)) ".")) (concat (concat (fmtInt (memGetByte addr 6)) ".") (fmtInt (memGetByte addr 7)))))
+  (concat
+    (concat (concat (fmtInt (memGetByte addr 4)) ".") (concat (fmtInt (memGetByte addr 5)) "."))
+    (concat (concat (fmtInt (memGetByte addr 6)) ".") (fmtInt (memGetByte addr 7)))))
 
 ; How many groups from `i` are zero. The run this answers is what a
 ; `::` stands for.
@@ -1247,7 +1224,7 @@
   (sysResult
     "sysRandomBytes"
     (let ((mut off 0))
-      (let ((mut rc
+      (let ((mut rc 
         (if (|| (== usesSyscallAbi 0) (== sysRandomNum 0))
           (if (> n 0)
             sysNoCall
@@ -1318,12 +1295,7 @@
     ; `rt_sigprocmask` takes a fourth, the mask's size, which it checks
     ; exactly. Passing it unconditionally is the shape `IO.socketAccept`
     ; uses for `accept` against `accept4`.
-    (sysResult "sysSignalBlock" (__syscall4
-      sysSigProcMaskNum
-      sigBlockHow
-      setbuf
-      0
-      sigsetBytes))
+    (sysResult "sysSignalBlock" (__syscall4 sysSigProcMaskNum sigBlockHow setbuf 0 sigsetBytes))
   })
 
 ;; Send a signal, which is how a test raises one against itself.
@@ -1369,13 +1341,7 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(spawn)
 (pub fn (sysForkProcess)
-  (let ((r (__syscall5
-    sysForkNum
-    sysForkArg
-    0
-    0
-    0
-    0)))
+  (let ((r (__syscall5 sysForkNum sysForkArg 0 0 0 0)))
     (if (< r 0)
       r
       (if (== forkChildIsZero 1)
@@ -1402,14 +1368,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (sysMapShared len)
-  (sysResult "sysMapShared" (__syscall6
-    sysMmapNum
-    0
-    len
-    3
-    mapSharedAnon
-    (- 0 1)
-    0)))
+  (sysResult "sysMapShared" (__syscall6 sysMmapNum 0 len 3 mapSharedAnon (- 0 1) 0)))
 
 ;; Unmap a mapping `sysMapShared` answered. `addr` and `len` must name
 ;; the whole mapping, and nothing may touch it afterwards.
@@ -1539,21 +1498,9 @@
 ;@axiom:effect(block)
 (fn (sysWaitWordRaw addr expected)
   (if (== waitWordKind 1)
-    (__syscall6
-      sysWaitWordNum
-      addr
-      0
-      expected
-      0
-      0
-      0)
+    (__syscall6 sysWaitWordNum addr 0 expected 0 0 0)
     (if (== waitWordKind 2)
-      (__syscall4
-        sysWaitWordNum
-        6
-        addr
-        expected
-        0)
+      (__syscall4 sysWaitWordNum 6 addr expected 0)
       0)))
 
 ;; Wake every binding blocked in `sysWaitWord` on `addr`: FUTEX_WAKE (1)
@@ -1575,14 +1522,7 @@
 ;@axiom:effect(unsafe)
 (fn (sysWakeWordRaw addr)
   (if (== waitWordKind 1)
-    (__syscall6
-      sysWakeWordNum
-      addr
-      1
-      2147483647
-      0
-      0
-      0)
+    (__syscall6 sysWakeWordNum addr 1 2147483647 0 0 0)
     (if (== waitWordKind 2)
       (__syscall3 sysWakeWordNum 262 addr 0)
       0)))
@@ -1691,14 +1631,7 @@
       {
         (memSetWord ts 0 (/ nanos 1000000000))
         (memSetWord ts 1 (% nanos 1000000000))
-        (let ((r (__syscall6
-          sysWaitWordNum
-          addr
-          0
-          expected
-          ts
-          0
-          0)))
+        (let ((r (__syscall6 sysWaitWordNum addr 0 expected ts 0 0)))
           {
             (sysScratchDone ts)
             (sysWaitAnswer r 0)
@@ -1708,9 +1641,10 @@
     ; clamped path: rounding such a `nanos` up by adding 999 could wrap
     ; it negative, skip the clamp, and hand the kernel a truncated,
     ; SHORTER wait that it then reports as timed out.
-    (let ((us (if (> nanos 4294967295000)
-      4294967296
-      (/ (+ nanos 999) 1000))))
+    (let ((us 
+      (if (> nanos 4294967295000)
+        4294967296
+        (/ (+ nanos 999) 1000))))
       (if (> us 4294967295)
         (sysWaitAnswer (sysUlockWait addr expected 4294967295) 1)
         (sysWaitAnswer (sysUlockWait addr expected us) 0)))))
@@ -1722,12 +1656,7 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (sysUlockWait addr expected us)
-  (__syscall4
-    sysWaitWordNum
-    6
-    addr
-    expected
-    us))
+  (__syscall4 sysWaitWordNum 6 addr expected us))
 
 ; The kernel's answer as the three codes. `clamped` is 1 when the
 ; kernel was asked for less than the caller's whole wait, so its
@@ -1801,15 +1730,14 @@
           ((Ok now)
             (if (>= now deadline)
               (set state 1)
-              {
-                (sysWaitWordTimeout (+ buf 16) 0 (- deadline now))
-              })
+              (sysWaitWordTimeout (+ buf 16) 0 (- deadline now)))
           )
           ((Err e)
             {
               (set failed (errCode e))
               (set state 2)
-            })))
+            }
+          )))
       (if (== state 1)
         (Ok 0)
         (Err (mkError failed "sysSleepUntilNanos")))
@@ -1860,7 +1788,6 @@
             ((Err e) (Err (mkError (errCode e) "sysSleepNanos"))))
         }))))
 
-
 ;; Bytes of caller scratch `sysChildExited` needs: a `siginfo_t` is 104
 ;; bytes on Darwin and 128 on Linux.
 (pub :: sysChildPollBytes Int)
@@ -1902,14 +1829,7 @@
     {
       (memSetWord buf 0 0)
       (memSetWord buf 1 0)
-      (let ((r (__syscall6
-        sysWaitIdNum
-        waitIdPidType
-        pid
-        buf
-        waitPollOptions
-        0
-        0)))
+      (let ((r (__syscall6 sysWaitIdNum waitIdPidType pid buf waitPollOptions 0 0)))
         (if (< r 0)
           (if (== r (- 0 4))
             (Ok false)

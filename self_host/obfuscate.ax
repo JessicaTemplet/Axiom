@@ -12,7 +12,11 @@
 
 (:: obfWord (-> String Int Int))
 (fn (obfWord bytes start)
-  (| (strByte bytes start) (| (<< (strByte bytes (+ start 1)) 8) (| (<< (strByte bytes (+ start 2)) 16) (<< (strByte bytes (+ start 3)) 24)))))
+  (|
+    (strByte bytes start)
+    (|
+      (<< (strByte bytes (+ start 1)) 8)
+      (| (<< (strByte bytes (+ start 2)) 16) (<< (strByte bytes (+ start 3)) 24)))))
 
 (:: obfStep (-> Int Int))
 (fn (obfStep state)
@@ -40,7 +44,9 @@
     {
       (for i in 0..(/ (strLen body) 3)
         (let ((at (* i 3)))
-          (let ((byte (+ (* (obfHexValue (strByte body (+ at 1))) 16) (obfHexValue (strByte body (+ at 2))))))
+          (let ((byte (+
+                        (* (obfHexValue (strByte body (+ at 1))) 16)
+                        (obfHexValue (strByte body (+ at 2))))))
             {
               (set state (obfStep state))
               (let ((masked (^ byte (& state 255))))
@@ -113,7 +119,9 @@
 
 (:: obfKeepName (-> String Bool))
 (fn (obfKeepName name)
-  (|| (strEq name "main") (|| (strEq name "mainCRTStartup") (|| (strEq name "_start") (strStartsWith name "axiom_")))))
+  (||
+    (strEq name "main")
+    (|| (strEq name "mainCRTStartup") (|| (strEq name "_start") (strStartsWith name "axiom_")))))
 
 (:: obfDecoder String)
 (fn (obfDecoder)
@@ -131,13 +139,12 @@
     (mut literal 0)
   )
     {
-      (for name in (cast (Vec String) (symtabNames
-        (cast (Vec Int) lines)))
+      (for name in (cast (Vec String) (symtabNames (cast (Vec Int) lines)))
         (if (! (obfKeepName name))
           (let ((id (internIntern names name)))
-            {
-              (vecPush replacements (concat "__axob." (concat (fmtInt seed) (concat "." (fmtInt id)))))
-            })))
+            (vecPush
+              replacements
+              (concat "__axob." (concat (fmtInt seed) (concat "." (fmtInt id))))))))
       (vecPush init "define private void @.axiom.obf.init() noinline optnone {\nentry:\n  %a = load volatile i32, ptr @.axiom.obf.a\n  %b = load volatile i32, ptr @.axiom.obf.b\n  %seed = xor i32 %a, %b")
       (for line in lines
         (if (strStartsWith line "@str_")
@@ -146,10 +153,10 @@
               ((Some i) i)
               ((None) 0)))
             (at (+
-              (match (strFind line "c\"" 0)
-                ((Some i) i)
-                ((None) 0))
-              2))
+                  (match (strFind line "c\"" 0)
+                    ((Some i) i)
+                    ((None) 0))
+                  2))
           )
             (let (
               (name (strSlice line 1 (- end 1)))
@@ -158,18 +165,54 @@
               (id (fmtInt literal))
             )
               {
-                (vecPush out (concat "@" (concat name (concat " = private global [" (concat (fmtInt n) " x i8] zeroinitializer")))))
-                (vecPush out (concat "@.axiom.obf.enc_" (concat id (concat " = private constant [" (concat (fmtInt n) (concat " x i8] c\"" (concat (obfMaskLiteral body (obfLiteralSeed seed literal)) "\"")))))))
-                (vecPush init (concat "  %mix" (concat id (concat " = xor i32 %seed, " (fmtInt (& (* literal 2654435761) 4294967295))))))
-                (vecPush init (concat "  %key" (concat id (concat " = or i32 %mix" (concat id ", 1")))))
-                (vecPush init (concat "  call void @.axiom.obf.decode(ptr @.axiom.obf.enc_" (concat id (concat ", ptr @" (concat name (concat ", i64 " (concat (fmtInt n) (concat ", i32 %key" (concat id ")")))))))))
+                (vecPush
+                  out
+                  (concat
+                    "@"
+                    (concat
+                      name
+                      (concat " = private global [" (concat (fmtInt n) " x i8] zeroinitializer")))))
+                (vecPush
+                  out
+                  (concat
+                    "@.axiom.obf.enc_"
+                    (concat
+                      id
+                      (concat
+                        " = private constant ["
+                        (concat
+                          (fmtInt n)
+                          (concat
+                            " x i8] c\""
+                            (concat (obfMaskLiteral body (obfLiteralSeed seed literal)) "\"")))))))
+                (vecPush
+                  init
+                  (concat
+                    "  %mix"
+                    (concat
+                      id
+                      (concat " = xor i32 %seed, " (fmtInt (& (* literal 2654435761) 4294967295))))))
+                (vecPush
+                  init
+                  (concat "  %key" (concat id (concat " = or i32 %mix" (concat id ", 1")))))
+                (vecPush
+                  init
+                  (concat
+                    "  call void @.axiom.obf.decode(ptr @.axiom.obf.enc_"
+                    (concat
+                      id
+                      (concat
+                        ", ptr @"
+                        (concat
+                          name
+                          (concat
+                            ", i64 "
+                            (concat (fmtInt n) (concat ", i32 %key" (concat id ")")))))))))
                 (set literal (+ literal 1))
               }))
           {
             (if (isSome (strFind line "  %r = call i64 @__axiom_user_main()" 0))
-              {
-                (vecPush out "  call void @.axiom.obf.init()")
-              })
+              (vecPush out "  call void @.axiom.obf.init()"))
             (vecPush out (obfRenameLine line names replacements))
           }))
       (vecPush init "  ret void\n}")

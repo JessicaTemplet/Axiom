@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- Formatter width trials stop once a call cannot fit, and nested trials
+  print directly. Deep expressions no longer trigger exponential work.
+  The source tree, examples and snapshots follow the width-based layout.
+  Tested by `scripts/check-fmt.sh` and the binding printer's tests.
+
 - Function contracts appear in hover, signature help, `axiom doc` and
   the generated library reference. Completion inside a clause offers
   its parameters and, in a postcondition, `result`. The language

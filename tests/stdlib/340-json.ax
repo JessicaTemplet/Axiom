@@ -51,8 +51,8 @@
     }))
 
 (:: main Int)
-;@axiom:effect(io)
 ; JSON consumers use constructor/parse results, including the allowed zero sentinel.
+;@axiom:effect(io)
 (fn (main)
   ; --- integer boundaries ----------------------------------------
   (let (
@@ -63,27 +63,39 @@
       (set bad (+ bad (eq "zero" (jsonWrite (jsonNum 0)) "0")))
       (set bad (+ bad (eq "one" (jsonWrite (jsonNum 1)) "1")))
       (set bad (+ bad (eq "minus one" (jsonWrite (jsonNum (- 0 1))) "-1")))
-      (set bad (+ bad (eq "int max" (jsonWrite (jsonNum 9223372036854775807)) "9223372036854775807")))
+      (set bad (+
+                 bad
+                 (eq "int max" (jsonWrite (jsonNum 9223372036854775807)) "9223372036854775807")))
       ; -(2^63-1). The old guard matched THIS value and rendered it as
       ; the most negative one.
-      (set bad (+ bad (eq "int max negated" (jsonWrite (jsonNum (- 0 9223372036854775807))) "-9223372036854775807")))
+      (set bad (+
+                 bad
+                 (eq
+                   "int max negated"
+                   (jsonWrite (jsonNum (- 0 9223372036854775807)))
+                   "-9223372036854775807")))
       ; The most negative Int, built by subtraction because it has no
       ; literal spelling. The old guard never matched it, and rendering
       ; it walked off the digit table.
-      (set bad (+ bad (eq "int min" (jsonWrite (jsonNum (- (- 0 9223372036854775807) 1))) "-9223372036854775808")))
+      (set bad (+
+                 bad
+                 (eq
+                   "int min"
+                   (jsonWrite (jsonNum (- (- 0 9223372036854775807) 1)))
+                   "-9223372036854775808")))
       (set n (+ n 6))
       ; --- parsing scalars -------------------------------------------
       (set bad (+ bad (eqInt "parse int" (jsonInt (jsonParse "42")) 42)))
       (set bad (+ bad (eqInt "parse negative" (jsonInt (jsonParse "-7")) (- 0 7))))
       (set bad (+ bad (eqInt "parse big" (jsonInt (jsonParse "9007199254740993")) 9007199254740993)))
       (set bad (+
-        bad
-        (eqInt
-          "null is null"
-          (if (jsonIsNull (jsonParse "null"))
-            1
-            0)
-          1)))
+                 bad
+                 (eqInt
+                   "null is null"
+                   (if (jsonIsNull (jsonParse "null"))
+                     1
+                     0)
+                   1)))
       (set bad (+ bad (eqInt "true" (jsonBoolVal (jsonParse "true")) 1)))
       (set bad (+ bad (eqInt "false" (jsonBoolVal (jsonParse "false")) 0)))
       ; A fraction keeps its text and truncates its integer part.
@@ -109,8 +121,15 @@
       ; Two UTF-8 bytes for U+00E9, four for U+1F600 via a surrogate
       ; pair, three for the U+FFFD an unpaired surrogate becomes.
       (set bad (+ bad (eqInt "latin1 length" (strLen (jsonStrVal (jsonParse "\"\\u00e9\""))) 2)))
-      (set bad (+ bad (eqInt "surrogate pair length" (strLen (jsonStrVal (jsonParse "\"\\ud83d\\ude00\""))) 4)))
-      (set bad (+ bad (eqInt "lone surrogate length" (strLen (jsonStrVal (jsonParse "\"\\ud83d\""))) 3)))
+      (set bad (+
+                 bad
+                 (eqInt
+                   "surrogate pair length"
+                   (strLen (jsonStrVal (jsonParse "\"\\ud83d\\ude00\"")))
+                   4)))
+      (set bad (+
+                 bad
+                 (eqInt "lone surrogate length" (strLen (jsonStrVal (jsonParse "\"\\ud83d\""))) 3)))
       (set n (+ n 13))
       ; --- containers -------------------------------------------------
       (set bad (+ bad (eqInt "array length" (jsonArrLen (jsonParse "[1,2,3]")) 3)))
@@ -120,7 +139,9 @@
       (set bad (+ bad (eqInt "empty object" (jsonObjLen (jsonParse "{}")) 0)))
       (set bad (+ bad (eqInt "object lookup" (jsonGetInt (jsonParse "{\"a\":1,\"b\":2}") "b") 2)))
       (set bad (+ bad (eqInt "object miss" (jsonGet (jsonParse "{\"a\":1}") "zz") 0)))
-      (set bad (+ bad (eqInt "nested" (jsonInt (jsonArrGet (jsonArrGet (jsonParse "[[9]]") 0) 0)) 9)))
+      (set bad (+
+                 bad
+                 (eqInt "nested" (jsonInt (jsonArrGet (jsonArrGet (jsonParse "[[9]]") 0) 0)) 9)))
       (set n (+ n 8))
       ; --- refusals ---------------------------------------------------
       ; Every one of these must answer 0, the absence marker.
@@ -153,18 +174,47 @@
       (set bad (+ bad (eq "write null" (jsonWrite jsonNull) "null")))
       (set bad (+ bad (eq "write escapes" (jsonWrite (jsonStr "a\"b\\c\nd")) "\"a\\\"b\\\\c\\nd\"")))
       (set bad (+ bad (eq "write control" (jsonWrite (jsonStr (strFromByte 1))) "\"\\u0001\"")))
-      (set bad (+ bad (eq "write object" (jsonWrite (jsonObjPut (jsonObjPut jsonObj "a" (jsonNum 1)) "b" (jsonStr "x"))) "{\"a\":1,\"b\":\"x\"}")))
-      (set bad (+ bad (eq "round trip" (jsonWrite (jsonParse "{\"a\":[1,2,{\"b\":null}],\"c\":true}")) "{\"a\":[1,2,{\"b\":null}],\"c\":true}")))
-      (set bad (+ bad (eq "round trip escape" (jsonWrite (jsonParse "\"tab\\there\"")) "\"tab\\there\"")))
+      (set bad (+
+                 bad
+                 (eq
+                   "write object"
+                   (jsonWrite (jsonObjPut (jsonObjPut jsonObj "a" (jsonNum 1)) "b" (jsonStr "x")))
+                   "{\"a\":1,\"b\":\"x\"}")))
+      (set bad (+
+                 bad
+                 (eq
+                   "round trip"
+                   (jsonWrite (jsonParse "{\"a\":[1,2,{\"b\":null}],\"c\":true}"))
+                   "{\"a\":[1,2,{\"b\":null}],\"c\":true}")))
+      (set bad (+
+                 bad
+                 (eq "round trip escape" (jsonWrite (jsonParse "\"tab\\there\"")) "\"tab\\there\"")))
       ; A code point above the BMP survives parse and re-serialisation
       ; as raw UTF-8 bytes rather than as an escape.
-      (set bad (+ bad (eqInt "round trip astral length" (strLen (jsonWrite (jsonParse "\"\\ud83d\\ude00\""))) 6)))
+      (set bad (+
+                 bad
+                 (eqInt
+                   "round trip astral length"
+                   (strLen (jsonWrite (jsonParse "\"\\ud83d\\ude00\"")))
+                   6)))
       ; A byte that begins no well-formed UTF-8 character is written as
       ; `�`, one per byte, where it went out raw until 2026-09-27
       ; and made text no strict reader parses; well-formed multi-byte
       ; text still passes through as itself.
-      (set bad (+ bad (eq "write lone lead byte" (jsonWrite (jsonStr (concat "a" (concat (strFromByte 228) "b")))) "\"a\\ufffdb\"")))
-      (set bad (+ bad (eq "write surrogate bytes" (jsonWrite (jsonStr (concat (strFromByte 237) (concat (strFromByte 160) (strFromByte 128))))) "\"\\ufffd\\ufffd\\ufffd\"")))
+      (set bad (+
+                 bad
+                 (eq
+                   "write lone lead byte"
+                   (jsonWrite (jsonStr (concat "a" (concat (strFromByte 228) "b"))))
+                   "\"a\\ufffdb\"")))
+      (set bad (+
+                 bad
+                 (eq
+                   "write surrogate bytes"
+                   (jsonWrite
+                     (jsonStr
+                       (concat (strFromByte 237) (concat (strFromByte 160) (strFromByte 128)))))
+                   "\"\\ufffd\\ufffd\\ufffd\"")))
       (set bad (+ bad (eq "write well-formed" (jsonWrite (jsonStr "é世")) "\"é世\"")))
       (set n (+ n 10))
       ; --- depth ------------------------------------------------------

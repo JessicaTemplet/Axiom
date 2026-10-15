@@ -616,7 +616,7 @@ Tested by `tests/tools/symbols-zoo.golden`.
 Source:
 
 ```scheme
-(data Maybe (a)
+(data Maybe a
   (Nothing)
   (Just a))
 
@@ -690,12 +690,13 @@ Here the first declaration carries `;@axiom:effect(pure)`, the second is an
 ```scheme
 ;@axiom:effect(pure)
 (:: double (-> Int Int))
-(fn (double x) (* x 2))
+(fn (double x)
+  (* x 2))
 
 (extern "mymath"
   (addTwo :: (-> Int Int Int)))
 
-(data Maybe (a)
+(data Maybe a
   (Nothing)
   (Just a))
 ```

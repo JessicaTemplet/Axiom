@@ -66,12 +66,12 @@
       (for i in 0..(modelLen m)
         (let ((k (vecGet m.keys i)))
           (if (&&
-            (match lo
-              ((Some l) (>= (strCmp k l) 0))
-              ((None) true))
-            (match hi
-              ((Some h) (< (strCmp k h) 0))
-              ((None) true)))
+                (match lo
+                  ((Some l) (>= (strCmp k l) 0))
+                  ((None) true))
+                (match hi
+                  ((Some h) (< (strCmp k h) 0))
+                  ((None) true)))
             {
               (vecPush out.keys k)
               (vecPush out.vals (vecGet m.vals i))
@@ -98,18 +98,18 @@
 (fn (scanRange p root lo hi forward)
   (let ((m modelNew))
     (match (btreeScan
-      p
-      root
-      lo
-      hi
-      forward
-      (lambda (k v)
-        {
-          (vecPush m.keys k)
-          (vecPush m.vals v)
-          (Ok true)
-        }
-      ))
+             p
+             root
+             lo
+             hi
+             forward
+             (lambda (k v)
+               {
+                 (vecPush m.keys k)
+                 (vecPush m.vals v)
+                 (Ok true)
+               }
+             ))
       ((Ok _) (Ok m))
       ((Err e) (Err e)))))
 
@@ -127,23 +127,24 @@
     (match (readTree p root)
       ((Ok got) (check t (sameModel got m) (concat label ": forward scan")))
       ((Err e) (check t false (concat label (concat ": forward scan: " (errorText e))))))
-    (match (scanRange
-      p
-      root
-      None
-      None
-      false)
+    (match (scanRange p root None None false)
       ((Ok got) (check t (sameModel got (reversed m)) (concat label ": backward scan")))
       ((Err e) (check t false (concat label ": backward scan"))))
     (match (btreeCount p root)
       ((Ok n) (check t (== n (modelLen m)) (concat label ": count")))
       ((Err e) (check t false (concat label ": count"))))
     (match (btreeFirstKey p root)
-      ((Ok (Some k)) (check t (&& (> (modelLen m) 0) (strEq k (vecGet m.keys 0))) (concat label ": first key")))
+      ((Ok (Some k)) (check
+                       t
+                       (&& (> (modelLen m) 0) (strEq k (vecGet m.keys 0)))
+                       (concat label ": first key")))
       ((Ok (None)) (check t (== (modelLen m) 0) (concat label ": no first key")))
       ((Err e) (check t false (concat label ": first key"))))
     (match (btreeLastKey p root)
-      ((Ok (Some k)) (check t (&& (> (modelLen m) 0) (strEq k (vecLast m.keys))) (concat label ": last key")))
+      ((Ok (Some k)) (check
+                       t
+                       (&& (> (modelLen m) 0) (strEq k (vecLast m.keys)))
+                       (concat label ": last key")))
       ((Ok (None)) (check t (== (modelLen m) 0) (concat label ": no last key")))
       ((Err e) (check t false (concat label ": last key"))))
     (for i in 0..4
@@ -153,20 +154,10 @@
       )
         (let ((want (modelRange m lo hi)))
           {
-            (match (scanRange
-              p
-              root
-              lo
-              hi
-              true)
+            (match (scanRange p root lo hi true)
               ((Ok got) (check t (sameModel got want) (concat label ": range forward")))
               ((Err e) (check t false (concat label ": range forward"))))
-            (match (scanRange
-              p
-              root
-              lo
-              hi
-              false)
+            (match (scanRange p root lo hi false)
               ((Ok got) (check t (sameModel got (reversed want)) (concat label ": range backward")))
               ((Err e) (check t false (concat label ": range backward"))))
           })))
@@ -190,7 +181,10 @@
           (randomValue r))))
         (if (< op 45)
           (match (btreePut p root k v)
-            ((Ok isNew) (check t (boolEq isNew (modelPut m k v)) "put answers whether the key was new"))
+            ((Ok isNew) (check
+                          t
+                          (boolEq isNew (modelPut m k v))
+                          "put answers whether the key was new"))
             ((Err e) (check t false (concat "put: " (errorText e)))))
           (if (< op 55)
             (let ((had (isSome (modelGet m k))))
@@ -206,7 +200,10 @@
                 ((Err e) (check t false (concat "insertNew: " (errorText e))))))
             (if (< op 75)
               (match (btreeDelete p root k)
-                ((Ok was) (check t (boolEq was (modelDelete m k)) "delete answers whether the key was there"))
+                ((Ok was) (check
+                            t
+                            (boolEq was (modelDelete m k))
+                            "delete answers whether the key was there"))
                 ((Err e) (check t false (concat "delete: " (errorText e)))))
               (match (btreeGet p root k)
                 ((Ok got)
@@ -261,21 +258,9 @@
                     (check t (== (codeOf (pagerBeginWrite p)) 0) "begin batch")
                     (for i in 0..150
                       {
-                        (randomOp
-                          t
-                          p
-                          r
-                          ra
-                          ma
-                          false)
+                        (randomOp t p r ra ma false)
                         (if (== (% i 3) 0)
-                          (randomOp
-                            t
-                            p
-                            r
-                            rb
-                            mb
-                            true))
+                          (randomOp t p r rb mb true))
                         (set ops (+ ops 1))
                       })
                     (if (== (rngBelow r 6) 0)
@@ -303,20 +288,8 @@
                         (set commits (+ commits 1))
                       })
                     (check t (== (codeOf (pagerBeginRead p)) 0) "begin read")
-                    (verifyTree
-                      t
-                      p
-                      r
-                      ra
-                      ma
-                      "table tree")
-                    (verifyTree
-                      t
-                      p
-                      r
-                      rb
-                      mb
-                      "index tree")
+                    (verifyTree t p r ra ma "table tree")
+                    (verifyTree t p r rb mb "index tree")
                     (let ((c (btreeCheck p (roots3 ra rb))))
                       (check t (== (codeOf c) 0) (concat "btreeCheck: " (errText c))))
                     (check t (== (codeOf (pagerEndRead p)) 0) "end read")
@@ -342,20 +315,8 @@
                   }))
               (check t (== (codeOf (pagerCommit p)) 0) "commit delete-all")
               (check t (== (codeOf (pagerBeginRead p)) 0) "read after delete-all")
-              (verifyTree
-                t
-                p
-                r
-                ra
-                ma
-                "emptied table tree")
-              (verifyTree
-                t
-                p
-                r
-                rb
-                mb
-                "emptied index tree")
+              (verifyTree t p r ra ma "emptied table tree")
+              (verifyTree t p r rb mb "emptied index tree")
               (check t (== (codeOf (btreeCheck p (roots3 ra rb))) 0) "btreeCheck after delete-all")
               ; every page but the header, the schema root and the two roots is free
               (let (
@@ -367,25 +328,13 @@
               ; refill, then reopen with another cache size and read it back
               (check t (== (codeOf (pagerBeginWrite p)) 0) "begin refill")
               (for i in 0..400
-                (randomOp
-                  t
-                  p
-                  r
-                  ra
-                  ma
-                  false))
+                (randomOp t p r ra ma false))
               (check t (== (codeOf (pagerCommit p)) 0) "commit refill")
               (check t (== (codeOf (pagerClose p)) 0) "close")
               (let ((q (openOrDie "model.db" 64)))
                 {
                   (check t (== (codeOf (pagerBeginRead q)) 0) "read after reopen")
-                  (verifyTree
-                    t
-                    q
-                    r
-                    ra
-                    ma
-                    "reopened table tree")
+                  (verifyTree t q r ra ma "reopened table tree")
                   (check t (== (codeOf (btreeCheck q (roots3 ra rb))) 0) "btreeCheck after reopen")
                   (check t (== (codeOf (pagerEndRead q)) 0) "end read")
                   (check t (== (codeOf (pagerClose q)) 0) "close again")

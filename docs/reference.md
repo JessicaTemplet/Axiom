@@ -45,7 +45,9 @@ status:
 ```scheme
 (:: main Int)
 (fn (main)
-  (if (> (+ 2 2) 4) 1 0))
+  (if (> (+ 2 2) 4)
+    1
+    0))
 ```
 
 ### Fallible main
@@ -68,8 +70,10 @@ the `?` runs:
 
 (:: halveTwice (-> Int (Result Int Error)))
 (fn (halveTwice n)
-  (let ((a (divChecked n 2)?)
-        (b (divChecked a 2)?))
+  (let (
+    (a (divChecked n 2)?)
+    (b (divChecked a 2)?)
+  )
     (Ok b)))
 
 (:: main (Result Int Error))
@@ -127,7 +131,6 @@ line is a note for whoever maintains the code, and tools leave it out.
 
 ```scheme
 ;;! Counters for the examples.
-
 (import IO)
 
 ;; Add one to `n`.
@@ -135,15 +138,14 @@ line is a note for whoever maintains the code, and tools leave it out.
 ;; A second paragraph, with `code` and *emphasis* as in any Markdown.
 ; A note about the implementation, which hover and the reference skip.
 (:: bump (-> Int Int))
-(fn (bump n) (+ n 1))
+(fn (bump n)
+  (+ n 1))
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((v (bump 1)))
-    {
-      (println "{v}")
-    }))
+    (println "{v}")))
 ```
 
 Write the doc comment above the `::` signature when there is one, and
@@ -213,14 +215,17 @@ A lambda is a function value. It can capture values in its enclosing scope.
 (import IO)
 
 (:: apply (-> (-> Int Int) Int Int))
-(fn (apply f x) (f x))
+(fn (apply f x)
+  (f x))
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
   (let ((offset 100))
-    (println (apply (lambda (x) (+ x offset)) 5))
-    ()))
+    {
+      (println (apply (lambda (x) (+ x offset)) 5))
+      ()
+    }))
 ```
 
 This prints `105`. Function parameters and record fields may hold
@@ -238,16 +243,23 @@ build a lambda for the missing arguments, from left to right:
 (import IO)
 
 (:: sub (-> Int Int Int))
-(fn (sub x y) (- x y))
+(fn (sub x y)
+  (- x y))
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((subFrom50 (sub 50 _))    ; (lambda (y) (sub 50 y))
-        (minus8 (sub _ 8)))       ; (lambda (x) (sub x 8))
-    (println (subFrom50 8))
-    (println (minus8 50))
-    ()))
+  ; (lambda (y) (sub 50 y))
+  ; (lambda (x) (sub x 8))
+  (let (
+    (subFrom50 (sub 50 _))
+    (minus8 (sub _ 8))
+  )
+    {
+      (println (subFrom50 8))
+      (println (minus8 50))
+      ()
+    }))
 ```
 
 This prints `42` twice. A bare `_` elsewhere in an expression is
@@ -280,8 +292,10 @@ numeric conversion. `String` equality reads contents; ordering uses `strCmp`.
 
 (:: compute (-> Int Int))
 (fn (compute n)
-  (let ((x (+ n 1))
-        (y (* x 2)))
+  (let (
+    (x (+ n 1))
+    (y (* x 2))
+  )
     (+ x y)))
 
 (:: main ())
@@ -304,10 +318,12 @@ Declare a mutable binding with `mut`, then change it with `set`:
 ;@axiom:effect(io)
 (fn (main)
   (let ((mut count 0))
-    (set count (+ count 1))
-    (set count (+ count 1))
-    (println count)
-    ()))
+    {
+      (set count (+ count 1))
+      (set count (+ count 1))
+      (println count)
+      ()
+    }))
 ```
 
 This prints `2`. Assignment returns the assigned value. A closure may
@@ -330,20 +346,26 @@ form a chain, followed by the final default branch.
 (:: abs (-> Int Int))
 (fn (abs n)
   (if (< n 0)
-      (- 0 n)
-      n))
+    (- 0 n)
+    n))
 
 (:: classify (-> Int String))
 (fn (classify n)
-  (if (< n 0) "negative" (== n 0) "zero" "positive"))
+  (if (< n 0)
+    "negative"
+    (== n 0)
+    "zero"
+    "positive"))
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (println (abs -7))
-  (println (classify -3))
-  (println (classify 0))
-  (println (classify 12)))
+  {
+    (println (abs -7))
+    (println (classify -3))
+    (println (classify 0))
+    (println (classify 12))
+  })
 ```
 
 Leave out the else when the branch is there for what it does. The `if`
@@ -360,7 +382,8 @@ own value is dropped:
   (let ((seen vecNew))
     {
       (for n in 0..10
-        (if (== (% n 3) 0) (vecPush seen n)))
+        (if (== (% n 3) 0)
+          (vecPush seen n)))
       (if (> (vecLen seen) 3)
         (println "more than three"))
       (println (vecLen seen))
@@ -388,7 +411,10 @@ that are there for what they do need not agree:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut hits 0) (mut seen false))
+  (let (
+    (mut hits 0)
+    (mut seen false)
+  )
     {
       (for n in 0..5
         (if (== (% n 2) 0)
@@ -527,17 +553,17 @@ Tested by `tests/selfhost/973-type-alias.ax` and `tests/selfhost/134-subtype-che
 
 ```scheme
 ; Optional value
-(data Maybe (a)
+(data Maybe a
   (Nothing)
   (Just a))
 
 ; Linked list
-(data List (a)
+(data List a
   (Nil)
   (Cons a (List a)))
 
 ; Binary tree
-(data Tree (a)
+(data Tree a
   (Leaf)
   (Node (Tree a) a (Tree a)))
 
@@ -564,16 +590,20 @@ renderable data types; no derive is needed for printing.
 ```scheme
 (import IO)
 
-(data List (a)
+(data List a
   (Nil)
   (Cons a (List a)))
 
 (:: describe (-> (List Int) String))
 (fn (describe xs)
   (match xs
-    ((Nil)                   "empty")
-    ((Cons _ (Nil))          "one item")
-    ((Cons h (Cons h2 _))    (if (== h h2) "starts with a pair" "two or more"))))
+    ((Nil) "empty")
+    ((Cons _ (Nil)) "one item")
+    ((Cons h (Cons h2 _))
+      (if (== h h2)
+        "starts with a pair"
+        "two or more")
+    )))
 
 (:: main ())
 ;@axiom:effect(io)
@@ -608,7 +638,8 @@ before using `.field`.
   (y : Int))
 
 (:: shift (-> Point Int Point))
-(fn (shift p n) (Point (+ p.x n) p.y))
+(fn (shift p n)
+  (Point (+ p.x n) p.y))
 
 (:: main ())
 ;@axiom:effect(io)
@@ -651,10 +682,17 @@ handle: a `parallel` form lends it to its bindings, and it can't have a
   (render : (-> a String)))
 
 (:: showInt (ShowOf Int))
-(fn (showInt) (ShowOf fmtInt))
+(fn (showInt)
+  (ShowOf fmtInt))
 
 (:: showSwitch (ShowOf Bool))
-(fn (showSwitch) (ShowOf (lambda (b) (if b "on" "off"))))
+(fn (showSwitch)
+  (ShowOf
+    (lambda (b)
+      (if b
+        "on"
+        "off")
+    )))
 
 (:: report (-> (ShowOf a) String a Int))
 ;@axiom:effect(io)
@@ -715,7 +753,12 @@ A custom effect declares callable operations with signatures:
     (handle
       (greet "Ada")
       (Console)
-      (lambda (s) { (println "log: {s}") 0 }))
+      (lambda (s)
+        {
+          (println "log: {s}")
+          0
+        }
+      ))
     (handle
       (greet "Grace")
       (Console)
@@ -753,7 +796,11 @@ with `result` bound to the returned value:
 ;@axiom:post((&& (>= result lo) (<= result hi)))
 (:: clamp (-> Int Int Int Int))
 (fn (clamp n lo hi)
-  (if (< n lo) lo (if (> n hi) hi n)))
+  (if (< n lo)
+    lo
+    (if (> n hi)
+      hi
+      n)))
 
 (:: main ())
 ;@axiom:effect(io)
@@ -914,13 +961,17 @@ wrappers and native archives; see [calling Rust](ffi.md).
 ```scheme
 (import IO)
 
-(macro (clamp lo hi x) (if (< x lo) lo (> x hi) hi x))
+(macro (clamp lo hi x) (if (< x lo)
+  lo
+  (> x hi)
+  hi
+  x))
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
-    (println (clamp 0 10 42))   ; becomes (if (< 42 0) 0 (> 42 10) 10 42)
+    (println (clamp 0 10 42))  ; becomes (if (< 42 0) 0 (> 42 10) 10 42)
     (println (clamp 0 10 -3))
   })
 ```
@@ -943,8 +994,7 @@ macro picks which:
 ```scheme
 (import IO)
 
-(macro total
-  ((total x) x)
+(macro total ((total x) x)
   ((total x rest ...) (+ x (total rest ...))))
 
 (:: main ())
@@ -972,7 +1022,11 @@ compilation. `Pre` supplies two derivers, `deriveEq` and
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((name "world") (n 42) (pi 3.14159))
+  (let (
+    (name "world")
+    (n 42)
+    (pi 3.14159)
+  )
     {
       (println "Hello {name}")
       (println "n={n} pi={pi:.2}")
@@ -1027,7 +1081,10 @@ Reference cycles require explicit application management.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut i 0) (mut total 0))
+  (let (
+    (mut i 0)
+    (mut total 0)
+  )
     {
       (while (< i 1000)
         {
@@ -1086,8 +1143,14 @@ values are the same value exactly when their addresses are equal:
     (c a)
   )
     {
-      (println (if (addrEq (addrOf a) (addrOf c)) "a is c" "a is not c"))
-      (println (if (addrEq (addrOf a) (addrOf b)) "a is b" "a is not b"))
+      (println
+        (if (addrEq (addrOf a) (addrOf c))
+          "a is c"
+          "a is not c"))
+      (println
+        (if (addrEq (addrOf a) (addrOf b))
+          "a is b"
+          "a is not b"))
     }))
 ```
 
@@ -1181,7 +1244,12 @@ instructions read every input before they write the output.
 (fn (divmod n d)
   (let ((mut rem 0))
     (let ((q (asm
-      (aarch64 "udiv {q}, {a}, {b}\nmsub {r}, {q}, {b}, {a}" (out q) (out r into rem) (in a n) (in b d))
+      (aarch64
+        "udiv {q}, {a}, {b}\nmsub {r}, {q}, {b}, {a}"
+        (out q)
+        (out r into rem)
+        (in a n)
+        (in b d))
       (x86_64 "xorl %edx, %edx\ndivq {b}" (inout q "rax" n) (out r "rdx" into rem) (in b d)))))
       (+ (* q 100) rem))))
 
@@ -1505,7 +1573,10 @@ Tested by `tests/stdlib/870-inline-asm-operands.ax` and
 
 (:: slowSum (-> Int Int))
 (fn (slowSum n)
-  (let ((mut i 0) (mut acc 0))
+  (let (
+    (mut i 0)
+    (mut acc 0)
+  )
     {
       (while (< i n)
         {
@@ -1521,8 +1592,10 @@ Tested by `tests/stdlib/870-inline-asm-operands.ax` and
 ;@axiom:effect(block)
 (fn (main)
   (let ((n 1000000))
-    (parallel p ((a (slowSum n))
-                 (b (* n 2)))
+    (parallel p (
+      (a (slowSum n))
+      (b (* n 2))
+    )
       {
         (println "a = {a}")
         (println "b = {b}")
@@ -1655,11 +1728,7 @@ server answers with a greeting.
             (_ (acceptOne server))
           )
             (match (tcpReadLine client 1024)
-              ((Ok (Some reply))
-                {
-                  (println reply)
-                }
-              )
+              ((Ok (Some reply)) (println reply))
               (_ (die "no reply" 1))))
         ))
     )))
@@ -1870,7 +1939,10 @@ with `test`. Assertions take a label first:
 (:: testAddition Int)
 ;@axiom:effect(io)
 (fn (testAddition)
-  { (assertEq "two plus two" 4 (+ 2 2)) 0 })
+  {
+    (assertEq "two plus two" 4 (+ 2 2))
+    0
+  })
 ```
 
 Run `axiom test tests.ax`. A directory runs its immediate `.ax` files

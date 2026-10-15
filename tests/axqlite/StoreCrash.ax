@@ -38,7 +38,13 @@
 ; Every fault kind.
 (pub :: faultKinds (Vec Int))
 (pub fn (faultKinds)
-  (vecPush (vecPush (vecPush (vecPush (vecPush (vecPush vecNew pagerFaultFail) pagerFaultTear) pagerFaultPowerLoss) pagerFaultPowerLossStrict) pagerFaultPowerLossJournal) pagerFaultPowerLossDatabase))
+  (vecPush
+    (vecPush
+      (vecPush
+        (vecPush (vecPush (vecPush vecNew pagerFaultFail) pagerFaultTear) pagerFaultPowerLoss)
+        pagerFaultPowerLossStrict)
+      pagerFaultPowerLossJournal)
+    pagerFaultPowerLossDatabase))
 
 (:: fresh (-> String String Int))
 ;@axiom:effect(io)
@@ -59,15 +65,7 @@
 (pub fn (runFaulted base path cache txn kind at arg)
   {
     (fresh base path)
-    (match (pagerOpenFaulty
-      path
-      false
-      false
-      cache
-      0
-      0
-      0
-      false)
+    (match (pagerOpenFaulty path false false cache 0 0 0 false)
       ((Err e) (* (errCode e) 1000000))
       ((Ok p)
         {
@@ -108,15 +106,7 @@
 (pub :: recoveredHash (-> String Int))
 ;@axiom:effect(io)
 (pub fn (recoveredHash path)
-  (match (pagerOpenFaulty
-    path
-    false
-    false
-    16
-    0
-    0
-    0
-    false)
+  (match (pagerOpenFaulty path false false 16 0 0 0 false)
     ((Err e) -1)
     ((Ok p)
       (let ((_ (pagerClose p)))
@@ -138,21 +128,11 @@
 (pub fn (spillsDuring base cache txn)
   {
     (fresh base "spill.db")
-    (match (pagerOpenFaulty
-      "spill.db"
-      false
-      false
-      cache
-      0
-      0
-      0
-      false)
+    (match (pagerOpenFaulty "spill.db" false false cache 0 0 0 false)
       ((Err e) -1)
       ((Ok p)
         (let ((n 
-          (match (andThen
-            (pagerBeginWrite p)
-            (lambda (_) (txn p)))
+          (match (andThen (pagerBeginWrite p) (lambda (_) (txn p)))
             ((Ok _) (pagerStat p 5))
             ((Err e) -1))))
           {
@@ -167,14 +147,7 @@
 (pub :: dryRun (-> Tally String String Int (-> Pager (Result Int Error)) Int))
 ;@axiom:effect(io)
 (pub fn (dryRun t base after cache txn)
-  (let ((r (runFaulted
-    base
-    after
-    cache
-    txn
-    0
-    0
-    0)))
+  (let ((r (runFaulted base after cache txn 0 0 0)))
     {
       (check t (< r 1000000) "the transaction commits when nothing fails")
       (% r 1000000)
@@ -190,15 +163,8 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (crashOne t label base cache txn kind n before after)
-  (let ((trial (lambda (_)
-    (runFaulted
-      base
-      "crash.db"
-      cache
-      txn
-      kind
-      n
-      (+ 100 (% (* n 997) 3900))))))
+  (let ((trial 
+    (lambda (_) (runFaulted base "crash.db" cache txn kind n (+ 100 (% (* n 997) 3900))))))
     (region one
       (let ((r (faultTrial trial)))
         (let (
@@ -206,9 +172,14 @@
           (hot (journalHasHeader "crash.db"))
         )
           (let ((h (recoveredHash "crash.db")))
-            (let ((where (concat label (concat ", " (concat (faultName kind) (concat " at point " (fmtInt n)))))))
+            (let ((where (concat
+                           label
+                           (concat ", " (concat (faultName kind) (concat " at point " (fmtInt n)))))))
               {
-                (check t (|| (== h before) (== h after)) (concat where ": the file is exactly the before or the after state"))
+                (check
+                  t
+                  (|| (== h before) (== h after))
+                  (concat where ": the file is exactly the before or the after state"))
                 (if (== kind pagerFaultFail)
                   (check
                     t
@@ -238,12 +209,7 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (crashSweep t label base cache txn rootsBefore rootsAfter)
-  (let ((points (dryRun
-    t
-    base
-    "after.db"
-    cache
-    txn)))
+  (let ((points (dryRun t base "after.db" cache txn)))
     (let (
       (before (fileHash base))
       (after (fileHash "after.db"))
@@ -260,12 +226,12 @@
         ; both ends are sound databases
         (for which in 0..2
           (match (pagerOpen
-            (if (== which 0)
-              base
-              "after.db")
-            false
-            false
-            16)
+                   (if (== which 0)
+                     base
+                     "after.db")
+                   false
+                   false
+                   16)
             ((Ok p)
               {
                 (check
@@ -296,16 +262,7 @@
           )
             {
               (for n in 1..(+ points 1)
-                (let ((v (crashOne
-                  t
-                  label
-                  base
-                  cache
-                  txn
-                  kind
-                  n
-                  before
-                  after)))
+                (let ((v (crashOne t label base cache txn kind n before after)))
                   {
                     (set total (+ total 1))
                     (if (== (& v 3) 1)
@@ -331,15 +288,7 @@
     {
       (copyOver "hot.db" "rec.db")
       (copyOver "hot.db-journal" "rec.db-journal")
-      (match (pagerOpenFaulty
-        "rec.db"
-        false
-        false
-        16
-        kind
-        m
-        (+ 100 (% (* m 997) 3900))
-        false)
+      (match (pagerOpenFaulty "rec.db" false false 16 kind m (+ 100 (% (* m 997) 3900)) false)
         ((Ok p) (pagerAbandon p))
         ((Err e) ()))
       (if (== (recoveredHash "rec.db") before)
@@ -355,15 +304,8 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (prepareHot base cache txn n)
-  (let ((trial (lambda (_)
-    (runFaulted
-      base
-      "crash.db"
-      cache
-      txn
-      pagerFaultPowerLossStrict
-      n
-      0))))
+  (let ((trial 
+    (lambda (_) (runFaulted base "crash.db" cache txn pagerFaultPowerLossStrict n 0))))
     (region one
       (let ((_ (faultTrial trial)))
         (if (! (journalHasHeader "crash.db"))
@@ -373,15 +315,7 @@
             (copyOver "crash.db-journal" "hot.db-journal")
             (copyOver "hot.db" "rec.db")
             (copyOver "hot.db-journal" "rec.db-journal")
-            (match (pagerOpenFaulty
-              "rec.db"
-              false
-              false
-              16
-              0
-              0
-              0
-              false)
+            (match (pagerOpenFaulty "rec.db" false false 16 0 0 0 false)
               ((Ok p)
                 (let ((k (pagerFaultPoints p)))
                   {
@@ -404,12 +338,7 @@
 ;@axiom:effect(block)
 (pub fn (recoverySweep t label base cache txn every)
   (let (
-    (points (dryRun
-      t
-      base
-      "after.db"
-      cache
-      txn))
+    (points (dryRun t base "after.db" cache txn))
     (before (fileHash base))
     (mut total 0)
     (mut hotCases 0)
@@ -425,7 +354,14 @@
                   (for m in 1..(+ rpoints 1)
                     {
                       (set total (+ total 1))
-                      (check t (== (recoveryCrashOne kind m before) 1) (concat label (concat ": recovery crashed by " (concat (faultName kind) (concat " at recovery point " (fmtInt m))))))
+                      (check
+                        t
+                        (== (recoveryCrashOne kind m before) 1)
+                        (concat
+                          label
+                          (concat
+                            ": recovery crashed by "
+                            (concat (faultName kind) (concat " at recovery point " (fmtInt m))))))
                     }))
               }))))
       (println "{label}: {hotCases} hot journals, their recovery crashed {total} ways, and recovered again to the before state")
@@ -468,9 +404,7 @@
         {
           (match (btreePut p root (keyRowid n) (rowBytes n size))
             ((Err e)
-              {
-                (set failed (Some e))
-              }
+              (set failed (Some e))
             )
             ((Ok _) ()))
           (set n (+ n step))
@@ -493,9 +427,7 @@
         {
           (match (btreeDelete p root (keyRowid n))
             ((Err e)
-              {
-                (set failed (Some e))
-              }
+              (set failed (Some e))
             )
             ((Ok _) ()))
           (set n (+ n step))
@@ -520,9 +452,7 @@
             (andThen
               (setup p)
               (lambda (v)
-                (mapOk
-                  (pagerCommit p)
-                  (lambda (_) v))
+                (mapOk (pagerCommit p) (lambda (_) v))
               ))
           ))))
         {
@@ -547,9 +477,7 @@
         {
           (match (btreeDelete p root (keyRowid n))
             ((Err e)
-              {
-                (set failed (Some e))
-              }
+              (set failed (Some e))
             )
             ((Ok _) ()))
           (set n (- n 1))

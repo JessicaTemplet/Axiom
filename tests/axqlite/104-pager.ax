@@ -51,7 +51,14 @@
       (let ((root (unwrapOr (btreeCreate p btreeTable) 0)))
         {
           (for i in 1..(+ n 1)
-            (ok t (btreePut p root (keyRowid i) (unwrapOr (recEncode (vecPush vecNew (VInt (* i i)))) "")) "build: put"))
+            (ok
+              t
+              (btreePut
+                p
+                root
+                (keyRowid i)
+                (unwrapOr (recEncode (vecPush vecNew (VInt (* i i)))) ""))
+              "build: put"))
           (ok t (pagerCommit p) "build: commit")
           (ok t (pagerClose p) "build: close")
           root
@@ -66,9 +73,7 @@
     ((Err e) (errCode e))
     ((Ok p)
       (let ((r 
-        (andThen
-          (pagerBeginRead p)
-          (lambda (_) (readTree p root)))))
+        (andThen (pagerBeginRead p) (lambda (_) (readTree p root)))))
         {
           (let ((_ (pagerClose p)))
             ())
@@ -91,10 +96,17 @@
           (check t (== (unwrapOr (pagerChangeCounter p) 0) 1) "a new file's change counter is 1")
           (check t (== (unwrapOr (pagerSchemaVersion p) -1) 0) "a new file's schema version is 0")
           (check t (== (unwrapOr (pagerFreeListCount p) -1) 0) "a new file has no free pages")
-          (check t (== (unwrapOr (btreeCount p btreeSchemaRoot) -1) 0) "the schema table starts empty")
+          (check
+            t
+            (== (unwrapOr (btreeCount p btreeSchemaRoot) -1) 0)
+            "the schema table starts empty")
           (check t (== (pagerLockLevel p) 1) "a read holds the shared lock")
           (is t (pagerAlloc p) axqMisuse "no page changes outside a write transaction")
-          (is t (btreePut p btreeSchemaRoot "k" "v") axqMisuse "no tree changes outside a write transaction")
+          (is
+            t
+            (btreePut p btreeSchemaRoot "k" "v")
+            axqMisuse
+            "no tree changes outside a write transaction")
           (is t (pagerSetMeta p 0 1) axqMisuse "no header changes outside a write transaction")
           (ok t (pagerEndRead p) "end read")
           (check t (== (pagerLockLevel p) 0) "ending the read releases the lock")
@@ -130,7 +142,10 @@
               (ok t (pagerBeginWrite p) "begin write")
               (let ((root (unwrapOr (btreeCreate p btreeTable) 0)))
                 (for i in 0..300
-                  (ok t (btreePut p root (keyRowid i) "a value that takes some room in a leaf") "put")))
+                  (ok
+                    t
+                    (btreePut p root (keyRowid i) "a value that takes some room in a leaf")
+                    "put")))
               (ok t (pagerSetMeta p 0 7) "set meta")
               (ok t (btreePut p btreeSchemaRoot "t" "1") "put in the schema table")
               (ok t (pagerRollback p) "rollback")
@@ -138,7 +153,10 @@
               (ok t (pagerBeginRead p) "begin read")
               (check t (== (unwrapOr (pagerMeta p 0) 0) 42) "rollback restores meta 0")
               (check t (== (unwrapOr (pagerPageCount p) 0) 2) "rollback restores the page count")
-              (check t (== (unwrapOr (btreeCount p btreeSchemaRoot) -1) 0) "rollback restores the schema table")
+              (check
+                t
+                (== (unwrapOr (btreeCount p btreeSchemaRoot) -1) 0)
+                "rollback restores the schema table")
               (ok t (pagerEndRead p) "end read")
             })
           ; a transaction bigger than the cache spills, and rolls back exactly
@@ -151,11 +169,17 @@
               (ok t (pagerBeginWrite p) "begin big write")
               (let ((root (unwrapOr (btreeCreate p btreeTable) 0)))
                 (for i in 0..2000
-                  (ok t (btreePut p root (keyRowid i) "a value that takes some room in a leaf") "put")))
+                  (ok
+                    t
+                    (btreePut p root (keyRowid i) "a value that takes some room in a leaf")
+                    "put")))
               (check t (> (pagerStat p 5) 0) "a 4-page cache spills a big transaction")
               (check t (!= (fileHash "a.db") before) "spilled pages reached the file")
               (ok t (pagerRollback p) "rollback")
-              (check t (== (fileHash "a.db") before) "rollback after spilling leaves the file byte for byte")
+              (check
+                t
+                (== (fileHash "a.db") before)
+                "rollback after spilling leaves the file byte for byte")
             })
           (ok t (pagerClose p) "close")
         })
@@ -169,7 +193,10 @@
             (c (unwrapOr (pagerAlloc p) 0))
           )
             {
-              (check t (&& (== a 2) (&& (== b 3) (== c 4))) "new pages come from the end of the file")
+              (check
+                t
+                (&& (== a 2) (&& (== b 3) (== c 4)))
+                "new pages come from the end of the file")
               (ok t (pagerCommit p) "commit")
               (check t (== (sizeOf "a.db") 20480) "the file grew by three pages")
               (ok t (pagerBeginWrite p) "begin")
@@ -195,9 +222,7 @@
         {
           (for i in 0..48
             (if (! (== (fileByte "a.db-journal" i) 0))
-              {
-                (set zero false)
-              }))
+              (set zero false)))
           (check t zero "the journal's header is zero once the transaction is over")
         })
       ; read-only
@@ -206,7 +231,11 @@
           (check t (pagerIsReadOnly p) "opened read-only")
           (is t (pagerBeginWrite p) axqReadOnly "a read-only pager refuses a write transaction")
           (ok t (pagerBeginRead p) "a read-only pager reads")
-          (is t (btreePut p btreeSchemaRoot "k" "v") axqReadOnly "a read-only pager refuses tree changes")
+          (is
+            t
+            (btreePut p btreeSchemaRoot "k" "v")
+            axqReadOnly
+            "a read-only pager refuses tree changes")
           (ok t (pagerEndRead p) "end read")
           (ok t (pagerClose p) "close")
         })
@@ -214,17 +243,26 @@
       (check t (== (openCode "missing.db" false true) axqIoFailed) "a missing file, read-only")
       (let ((_ (writeFile "empty.db" "")))
         ())
-      (check t (== (openCode "empty.db" false true) axqNotADatabase) "an empty file can't be made a database read-only")
+      (check
+        t
+        (== (openCode "empty.db" false true) axqNotADatabase)
+        "an empty file can't be made a database read-only")
       (check t (== (openCode "empty.db" false false) 0) "an empty file becomes a database")
       (check t (== (sizeOf "empty.db") 8192) "and has two pages")
-      ; files that aren't databases
       (let ((_ (writeFile "text.db" "hello, this is not a database")))
         ())
-      (check t (== (openCode "text.db" false false) axqNotADatabase) "a text file is not a database")
+      ; files that aren't databases
+      (check
+        t
+        (== (openCode "text.db" false false) axqNotADatabase)
+        "a text file is not a database")
       (let ((r (rngNew 104)))
         (let ((_ (writeFile "noise.db" (rngBytes r 10000 256))))
           ()))
-      (check t (== (openCode "noise.db" false false) axqNotADatabase) "random bytes are not a database")
+      (check
+        t
+        (== (openCode "noise.db" false false) axqNotADatabase)
+        "random bytes are not a database")
       (copyOver "a.db" "v2.db")
       (patchByte "v2.db" 23 2)
       (check t (== (openCode "v2.db" false false) axqNotADatabase) "format version 2 is not read")
@@ -245,10 +283,20 @@
                   (for i in 1..401
                     (if (== (% i 3) 0)
                       (ok t (btreeDelete p root (keyRowid i)) "delete an existing row")
-                      (ok t (btreePut p root (keyRowid i) "a longer value than the row had, so cells move") "rewrite an existing row")))
+                      (ok
+                        t
+                        (btreePut
+                          p
+                          root
+                          (keyRowid i)
+                          "a longer value than the row had, so cells move")
+                        "rewrite an existing row")))
                   (check t (> (pagerStat p 5) 0) "the rewrite spilled")
                   (ok t (pagerRollback p) "rollback")
-                  (check t (== (fileHash "b.db") before) "rolling back rewritten, spilled pages leaves the file byte for byte")
+                  (check
+                    t
+                    (== (fileHash "b.db") before)
+                    "rolling back rewritten, spilled pages leaves the file byte for byte")
                   (ok t (pagerClose p) "close")
                 }
               )
@@ -258,24 +306,43 @@
           (patchByte "flip.db" (+ (* 3 4096) 2000) (^ (fileByte "b.db" (+ (* 3 4096) 2000)) 1))
           (check t (== (readCode "flip.db" root) axqCorrupt) "a flipped bit in a leaf is corrupt")
           (copyOver "b.db" "moved.db")
-          ; page 4's bytes, checksum and all, where page 3 should be
           (let ((s (unwrapOr (readFile "b.db") "")))
             (let ((pg4 (strSlice s (* 4 4096) 4096)))
-              (let ((_ (writeFile "moved.db" (concat (concat (strSlice s 0 (* 3 4096)) pg4) (strSlice s (* 4 4096) (strLen s))))))
+              (let ((_ (writeFile
+                         "moved.db"
+                         (concat
+                           (concat (strSlice s 0 (* 3 4096)) pg4)
+                           (strSlice s (* 4 4096) (strLen s))))))
                 ())))
-          (check t (== (readCode "moved.db" root) axqCorrupt) "a valid page in the wrong place is corrupt")
+          ; page 4's bytes, checksum and all, where page 3 should be
+          (check
+            t
+            (== (readCode "moved.db" root) axqCorrupt)
+            "a valid page in the wrong place is corrupt")
           (let ((s (unwrapOr (readFile "b.db") "")))
             (let ((_ (writeFile "short.db" (strSlice s 0 (- (strLen s) 4096)))))
               ()))
-          (check t (== (openCode "short.db" false false) axqCorrupt) "a file shorter than its page count")
-          (let ((_ (writeFile "long.db" (concat (unwrapOr (readFile "b.db") "") (rngBytes (rngNew 5) 4096 256)))))
+          (check
+            t
+            (== (openCode "short.db" false false) axqCorrupt)
+            "a file shorter than its page count")
+          (let ((_ (writeFile
+                     "long.db"
+                     (concat (unwrapOr (readFile "b.db") "") (rngBytes (rngNew 5) 4096 256)))))
             ())
-          (check t (== (openCode "long.db" false false) axqCorrupt) "a file longer than its page count")
+          (check
+            t
+            (== (openCode "long.db" false false) axqCorrupt)
+            "a file longer than its page count")
           (match (pagerOpen "flip.db" false false 16)
             ((Ok p)
               {
                 (ok t (pagerBeginRead p) "begin read")
-                (is t (btreeCheck p (vecPush (vecPush vecNew btreeSchemaRoot) root)) axqCorrupt "btreeCheck finds the flipped bit")
+                (is
+                  t
+                  (btreeCheck p (vecPush (vecPush vecNew btreeSchemaRoot) root))
+                  axqCorrupt
+                  "btreeCheck finds the flipped bit")
                 (ok t (pagerEndRead p) "end read")
                 (ok t (pagerClose p) "close")
               }

@@ -96,9 +96,7 @@
         (if (! (isSome failed))
           (match (btreePut p root (keyRowid n) long)
             ((Err e)
-              {
-                (set failed (Some e))
-              }
+              (set failed (Some e))
             )
             ((Ok _) ()))))
       (match failed
@@ -121,9 +119,7 @@
       (while (&& (! done) (< busy 100000000))
         (match (pagerBeginWrite p)
           ((Err e)
-            {
-              (set busy (+ busy 1))
-            }
+            (set busy (+ busy 1))
           )
           ((Ok _)
             (let ((n 
@@ -132,8 +128,8 @@
                 (_ -1000000))))
               {
                 (match (andThen
-                  (btreePut p root counterKey (fmtInt (+ n 1)))
-                  (lambda (_) (pagerCommit p)))
+                         (btreePut p root counterKey (fmtInt (+ n 1)))
+                         (lambda (_) (pagerCommit p)))
                   ((Ok _) ())
                   ((Err e)
                     {
@@ -161,9 +157,7 @@
     {
       (while (&& (== root 0) (< tries 100000000))
         {
-          (match (andThen
-            (pagerBeginRead p)
-            (lambda (_) (pagerMeta p 0)))
+          (match (andThen (pagerBeginRead p) (lambda (_) (pagerMeta p 0)))
             ((Ok r)
               (set root r)
             )
@@ -198,9 +192,9 @@
               })
             (if (strEq mode "hold-write")
               (if (isErr
-                (andThen
-                  (pagerBeginWrite p)
-                  (lambda (_) (rewrite p root "the child's, never committed, and long enough to spill"))))
+                    (andThen
+                      (pagerBeginWrite p)
+                      (lambda (_) (rewrite p root "the child's, never committed, and long enough to spill"))))
                 13
                 {
                   (let ((_ (writeFile "ready-write" "1")))
@@ -213,9 +207,9 @@
                 })
               (if (strEq mode "die-writing")
                 (if (isErr
-                  (andThen
-                    (pagerBeginWrite p)
-                    (lambda (_) (rewrite p root "the child's, dying, and long enough to spill from the cache"))))
+                      (andThen
+                        (pagerBeginWrite p)
+                        (lambda (_) (rewrite p root "the child's, dying, and long enough to spill from the cache"))))
                   16
                   {
                     (let ((_ (writeFile "ready-die" "1")))
@@ -262,9 +256,7 @@
                       (andThen
                         (rewrite p r "original")
                         (lambda (_)
-                          (mapOk
-                            (btreePut p r counterKey "0")
-                            (lambda (_) 0))
+                          (mapOk (btreePut p r counterKey "0") (lambda (_) 0))
                         ))
                     ))
                 }
@@ -302,15 +294,19 @@
                 (check t (waitFor "ready-write") "the writing child is ready")
                 (is t (pagerBeginRead p) axqBusy "the parent can't read while the child writes")
                 (is t (pagerBeginWrite p) axqBusy "nor write")
-                (check t (!= (fileHash "xp.db") before) "the child's uncommitted pages are in the file")
+                (check
+                  t
+                  (!= (fileHash "xp.db") before)
+                  "the child's uncommitted pages are in the file")
                 (let ((_ (writeFile "go-write" "1")))
                   ())
                 (check t (== (reap pid) 0) "the writing child rolls back cleanly")
                 (check t (== (fileHash "xp.db") before) "and the file is as it was")
-                (match (andThen
-                  (pagerBeginRead p)
-                  (lambda (_) (btreeGet p root (keyRowid 3))))
-                  ((Ok (Some v)) (check t (strStartsWith v "original") "the parent reads the original row"))
+                (match (andThen (pagerBeginRead p) (lambda (_) (btreeGet p root (keyRowid 3))))
+                  ((Ok (Some v)) (check
+                                   t
+                                   (strStartsWith v "original")
+                                   "the parent reads the original row"))
                   (_ (check t false "the parent reads row 3")))
                 (is t (pagerEndRead p) 0 "end read")
               }
@@ -325,12 +321,17 @@
                 (check t (!= (fileHash "xp.db") before) "its pages are in the file")
                 (check t (== (codeOf (sysKill pid 9)) 0) "SIGKILL")
                 (check t (== (reap pid) 137) "the child died of SIGKILL")
-                (match (andThen
-                  (pagerBeginRead p)
-                  (lambda (_) (btreeGet p root (keyRowid 3))))
-                  ((Ok (Some v)) (check t (strStartsWith v "original") "the parent recovers the journal and reads the original row"))
+                (match (andThen (pagerBeginRead p) (lambda (_) (btreeGet p root (keyRowid 3))))
+                  ((Ok (Some v)) (check
+                                   t
+                                   (strStartsWith v "original")
+                                   "the parent recovers the journal and reads the original row"))
                   (_ (check t false "the parent reads row 3 after the kill")))
-                (is t (btreeCheck p (vecPush (vecPush vecNew btreeSchemaRoot) root)) 0 "the recovered file checks")
+                (is
+                  t
+                  (btreeCheck p (vecPush (vecPush vecNew btreeSchemaRoot) root))
+                  0
+                  "the recovered file checks")
                 (is t (pagerEndRead p) 0 "end read")
                 (check t (== (fileHash "xp.db") before) "recovery restores the file byte for byte")
               }
@@ -347,10 +348,11 @@
                     (check t (== failed 0) "every increment of the parent's commits")
                   })
                 (check t (== (reap pid) 0) "every increment of the child's commits")
-                (match (andThen
-                  (pagerBeginRead p)
-                  (lambda (_) (btreeGet p root counterKey)))
-                  ((Ok (Some v)) (check t (strEq v "200") (concat "100 + 100 increments make 200, not " v)))
+                (match (andThen (pagerBeginRead p) (lambda (_) (btreeGet p root counterKey)))
+                  ((Ok (Some v)) (check
+                                   t
+                                   (strEq v "200")
+                                   (concat "100 + 100 increments make 200, not " v)))
                   (_ (check t false "read the counter")))
                 (is t (pagerEndRead p) 0 "end read")
               }

@@ -26,7 +26,8 @@ then with the same statements as text:
         (for row in rs.rows
           (println (unwrapOr (rowTextNamed row "name") "?")))
         0
-      })
+      }
+    )
     ((Err e) (println (errorText e)))))
 
 (:: main Int)
@@ -37,13 +38,37 @@ then with the same statements as text:
     ((Ok db)
       (let ((minAge 30))
         {
-          (let ((_ (axqRunOn db (axqlCreateTable IF NOT EXISTS people (id INTEGER PRIMARY KEY) (name TEXT NOT NULL) (age INTEGER))))) 0)
-          (let ((_ (axqRunOn db (axqlInsert people (name age) (values (text "Ada") (int 36)) (values (text "Bob") (int 24)))))) 0)
-          (show (axqQueryOn db (axqlSelect people (name) (where (> age (int minAge))) (orderBy name))))
-          (let ((_ (axqExec db "INSERT INTO people (name, age) VALUES ('Cy', 41)"))) 0)
-          (show (axqQueryOn db (Query "SELECT name FROM people WHERE age > ? ORDER BY name" (vec1 (VInt minAge)))))
-          (let ((_ (axqClose db))) 0)
-        }))))
+          (let ((_ (axqRunOn
+                     db
+                     (axqlCreateTable
+                       IF
+                       NOT
+                       EXISTS
+                       people
+                       (id INTEGER PRIMARY KEY)
+                       (name TEXT NOT NULL)
+                       (age INTEGER)))))
+            0)
+          (let ((_ (axqRunOn
+                     db
+                     (axqlInsert
+                       people
+                       (name age)
+                       (values (text "Ada") (int 36))
+                       (values (text "Bob") (int 24))))))
+            0)
+          (show
+            (axqQueryOn db (axqlSelect people (name) (where (> age (int minAge))) (orderBy name))))
+          (let ((_ (axqExec db "INSERT INTO people (name, age) VALUES ('Cy', 41)")))
+            0)
+          (show
+            (axqQueryOn
+              db
+              (Query "SELECT name FROM people WHERE age > ? ORDER BY name" (vec1 (VInt minAge)))))
+          (let ((_ (axqClose db)))
+            0)
+        })
+    )))
 
 (:: vec1 (-> Value (Vec Value)))
 (fn (vec1 v)

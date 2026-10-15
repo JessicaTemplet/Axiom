@@ -126,14 +126,16 @@
             ((Ok peer) (println (concat "peer " (socketAddrText peer))))
             ((Err e) ())))
         (if (==
-          (match (tcpRead con byte 0 1)
-            ((Ok k) k)
-            ((Err e) (- 0 e.code)))
-          1)
+              (match (tcpRead con byte 0 1)
+                ((Ok k) k)
+                ((Err e) (- 0 e.code)))
+              1)
           (respond con (readBufferText byte 0 1) reps))
-        (let ((_ (tcpClose con))) ())
+        (let ((_ (tcpClose con)))
+          ())
         1
-      })))
+      }
+    )))
 
 ; A worker: serve until SIGTERM. The poller, the one-byte buffer and the
 ; mark cell are allocated here, above every arena mark, so no reset
@@ -162,11 +164,12 @@
           {
             (if (isErr (pollerAddListener p lsn 1))
               (sysExitWith 255))
+            (let ((_ (pollerAddSignals p (sysSigBit sigTerm) 2)))
+              ())
             ; A worker that cannot watch SIGTERM still serves; it leaves
             ; on the wait's ten-second timeout instead.
-            (let ((_ (pollerAddSignals p (sysSigBit sigTerm) 2))) ())
             (while (== running 1)
-              (let ((n
+              (let ((n 
                 (match (pollerWait p 10000)
                   ((Ok k) k)
                   ((Err e) (- 0 e.code)))))
@@ -176,24 +179,30 @@
                     (while (< e n)
                       {
                         (match (pollerSignal p e)
-                          ((Some sig) (set running 0))
+                          ((Some sig)
+                            (set running 0)
+                          )
                           ((None)
                             (let ((m (__axiom_arena_mark_into markCell)))
                               {
-                                (set served (+ served (handleOne
-                                  lsn
-                                  byte
-                                  (if (== varied 1)
-                                    (+ 8 (* 32 (% served 16)))
-                                    32)
-                                  reportPeer)))
+                                (set served (+
+                                              served
+                                              (handleOne
+                                                lsn
+                                                byte
+                                                (if (== varied 1)
+                                                  (+ 8 (* 32 (% served 16)))
+                                                  32)
+                                                reportPeer)))
                                 (if (== arenaOn 1)
                                   (__axiom_arena_reset m))
-                              })))
+                              })
+                          ))
                         (set e (+ e 1))
                       })))))
             served
-          })))))
+          })
+      ))))
 
 ; The address to listen on: 127.0.0.1, or ::1 under AXIOM_NET_LISTEN6.
 (:: listenAddr (-> Bool Int (Result SocketAddr Error)))
@@ -222,30 +231,42 @@
         {
           (println (concat "address failed: " (errorText e)))
           (sysExitWith 2)
-        })
+        }
+      )
+      ; A FAILED LISTEN NAMES ITSELF: the operation and the errno, with
+      ; the address and the length it asked for, so a wrong family, a
+      ; wrong length and a port already taken read differently.
       ((Ok addr)
-        ; A FAILED LISTEN NAMES ITSELF: the operation and the errno, with
-        ; the address and the length it asked for, so a wrong family, a
-        ; wrong length and a port already taken read differently.
         (match (tcpListenAddr addr)
           ((Err le)
             {
-              (println (concat (concat (concat (errorText le) " failed: errno ") (fmtInt le.code)) (concat (concat " addr " (socketAddrText addr)) (concat " len " (fmtInt (if (socketAddrIsV6 addr) netAddr6Bytes netAddr4Bytes))))))
+              (println
+                (concat
+                  (concat (concat (errorText le) " failed: errno ") (fmtInt le.code))
+                  (concat
+                    (concat " addr " (socketAddrText addr))
+                    (concat
+                      " len "
+                      (fmtInt
+                        (if (socketAddrIsV6 addr)
+                          netAddr6Bytes
+                          netAddr4Bytes))))))
               (sysExitWith 2)
-            })
+            }
+          )
           ((Ok lsn)
             {
-              (let ((_ (tcpListenerSetNonBlocking lsn true))) ())
-              (let ((_ (sysSignalBlock (sysSigBit sigTerm) setbuf))) ())
+              (let ((_ (tcpListenerSetNonBlocking lsn true)))
+                ())
+              (let ((_ (sysSignalBlock (sysSigBit sigTerm) setbuf)))
+                ())
               (let ((mut w 0))
                 (while (< w nworkers)
                   {
                     (let ((pid sysForkProcess))
                       (if (== pid 0)
                         (sysExitWith (serve lsn arenaOn varied (envOn "AXIOM_NET_PEER")))
-                        {
-                          (vecPush pids pid)
-                        }))
+                        (vecPush pids pid)))
                     (set w (+ w 1))
                   }))
               ; One line the driver parses, then this process does nothing
@@ -263,7 +284,8 @@
                     })
                   (println s)
                 })
-              (let ((_ (tcpListenerClose lsn))) ())
+              (let ((_ (tcpListenerClose lsn)))
+                ())
               (let ((mut r 0))
                 (while (< r (vecLen pids))
                   {
@@ -271,4 +293,6 @@
                     (set r (+ r 1))
                   }))
               0
-            }))))))
+            }
+          ))
+      ))))

@@ -196,9 +196,12 @@ parser (`parseExternDecl`, `parseExternItems` and `parseExternClauses`
 in `self_host/parser.ax`) accepts exactly this shape:
 
 ```scheme
-(pub extern "axiom_demo"                                  ; the library string
-  (add      :: (-> Int Int Int) (symbol "axffi_add"))     ; an item
-  (abiProbe :: Int              (symbol "axffi_abi_probe")))  ; nullary: a bare result type
+(pub extern "axiom_demo"
+  (add :: (-> Int Int Int) (symbol "axffi_add"))
+  (abiProbe :: Int (symbol "axffi_abi_probe")))
+; the library string
+; an item
+; nullary: a bare result type
 ```
 
 - The block head is `extern` followed by a library name in quotes.
@@ -387,22 +390,22 @@ one word. So the shim takes a trailing out-cell,
 
 ```scheme
 (pub :: shout (-> String String))
-
 (pub fn (shout text)
+  ; a 16-byte counted cell, zeroed
+  ; the call; status ignored here
+  ; copy into a fresh Axiom String
   (let (
-    (__c ffiCellNew)                    ; a 16-byte counted cell, zeroed
-    (__st (shoutRaw text __c))          ; the call; status ignored here
+    (__c ffiCellNew)
+    (__st (shoutRaw text __c))
     (__p (ffiCellWord __c 0))
     (__n (ffiCellWord __c 1))
-    (__v (ffiBytesToStr __p __n))       ; copy into a fresh Axiom String
+    (__v (ffiBytesToStr __p __n))
   )
     {
-      (ffiFreeBytes __p __n)            ; give the Rust bytes back
+      (ffiFreeBytes __p __n)  ; give the Rust bytes back
       (ffiCellFree __c)
       __v
-    }
-  )
-)
+    }))
 ```
 
 The copy is the central safety rule (C4). Only Axiom's emitter writes
@@ -418,15 +421,22 @@ The helpers live once, in `stdlib/Ffi.ax`, which imports only `Mem`,
 without colliding:
 
 ```scheme
-(pub :: ffiCellNew     Int)                 ; a 16-byte out-cell, zeroed, held by one share
-(pub :: ffiCellFree    (-> Int Int))        ; releases it
-(pub :: ffiCellWord    (-> Int Int Int))    ; (cell i) -> word i
-(pub :: ffiBytesToStr  (-> Int Int String)) ; (ptr len) -> a fresh copy; does not free
-(pub :: ffiStatusOk    Int)  ; 0
-(pub :: ffiStatusErr   Int)  ; 1
-(pub :: ffiStatusNone  Int)  ; 2
+(pub :: ffiCellNew Int)  ; a 16-byte out-cell, zeroed, held by one share
+
+(pub :: ffiCellFree (-> Int Int))  ; releases it
+
+(pub :: ffiCellWord (-> Int Int Int))  ; (cell i) -> word i
+
+(pub :: ffiBytesToStr (-> Int Int String))  ; (ptr len) -> a fresh copy; does not free
+
+(pub :: ffiStatusOk Int)  ; 0
+
+(pub :: ffiStatusErr Int)  ; 1
+
+(pub :: ffiStatusNone Int)  ; 2
+
 (pub extern "axiom_ffi"
-  (ffiFreeBytes  :: (-> Int Int Int) (symbol "axffi_free_bytes"))
+  (ffiFreeBytes :: (-> Int Int Int) (symbol "axffi_free_bytes"))
   (ffiAbiVersion :: Int (symbol "axffi_abi_version")))
 ```
 
@@ -450,7 +460,6 @@ impossible. The wrapper turns the status into the ordinary `Result` of
 
 ```scheme
 (pub :: parseInt (-> String (Result Int String)))
-
 (pub fn (parseInt text)
   (let (
     (__c ffiCellNew)
@@ -459,18 +468,34 @@ impossible. The wrapper turns the status into the ordinary `Result` of
     (__n (ffiCellWord __c 1))
   )
     (if (== __st 0)
-      { (ffiCellFree __c) (Ok __p) }
+      {
+        (ffiCellFree __c)
+        (Ok __p)
+      }
       (let ((__m (ffiBytesToStr __p __n)))
-        { (ffiFreeBytes __p __n) (ffiCellFree __c) (Err __m) }))))
+        {
+          (ffiFreeBytes __p __n)
+          (ffiCellFree __c)
+          (Err __m)
+        }))))
 
 (pub :: maybe (-> Int (Option Int)))
-
 (pub fn (maybe n)
-  (let ((__c ffiCellNew) (__st (maybeRaw n __c))
-        (__p (ffiCellWord __c 0)) (__n (ffiCellWord __c 1)))
+  (let (
+    (__c ffiCellNew)
+    (__st (maybeRaw n __c))
+    (__p (ffiCellWord __c 0))
+    (__n (ffiCellWord __c 1))
+  )
     (if (== __st 0)
-      { (ffiCellFree __c) (Some __p) }
-      { (ffiCellFree __c) None })))
+      {
+        (ffiCellFree __c)
+        (Some __p)
+      }
+      {
+        (ffiCellFree __c)
+        None
+      })))
 ```
 
 This is shown compacted. The generated file is laid out as `axiom fmt`
@@ -535,10 +560,13 @@ to write one. `memAllocMapped` masks its map to bits 16..62 and can't
 set the form bit, and no constructor site does.
 
 ```scheme
-(pub :: ffiHandleNew   (-> Int Int Handle))  ; (ptr dropFnAddr) -> a fresh Handle, one share
-(pub :: ffiHandlePtr   (-> Handle Int))      ; the raw pointer, 0 once closed
-(pub :: ffiHandleLive  (-> Handle Bool))     ; ptr != 0
-(pub :: ffiHandleClose (-> Handle Int))      ; runs the destructor now, once; pointer zeroed; answers 0
+(pub :: ffiHandleNew (-> Int Int Handle))  ; (ptr dropFnAddr) -> a fresh Handle, one share
+
+(pub :: ffiHandlePtr (-> Handle Int))  ; the raw pointer, 0 once closed
+
+(pub :: ffiHandleLive (-> Handle Bool))  ; ptr != 0
+
+(pub :: ffiHandleClose (-> Handle Int))  ; runs the destructor now, once; pointer zeroed; answers 0
 ```
 
 `Handle` is a reference in every classification: `fldClass` answers 2
@@ -568,25 +596,30 @@ that must go *now*, such as a file or a lock, and for nothing else.
 `axiom-bindgen` generates this shape (`Demo.ax`):
 
 ```scheme
-(pub struct Counter sealed (handle : Handle))
+(pub struct Counter sealed
+  (handle : Handle))
 
 (pub :: counterNew (-> Int Counter))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (counterNew start)
-  (let ((__p (cast Int (counterNewRaw start)))
-        (__h (ffiHandleNew __p counterDropFn)))
+  (let (
+    (__p (cast Int (counterNewRaw start)))
+    (__h (ffiHandleNew __p counterDropFn))
+  )
     (Counter __h)))
 
 (pub :: counterValue (-> Counter Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (counterValue c)
-  (let ((__a0 (cast Foreign (ffiHandlePtr c.handle)))
-        (__r (counterValueRaw __a0)))
+  (let (
+    (__a0 (cast Foreign (ffiHandlePtr c.handle)))
+    (__r (counterValueRaw __a0))
+  )
     __r))
 
-(pub :: counterClose (-> Counter Int))       ; explicit early close, optional
+(pub :: counterClose (-> Counter Int))  ; explicit early close, optional
 (pub fn (counterClose c)
   (ffiHandleClose c.handle))
 ```
@@ -807,7 +840,11 @@ each use:
         (__w1 (cast Float (ffiCellWord __c 1)))
         (__r (Point __w0 __w1))
       )
-        { (ffiCellFree __c) __r }))))
+        {
+          (ffiCellFree __c)
+          __r
+        })
+    )))
 ```
 
 The macro sees only the function, so how does it know `Point` is a
@@ -1033,9 +1070,17 @@ The binding maps `(Option T)` to `Option<T>` and `(Result T E)` to
 (`Cons(i64, Box<List_Int>)`). It converts at every boundary:
 
 ```scheme
-(pub data Shape (Circle Float) (Rect Int Int) (Empty))
-(pub struct Named (name : String) (score : Int))
+(pub data Shape
+  (Circle Float)
+  (Rect Int Int)
+  (Empty))
+
+(pub struct Named
+  (name : String)
+  (score : Int))
+
 (pub :: shapeGrow (-> Shape Int Shape))
+
 (pub :: safeDiv (-> Int Int (Result Int String)))
 ```
 

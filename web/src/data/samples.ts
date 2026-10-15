@@ -453,8 +453,10 @@ product is not representable while sizing the upload`,
 
 (:: sized (-> String String (Result Int Error)))
 (fn (sized chunk parts)
-  (let ((size (number "chunk" chunk)?)
-        (n (number "parts" parts)?))
+  (let (
+    (size (number "chunk" chunk)?)
+    (n (number "parts" parts)?)
+  )
     (upload size n)))
 
 (:: report (-> String String Int))
@@ -550,14 +552,20 @@ test: 4 pauses recorded, 0 ms slept`,
 ;@axiom:post((&& (>= result lo) (<= result hi)))
 (:: clamp (-> Int Int Int Int))
 (fn (clamp n lo hi)
-  (if (< n lo) lo (if (> n hi) hi n)))
+  (if (< n lo)
+    lo
+    (if (> n hi)
+      hi
+      n)))
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((below (clamp -3 0 10))
-        (inside (clamp 7 0 10))
-        (above (clamp 18 0 10)))
+  (let (
+    (below (clamp -3 0 10))
+    (inside (clamp 7 0 10))
+    (above (clamp 18 0 10))
+  )
     (println "{below} {inside} {above}")))`,
     output: '0 7 10',
     docs: { label: 'Contracts', href: `${REF}#contracts-pre-and-post` },
@@ -930,7 +938,7 @@ ok   testOlder
     points: [
       { at: '(cerealDecode CerealToml toml)', text: 'Decoding returns a Result, and `?` hands an error straight back.' },
       { at: '(cerealField cerealIntCodec config "replicas")', text: 'A missing or non-integer field is an Error naming replicas.' },
-      { at: '(cerealEncode CerealJson config)))))', text: 'The same value writes out as JSON, TOML or YAML.' },
+      { at: '(cerealEncode CerealJson config)', text: 'The same value writes out as JSON, TOML or YAML.' },
     ],
     docs: { label: 'Cereal and RPC framing', href: `${LIB}docs/stdlib.md#cereal` },
     output: `{"name":"payments","replicas":3}`,
@@ -940,8 +948,10 @@ ok   testOlder
 
 (:: toJson (-> String (Result String Error)))
 (fn (toJson toml)
-  (let ((config (cerealDecode CerealToml toml)?)
-        (replicas (cerealField cerealIntCodec config "replicas")?))
+  (let (
+    (config (cerealDecode CerealToml toml)?)
+    (replicas (cerealField cerealIntCodec config "replicas")?)
+  )
     (if (< replicas 1)
       (Err (mkError 22 "replicas must be at least 1"))
       (cerealEncode CerealJson config))))
@@ -1026,9 +1036,9 @@ ok   testOlder
     title: 'Normalise a timestamp, then add a duration',
     lede: '`Chrono` validates calendar values and returns a Result for parsing and arithmetic. An offset-bearing timestamp can be normalised to UTC; the returned date-time holds no zone field.',
     points: [
-      { at: '(let ((start (datetimeParseUtc "2024-02-29T23:30:00+02:00")?)', text: 'The +02:00 offset is applied before the naive UTC date-time is returned.' },
-      { at: '(delay (durationParse "PT1H30M")?))', text: '`?` binds each success and propagates an error at either step.' },
-      { at: '(datetimeAdd start delay))))', text: 'Duration arithmetic refuses results outside the supported range.' },
+      { at: '(start (datetimeParseUtc "2024-02-29T23:30:00+02:00")?)', text: 'The +02:00 offset is applied before the naive UTC date-time is returned.' },
+      { at: '(delay (durationParse "PT1H30M")?)', text: '`?` binds each success and propagates an error at either step.' },
+      { at: '(datetimeAdd start delay)', text: 'Duration arithmetic refuses results outside the supported range.' },
     ],
     docs: { label: 'Dates and times', href: `${LIB}docs/chrono.md` },
     output: '2024-02-29T23:00:00',
@@ -1038,8 +1048,10 @@ ok   testOlder
 
 (:: arrival (Result NaiveDateTime Error))
 (fn (arrival)
-  (let ((start (datetimeParseUtc "2024-02-29T23:30:00+02:00")?)
-        (delay (durationParse "PT1H30M")?))
+  (let (
+    (start (datetimeParseUtc "2024-02-29T23:30:00+02:00")?)
+    (delay (durationParse "PT1H30M")?)
+  )
     (datetimeAdd start delay)))
 
 (:: main ())
@@ -1047,11 +1059,7 @@ ok   testOlder
 (fn (main)
   (match arrival
     ((Err e) (die (errorText e) 1))
-    ((Ok end)
-      {
-        (println (datetimeToString end))
-      }
-    )))`,
+    ((Ok end) (println (datetimeToString end)))))`,
   },
   {
     id: 'tasks',
@@ -1085,12 +1093,10 @@ job 3: 9`,
 ;@axiom:effect(block)
 (fn (main)
   (let ((answers (taskMap job 4 2 64)))
-    {
-      (for answer in answers
-        (match answer
-          ((Ok text) (println text))
-          ((Err e) (println (errorText e)))))
-    }))`,
+    (for answer in answers
+      (match answer
+        ((Ok text) (println text))
+        ((Err e) (println (errorText e)))))))`,
   },
   {
     id: 'obfuscation',
@@ -1129,11 +1135,7 @@ job 3: 9`,
           (obfuscationKeyWipe key)
           (match opened
             ((Err e) (die (errorText e) 1))
-            ((Ok text)
-              {
-                (println text)
-              }
-            ))
+            ((Ok text) (println text)))
         })
     )))`,
   },

@@ -92,8 +92,14 @@ copy in an ordinary build.
           (obfuscationKeyWipe key)
           (match opened
             ((Err e) (Err e))
-            ((Ok bytes) { (println bytes) (Ok 0) }))
-        }))))
+            ((Ok bytes)
+              {
+                (println bytes)
+                (Ok 0)
+              }
+            ))
+        })
+    )))
 ```
 
 For a generated asset, replace `roundTrip` with the packed module's

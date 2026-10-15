@@ -147,27 +147,19 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: vecOwnsRefs (-> (Vec a) Bool))
 (pub fn (vecOwnsRefs v)
-  (==
-    (memGetWord
-      (cast Int v)
-      3)
-    1))
+  (== (memGetWord (cast Int v) 3) 1))
 
 ;; How many elements the vector holds.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: vecLen (-> (Vec a) Int))
 (pub fn (vecLen v)
-  (memGetWord
-    (cast Int v)
-    0))
+  (memGetWord (cast Int v) 0))
 
 ;; How many elements the vector can hold before it grows.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: vecCap (-> (Vec a) Int))
 (pub fn (vecCap v)
-  (memGetWord
-    (cast Int v)
-    1))
+  (memGetWord (cast Int v) 1))
 
 ; The address of the element block.
 ;
@@ -178,9 +170,7 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (:: vecData (-> (Vec a) Int))
 (fn (vecData v)
-  (memGetWord
-    (cast Int v)
-    2))
+  (memGetWord (cast Int v) 2))
 
 ;; The element at `i`. REFUSES an index outside `0 .. (vecLen v) - 1`.
 ;
@@ -264,8 +254,7 @@
     None
     (if (>= i (vecLen v))
       None
-      (Some
-        (cast a (memGetWord (vecData v) i))))))
+      (Some (cast a (memGetWord (vecData v) i))))))
 
 ;; Element `i` as a `String`, for a vector that holds strings. Out of
 ;; range traps, as `vecGet` does.
@@ -319,9 +308,7 @@
 (pub fn (vecPushStr v s)
   {
     (__retainref s)
-    (vecPush
-      v
-      (cast a s))
+    (vecPush v (cast a s))
   })
 
 ;; Append a `Vec` to a vector of words, taking a share of it.
@@ -334,9 +321,7 @@
 (pub fn (vecPushVec v x)
   {
     (__retainref x)
-    (vecPush
-      v
-      (cast a x))
+    (vecPush v (cast a x))
   })
 
 ;; Overwrite the element at `i`. Returns the handle.
@@ -364,17 +349,11 @@
               (vecDropAt v i)
               {
                 (memMarkLeaf (vecData v))
-                (memSetWord
-                  (cast Int v)
-                  3
-                  2)
+                (memSetWord (cast Int v) 3 2)
                 v
               })
             v)
-          (memSetWord
-            (vecData v)
-            i
-            (cast Int x))
+          (memSetWord (vecData v) i (cast Int x))
           v
         }))))
 
@@ -427,7 +406,8 @@
         (memMarkArray bigger newCap)
         bigger)
       (memCopy bigger old (* (vecLen v) 8))
-      (let ((h (cast Int v)))
+      (let ((h 
+        (cast Int v)))
         {
           (memSetWord h 2 bigger)
           (memSetWord h 1 newCap)
@@ -451,7 +431,6 @@
 ; replaced the data pointer. Reading it into a `let` before the reserve
 ; would write the element into the abandoned block, and the bug would be
 ; invisible until the vector happened to grow.
-;@axiom:restrict(no-io,no-foreign)
 ;
 ; The share of `x` is taken here, by `__retainref`, which also answers
 ; whether `x`'s type at this call is counted. That answer settles what
@@ -467,6 +446,7 @@
 ;   leaf again: the walk would otherwise release a word no share was
 ;   taken for. The elements it already holds keep their shares and are
 ;   never released.
+;@axiom:restrict(no-io,no-foreign)
 (pub :: vecPush (-> (Vec a) a (Vec a)))
 (pub fn (vecPush v x)
   (let (
@@ -489,10 +469,7 @@
               (memMarkLeaf (vecData v))
               (memSetWord h 3 2)
             }))
-        (memSetWord
-          (vecData v)
-          len
-          (cast Int x))
+        (memSetWord (vecData v) len (cast Int x))
         (memSetWord h 0 (+ len 1))
         v
       })))
@@ -533,10 +510,7 @@
       (let ((top (memGetWord (vecData v) (- len 1))))
         {
           (memSetWord (vecData v) (- len 1) 0)
-          (memSetWord
-            (cast Int v)
-            0
-            (- len 1))
+          (memSetWord (cast Int v) 0 (- len 1))
           (cast a top)
         }))))
 
@@ -565,10 +539,7 @@
     (if (vecOwnsRefs v)
       (vecDropFrom v 0)
       v)
-    (memSetWord
-      (cast Int v)
-      0
-      0)
+    (memSetWord (cast Int v) 0 0)
     v
   })
 
@@ -771,23 +742,25 @@
 ; input both ways and requires the same answer.
 (pub :: vecSortBy (-> (Vec a) (-> a a Int) (Vec a)))
 (pub fn (vecSortBy v cmp)
+  ; A comparator that grows, shrinks or replaces the vector it is
+  ; sorting would leave the sort swapping words in a block the
+  ; vector no longer owns - a block the allocator may already have
+  ; handed to someone else. Measured: a comparator that pushed one
+  ; element let the sort scramble an unrelated vector's contents.
+  ; So the vector is checked after every comparison, and a change
+  ; stops the program with status 77, the status a bad index has
+  ; (tests/stdlib/849-size-refusals.ax).
   (let (
     (n (vecLen v))
     (d (vecData v))
   )
-    ; A comparator that grows, shrinks or replaces the vector it is
-    ; sorting would leave the sort swapping words in a block the
-    ; vector no longer owns - a block the allocator may already have
-    ; handed to someone else. Measured: a comparator that pushed one
-    ; element let the sort scramble an unrelated vector's contents.
-    ; So the vector is checked after every comparison, and a change
-    ; stops the program with status 77, the status a bad index has
-    ; (tests/stdlib/849-size-refusals.ax).
-    (let ((guarded (lambda (a b)
-      (let ((r (cmp a b)))
-        (if (|| (!= (vecData v) d) (!= (vecLen v) n))
-          __indexTrap
-          r)))))
+    (let ((guarded 
+      (lambda (a b)
+        (let ((r (cmp a b)))
+          (if (|| (!= (vecData v) d) (!= (vecLen v) n))
+            __indexTrap
+            r))
+      )))
       {
         (let ((mut i (- (/ n 2) 1)))
           (while (>= i 0)

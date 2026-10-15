@@ -169,14 +169,20 @@ after it and for the body.
   })
 
 (:: two (-> Int Int Int))
-(fn (two a b) (+ a b))
+(fn (two a b)
+  (+ a b))
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((s (two (side 1) (side 2)))  ; prints 1, then 2
-        (x (side 3))                 ; prints 3
-        (y (+ x 1)))                 ; x is in scope for y
+  ; prints 1, then 2
+  ; prints 3
+  ; x is in scope for y
+  (let (
+    (s (two (side 1) (side 2)))
+    (x (side 3))
+    (y (+ x 1))
+  )
     (- (+ s y) 7)))
 ```
 
@@ -517,10 +523,13 @@ This checks `OK` with `AX3037` beside it, and its row reads
 `#effect=pure #effects-incomplete` with no `IO`:
 
 ```scheme
-(struct Logger (emit : (-> String Int)))
+(struct Logger
+  (emit : (-> String Int)))
+
 ;@axiom:effect(pure)
 (:: runIt (-> Logger String Int))
-(fn (runIt l s) ((l.emit) s))
+(fn (runIt l s)
+  (l.emit s))
 ```
 
 `__alloc`, the primitive the whole heap goes through, contributes
@@ -564,8 +573,13 @@ corpus, and an inference change has to be measured against both.
 `axiom symbols` reports an effect for each of these:
 
 ```scheme
-(fn (writes a)    (__store64 a 0 42)) ; writes arbitrary memory -> Mut, Unsafe
-(fn (readsArgs n) (__argc))           ; reads the command line  -> IO
+(fn (writes a)
+  (__store64 a 0 42))
+
+; writes arbitrary memory -> Mut, Unsafe
+(fn (readsArgs n)
+  (__argc))
+; reads the command line  -> IO
 ```
 
 **MM-EXEC-9b (H).** What a purity claim guarantees: **a
@@ -808,13 +822,29 @@ End to end:
 ```scheme
 (import IO)
 
-(effect Console (log :: (-> String Int)))
+(effect Console
+  (log :: (-> String Int)))
+
 ;@axiom:effect(console)
-(fn (greet n) { (log "from deep") n })
-;@axiom:effect(io)
+(fn (greet n)
+  {
+    (log "from deep")
+    n
+  })
+
 ; `s` is the `String` that `log` declares: the handler is checked against
 ; the operation's arrow, so `println` renders it with no cast
-(fn (main) (handle (greet 7) (Console IO) (lambda (s) { (println s) 0 })))
+;@axiom:effect(io)
+(fn (main)
+  (handle
+    (greet 7)
+    (Console IO)
+    (lambda (s)
+      {
+        (println s)
+        0
+      }
+    )))
 ```
 
 This prints `from deep` and exits 7. With the `handle` removed, it
@@ -860,10 +890,21 @@ length word bounds it, so an interior NUL is an ordinary byte, and a
 
 ;@axiom:effect(io)
 (fn (main)
-  (let ((a "hi") (b (strDup "hi")))
-    { (println (if (== a b) "equal" "different"))
-      (println (if (== (cast Int a) (cast Int b)) "same object" "two objects"))
-      0 }))
+  (let (
+    (a "hi")
+    (b (strDup "hi"))
+  )
+    {
+      (println
+        (if (== a b)
+          "equal"
+          "different"))
+      (println
+        (if (== (cast Int a) (cast Int b))
+          "same object"
+          "two objects"))
+      0
+    }))
 ```
 
 ```text
@@ -917,7 +958,8 @@ decision, and the macro system shares it and is built around it
 compiler doesn't even constant-fold. This program:
 
 ```scheme
-(fn (main) (+ 1 (* 2 3)))
+(fn (main)
+  (+ 1 (* 2 3)))
 ```
 
 emits this IR for its body:
@@ -945,7 +987,10 @@ exits 5:
 
 ```scheme
 (:: main Int)
-(fn (main) (if (< 1 0) (main) 5))
+(fn (main)
+  (if (< 1 0)
+    (main)
+    5))
 ```
 
 Under the hood, the emitter's tables (`isNullaryFn`, `isDefinedFn`,
@@ -2045,10 +2090,13 @@ rule's claim (`MM-ALLOC-4b`).
 **MM-ALLOC-12 (H).** Four primitives read or restore the allocator's position:
 
 ```scheme
-(__axiom_arena_mark)                        ; -> newly allocated mark cell
-(__axiom_arena_mark_into cell)              ; -> caller-owned mark cell
-(__axiom_arena_reset mark)                  ; -> 0
-(__axiom_arena_reset_keeping mark addr n)   ; -> new address of the kept block
+(__axiom_arena_mark)  ; -> newly allocated mark cell
+
+(__axiom_arena_mark_into cell)  ; -> caller-owned mark cell
+
+(__axiom_arena_reset mark)  ; -> 0
+
+(__axiom_arena_reset_keeping mark addr n)  ; -> new address of the kept block
 ```
 
 A **mark** captures the whole allocator position in a cell: the bump
@@ -2457,7 +2505,7 @@ isn't (`MM-MUT-2`). A field store can install a reference to a
 *younger* value into an *older* one:
 
 ```scheme
-(set old.next young)     ; `young` now outlives `young`'s arena
+(set old.next young)  ; `young` now outlives `young`'s arena
 ```
 
 A conforming implementation of escape promotion **MUST** therefore treat
@@ -2511,9 +2559,10 @@ from it:
 ;@axiom:raw
 (:: getStr (-> Int Int String))
 ;@axiom:effect(unsafe)
-(fn (getStr a i) (cast String (memGetWord a i)))
+(fn (getStr a i)
+  (cast String (memGetWord a i)))
 
-(memSetWord p 0 (getStr p 0))     ; evidence word 1, releases emitted
+(memSetWord p 0 (getStr p 0))  ; evidence word 1, releases emitted
 ```
 
 The cast still forges a reference out of a word, so the accessor says
@@ -2585,8 +2634,10 @@ saved position and answers the body's scalar result.
 ;@axiom:effect(io)
 (fn (main)
   (let ((id 42))
-    (let ((n (region r (strLen (format "GET /orders/{id}")))))
-      { (println "rendered {n} bytes") })))
+    (let ((n 
+      (region r
+        (strLen (format "GET /orders/{id}")))))
+      (println "rendered {n} bytes"))))
 ```
 
 ```text
@@ -2823,7 +2874,10 @@ variable.
 (:: main Int)
 (fn (main)
   (let ((mut x 0))
-    { (set x 3) x }))
+    {
+      (set x 3)
+      x
+    }))
 ```
 
 `axiom emit-llvm` shows the slot:
@@ -2864,7 +2918,10 @@ of a function that returns `Int`: `(fn (bump p) (set p.x 1))` declared
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((p (P 1 2)) (q p))
+  (let (
+    (p (P 1 2))
+    (q p)
+  )
     {
       (set p.x 99)
       (let ((seen q.x))
@@ -3345,7 +3402,8 @@ would answer freed storage:
 
 ```scheme
 (let ((b (Mk (concat "id-" t))))
-  (match b ((Mk s) s)))
+  (match b
+    ((Mk s) s)))
 ```
 
 Second, a `match` binder, which is the same field under another name.
@@ -3405,7 +3463,10 @@ A `mut` local whose type is a reference owns what it holds:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut s "") (mut i 0))
+  (let (
+    (mut s "")
+    (mut i 0)
+  )
     {
       (while (< i 1000)
         {
@@ -4828,7 +4889,10 @@ dies. So a `Vec` of `File`s closes every descriptor when it dies.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut i 0) (mut total 0))
+  (let (
+    (mut i 0)
+    (mut total 0)
+  )
     {
       (while (< i 10000)
         {
@@ -5318,8 +5382,10 @@ changes a count the parent relies on:
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (shout s)
-  (parallel p ((a (strLen s))
-               (b (strLen (concat s "!"))))
+  (parallel p (
+    (a (strLen s))
+    (b (strLen (concat s "!")))
+  )
     (+ a b)))
 
 (:: main Int)
@@ -6380,7 +6446,8 @@ nothing else unlocks it:
           ((Some g) (println "free again"))
           ((None) (println "still held")))
         0
-      })
+      }
+    )
     ((Err e) 1)))
 ```
 
@@ -6445,12 +6512,19 @@ There is no free to call:
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (sumAll c)
-  (let ((mut sum 0) (mut more 1))
+  (let (
+    (mut sum 0)
+    (mut more 1)
+  )
     {
       (while (== more 1)
         (match (chanRecv c)
-          ((Some v) (set sum (+ sum v)))
-          ((None) (set more 0))))
+          ((Some v)
+            (set sum (+ sum v))
+          )
+          ((None)
+            (set more 0)
+          )))
       sum
     }))
 
@@ -6461,11 +6535,15 @@ There is no free to call:
 (fn (main)
   (match (chanNew 4)
     ((Ok c)
-      (parallel p ((a (sendAll c)) (b (sumAll c)))
+      (parallel p (
+        (a (sendAll c))
+        (b (sumAll c))
+      )
         {
           (println "sum {b}")
           0
-        }))
+        })
+    )
     ((Err e) 1)))
 ```
 
@@ -7475,24 +7553,34 @@ needed.
 ```scheme
 (:: copyBoard (-> (Vec Int) (Vec Int)))
 (fn (copyBoard src)
-  (let ((dst (vecWithCapacity 576)) (mut i 0))
+  (let (
+    (dst (vecWithCapacity 576))
+    (mut i 0)
+  )
     {
       (while (< i 576)
-        { (vecPush dst (vecGet src i)) (set i (+ i 1)) })
+        {
+          (vecPush dst (vecGet src i))
+          (set i (+ i 1))
+        })
       dst
     }))
 
 (:: advance (-> (Vec Int) Int (Vec Int)))
 ;@axiom:effect(unsafe)
 (fn (advance b n)
-  (let ((m (__axiom_arena_mark)) (mut bb b) (mut nn n))
+  (let (
+    (m (__axiom_arena_mark))
+    (mut bb b)
+    (mut nn n)
+  )
     {
       (while (> nn 0)
         (let ((b2 (step bb)))
           (let ((up (copyBoard b2)))
             {
-              (__axiom_arena_reset m)          ; `up` is now above the waterline
-              (set bb (copyBoard up))          ; and survives being read: MM-ALLOC-14
+              (__axiom_arena_reset m)  ; `up` is now above the waterline
+              (set bb (copyBoard up))  ; and survives being read: MM-ALLOC-14
               (set nn (- nn 1))
             })))
       bb
@@ -7555,9 +7643,21 @@ prevent.
 Here is what `MM-VAL-8` means in practice, and why it is worth knowing:
 
 ```scheme
-(data Color () (Red) (Green) (Blue))          ; rep 1: values are tags, 0 allocations
-(data Shape () (Circle Int) (Square Int))     ; rep 0: every value is a 2-word block
-(data Tree  () (Leaf) (Node Tree Int Tree))   ; rep 2: (Leaf) is immediate, (Node ...) is a 4-word block
+(data Color
+  (Red)
+  (Green)
+  (Blue))
+
+; rep 1: values are tags, 0 allocations
+(data Shape
+  (Circle Int)
+  (Square Int))
+
+; rep 0: every value is a 2-word block
+(data Tree
+  (Leaf)
+  (Node Tree Int Tree))
+; rep 2: (Leaf) is immediate, (Node ...) is a 4-word block
 ```
 
 A `(Leaf)` costs nothing and a `(Node l v r)` costs 32 bytes. A match
@@ -7569,15 +7669,23 @@ list.
 ### 11.3 The aliasing hazard, in the smallest program that shows it
 
 ```scheme
-(struct Cfg (mut verbose : Int))
+(struct Cfg
+  (mut verbose : Int))
 
 (:: configure (-> Cfg Cfg))
-(fn (configure c) { (set c.verbose 1) c })    ; mutates the caller's value
+(fn (configure c)
+  {
+    (set c.verbose 1)  ; mutates the caller's value
+    c
+  })
 
 (fn (main)
-  (let ((base (Cfg 0))
-        (loud (configure base)))
-    (- loud.verbose base.verbose)))           ; 0, not 1
+  (let (
+    (base (Cfg 0))
+    (loud (configure base))
+  )
+    (- loud.verbose base.verbose)))
+; 0, not 1
 ```
 
 `configure` looks like it returns a modified copy. It returns its

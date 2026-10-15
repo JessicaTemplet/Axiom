@@ -41,7 +41,8 @@
     ((Err e)
       (match (errorKind e)
         ((WouldBlock) true)
-        (_ false)))))
+        (_ false))
+    )))
 
 ; Accept, allowing for the connection not having landed on the queue
 ; yet: a loopback `connect` returns once the kernel has taken it, which
@@ -61,47 +62,54 @@
 (fn (main)
   (let ((port (+ 20000 (% sysPid 10000))))
     (let ((addr (socketAddrNew ipLocalhostV4 port)))
-        {
-          ; The address builder is the one place the two sockaddr layouts
-          ; differ, so check the bytes it writes: the family must land
-          ; where this platform keeps it, and the port must be big-endian.
-          (let ((b (strAlloc netAddrMaxBytes)))
+      {
+        ; The address builder is the one place the two sockaddr layouts
+        ; differ, so check the bytes it writes: the family must land
+        ; where this platform keeps it, and the port must be big-endian.
+        (let ((b (strAlloc netAddrMaxBytes)))
+          {
+            (netAddr4 (strData b) port 127 0 0 1)
+            (say
+              (if (== sockaddrHasLenByte 1)
+                (&& (== (strByte b 0) 16) (== (strByte b 1) afInet))
+                (&& (== (strByte b 0) afInet) (== (strByte b 1) 0)))
+              "the address family lands where this platform keeps it")
+            (say
+              (&& (== (strByte b 2) (& (>> port 8) 255)) (== (strByte b 3) (& port 255)))
+              "the port is written big-endian")
+          })
+        (match (tcpListenAddr addr)
+          ((Err e) (say false "listen on 127.0.0.1 is accepted"))
+          ((Ok lsn)
             {
-              (netAddr4 (strData b) port 127 0 0 1)
-              (say
-                (if (== sockaddrHasLenByte 1)
-                  (&& (== (strByte b 0) 16) (== (strByte b 1) afInet))
-                  (&& (== (strByte b 0) afInet) (== (strByte b 1) 0)))
-                "the address family lands where this platform keeps it")
-              (say
-                (&& (== (strByte b 2) (& (>> port 8) 255)) (== (strByte b 3) (& port 255)))
-                "the port is written big-endian")
-            })
-          (match (tcpListenAddr addr)
-            ((Err e) (say false "listen on 127.0.0.1 is accepted"))
-            ((Ok lsn)
-              {
-                (say true "listen on 127.0.0.1 is accepted")
-                (say (isOk (tcpListenerSetNonBlocking lsn true)) "the listener goes non-blocking")
-                ; Nothing has connected yet, so this must be the "not yet"
-                ; answer and not a failure - the distinction the whole
-                ; event loop is built on.
-                (say (wouldBlock (tcpAccept lsn)) "accept with nothing pending would block")
-                (match (tcpConnectAddr addr)
-                  ((Err e) (say false "connect to our own listener is accepted"))
-                  ((Ok cli)
-                    {
-                      (say true "connect to our own listener is accepted")
-                      (match (acceptSoon lsn 1000)
-                        ((Err e) (say false "accept answers the connected stream"))
-                        ((Ok con)
-                          {
-                            (say true "accept answers the connected stream")
-                            (say (isOk (tcpShutdown con ShutdownBoth)) "shutdown closes both directions")
-                            (let ((_ (tcpClose con))) ())
-                          }))
-                      (let ((_ (tcpClose cli))) ())
-                    }))
-                (say (isOk (tcpListenerClose lsn)) "the listener closes")
-              }))
-        })))
+              (say true "listen on 127.0.0.1 is accepted")
+              (say (isOk (tcpListenerSetNonBlocking lsn true)) "the listener goes non-blocking")
+              ; Nothing has connected yet, so this must be the "not yet"
+              ; answer and not a failure - the distinction the whole
+              ; event loop is built on.
+              (say (wouldBlock (tcpAccept lsn)) "accept with nothing pending would block")
+              (match (tcpConnectAddr addr)
+                ((Err e) (say false "connect to our own listener is accepted"))
+                ((Ok cli)
+                  {
+                    (say true "connect to our own listener is accepted")
+                    (match (acceptSoon lsn 1000)
+                      ((Err e) (say false "accept answers the connected stream"))
+                      ((Ok con)
+                        {
+                          (say true "accept answers the connected stream")
+                          (say
+                            (isOk (tcpShutdown con ShutdownBoth))
+                            "shutdown closes both directions")
+                          (let ((_ (tcpClose con)))
+                            ())
+                        }
+                      ))
+                    (let ((_ (tcpClose cli)))
+                      ())
+                  }
+                ))
+              (say (isOk (tcpListenerClose lsn)) "the listener closes")
+            }
+          ))
+      })))

@@ -20,7 +20,10 @@
 
 (:: rowValue (-> Int String))
 (fn (rowValue n)
-  (match (recEncode (vecPush (vecPush (vecPush vecNew (VInt n)) (VText "a row of about fifty bytes, give or take")) (VReal 2.5)))
+  (match (recEncode
+           (vecPush
+             (vecPush (vecPush vecNew (VInt n)) (VText "a row of about fifty bytes, give or take"))
+             (VReal 2.5)))
     ((Ok r) r)
     ((Err e) "")))
 
@@ -68,21 +71,10 @@
           {
             ; ascending
             (for n in 1..20001
-              (putRow
-                t
-                p
-                ta
-                m
-                n))
+              (putRow t p ta m n))
             (check t (== (codeOf (pagerCommit p)) 0) "commit ascending")
             (check t (== (codeOf (pagerBeginRead p)) 0) "read")
-            (verify
-              t
-              p
-              ta
-              m
-              roots
-              "20000 ascending rows")
+            (verify t p ta m roots "20000 ascending rows")
             (let (
               (pages (unwrapOr (pagerPageCount p) 0))
               (h (unwrapOr (btreeHeight p ta) 0))
@@ -95,38 +87,25 @@
                 (println "20000 ascending rows: height {h}, {pages} pages")
               })
             (match (btreeLastKey p ta)
-              ((Ok (Some k)) (check t (== (unwrapOr (keyRowidOf k) 0) 20000) "the last rowid is 20000"))
+              ((Ok (Some k)) (check
+                               t
+                               (== (unwrapOr (keyRowidOf k) 0) 20000)
+                               "the last rowid is 20000"))
               (_ (check t false "last key")))
             (check t (== (codeOf (pagerEndRead p)) 0) "end read")
             ; random and descending rowids between and beyond them
             (check t (== (codeOf (pagerBeginWrite p)) 0) "begin mixed")
             (for i in 0..6000
-              (putRow
-                t
-                p
-                ta
-                m
-                (- (rngBelow r 60000) 20000)))
+              (putRow t p ta m (- (rngBelow r 60000) 20000)))
             (let ((mut n 100000))
               (while (> n 97000)
                 {
-                  (putRow
-                    t
-                    p
-                    ta
-                    m
-                    n)
+                  (putRow t p ta m n)
                   (set n (- n 1))
                 }))
             (check t (== (codeOf (pagerCommit p)) 0) "commit mixed")
             (check t (== (codeOf (pagerBeginRead p)) 0) "read")
-            (verify
-              t
-              p
-              ta
-              m
-              roots
-              "random and descending rows")
+            (verify t p ta m roots "random and descending rows")
             (check t (== (codeOf (pagerEndRead p)) 0) "end read")
             ; delete a range, then every third remaining row
             (check t (== (codeOf (pagerBeginWrite p)) 0) "begin deletes")
@@ -148,13 +127,7 @@
               })
             (check t (== (codeOf (pagerCommit p)) 0) "commit deletes")
             (check t (== (codeOf (pagerBeginRead p)) 0) "read")
-            (verify
-              t
-              p
-              ta
-              m
-              roots
-              "after deletes")
+            (verify t p ta m roots "after deletes")
             (let (
               (n (modelLen m))
               (free (unwrapOr (pagerFreeListCount p) 0))
@@ -171,16 +144,13 @@
                 (match (btreeInsertNew p ib k "")
                   ((Ok added) (check t (boolEq added (modelPut mi k "")) "big key insert"))
                   ((Err e) (check t false (concat "big key insert: " (errorText e)))))))
-            (check t (== (codeOf (btreeInsertNew p ib (rngBytes r 1001 256) "")) axqTooBig) "a 1001-byte key is too big")
+            (check
+              t
+              (== (codeOf (btreeInsertNew p ib (rngBytes r 1001 256) "")) axqTooBig)
+              "a 1001-byte key is too big")
             (check t (== (codeOf (pagerCommit p)) 0) "commit big keys")
             (check t (== (codeOf (pagerBeginRead p)) 0) "read")
-            (verify
-              t
-              p
-              ib
-              mi
-              roots
-              "2500 keys of 1000 bytes")
+            (verify t p ib mi roots "2500 keys of 1000 bytes")
             (let ((h (unwrapOr (btreeHeight p ib) 0)))
               {
                 (check t (>= h 5) "1000-byte keys make a deep tree")
@@ -200,33 +170,18 @@
                 (check t (== (codeOf (pagerCommit p)) 0) "commit big-key deletes")
               })
             (check t (== (codeOf (pagerBeginRead p)) 0) "read")
-            (verify
-              t
-              p
-              ib
-              mi
-              roots
-              "big keys all deleted")
-            (verify
-              t
-              p
-              ta
-              m
-              roots
-              "the table tree untouched")
+            (verify t p ib mi roots "big keys all deleted")
+            (verify t p ta m roots "the table tree untouched")
             (check t (== (codeOf (pagerEndRead p)) 0) "end read")
             ; clearing the table tree frees all but its root
             (check t (== (codeOf (pagerBeginWrite p)) 0) "begin clear")
-            (check t (== (unwrapOr (btreeClear p ta) -1) (modelLen m)) "clear answers the entries removed")
+            (check
+              t
+              (== (unwrapOr (btreeClear p ta) -1) (modelLen m))
+              "clear answers the entries removed")
             (check t (== (codeOf (pagerCommit p)) 0) "commit clear")
             (check t (== (codeOf (pagerBeginRead p)) 0) "read")
-            (verify
-              t
-              p
-              ta
-              modelNew
-              roots
-              "cleared")
+            (verify t p ta modelNew roots "cleared")
             (let (
               (pages (unwrapOr (pagerPageCount p) 0))
               (free (unwrapOr (pagerFreeListCount p) 0))

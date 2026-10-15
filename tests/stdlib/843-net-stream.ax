@@ -73,14 +73,18 @@
             ((Ok c)
               (match (tcpAccept lsn)
                 ((Err e) (Err e))
+                ; small writes go at once, so a non-blocking read
+                ; after one finds its bytes
                 ((Ok s)
-                  ; small writes go at once, so a non-blocking read
-                  ; after one finds its bytes
                   (let (
                     (_ (tcpSetNoDelay c true))
                     (_ (tcpSetNoDelay s true))
                   )
-                    (Ok (Pair lsn c s))))))))))))
+                    (Ok (Pair lsn c s)))
+                ))
+            ))
+        ))
+    )))
 
 ; Wait until `s` has bytes to read, as a non-blocking server would
 ; before reading: 1 when it does, 0 when two seconds pass first.
@@ -92,7 +96,8 @@
     ((Ok p)
       (match (pollerAddStream p s 1)
         ((Err _) 0)
-        ((Ok _) (unwrapOr (pollerWait p 2000) 0))))))
+        ((Ok _) (unwrapOr (pollerWait p 2000) 0)))
+    )))
 
 (:: send (-> TcpStream String Int))
 ;@axiom:effect(io)
@@ -109,21 +114,21 @@
     (s p.server)
   )
     {
-      ; CRLF and LF both end a line; the terminator is not answered
       (let ((_ (send c "a\r\nb\n")))
         ())
+      ; CRLF and LF both end a line; the terminator is not answered
       (say (strEq (lineOf (tcpReadLine s 100)) "a") "a CRLF line")
       (say (strEq (lineOf (tcpReadLine s 100)) "b") "an LF line")
-      ; two lines in one write: the second comes from the buffer
       (let ((_ (send c "one\ntwo\n")))
         ())
+      ; two lines in one write: the second comes from the buffer
       (say (strEq (lineOf (tcpReadLine s 100)) "one") "the first of two lines")
       (say (== (tcpBuffered s) 4) "the second waits in the buffer")
       (say (strEq (lineOf (tcpReadLine s 100)) "two") "the second line")
       (say (== (tcpBuffered s) 0) "the buffer is empty again")
-      ; a line longer than the limit is refused and kept
       (let ((_ (send c "abcdefghij\n")))
         ())
+      ; a line longer than the limit is refused and kept
       (say (strEq (lineOf (tcpReadLine s 4)) "InvalidData") "a line past the limit is InvalidData")
       (say (strEq (lineOf (tcpReadLine s 100)) "abcdefghij") "and its bytes are still there")
       (let ((_ (send c "abcd\r\n")))
@@ -149,11 +154,13 @@
         ())
       (say (== (waitReadable s) 1) "a poller sees the rest")
       (say (strEq (lineOf (tcpReadLine s 100)) "half") "and completes")
-      (say (strEq (lineOf (tcpReadLine s 100)) "WouldBlock") "an empty non-blocking stream would block")
+      (say
+        (strEq (lineOf (tcpReadLine s 100)) "WouldBlock")
+        "an empty non-blocking stream would block")
       (say (isOk (tcpSetNonBlocking s false)) "blocking again")
-      ; the last line need not end in a newline
       (let ((_ (send c "tail")))
         ())
+      ; the last line need not end in a newline
       (say (isOk (tcpShutdown c ShutdownWrite)) "the client shuts its writing half")
       (say (strEq (lineOf (tcpReadLine s 100)) "tail") "an unterminated last line")
       (say (strEq (lineOf (tcpReadLine s 100)) "<eof>") "then end of stream")
@@ -200,13 +207,11 @@
         {
           (match (tcpWriteSome c chunk)
             ((Ok n)
-              {
-                (set sent (+ sent n))
-              })
+              (set sent (+ sent n))
+            )
             ((Err e)
-              {
-                (set stop (kindName (errorKind e)))
-              }))
+              (set stop (kindName (errorKind e)))
+            ))
           (set tries (+ tries 1))
         })
       (say (strEq stop "WouldBlock") "a full buffer would block")
@@ -220,22 +225,60 @@
   (let ((s p.server))
     {
       (say (isOk (tcpSetReadTimeout s (Some 2000))) "set a read timeout")
-      (say (match (tcpReadTimeout s) ((Ok (Some 2000)) true) (_ false)) "read it back")
+      (say
+        (match (tcpReadTimeout s)
+          ((Ok (Some 2000)) true)
+          (_ false))
+        "read it back")
       (say (isOk (tcpSetReadTimeout s None)) "clear it")
-      (say (match (tcpReadTimeout s) ((Ok (None)) true) (_ false)) "and it reads back as None")
-      (say (strEq (outcome (tcpSetReadTimeout s (Some 0))) "InvalidInput") "a zero timeout is InvalidInput")
+      (say
+        (match (tcpReadTimeout s)
+          ((Ok (None)) true)
+          (_ false))
+        "and it reads back as None")
+      (say
+        (strEq (outcome (tcpSetReadTimeout s (Some 0))) "InvalidInput")
+        "a zero timeout is InvalidInput")
       (say (isOk (tcpSetWriteTimeout s (Some 2000))) "set a write timeout")
-      (say (match (tcpWriteTimeout s) ((Ok (Some 2000)) true) (_ false)) "read it back")
+      (say
+        (match (tcpWriteTimeout s)
+          ((Ok (Some 2000)) true)
+          (_ false))
+        "read it back")
       (say (isOk (tcpSetNoDelay s true)) "TCP_NODELAY on")
-      (say (match (tcpNoDelay s) ((Ok true) true) (_ false)) "reads back on")
+      (say
+        (match (tcpNoDelay s)
+          ((Ok true) true)
+          (_ false))
+        "reads back on")
       (say (isOk (tcpSetNoDelay s false)) "TCP_NODELAY off")
-      (say (match (tcpNoDelay s) ((Ok false) true) (_ false)) "reads back off")
+      (say
+        (match (tcpNoDelay s)
+          ((Ok false) true)
+          (_ false))
+        "reads back off")
       (say (isOk (tcpSetTtl s 64)) "set the TTL")
-      (say (match (tcpTtl s) ((Ok 64) true) (_ false)) "read it back")
-      (say (match (tcpTakeError s) ((Ok (None)) true) (_ false)) "no pending socket error")
+      (say
+        (match (tcpTtl s)
+          ((Ok 64) true)
+          (_ false))
+        "read it back")
+      (say
+        (match (tcpTakeError s)
+          ((Ok (None)) true)
+          (_ false))
+        "no pending socket error")
       (say (isOk (tcpListenerSetTtl p.lsn 32)) "set the listener's TTL")
-      (say (match (tcpListenerTtl p.lsn) ((Ok 32) true) (_ false)) "read it back")
-      (say (match (tcpListenerTakeError p.lsn) ((Ok (None)) true) (_ false)) "no pending listener error")
+      (say
+        (match (tcpListenerTtl p.lsn)
+          ((Ok 32) true)
+          (_ false))
+        "read it back")
+      (say
+        (match (tcpListenerTakeError p.lsn)
+          ((Ok (None)) true)
+          (_ false))
+        "no pending listener error")
       0
     }))
 
@@ -256,16 +299,31 @@
                   (say true "tcpConnectTimeout to a listener")
                   ; the stream is blocking again: a timed read times out
                   (say (isOk (tcpSetReadTimeout c (Some 50))) "a 50 ms read timeout")
-                  (say (strEq (textOf (tcpReadSome c 16)) "TimedOut") "the stream blocks, so it times out")
-                }))
-            (say (strEq (outcome (tcpConnectTimeout bound 0)) "InvalidInput") "a zero deadline is InvalidInput")
+                  (say
+                    (strEq (textOf (tcpReadSome c 16)) "TimedOut")
+                    "the stream blocks, so it times out")
+                }
+              ))
+            (say
+              (strEq (outcome (tcpConnectTimeout bound 0)) "InvalidInput")
+              "a zero deadline is InvalidInput")
             (say (strEq (outcome (tcpConnect (socketAddrText bound))) "ok") "tcpConnect takes text")
-            (say (strEq (outcome (tcpConnect "localhost:80")) "InvalidInput") "tcpConnect refuses a name")
-            (say (strEq (outcome (tcpListen "300.0.0.1:0")) "InvalidInput") "tcpListen refuses a bad address")
-            (say (strEq (outcome (tcpListenAddr bound)) "AddrInUse") "a second listener on the port is AddrInUse")
+            (say
+              (strEq (outcome (tcpConnect "localhost:80")) "InvalidInput")
+              "tcpConnect refuses a name")
+            (say
+              (strEq (outcome (tcpListen "300.0.0.1:0")) "InvalidInput")
+              "tcpListen refuses a bad address")
+            (say
+              (strEq (outcome (tcpListenAddr bound)) "AddrInUse")
+              "a second listener on the port is AddrInUse")
             (let ((_ (tcpListenerClose lsn)))
-              (say (strEq (outcome (tcpConnectAddr bound)) "ConnectionRefused") "a closed port is ConnectionRefused"))
-          })))))
+              (say
+                (strEq (outcome (tcpConnectAddr bound)) "ConnectionRefused")
+                "a closed port is ConnectionRefused"))
+          }
+        ))
+    )))
 
 (:: main ())
 ;@axiom:effect(io)
@@ -281,7 +339,8 @@
           (let ((_ (send p.client "over six\n")))
             ())
           (say (strEq (lineOf (tcpReadLine p.server 100)) "over six") "a line over IPv6")
-        }))
+        }
+      ))
     (match (pairOn "127.0.0.1:0")
       ((Err e) (say false "IPv4 pair"))
       ((Ok p) (exact p)))

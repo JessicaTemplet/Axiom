@@ -252,14 +252,10 @@
               (let ((t (commentText (vecGet lines j))))
                 (if (== (strLen t) 0)
                   (if (! (== (strLen out) 0))
-                    {
-                      (set stop true)
-                    })
-                  {
-                    (set out (if (== (strLen out) 0)
-                      t
-                      (concat (concat out " ") t)))
-                  })))
+                    (set stop true))
+                  (set out (if (== (strLen out) 0)
+                    t
+                    (concat (concat out " ") t))))))
             (set j (+ j 1))
           }))
       out
@@ -283,17 +279,11 @@
         {
           (let ((line (vecGet lines i)))
             (if (isModuleDocLine line)
-              {
-                (set out (concat out (concat (commentText line) "\n")))
-              }
+              (set out (concat out (concat (commentText line) "\n")))
               (if (== (strLen (strTrim line)) 0)
                 (if (! (== (strLen out) 0))
-                  {
-                    (set stop true)
-                  })
-                {
-                  (set stop true)
-                })))
+                  (set stop true))
+                (set stop true))))
           (set i (+ i 1))
         })
       (strTrim out)
@@ -380,10 +370,10 @@
       (while (< i n)
         {
           (set out (concat
-            out
-            (if (== (strByte s i) 124)
-              "\\|"
-              (strSlice s i 1))))
+                     out
+                     (if (== (strByte s i) 124)
+                       "\\|"
+                       (strSlice s i 1))))
           (set i (+ i 1))
         })
       out
@@ -426,20 +416,28 @@
 ; Contract tags immediately above either half of a public function.
 (:: contractsAbove (-> (Vec String) Int String))
 (fn (contractsAbove lines i)
-  (let ((mut start (- i 1)) (mut out ""))
+  (let (
+    (mut start (- i 1))
+    (mut out "")
+  )
     {
       (while (if (>= start 0)
-               (let ((line (strTrim (vecGet lines start))))
-                 (|| (== (strLen line) 0) (strStartsWith line ";")))
-               false)
+        (let ((line (strTrim (vecGet lines start))))
+          (|| (== (strLen line) 0) (strStartsWith line ";")))
+        false)
         (set start (- start 1)))
       (set start (+ start 1))
       (while (< start i)
         (let ((line (strTrim (vecGet lines start))))
           {
             (if (|| (strStartsWith line ";@axiom:pre(") (strStartsWith line ";@axiom:post("))
-              (set out (concat out (concat (if (== (strLen out) 0) "" "<br>")
-                (concat "`" (concat (cell line) "`"))))))
+              (set out (concat
+                         out
+                         (concat
+                           (if (== (strLen out) 0)
+                             ""
+                             "<br>")
+                           (concat "`" (concat (cell line) "`"))))))
             (set start (+ start 1))
           }))
       out
@@ -447,16 +445,31 @@
 
 (:: contractsFor (-> (Vec String) String String))
 (fn (contractsFor lines name)
-  (let ((mut i 0) (mut out ""))
+  (let (
+    (mut i 0)
+    (mut out "")
+  )
     {
       (while (< i (vecLen lines))
         (let ((line (strTrim (vecGet lines i))))
           {
             (if (|| (strStartsWith line "(pub :: ") (strStartsWith line "(pub fn ("))
-              (if (strEq (identAt line (if (strStartsWith line "(pub :: ") 8 9)) name)
+              (if (strEq
+                    (identAt
+                      line
+                      (if (strStartsWith line "(pub :: ")
+                        8
+                        9))
+                    name)
                 (let ((clauses (contractsAbove lines i)))
                   (if (> (strLen clauses) 0)
-                    (set out (concat out (concat (if (== (strLen out) 0) "" "<br>") clauses)))))))
+                    (set out (concat
+                               out
+                               (concat
+                                 (if (== (strLen out) 0)
+                                   ""
+                                   "<br>")
+                                 clauses)))))))
             (set i (+ i 1))
           }))
       out
@@ -491,35 +504,41 @@
                         {
                           (set count (+ count 1))
                           (set rows (concat
-                            rows
-                            (renderRow
-                              kind
-                              dn
-                              (if (strEq kind "value")
-                                (declType line dn)
-                                "")
-                              (effectsOf axsym dn)
-                              (contractsFor lines dn)
-                              (docAbove lines i))))
-                          ; The block answers `0` so it agrees with the
-                          ; other arm of the `if` above it. Without it
-                          ; the arm's type is `set`'s, which is the
-                          ; STRING being assigned, and the checker
-                          ; reports the mismatch against `count`.
+                                      rows
+                                      (renderRow
+                                        kind
+                                        dn
+                                        (if (strEq kind "value")
+                                          (declType line dn)
+                                          "")
+                                        (effectsOf axsym dn)
+                                        (contractsFor lines dn)
+                                        (docAbove lines i))))
                           ()
                         })))
+                  ; The block answers `0` so it agrees with the
+                  ; other arm of the `if` above it. Without it
+                  ; the arm's type is `set`'s, which is the
+                  ; STRING being assigned, and the checker
+                  ; reports the mismatch against `count`.
                   (set i (+ i 1))
                 }))
             (concat
               (concat
-                (concat (concat (concat "## `" name) "`\n\n") (concat (concat "`" path) (concat "` — " (concat (fmtInt count) " public names\n\n"))))
+                (concat
+                  (concat (concat "## `" name) "`\n\n")
+                  (concat
+                    (concat "`" path)
+                    (concat "` — " (concat (fmtInt count) " public names\n\n"))))
                 (let ((intro (moduleDoc lines)))
                   (if (== (strLen intro) 0)
                     ""
                     (concat intro "\n\n"))))
               (if (== count 0)
                 ""
-                (concat "| Name | Kind | Type | Effects | Contracts | Summary |\n|---|---|---|---|---|---|\n" (concat rows "\n"))))
+                (concat
+                  "| Name | Kind | Type | Effects | Contracts | Summary |\n|---|---|---|---|---|---|\n"
+                  (concat rows "\n"))))
           })))))
 
 (:: renderRow (-> String String String String String String String))
@@ -542,7 +561,6 @@
 
 ; The reference states one number per module and this writes it, with
 ; `Fmt.fmtInt`.
-
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)

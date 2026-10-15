@@ -60,7 +60,10 @@ parentheses, and both spellings mean the same thing:
 
 ```scheme
 (macro (five) 5)
-(fn (main) (+ five (five)))     ; 10
+
+(fn (main)
+  (+ five (five)))
+; 10
 ```
 
 **MAC-LANG-3a (H).** Macros are order-independent, like every other
@@ -249,15 +252,13 @@ which it needs:
 
 ; The rule form: a bare name, then one or more rules. These templates
 ; are declarations.
-(macro deriveTag
-  ((deriveTag T)      (:: (syntax/join tag T) Int)
+(macro deriveTag ((deriveTag T)      (:: (syntax/join tag T) Int)
                       (fn ((syntax/join tag T)) 1))
   ((deriveTag T base) (:: (syntax/join tag T) Int)
                       (fn ((syntax/join tag T)) base)))
 
 ; The same form, with templates that are one expression each.
-(macro total
-  ((total x) x)
+(macro total ((total x) x)
   ((total x rest ...) (+ x (total rest ...))))
 ```
 
@@ -720,9 +721,7 @@ never outranks a binder:
       v))
     (c v)
   )
-    {
-      (println "{a} {b} {c}")
-    }))
+    (println "{a} {b} {c}")))
 ```
 
 ```text
@@ -762,7 +761,8 @@ that mentions a parameter twice evaluates that argument twice:
 
 ```scheme
 (macro (twice x) (+ x x))
-(twice (readLine))          ; reads twice
+
+(twice (readLine))  ; reads twice
 ```
 
 This follows from substitution and isn't a defect. `MAC-SAFE-1` says
@@ -1100,11 +1100,20 @@ capture a name from the call site. That holds for a `let` binder and
 for a `match` arm's pattern binder alike:
 
 ```scheme
-(macro (addTo x) (let ((tmp 100)) (+ tmp x)))
-(let ((tmp 1)) (addTo tmp))          ; 101
+(macro (addTo x) (let ((tmp 100))
+  (+ tmp x)))
 
-(macro (orElse o d) (match o ((Some v) d) ((None) d)))
-(let ((v 42)) (orElse (Some 8) v))   ; 42
+(let ((tmp 1))
+  (addTo tmp))
+
+; 101
+(macro (orElse o d) (match o
+  ((Some v) d)
+  ((None) d)))
+
+(let ((v 42))
+  (orElse (Some 8) v))
+; 42
 ```
 
 If the template's `tmp` and `v` captured the caller's, these would
@@ -1182,9 +1191,16 @@ answer differently when a macro wrote it, which is the silent wrong
 answer hygiene exists to prevent.
 
 ```scheme
-(macro (isTrue b) (match b ((true) 1) ((false) 0)))
-(isTrue false)                          ; 0
-(match false ((true) 1) ((false) 0))    ; 0, the same by hand
+(macro (isTrue b) (match b
+  (true 1)
+  (false 0)))
+
+(isTrue false)  ; 0
+
+(match false
+  (true 1)
+  (false 0))
+; 0, the same by hand
 ```
 
 Nothing else is exempt. A bare constructor name in pattern position
@@ -1398,8 +1414,10 @@ is which side named the binding.
 Renaming both would make every binding form impossible:
 
 ```scheme
-(macro (bind! x e body) (let ((x e)) body))
-(bind! v 41 (+ v 1))   ; 42
+(macro (bind! x e body) (let ((x e))
+  body))
+
+(bind! v 41 (+ v 1))  ; 42
 ```
 
 If `x` were renamed to `x.N`, the `let` would bind `x.N` while `body`,
@@ -1450,10 +1468,14 @@ refused at the definition site.
 
 ```scheme
 ;; PrivMac.ax
-(pub macro (once x) (helper x))
-(fn (helper x) (* x 2))
 ;; entry file
 (import PrivMac)
+
+(pub macro (once x) (helper x))
+
+(fn (helper x)
+  (* x 2))
+
 (once 21)
 ; E AX3023 `PrivMac::helper` is private to module `PrivMac`
 ```
@@ -1852,13 +1874,21 @@ hex:
 
 ```scheme
 (import IO)
+
 ;@axiom:effect(io)
 (fn (main)
-  (let ((name "parse") (ms 42) (x 3.14159) (n 255))
-    { (println "ok {name} in {ms:>4}ms")
+  (let (
+    (name "parse")
+    (ms 42)
+    (x 3.14159)
+    (n 255)
+  )
+    {
+      (println "ok {name} in {ms:>4}ms")
       (println "hex {n:x} {n:X}, pi {x:.2}, [{name:<8}] [{name:^9}] {ms:04}")
       (println "{{literal}}")
-      0 }))
+      0
+    }))
 ```
 
 ```text
@@ -1876,10 +1906,12 @@ The printing surface is these macros in `stdlib/`:
 
 ```scheme
 ; stdlib/IO.ax
-(pub macro (println e)  (writeStr stdout (syntax/formatln e)))
+(pub macro (println e) (writeStr stdout (syntax/formatln e)))
+
 (pub macro (eprintln e) (writeStr stderr (syntax/formatln e)))
+
 ; stdlib/Str.ax
-(pub macro (format e)   (syntax/format e))
+(pub macro (format e) (syntax/format e))
 ```
 
 There is no newline-less `print`. C-descended libraries have one
@@ -1986,12 +2018,22 @@ prints `n=42`:
 
 ```scheme
 (import IO)
+
 (:: show (-> a String))
-(fn (show x) "HIJACKED")
+(fn (show x)
+  "HIJACKED")
+
 (:: concat (-> String String String))
-(fn (concat a b) "HIJACKED")
+(fn (concat a b)
+  "HIJACKED")
+
 ;@axiom:effect(io)
-(fn (main) (let ((n 42)) { (println "n={n}") 0 }))
+(fn (main)
+  (let ((n 42))
+    {
+      (println "n={n}")
+      0
+    }))
 ```
 
 ```text
@@ -2052,7 +2094,9 @@ once duplicates its effects. A macro author who must not duplicate one
 **MUST** bind it first:
 
 ```scheme
-(macro (twiceSafe x) (let ((v x)) (+ v v)))    ; hygiene renames `v`
+(macro (twiceSafe x) (let ((v x))
+  (+ v v)))
+; hygiene renames `v`
 ```
 
 `MAC-HYG-1` makes this idiom safe: the binding can't capture anything
@@ -2556,14 +2600,17 @@ also has a `v`. Renaming keeps them apart, so the caller's `v` reaches
 `test` and `acc` untouched:
 
 ```scheme
-(macro (sumIf test x acc)
-  (let ((v x))                       ; MAC-SAFE-1: evaluate x once
-    (if test (+ acc v) acc)))
+(macro (sumIf test x acc) (let ((v x))
+  (if test
+    ; MAC-SAFE-1: evaluate x once
+    (+ acc v)
+    acc)))
 
 (:: main Int)
 (fn (main)
   (let ((v 10))
-    (sumIf (> v 5) 2 v)))            ; 10 + 2
+    (sumIf (> v 5) 2 v)))
+; 10 + 2
 ```
 
 ```bash
@@ -2582,16 +2629,19 @@ verbatim by `tests/selfhost/374-derive-eq.ax`: this section's macro,
 data type and invocation, answering 101 from three `eqColor` probes.
 
 ```scheme
-(pub macro deriveEq
-  ((deriveEq T)
+(pub macro deriveEq ((deriveEq T)
    (:: (syntax/join eq T) (-> T T Bool))
    (fn ((syntax/join eq T) a b)
      (match a
        (syntax/for (C (syntax/constructors T))
          ((C) (match b ((C) true) (_ false))))))))
 
-(data Color () (Red) (Green) (Blue))
-(deriveEq Color)          ; generates eqColor : Color -> Color -> Bool
+(data Color
+  (Red)
+  (Green)
+  (Blue))
+
+(deriveEq Color)  ; generates eqColor : Color -> Color -> Bool
 ```
 
 It expands to exactly what you would write by hand:
@@ -2600,9 +2650,21 @@ It expands to exactly what you would write by hand:
 (:: eqColor (-> Color Color Bool))
 (fn (eqColor a b)
   (match a
-    ((Red)   (match b ((Red) true)   (_ false)))
-    ((Green) (match b ((Green) true) (_ false)))
-    ((Blue)  (match b ((Blue) true)  (_ false)))))
+    ((Red)
+      (match b
+        ((Red) true)
+        (_ false))
+    )
+    ((Green)
+      (match b
+        ((Green) true)
+        (_ false))
+    )
+    ((Blue)
+      (match b
+        ((Blue) true)
+        (_ false))
+    )))
 ```
 
 The example shows two properties:
@@ -2621,8 +2683,7 @@ pattern binders, and the parallel form of `syntax/fold` zips the two
 sides:
 
 ```scheme
-(pub macro deriveEqF
-  ((deriveEqF T)
+(pub macro deriveEqF ((deriveEqF T)
    (:: (syntax/join eq T) (-> T T Bool))
    (fn ((syntax/join eq T) a b)
      (match a
@@ -2673,8 +2734,7 @@ It uses four mechanisms beyond §10.2's set:
 So the "expands to" claim below is literal, not only behavioural:
 
 ```scheme
-(pub macro deriveLenses
-  ((deriveLenses S)
+(pub macro deriveLenses ((deriveLenses S)
    (syntax/for (f (syntax/fields S))
      (:: (syntax/join get f) (-> S Int))
      (fn ((syntax/join get f) s) s.f)
@@ -2684,7 +2744,10 @@ So the "expands to" claim below is literal, not only behavioural:
        (S (syntax/for (g (syntax/fields S))
             (if (syntax/same f g) v s.g)))))))
 
-(struct Point (x : Int) (y : Int))
+(struct Point
+  (x : Int)
+  (y : Int))
+
 (deriveLenses Point)
 ; getX  : Point -> Int         withX : Point -> Int -> Point
 ; getY  : Point -> Int         withY : Point -> Int -> Point
@@ -2706,16 +2769,16 @@ visitor. Each rule is a pattern and a template, which is exactly what a
 rewrite rule *is*:
 
 ```scheme
-(pub macro simplify
-  ((simplify (+ e 0))     (simplify e))
+(pub macro simplify ((simplify (+ e 0))     (simplify e))
   ((simplify (+ 0 e))     (simplify e))
   ((simplify (* e 1))     (simplify e))
   ((simplify (* e 0))     0)
-  ((simplify (- e e))     0)              ; literal repetition: same form twice
+  ((simplify (- e e))     0)
   ((simplify (f a ...))   (f (simplify a) ...))
   ((simplify e)           e))
 
-(simplify (+ (* n 1) 0))                  ; n
+; literal repetition: same form twice
+(simplify (+ (* n 1) 0))  ; n
 ```
 
 Two rules make this work:
@@ -2753,8 +2816,7 @@ A state machine. The macro's value is that the compiler checks the
 *shape*, rather than a runtime parser:
 
 ```scheme
-(pub macro machine
-  ((machine nm (state s (on ev next)) ...)
+(pub macro machine ((machine nm (state s (on ev next)) ...)
    (data (syntax/join nm State) () (s) ...)
 
    (:: (syntax/join nm Step)
@@ -2763,9 +2825,7 @@ A state machine. The macro's value is that the compiler checks the
      (match st
        ((s) (if (== e ev) (next) (s))) ...))))
 
-(machine Door
-  (state Closed (on 1 Open))
-  (state Open   (on 0 Closed)))
+(machine Door (state Closed (on 1 Open)) (state Open (on 0 Closed)))
 ```
 
 Here the ellipsis does the work, not a query. The pattern

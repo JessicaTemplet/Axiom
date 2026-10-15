@@ -29,9 +29,7 @@
 (:: rowAt (-> Pager Int Int String))
 ;@axiom:effect(io)
 (fn (rowAt p root n)
-  (match (andThen
-    (pagerBeginRead p)
-    (lambda (_) (btreeGet p root (keyRowid n))))
+  (match (andThen (pagerBeginRead p) (lambda (_) (btreeGet p root (keyRowid n))))
     ((Ok (Some v))
       (let ((_ (pagerEndRead p)))
         v)
@@ -52,9 +50,7 @@
         (if (! (isSome failed))
           (match (btreePut p root (keyRowid n) v)
             ((Err e)
-              {
-                (set failed (Some e))
-              }
+              (set failed (Some e))
             )
             ((Ok _) ()))))
       (match failed
@@ -106,30 +102,47 @@
           (check t (== (pagerLockLevel b) 0) "a busy answer leaves b without a lock")
           (let ((before (fileHash "shared.db")))
             {
-              (is t (rewrite a root "uncommitted, and long enough that the 4-page cache spills") 0 "a rewrites every row")
+              (is
+                t
+                (rewrite a root "uncommitted, and long enough that the 4-page cache spills")
+                0
+                "a rewrites every row")
               (check t (> (pagerStat a 5) 0) "a's uncommitted pages were spilled to the file")
               (check t (!= (fileHash "shared.db") before) "the file holds uncommitted bytes")
               (is t (pagerBeginRead b) axqBusy "b still can't read them")
               (match (pagerOpen "shared.db" false true 4)
                 ((Ok c)
                   {
-                    (is t (pagerBeginRead c) axqBusy "nor can a third, read-only connection opened meanwhile")
+                    (is
+                      t
+                      (pagerBeginRead c)
+                      axqBusy
+                      "nor can a third, read-only connection opened meanwhile")
                     (is t (pagerClose c) 0 "c closes")
                   }
                 )
-                ((Err e) (check t false (concat "a connection opens while another writes: " (errorText e)))))
+                ((Err e) (check
+                           t
+                           false
+                           (concat "a connection opens while another writes: " (errorText e)))))
               (is t (pagerRollback a) 0 "a rolls back")
               (check t (== (pagerLockLevel a) 0) "a rollback releases the lock")
               (check t (== (fileHash "shared.db") before) "the rollback leaves the file as it was")
             })
-          (check t (strEq (rowAt b root 7) "original, a value long enough to fill pages") "b reads the original row")
+          (check
+            t
+            (strEq (rowAt b root 7) "original, a value long enough to fill pages")
+            "b reads the original row")
           ; a committed change reaches a connection whose cache held the old row
           (is t (pagerBeginWrite a) 0 "a writes again")
           (is t (btreePut a root (keyRowid 7) "changed") 0 "a changes row 7")
           (is t (pagerCommit a) 0 "a commits")
           (check t (strEq (rowAt b root 7) "changed") "b drops its cache and reads the change")
           (is t (pagerBeginRead b) 0 "b reads")
-          (check t (== (unwrapOr (pagerChangeCounter b) 0) 3) "b sees the third commit's change counter")
+          (check
+            t
+            (== (unwrapOr (pagerChangeCounter b) 0) 3)
+            "b sees the third commit's change counter")
           (is t (pagerEndRead b) 0 "b ends its read")
           ; an upgrade with nobody else reading works
           (is t (pagerBeginRead b) 0 "b reads")
@@ -141,12 +154,26 @@
           (let ((before (fileHash "shared.db")))
             {
               (is t (pagerBeginWrite a) 0 "a writes")
-              (is t (rewrite a root "never committed, long enough to spill from the cache") 0 "a rewrites every row")
+              (is
+                t
+                (rewrite a root "never committed, long enough to spill from the cache")
+                0
+                "a rewrites every row")
               (check t (> (pagerStat a 5) 0) "the dying writer spilled pages")
               (pagerAbandon a)
-              (is t (pagerOpen "shared.db" false true 4) axqReadOnly "a read-only connection can't recover the hot journal")
-              (check t (strEq (rowAt b root 7) "changed") "b recovers the journal and reads the committed row")
-              (check t (== (fileHash "shared.db") before) "recovery restores the file byte for byte")
+              (is
+                t
+                (pagerOpen "shared.db" false true 4)
+                axqReadOnly
+                "a read-only connection can't recover the hot journal")
+              (check
+                t
+                (strEq (rowAt b root 7) "changed")
+                "b recovers the journal and reads the committed row")
+              (check
+                t
+                (== (fileHash "shared.db") before)
+                "recovery restores the file byte for byte")
               (is
                 t
                 (andThen

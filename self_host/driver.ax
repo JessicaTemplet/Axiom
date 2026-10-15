@@ -122,15 +122,9 @@
 (pub fn (argsOf3 a b c)
   (let ((v vecNew))
     {
-      (vecPush
-        v
-        (cast Int a))
-      (vecPush
-        v
-        (cast Int b))
-      (vecPush
-        v
-        (cast Int c))
+      (vecPush v (cast Int a))
+      (vecPush v (cast Int b))
+      (vecPush v (cast Int c))
       v
     }))
 
@@ -178,21 +172,11 @@
       (let ((args 
         (let ((v vecNew))
           {
-            (vecPush
-              v
-              (cast Int (concat "-O" (fmtIntStr lvl))))
-            (vecPush
-              v
-              (cast Int llPath))
-            (vecPush
-              v
-              (cast Int "-S"))
-            (vecPush
-              v
-              (cast Int "-o"))
-            (vecPush
-              v
-              (cast Int outPath))
+            (vecPush v (cast Int (concat "-O" (fmtIntStr lvl))))
+            (vecPush v (cast Int llPath))
+            (vecPush v (cast Int "-S"))
+            (vecPush v (cast Int "-o"))
+            (vecPush v (cast Int outPath))
             v
           })))
         (let ((rc (runTool "opt" args)))
@@ -229,26 +213,13 @@
 ;@axiom:effect(unsafe)
 (pub fn (toolFailDiag msg help)
   (let (
-    (d (mkDiag
-      SEV_ERROR
-      "AX4003"
-      "toolchain-failure"
-      0
-      msg
-      0
-      0
-      help))
+    (d (mkDiag SEV_ERROR "AX4003" "toolchain-failure" 0 msg 0 0 help))
     (ds vecNew)
     (units vecNew)
   )
     {
       (vecPush ds d)
-      (vecPush
-        units
-        (cast Int (CUnit2
-          "<toolchain>"
-          ""
-          (cast String 0))))
+      (vecPush units (cast Int (CUnit2 "<toolchain>" "" (cast String 0))))
       (let ((out (renderDiagsFormat diagFormatFromArgv ds units)))
         (writeStr stderr out))
       exitToolFailed
@@ -306,9 +277,7 @@
 ; `-l<name>`) onto the `cc` argument vector.
 (pub :: appendLinkArgs (-> (Vec Int) (Vec Int) Int Int))
 (pub fn (appendLinkArgs v linkArgs i)
-  (if (==
-    (cast Int linkArgs)
-    0)
+  (if (== (cast Int linkArgs) 0)
     0
     (if (>= i (vecLen linkArgs))
       0
@@ -323,9 +292,7 @@
 (pub :: appendLinkArgsWindows (-> (Vec Int) (Vec Int) Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (appendLinkArgsWindows v linkArgs i)
-  (if (==
-    (cast Int linkArgs)
-    0)
+  (if (== (cast Int linkArgs) 0)
     0
     (if (>= i (vecLen linkArgs))
       0
@@ -333,13 +300,9 @@
         (cast String (vecGet linkArgs i))))
         {
           (if (strStartsWith a "-L")
-            (vecPush
-              v
-              (cast Int (concat "/libpath:" (strSlice a 2 (- (strLen a) 2)))))
+            (vecPush v (cast Int (concat "/libpath:" (strSlice a 2 (- (strLen a) 2)))))
             (if (strStartsWith a "-l")
-              (vecPush
-                v
-                (cast Int (concat (strSlice a 2 (- (strLen a) 2)) ".lib")))
+              (vecPush v (cast Int (concat (strSlice a 2 (- (strLen a) 2)) ".lib")))
               (vecPush v (vecGet linkArgs i))))
           (appendLinkArgsWindows v linkArgs (+ i 1))
         }))))
@@ -354,37 +317,52 @@
 (pub fn (winImportMachineMismatch bytes wantHigh)
   (if (! (strStartsWith bytes "!<arch>\n"))
     false
-    (let ((mut i 8) (mut bad false) (len (strLen bytes)))
+    (let (
+      (mut i 8)
+      (mut bad false)
+      (len (strLen bytes))
+    )
       {
         (while (&& (&& (>= i 0) (<= (+ i 60) len)) (! bad))
-          (if (&& (== (strByte bytes (+ i 58)) 96)
-                (== (strByte bytes (+ i 59)) 10))
+          (if (&& (== (strByte bytes (+ i 58)) 96) (== (strByte bytes (+ i 59)) 10))
             (match (strParseInt (strTrim (strSlice bytes (+ i 48) 10)))
-              ((None) (set i (- 0 1)))
+              ((None)
+                (set i (- 0 1))
+              )
               ((Some n)
                 (if (&& (>= n 0) (<= n (- len (+ i 60))))
-                  (let ((p (+ i 60))
-                        (table (&& (== (strByte bytes i) 47)
-                          (|| (== (strByte bytes (+ i 1)) 32)
-                            (== (strByte bytes (+ i 1)) 47)))))
+                  (let (
+                    (p (+ i 60))
+                    (table (&&
+                             (== (strByte bytes i) 47)
+                             (|| (== (strByte bytes (+ i 1)) 32) (== (strByte bytes (+ i 1)) 47))))
+                  )
                     {
-                      (if (&& (! table)
-                            (&& (>= n 20)
-                              (&& (== (strByte bytes p) 0)
-                                (&& (== (strByte bytes (+ p 1)) 0)
-                                  (&& (== (strByte bytes (+ p 2)) 255)
-                                    (&& (== (strByte bytes (+ p 3)) 255)
-                                      (&& (== (strByte bytes (+ p 4)) 0)
+                      (if (&&
+                            (! table)
+                            (&&
+                              (>= n 20)
+                              (&&
+                                (== (strByte bytes p) 0)
+                                (&&
+                                  (== (strByte bytes (+ p 1)) 0)
+                                  (&&
+                                    (== (strByte bytes (+ p 2)) 255)
+                                    (&&
+                                      (== (strByte bytes (+ p 3)) 255)
+                                      (&&
+                                        (== (strByte bytes (+ p 4)) 0)
                                         (== (strByte bytes (+ p 5)) 0))))))))
-                        (if (!= (+ (strByte bytes (+ p 6))
-                              (* 256 (strByte bytes (+ p 7))))
-                            (+ 100 (* 256 wantHigh)))
+                        (if (!=
+                              (+ (strByte bytes (+ p 6)) (* 256 (strByte bytes (+ p 7))))
+                              (+ 100 (* 256 wantHigh)))
                           (set bad true)
                           false)
                         false)
                       (set i (+ (+ p n) (% n 2)))
                     })
-                  (set i (- 0 1)))))
+                  (set i (- 0 1)))
+              ))
             (set i (- 0 1))))
         bad
       })))
@@ -395,12 +373,18 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (windowsArchivePathsOf linkArgs)
-  (let ((dirs vecNew) (libs vecNew) (out vecNew) (mut i 0))
+  (let (
+    (dirs vecNew)
+    (libs vecNew)
+    (out vecNew)
+    (mut i 0)
+  )
     {
       (if (! (== (cast Int linkArgs) 0))
         (while (< i (vecLen linkArgs))
           {
-            (let ((a (cast String (vecGet linkArgs i))))
+            (let ((a 
+              (cast String (vecGet linkArgs i))))
               (if (strStartsWith a "-L")
                 (vecPush dirs (cast Int (strSlice a 2 (- (strLen a) 2))))
                 (if (strStartsWith a "-l")
@@ -411,10 +395,14 @@
       (set i 0)
       (while (< i (vecLen libs))
         {
-          (let ((lib (cast String (vecGet libs i)))
-                (mut d 0) (mut found false))
+          (let (
+            (lib (cast String (vecGet libs i)))
+            (mut d 0)
+            (mut found false)
+          )
             (while (&& (< d (vecLen dirs)) (! found))
-              (let ((path (archivePathIn (cast String (vecGet dirs d)) lib true)))
+              (let ((path 
+                (archivePathIn (cast String (vecGet dirs d)) lib true)))
                 {
                   (if (fileExists path)
                     {
@@ -433,14 +421,19 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (windowsArchivesWrongMachine linkArgs winTarget)
-  (let ((paths (windowsArchivePathsOf linkArgs))
-        (wantHigh (if (strEq winTarget "windows-aarch64") 170 134))
-        (mut i 0)
-        (mut bad false))
+  (let (
+    (paths (windowsArchivePathsOf linkArgs))
+    (wantHigh (if (strEq winTarget "windows-aarch64")
+      170
+      134))
+    (mut i 0)
+    (mut bad false)
+  )
     {
       (while (&& (< i (vecLen paths)) (! bad))
         {
-          (let ((path (cast String (vecGet paths i))))
+          (let ((path 
+            (cast String (vecGet paths i))))
             (if (fileExists path)
               (if (winImportMachineMismatch (unwrapOr (readFile path) "") wantHigh)
                 (set bad true)
@@ -527,7 +520,6 @@
 ; cookie - llc refusing something that is not a template - the report
 ; is llc's own text and AX4003, as before.
 ; ------------------------------------------------------------------
-
 ; `runTool` with the tool's standard error written to `errPath`.
 (pub :: runToolErrTo (-> String (Vec Int) String Int))
 ;@axiom:effect(io)
@@ -559,9 +551,7 @@
           (if (|| (== i (strLen s)) (== (strByte s i) 10))
             {
               (if (|| (> i from) (< i (strLen s)))
-                {
-                  (vecPush out (strSlice s from (- i from)))
-                })
+                (vecPush out (strSlice s from (- i from))))
               (set from (+ i 1))
             })
           (set i (+ i 1))
@@ -599,7 +589,11 @@
     {
       (while (&& (< a b) (|| (== (strByte s a) 32) (== (strByte s a) 9)))
         (set a (+ a 1)))
-      (while (&& (> b a) (|| (== (strByte s (- b 1)) 32) (|| (== (strByte s (- b 1)) 9) (== (strByte s (- b 1)) 13))))
+      (while (&&
+               (> b a)
+               (||
+                 (== (strByte s (- b 1)) 32)
+                 (|| (== (strByte s (- b 1)) 9) (== (strByte s (- b 1)) 13))))
         (set b (- b 1)))
       (strSlice s a (- b a))
     }))
@@ -616,7 +610,10 @@
       (while (< i (strLen s))
         (if (&& (== (strByte s i) 92) (< (+ i 2) (strLen s)))
           {
-            (set out (concat out (strFromByteVal (+ (* 16 (asmHexVal (strByte s (+ i 1)))) (asmHexVal (strByte s (+ i 2)))))))
+            (set out (concat
+                       out
+                       (strFromByteVal
+                         (+ (* 16 (asmHexVal (strByte s (+ i 1)))) (asmHexVal (strByte s (+ i 2)))))))
             (set i (+ i 3))
           }
           {
@@ -656,14 +653,11 @@
       (while (&& (== (vecLen out) 0) (>= from 0))
         (let ((k (strFindSub ir "; axiom-asm-site " from)))
           (if (< k 0)
-            {
-              (set from (- 0 1))
-            }
-            (let (
-              (eol (match (strFindByte ir 10 k)
+            (set from (- 0 1))
+            (let ((eol 
+              (match (strFindByte ir 10 k)
                 ((Some e) e)
-                ((None) (strLen ir))))
-            )
+                ((None) (strLen ir)))))
               {
                 (asmSiteLine ir (strSlice ir (+ k 17) (- eol (+ k 17))) n out)
                 (set from eol)
@@ -731,9 +725,7 @@
           (if (|| (== i (strLen s)) (== (strByte s i) 32))
             {
               (if (> i from)
-                {
-                  (vecPush out (strSlice s from (- i from)))
-                })
+                (vecPush out (strSlice s from (- i from))))
               (set from (+ i 1))
             })
           (set i (+ i 1))
@@ -749,23 +741,22 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (asmUnitFor units recorded)
-  (let ((file (asmFileResolve recorded)) (mut i 0) (mut at (- 0 1)))
+  (let (
+    (file (asmFileResolve recorded))
+    (mut i 0)
+    (mut at (- 0 1))
+  )
     {
       (while (&& (< at 0) (< i (vecLen units)))
         {
           (if (strEq (memGetWordStr (vecGet units i) 0) file)
-            {
-              (set at i)
-            })
+            (set at i))
           (set i (+ i 1))
         })
       (if (>= at 0)
         at
         {
-          (vecPush units (cast Int (CUnit2
-            file
-            (unwrapOr (readFile file) "")
-            (cast String 0))))
+          (vecPush units (cast Int (CUnit2 file (unwrapOr (readFile file) "") (cast String 0))))
           (- (vecLen units) 1)
         })
     }))
@@ -785,29 +776,37 @@
         (u (asmUnitFor units (vecGetStr site 0)))
         (s (asmNumAt (vecGetStr site 1) 0))
         (e (asmNumAt (vecGetStr site 2) 0))
-        (key (concat (concat (concat (vecGetStr site 0) ":") (concat (vecGetStr site 1) ":")) (concat (concat (vecGetStr site 2) ":") msg)))
+        (key (concat
+               (concat (concat (vecGetStr site 0) ":") (concat (vecGetStr site 1) ":"))
+               (concat (concat (vecGetStr site 2) ":") msg)))
       )
         (let ((src (memGetWordStr (vecGet units u) 1)))
           (if (>= (asmSeenAt seen key 0) 0)
             1
-          {
-            (vecPush seen key)
-            (vecPush ds (diagSetUnitD (mkDiagNote
-              SEV_ERROR
-              "AX3117"
-              "inline-asm-rejected"
-              (if (&& (>= s 0) (&& (> e s) (<= e (strLen src))))
-                (mkSpan s e)
-                0)
-              (concat "llc rejected this line of an `asm` template: " msg)
-              0
-              0
-              "`check` runs no assembler, so an `asm` template is first assembled when the program is built; fix the instruction, or keep the IR with `--emit-llvm` and run `llc` on it to see the whole report"
-              (if (> (strLen read) 0)
-                (concat (concat "the assembler read `" read) "`, with the operands in their registers")
-                "the register allocator found no registers for the operands this line asks for; name fewer operands, or fewer clobbers")) u))
-            1
-          }))))))
+            {
+              (vecPush seen key)
+              (vecPush
+                ds
+                (diagSetUnitD
+                  (mkDiagNote
+                    SEV_ERROR
+                    "AX3117"
+                    "inline-asm-rejected"
+                    (if (&& (>= s 0) (&& (> e s) (<= e (strLen src))))
+                      (mkSpan s e)
+                      0)
+                    (concat "llc rejected this line of an `asm` template: " msg)
+                    0
+                    0
+                    "`check` runs no assembler, so an `asm` template is first assembled when the program is built; fix the instruction, or keep the IR with `--emit-llvm` and run `llc` on it to see the whole report"
+                    (if (> (strLen read) 0)
+                      (concat
+                        (concat "the assembler read `" read)
+                        "`, with the operands in their registers")
+                      "the register allocator found no registers for the operands this line asks for; name fewer operands, or fewer clobbers"))
+                  u))
+              1
+            }))))))
 
 (pub :: asmSeenAt (-> (Vec String) String Int Int))
 (pub fn (asmSeenAt v k i)
@@ -859,10 +858,9 @@
                     (asmTrim (vecGetStr ls (+ i 1)))
                     ""))
                 )
-                  (if (! (&& (>= cookie 0) (== (asmRejectDiag ir cookie shown read ds units seen) 1)))
-                    {
-                      (set unmapped (+ unmapped 1))
-                    }))))
+                  (if (!
+                        (&& (>= cookie 0) (== (asmRejectDiag ir cookie shown read ds units seen) 1)))
+                    (set unmapped (+ unmapped 1))))))
             (set i (+ i 1))
           }))
       unmapped
@@ -881,9 +879,7 @@
         {
           (let ((at (strFindSub (vecGetStr ls i) "note: !srcloc = " 0)))
             (if (>= at 0)
-              {
-                (set c (asmNumAt (vecGetStr ls i) (+ at 16)))
-              }))
+              (set c (asmNumAt (vecGetStr ls i) (+ at 16)))))
           (set i (+ i 1))
         })
       c
@@ -952,6 +948,10 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (assembleAndLink ir llPath objPath outPath optLevel linkArgs winTarget isBaremetal)
+  ; llc's standard error goes to a file beside the object, so a
+  ; rejected `asm` template line is reported where it is written
+  ; (`llcFailed`, AX3117). A run that succeeds passes on what llc
+  ; printed, its warnings, unchanged.
   (let ((lvl 
     (if (> optLevel 3)
       3
@@ -961,186 +961,155 @@
     (let ((llcArgs 
       (let ((v vecNew))
         {
-          (vecPush
-            v
-            (cast Int llPath))
-          (vecPush
-            v
-            (cast Int "-filetype=obj"))
-          (vecPush
-            v
-            (cast Int "-o"))
-          (vecPush
-            v
-            (cast Int objPath))
-          (vecPush
-            v
-            (cast Int (concat "-O" (fmtIntStr lvl))))
-          (vecPush
-            v
-            (cast Int llcRelocArg))
+          (vecPush v (cast Int llPath))
+          (vecPush v (cast Int "-filetype=obj"))
+          (vecPush v (cast Int "-o"))
+          (vecPush v (cast Int objPath))
+          (vecPush v (cast Int (concat "-O" (fmtIntStr lvl))))
+          (vecPush v (cast Int llcRelocArg))
           v
         })))
-      ; llc's standard error goes to a file beside the object, so a
-      ; rejected `asm` template line is reported where it is written
-      ; (`llcFailed`, AX3117). A run that succeeds passes on what llc
-      ; printed, its warnings, unchanged.
       (let ((rc (runToolErrTo "llc" llcArgs (concat objPath ".llc-err"))))
         (if (!= rc 0)
           (llcFailed ir (concat objPath ".llc-err") rc)
           {
-          (llcPassOn (concat objPath ".llc-err"))
-          (if (> (strLen winTarget) 0)
-            (if cgStaticlib
-              (toolFailDiag (concat "`--emit-staticlib` is not supported for " (concat winTarget " yet")) "the Windows link is lld-link's and `ar` has no place in it; an archive for a Windows host is a later phase of the Windows track")
-              (if (windowsArchivesWrongMachine linkArgs winTarget)
-                (toolFailDiag "lld-link failed"
-                  (concat "the import archive has the wrong machine; put a `kernel32.lib` for "
-                    (concat (if (strEq winTarget "windows-aarch64") "arm64" "x64") " on a `--link-search` directory")))
-                (let ((linkArgsW
-                (let ((v vecNew))
-                  {
-                    (vecPush
-                      v
-                      (cast Int "/subsystem:console"))
-                    (vecPush
-                      v
-                      (cast Int "/entry:mainCRTStartup"))
-                    (if (strEq winTarget "windows-aarch64")
-                      (vecPush
-                        v
-                        (cast Int "/machine:arm64"))
-                      v)
-                    (vecPush
-                      v
-                      (cast Int (concat "/out:" outPath)))
-                    (vecPush
-                      v
-                      (cast Int objPath))
-                    (appendLinkArgsWindows v linkArgs 0)
-                    v
-                  })))
-                (let ((rcw (runTool "lld-link" linkArgsW)))
-                  (if (!= rcw 0)
-                    (toolFailDiag
-                      (if (< rcw 0)
-                        "could not run `lld-link`"
-                        "lld-link failed")
-                      (concat (concat "lld-link links a " winTarget) (concat " executable; it ships with LLVM's lld (`brew install lld`, `apt-get install lld`, choco's llvm) - put it on PATH, and put a `kernel32.lib` for " (concat (if (strEq winTarget "windows-aarch64") "arm64" "x64") " on a `--link-search` directory"))))
-                    0)))))
-            (if isBaremetal
-              ; The bare target links an ELF for QEMU's `-kernel`, not
-              ; a hosted executable: `ld.lld` with the port's linker
-              ; script, no C runtime and nothing dynamic. A bare
-              ; archive is refused the way a Windows one is: the host
-              ; that would link it does not exist yet.
+            (llcPassOn (concat objPath ".llc-err"))
+            (if (> (strLen winTarget) 0)
               (if cgStaticlib
-                (toolFailDiag "`--emit-staticlib` is not supported for baremetal-aarch64 yet" "the baremetal link is ld.lld's and `ar` has no place in it; an archive for a device host is a later phase of the baremetal track")
-                (let ((ldPath (concat outPath ".ld")))
-                  (if (isErr (writeFile ldPath (baremetalLinkScript)))
-                    (toolFailDiag "could not write linker script" "check that the output directory exists and is writable")
-                    (let ((ldArgs 
-                      (let ((v vecNew))
-                        {
-                          (vecPush
-                            v
-                            (cast Int "-T"))
-                          (vecPush
-                            v
-                            (cast Int ldPath))
-                          (vecPush
-                            v
-                            (cast Int objPath))
-                          (appendLinkArgs v linkArgs 0)
-                          (vecPush
-                            v
-                            (cast Int "-o"))
-                          (vecPush
-                            v
-                            (cast Int outPath))
-                          v
-                        })))
-                      (let ((rcl (runTool "ld.lld" ldArgs)))
-                        {
-                          (unwrapOr (removeFile ldPath) 0)
-                          (if (!= rcl 0)
-                            (toolFailDiag
-                              (if (< rcl 0)
-                                "could not run `ld.lld`"
-                                "ld.lld failed")
-                              "ld.lld links a baremetal-aarch64 executable; it ships with LLVM's lld (`brew install llvm`, `apt-get install lld`) - put it on PATH")
-                            0)
-                        })))))
-              (if cgStaticlib
-                ; `--emit-staticlib`: the object is ARCHIVED, not linked -
-                ; a Rust (or C) host links it, and its `pub fn`s are the
-                ; host's `extern "C"` symbols (docs/ffi.md, the other
-                ; direction). The module was emitted without the `@main`
-                ; wrapper, so the host's own `main` is the only one.
-                (let ((arArgs 
-                  (let ((v vecNew))
-                    {
-                      (vecPush
+                (toolFailDiag
+                  (concat "`--emit-staticlib` is not supported for " (concat winTarget " yet"))
+                  "the Windows link is lld-link's and `ar` has no place in it; an archive for a Windows host is a later phase of the Windows track")
+                (if (windowsArchivesWrongMachine linkArgs winTarget)
+                  (toolFailDiag
+                    "lld-link failed"
+                    (concat
+                      "the import archive has the wrong machine; put a `kernel32.lib` for "
+                      (concat
+                        (if (strEq winTarget "windows-aarch64")
+                          "arm64"
+                          "x64")
+                        " on a `--link-search` directory")))
+                  (let ((linkArgsW 
+                    (let ((v vecNew))
+                      {
+                        (vecPush v (cast Int "/subsystem:console"))
+                        (vecPush v (cast Int "/entry:mainCRTStartup"))
+                        (if (strEq winTarget "windows-aarch64")
+                          (vecPush v (cast Int "/machine:arm64"))
+                          v)
+                        (vecPush v (cast Int (concat "/out:" outPath)))
+                        (vecPush v (cast Int objPath))
+                        (appendLinkArgsWindows v linkArgs 0)
                         v
-                        (cast Int "rcs"))
-                      (vecPush
-                        v
-                        (cast Int outPath))
-                      (vecPush
-                        v
-                        (cast Int objPath))
-                      v
-                    })))
-                  {
-                    (unwrapOr (removeFile outPath) 0)
-                    (let ((rc3 (runTool "ar" arArgs)))
-                      (if (!= rc3 0)
+                      })))
+                    (let ((rcw (runTool "lld-link" linkArgsW)))
+                      (if (!= rcw 0)
                         (toolFailDiag
-                          (if (< rc3 0)
-                            "could not run `ar`"
-                            "ar failed")
-                          "`ar` writes the static archive; put it on PATH (it ships with every C toolchain)")
-                        0))
-                  })
-                ; The FFI's link inputs, in DECLARATION
-                ; ORDER. `check-reproducible.sh` compares
-                ; bytes, and an unordered link line would
-                ; flip them run to run.
-                ;
-                ; Before `--link-lib`, this vector was
-                ; three entries and the language could not
-                ; name an external symbol, so there was
-                ; nothing for a `-l` to resolve.
-                (let ((ccArgs 
-                  (let ((v vecNew))
+                          (if (< rcw 0)
+                            "could not run `lld-link`"
+                            "lld-link failed")
+                          (concat
+                            (concat "lld-link links a " winTarget)
+                            (concat
+                              " executable; it ships with LLVM's lld (`brew install lld`, `apt-get install lld`, choco's llvm) - put it on PATH, and put a `kernel32.lib` for "
+                              (concat
+                                (if (strEq winTarget "windows-aarch64")
+                                  "arm64"
+                                  "x64")
+                                " on a `--link-search` directory"))))
+                        0)))))
+              (if isBaremetal
+                ; The bare target links an ELF for QEMU's `-kernel`, not
+                ; a hosted executable: `ld.lld` with the port's linker
+                ; script, no C runtime and nothing dynamic. A bare
+                ; archive is refused the way a Windows one is: the host
+                ; that would link it does not exist yet.
+                (if cgStaticlib
+                  (toolFailDiag "`--emit-staticlib` is not supported for baremetal-aarch64 yet" "the baremetal link is ld.lld's and `ar` has no place in it; an archive for a device host is a later phase of the baremetal track")
+                  (let ((ldPath (concat outPath ".ld")))
+                    (if (isErr (writeFile ldPath (baremetalLinkScript)))
+                      (toolFailDiag "could not write linker script" "check that the output directory exists and is writable")
+                      (let ((ldArgs 
+                        (let ((v vecNew))
+                          {
+                            (vecPush v (cast Int "-T"))
+                            (vecPush v (cast Int ldPath))
+                            (vecPush v (cast Int objPath))
+                            (appendLinkArgs v linkArgs 0)
+                            (vecPush v (cast Int "-o"))
+                            (vecPush v (cast Int outPath))
+                            v
+                          })))
+                        (let ((rcl (runTool "ld.lld" ldArgs)))
+                          {
+                            (unwrapOr (removeFile ldPath) 0)
+                            (if (!= rcl 0)
+                              (toolFailDiag
+                                (if (< rcl 0)
+                                  "could not run `ld.lld`"
+                                  "ld.lld failed")
+                                "ld.lld links a baremetal-aarch64 executable; it ships with LLVM's lld (`brew install llvm`, `apt-get install lld`) - put it on PATH")
+                              0)
+                          })))))
+                (if cgStaticlib
+                  ; `--emit-staticlib`: the object is ARCHIVED, not linked -
+                  ; a Rust (or C) host links it, and its `pub fn`s are the
+                  ; host's `extern "C"` symbols (docs/ffi.md, the other
+                  ; direction). The module was emitted without the `@main`
+                  ; wrapper, so the host's own `main` is the only one.
+                  (let ((arArgs 
+                    (let ((v vecNew))
+                      {
+                        (vecPush v (cast Int "rcs"))
+                        (vecPush v (cast Int outPath))
+                        (vecPush v (cast Int objPath))
+                        v
+                      })))
                     {
-                      (vecPush
+                      (unwrapOr (removeFile outPath) 0)
+                      (let ((rc3 (runTool "ar" arArgs)))
+                        (if (!= rc3 0)
+                          (toolFailDiag
+                            (if (< rc3 0)
+                              "could not run `ar`"
+                              "ar failed")
+                            "`ar` writes the static archive; put it on PATH (it ships with every C toolchain)")
+                          0))
+                    })
+                  ; The FFI's link inputs, in DECLARATION
+                  ; ORDER. `check-reproducible.sh` compares
+                  ; bytes, and an unordered link line would
+                  ; flip them run to run.
+                  ;
+                  ; Before `--link-lib`, this vector was
+                  ; three entries and the language could not
+                  ; name an external symbol, so there was
+                  ; nothing for a `-l` to resolve.
+                  (let ((ccArgs 
+                    (let ((v vecNew))
+                      {
+                        (vecPush v (cast Int objPath))
+                        (if (hasFlagAnywhere subcommandName "--obfuscate")
+                          (vecPush
+                            v
+                            (cast Int (if (isSome
+                                            (strFind (unwrapOr (readFile llPath) "") "apple-" 0))
+                              "-Wl,-S,-x"
+                              "-Wl,--strip-all")))
+                          v)
+                        (appendLinkArgs v linkArgs 0)
+                        (vecPush v (cast Int "-o"))
+                        (vecPush v (cast Int outPath))
                         v
-                        (cast Int objPath))
-                      (if (hasFlagAnywhere subcommandName "--obfuscate")
-                        (vecPush
-                          v
-                          (cast Int (if (isSome (strFind (unwrapOr (readFile llPath) "") "apple-" 0))
-                            "-Wl,-S,-x"
-                            "-Wl,--strip-all")))
-                        v)
-                      (appendLinkArgs v linkArgs 0)
-                      (vecPush
-                        v
-                        (cast Int "-o"))
-                      (vecPush
-                        v
-                        (cast Int outPath))
-                      v
-                    })))
-                  (let ((rc2 (runTool "cc" ccArgs)))
-                    (if (!= rc2 0)
-                      (toolFailDiag
-                        (if (< rc2 0)
-                          "could not run `cc`"
-                          "cc failed")
-                        "a C compiler drives the link step; put `cc` on PATH")
-                      0))))))
+                      })))
+                    (let ((rc2 (runTool "cc" ccArgs)))
+                      (if (!= rc2 0)
+                        (toolFailDiag
+                          (if (< rc2 0)
+                            "could not run `cc`"
+                            "cc failed")
+                          "a C compiler drives the link step; put `cc` on PATH")
+                        0))))))
           })))))
 
 ; ------------------------------------------------------------------
@@ -1171,8 +1140,7 @@
     {
       (while (< i (vecLen crates))
         {
-          (prepareCrate
-            (cast String (vecGet crates i)))
+          (prepareCrate (cast String (vecGet crates i)))
           (set i (+ i 1))
         })
       0
@@ -1208,15 +1176,9 @@
 (pub fn (crateTargetDirs dir)
   (let ((v vecNew))
     {
-      (vecPush
-        v
-        (cast Int (concat dir "target/release")))
-      (vecPush
-        v
-        (cast Int (concat dir "../target/release")))
-      (vecPush
-        v
-        (cast Int (concat dir "../../target/release")))
+      (vecPush v (cast Int (concat dir "target/release")))
+      (vecPush v (cast Int (concat dir "../target/release")))
+      (vecPush v (cast Int (concat dir "../../target/release")))
       v
     }))
 
@@ -1233,33 +1195,15 @@
     (let ((checkArgs 
       (let ((v vecNew))
         {
-          (vecPush
-            v
-            (cast Int "--src"))
-          (vecPush
-            v
-            (cast Int (concat dir "src")))
-          (vecPush
-            v
-            (cast Int "--lib"))
-          (vecPush
-            v
-            (cast Int stem))
-          (vecPush
-            v
-            (cast Int "--module"))
-          (vecPush
-            v
-            (cast Int module))
-          (vecPush
-            v
-            (cast Int "--check"))
-          (vecPush
-            v
-            (cast Int modPath))
-          (vecPush
-            v
-            (cast Int "--quiet"))
+          (vecPush v (cast Int "--src"))
+          (vecPush v (cast Int (concat dir "src")))
+          (vecPush v (cast Int "--lib"))
+          (vecPush v (cast Int stem))
+          (vecPush v (cast Int "--module"))
+          (vecPush v (cast Int module))
+          (vecPush v (cast Int "--check"))
+          (vecPush v (cast Int modPath))
+          (vecPush v (cast Int "--quiet"))
           v
         })))
       (let ((rc (runToolQuiet "axiom-bindgen" checkArgs)))
@@ -1268,34 +1212,19 @@
           (let ((genArgs 
             (let ((v vecNew))
               {
-                (vecPush
-                  v
-                  (cast Int "--src"))
-                (vecPush
-                  v
-                  (cast Int (concat dir "src")))
-                (vecPush
-                  v
-                  (cast Int "--lib"))
-                (vecPush
-                  v
-                  (cast Int stem))
-                (vecPush
-                  v
-                  (cast Int "--module"))
-                (vecPush
-                  v
-                  (cast Int module))
-                (vecPush
-                  v
-                  (cast Int "-o"))
-                (vecPush
-                  v
-                  (cast Int (concat dir "axiom")))
+                (vecPush v (cast Int "--src"))
+                (vecPush v (cast Int (concat dir "src")))
+                (vecPush v (cast Int "--lib"))
+                (vecPush v (cast Int stem))
+                (vecPush v (cast Int "--module"))
+                (vecPush v (cast Int module))
+                (vecPush v (cast Int "-o"))
+                (vecPush v (cast Int (concat dir "axiom")))
                 v
               })))
             {
-              (writeStderrStr (concat "axiom: regenerating " (concat modPath " with axiom-bindgen\n")))
+              (writeStderrStr
+                (concat "axiom: regenerating " (concat modPath " with axiom-bindgen\n")))
               (runTool "axiom-bindgen" genArgs)
             }))))))
 
@@ -1307,22 +1236,15 @@
   (let ((args 
     (let ((v vecNew))
       {
-        (vecPush
-          v
-          (cast Int "build"))
-        (vecPush
-          v
-          (cast Int "--release"))
-        (vecPush
-          v
-          (cast Int "--manifest-path"))
-        (vecPush
-          v
-          (cast Int (concat dir "Cargo.toml")))
+        (vecPush v (cast Int "build"))
+        (vecPush v (cast Int "--release"))
+        (vecPush v (cast Int "--manifest-path"))
+        (vecPush v (cast Int (concat dir "Cargo.toml")))
         v
       })))
     {
-      (writeStderrStr (concat "axiom: building crate `" (concat pkg "` with cargo (no archive found)\n")))
+      (writeStderrStr
+        (concat "axiom: building crate `" (concat pkg "` with cargo (no archive found)\n")))
       (runTool "cargo" args)
     }))
 
@@ -1395,22 +1317,20 @@
           (let ((e 
             (cast String (vecGet entries i))))
             (if (&&
-              (> (strLen e) 3)
-              (&&
-                (strEq (strSlice e (- (strLen e) 3) 3) ".ax")
-                (match (strFindByte e 46 0)
-                  ((None) false)
-                  ((Some d) (== d (- (strLen e) 3))))))
+                  (> (strLen e) 3)
+                  (&&
+                    (strEq (strSlice e (- (strLen e) 3) 3) ".ax")
+                    (match (strFindByte e 46 0)
+                      ((None) false)
+                      ((Some d) (== d (- (strLen e) 3))))))
               {
                 (if (== (strLen found) 0)
-                  {
-                    ; The guard above has just established that the ONLY
-                    ; `.` is at `strLen - 3`, so this is that index
-                    ; rather than a second scan for it. It used to be a
-                    ; second `strFindByte` whose `-1` could not happen
-                    ; and was not tested for.
-                    (set found (strSlice e 0 (- (strLen e) 3)))
-                  })
+                  ; The guard above has just established that the ONLY
+                  ; `.` is at `strLen - 3`, so this is that index
+                  ; rather than a second scan for it. It used to be a
+                  ; second `strFindByte` whose `-1` could not happen
+                  ; and was not tested for.
+                  (set found (strSlice e 0 (- (strLen e) 3))))
                 (set n (+ n 1))
               }))
           (set i (+ i 1))
@@ -1493,26 +1413,13 @@
 ;@axiom:effect(unsafe)
 (pub fn (buildFailDiag code slug msg help)
   (let (
-    (d (mkDiag
-      SEV_ERROR
-      code
-      slug
-      0
-      msg
-      0
-      0
-      help))
+    (d (mkDiag SEV_ERROR code slug 0 msg 0 0 help))
     (ds vecNew)
     (units vecNew)
   )
     {
       (vecPush ds d)
-      (vecPush
-        units
-        (cast Int (CUnit2
-          "<link>"
-          ""
-          (cast String 0))))
+      (vecPush units (cast Int (CUnit2 "<link>" "" (cast String 0))))
       (let ((out (renderDiagsFormat diagFormatFromArgv ds units)))
         (writeStr stderr out))
       exitToolFailed
@@ -1556,21 +1463,15 @@
     (mut i 0)
   )
     {
-      (if (! (==
-        (cast Int linkArgs)
-        0))
+      (if (! (== (cast Int linkArgs) 0))
         (while (< i (vecLen linkArgs))
           {
             (let ((a 
               (cast String (vecGet linkArgs i))))
               (if (strStartsWith a "-L")
-                (vecPush
-                  dirs
-                  (cast Int (strSlice a 2 (- (strLen a) 2))))
+                (vecPush dirs (cast Int (strSlice a 2 (- (strLen a) 2))))
                 (if (strStartsWith a "-l")
-                  (vecPush
-                    libs
-                    (cast Int (strSlice a 2 (- (strLen a) 2))))
+                  (vecPush libs (cast Int (strSlice a 2 (- (strLen a) 2))))
                   (cast (Vec Int) 0))))
             (set i (+ i 1))
           }))
@@ -1583,9 +1484,9 @@
                   (vecPush
                     out
                     (cast Int (archivePathIn
-                      (cast String (vecGet dirs d))
-                      (cast String (vecGet libs l))
-                      isWin)))
+                                (cast String (vecGet dirs d))
+                                (cast String (vecGet libs l))
+                                isWin)))
                   (set l (+ l 1))
                 }))
             (set d (+ d 1))
@@ -1617,9 +1518,7 @@
                   {
                     (let ((nm (strSlice ir start (- end start))))
                       (if (== (strIndexIn out nm) (- 0 1))
-                        (vecPush
-                          out
-                          (cast Int nm))
+                        (vecPush out (cast Int nm))
                         (cast (Vec Int) 0)))
                     (set at end)
                   }
@@ -1662,17 +1561,11 @@
           (let ((a 
             (cast String (vecGet explicit i))))
             {
-              (vecPush
-                v
-                (cast Int a))
+              (vecPush v (cast Int a))
               (if (strStartsWith a "-L")
-                (vecPush
-                  dirs
-                  (cast Int (strSlice a 2 (- (strLen a) 2))))
+                (vecPush dirs (cast Int (strSlice a 2 (- (strLen a) 2))))
                 (if (strStartsWith a "-l")
-                  (vecPush
-                    libs
-                    (cast Int (strSlice a 2 (- (strLen a) 2))))
+                  (vecPush libs (cast Int (strSlice a 2 (- (strLen a) 2))))
                   (cast (Vec Int) 0)))
             })
           (set i (+ i 1))
@@ -1698,12 +1591,8 @@
               (if (== (strIndexIn libs lib) (- 0 1))
                 (if (libExistsIn dirs lib 0 (irTargetIsWindows ir))
                   {
-                    (vecPush
-                      v
-                      (cast Int (concat "-l" lib)))
-                    (vecPush
-                      libs
-                      (cast Int lib))
+                    (vecPush v (cast Int (concat "-l" lib)))
+                    (vecPush libs (cast Int lib))
                   }
                   (cast (Vec Int) 0))
                 (cast (Vec Int) 0)))
@@ -1757,12 +1646,8 @@
             (if (&& (> (strLen d) 0) (== (strIndexIn dirs d) (- 0 1)))
               (if (fileExists d)
                 {
-                  (vecPush
-                    v
-                    (cast Int (concat "-L" d)))
-                  (vecPush
-                    dirs
-                    (cast Int d))
+                  (vecPush v (cast Int (concat "-L" d)))
+                  (vecPush dirs (cast Int d))
                 }
                 (cast (Vec Int) 0))
               (cast (Vec Int) 0)))
@@ -1799,12 +1684,8 @@
   (if (== (strIndexIn dirs d) (- 0 1))
     (if (fileExists d)
       {
-        (vecPush
-          v
-          (cast Int (concat "-L" d)))
-        (vecPush
-          dirs
-          (cast Int d))
+        (vecPush v (cast Int (concat "-L" d)))
+        (vecPush dirs (cast Int d))
         0
       }
       0)
@@ -1834,9 +1715,7 @@
     {
       (while (< i (vecLen paths))
         {
-          (vecPush
-            out
-            (cast Int (unwrapOr (readFile (cast String (vecGet paths i))) "")))
+          (vecPush out (cast Int (unwrapOr (readFile (cast String (vecGet paths i))) "")))
           (set i (+ i 1))
         })
       out
@@ -1857,9 +1736,7 @@
 (pub fn (symbolGrounded blobs name i)
   (if (>= i (vecLen blobs))
     false
-    (if (blobDefines
-      (cast String (vecGet blobs i))
-      name)
+    (if (blobDefines (cast String (vecGet blobs i)) name)
       true
       (symbolGrounded blobs name (+ i 1)))))
 
@@ -1912,7 +1789,9 @@
     (if (< at 0)
       false
       (let ((end (+ at (strLen needle))))
-        (if (&& (&& (< end (strLen blob)) (== (strByte blob end) 0)) (== (identByteAt blob (- at 1)) 0))
+        (if (&&
+              (&& (< end (strLen blob)) (== (strByte blob end) 0))
+              (== (identByteAt blob (- at 1)) 0))
           true
           (nulAfter blob needle (+ at 1)))))))
 
@@ -1923,7 +1802,9 @@
   (if (< i 0)
     0
     (let ((b (strByte blob i)))
-      (if (|| (|| (&& (>= b 65) (<= b 90)) (&& (>= b 97) (<= b 122))) (|| (&& (>= b 48) (<= b 57)) (== b 95)))
+      (if (||
+            (|| (&& (>= b 65) (<= b 90)) (&& (>= b 97) (<= b 122)))
+            (|| (&& (>= b 48) (<= b 57)) (== b 95)))
         1
         0))))
 
@@ -1938,10 +1819,7 @@
     {
       (while (< i (vecLen blobs))
         {
-          (collectFfiNames
-            (cast String (vecGet blobs i))
-            out
-            0)
+          (collectFfiNames (cast String (vecGet blobs i)) out 0)
           (set i (+ i 1))
         })
       out
@@ -1959,9 +1837,7 @@
           {
             (let ((nm (strSlice blob at (- end at))))
               (if (&& (< (strLen nm) 200) (== (strIndexIn out nm) (- 0 1)))
-                (vecPush
-                  out
-                  (cast Int nm))
+                (vecPush out (cast Int nm))
                 (cast (Vec Int) 0)))
             (collectFfiNames blob out end)
           }
@@ -2042,11 +1918,7 @@
                   ((Some open)
                     {
                       (if (! (platformGroundedSym (strSlice ir (+ sym 1) (- open (+ sym 1)))))
-                        {
-                          (vecPush
-                            out
-                            (cast Int (strSlice ir (+ sym 1) (- open (+ sym 1)))))
-                        })
+                        (vecPush out (cast Int (strSlice ir (+ sym 1) (- open (+ sym 1))))))
                       (set at open)
                     }
                   ))
@@ -2070,14 +1942,7 @@
       0
       (let ((paths (existingPaths (archivePathsOf linkArgs (irTargetIsWindows ir)))))
         (let ((blobs (readArchives paths)))
-          (groundEachSpanned
-            names
-            blobs
-            paths
-            decls
-            units
-            dfmt
-            0))))))
+          (groundEachSpanned names blobs paths decls units dfmt 0))))))
 
 (pub :: existingPaths (-> (Vec Int) (Vec Int)))
 ;@axiom:effect(io)
@@ -2122,34 +1987,26 @@
           (have (descriptorsOf blobs n))
         )
           (if (|| (== (strLen want) 0) (|| (== (vecLen have) 0) (>= (strIndexIn have want) 0)))
-            (groundEachSpanned
-              names
-              blobs
-              paths
-              decls
-              units
-              dfmt
-              (+ i 1))
+            (groundEachSpanned names blobs paths decls units dfmt (+ i 1))
             (let ((item (findExternItem decls n 0)))
               (let (
                 (d (mkDiag
-                  SEV_ERROR
-                  "AX4005"
-                  "extern-shape"
-                  (if (== item 0)
-                    0
-                    (nodeSpan item))
-                  (concat
-                    (concat "`" (concat n "` is exported by the crate for "))
-                    (concat (concat
-                      (sigTagSpelled
-                        (cast String (vecGet have 0)))
-                      (concat "; the `extern` item declares "
-                      (sigTagSpelled want)))
-                    ""))
-                  0
-                  0
-                  "the Rust shim and the `extern` item must agree on every parameter and the result (docs/ffi.md, the type table); regenerate the binding module with `axiom-bindgen`, or fix the hand-written item"))
+                     SEV_ERROR
+                     "AX4005"
+                     "extern-shape"
+                     (if (== item 0)
+                       0
+                       (nodeSpan item))
+                     (concat
+                       (concat "`" (concat n "` is exported by the crate for "))
+                       (concat
+                         (concat
+                           (sigTagSpelled (cast String (vecGet have 0)))
+                           (concat "; the `extern` item declares " (sigTagSpelled want)))
+                         ""))
+                     0
+                     0
+                     "the Rust shim and the `extern` item must agree on every parameter and the result (docs/ffi.md, the type table); regenerate the binding module with `axiom-bindgen`, or fix the hand-written item"))
                 (ds vecNew)
               )
                 {
@@ -2164,12 +2021,7 @@
                       (if (== item 0)
                         (let ((uv vecNew))
                           {
-                            (vecPush
-                              uv
-                              (cast Int (CUnit2
-                                "<link>"
-                                ""
-                                (cast String 0))))
+                            (vecPush uv (cast Int (CUnit2 "<link>" "" (cast String 0))))
                             uv
                           })
                         units))))
@@ -2187,27 +2039,30 @@
               (concat "no archive is linked, and `" (concat n "` needs one"))
               (concat "no linked archive defines `" (concat n "`"))))
             (help (if (== (vecLen paths) 0)
-              (concat "pass `--link-lib NAME --link-search DIR` where DIR holds `libNAME.a`, or set `AXIOM_LINK_SEARCH` to the directory; the `extern` block names library \"" (concat lib "\", and `axiom build` links `lib<name>.a` by itself when a search directory holds it (an `AXIOM_PATH` entry's `../target/release` is searched too)"))
+              (concat
+                "pass `--link-lib NAME --link-search DIR` where DIR holds `libNAME.a`, or set `AXIOM_LINK_SEARCH` to the directory; the `extern` block names library \""
+                (concat lib "\", and `axiom build` links `lib<name>.a` by itself when a search directory holds it (an `AXIOM_PATH` entry's `../target/release` is searched too)"))
               (let ((near (closestFfiName (archiveFfiNames blobs) n)))
                 (concat
                   (concat "searched: " (concat (joinPaths paths 0) "; "))
-                  (concat (if (== (strLen near) 0)
-                    "check the `(symbol \"...\")` clause against the crate's `#[axiom_export]` names"
-                    (concat "did you mean `" (concat near "`?")))
-                  "")))))
+                  (concat
+                    (if (== (strLen near) 0)
+                      "check the `(symbol \"...\")` clause against the crate's `#[axiom_export]` names"
+                      (concat "did you mean `" (concat near "`?")))
+                    "")))))
           )
             (let (
               (d (mkDiag
-                SEV_ERROR
-                "AX4004"
-                "ungrounded-symbol"
-                (if (== item 0)
-                  0
-                  (nodeSpan item))
-                msg
-                0
-                0
-                help))
+                   SEV_ERROR
+                   "AX4004"
+                   "ungrounded-symbol"
+                   (if (== item 0)
+                     0
+                     (nodeSpan item))
+                   msg
+                   0
+                   0
+                   help))
               (ds vecNew)
             )
               {
@@ -2222,12 +2077,7 @@
                     (if (== item 0)
                       (let ((u vecNew))
                         {
-                          (vecPush
-                            u
-                            (cast Int (CUnit2
-                              "<link>"
-                              ""
-                              (cast String 0))))
+                          (vecPush u (cast Int (CUnit2 "<link>" "" (cast String 0))))
                           u
                         })
                       units))))
@@ -2257,14 +2107,9 @@
     (- 0 1)
     (let ((d (vecGet decls i)))
       (if (&& (== (nodeTag d) TAG_D_EXTERN) (!= (findExternItemIn (nodeCVec d) sym 0) 0))
-        (if (==
-          (cast Int (nodeModule d))
-          0)
+        (if (== (cast Int (nodeModule d)) 0)
           0
-          (unitIndexOf
-            units
-            (cast String (nodeModule d))
-            0))
+          (unitIndexOf units (cast String (nodeModule d)) 0))
         (findExternUnitFrom decls sym units (+ i 1))))))
 
 ; The descriptor string an extern item's declared type spells:
@@ -2316,11 +2161,7 @@
     {
       (while (< i (vecLen blobs))
         {
-          (collectPrefixed
-            (cast String (vecGet blobs i))
-            prefix
-            out
-            0)
+          (collectPrefixed (cast String (vecGet blobs i)) prefix out 0)
           (set i (+ i 1))
         })
       out
@@ -2338,9 +2179,7 @@
           {
             (let ((tail (strSlice blob (+ at (strLen prefix)) (- end (+ at (strLen prefix))))))
               (if (&& (< (strLen tail) 80) (== (strIndexIn out tail) (- 0 1)))
-                (vecPush
-                  out
-                  (cast Int tail))
+                (vecPush out (cast Int tail))
                 (cast (Vec Int) 0)))
             (collectPrefixed blob prefix out end)
           }
@@ -2403,9 +2242,7 @@
 
 (pub :: findExternItemIn (-> (Vec Int) String Int Int))
 (pub fn (findExternItemIn items sym i)
-  (if (==
-    (cast Int items)
-    0)
+  (if (== (cast Int items) 0)
     0
     (if (>= i (vecLen items))
       0
@@ -2443,7 +2280,11 @@
       (cast String (vecGet names i))))
       (if (symbolGrounded blobs n 0)
         (groundEach names blobs (+ i 1))
-        (buildFailDiag "AX4004" "ungrounded-symbol" (concat "no archive on the link line defines `" (concat n "`")) "check the `(symbol \"...\")` clause against the crate, and check that `--link-lib`/`--link-search` name the archive defining it; this is refused here rather than in `opt` or `cc` because a linker error about generated code cannot point at the declaration that caused it")))))
+        (buildFailDiag
+          "AX4004"
+          "ungrounded-symbol"
+          (concat "no archive on the link line defines `" (concat n "`"))
+          "check the `(symbol \"...\")` clause against the crate, and check that `--link-lib`/`--link-search` name the archive defining it; this is refused here rather than in `opt` or `cc` because a linker error about generated code cannot point at the declaration that caused it")))))
 
 ; Write `ir` beside `outPath`, drive the toolchain, and clean up.
 ;
@@ -2490,14 +2331,14 @@
                   (toolFailDiag "opt failed" "`opt` is optional - a PATH without it warns and builds - so this is a failure of the one that is installed")
                 }
                 (let ((rc (assembleAndLink
-                  ir
-                  toAssemble
-                  objPath
-                  exePath
-                  optLevel
-                  linkArgs
-                  winTarget
-                  isBaremetal)))
+                            ir
+                            toAssemble
+                            objPath
+                            exePath
+                            optLevel
+                            linkArgs
+                            winTarget
+                            isBaremetal)))
                   {
                     (unwrapOr (removeFile objPath) 0)
                     (if (!= (strCmp toAssemble llPath) 0)
@@ -2576,7 +2417,9 @@
 ; is a compiler nobody gets past.
 (pub :: usageText String)
 (pub fn (usageText)
-  (concat (concat "Axiom " axiomVersion) "\n\nUSAGE:\n  axiom [OPTIONS] <COMMAND> [ARGS]\n\nCOMMANDS:\n  build      compile a source file to an executable\n  check      check syntax and types, emitting no code\n  run        compile and run, forwarding further arguments\n  new        start a project with Main.ax and axiom.pkg\n  fetch      check out the project's registry dependencies\n  test       run every test-named function in a file or directory\n  emit-llvm  print the generated LLVM IR\n  fmt        format a source file in place\n  explain    describe a diagnostic code\n  symbols    list top-level symbols in AXSYM\n  doc        render the docs and the library reference in your browser\n  repl       start the interactive read-eval-print loop\n  lsp        run the language server on stdin/stdout\n  version    print the version\n  help       print help, or help <COMMAND> for one command\n\nOPTIONS:\n  --obfuscate        mask literals, scramble symbols and obscure entries\n  --input <PATH>     input file (build, check, run, emit-llvm)\n  --output <PATH>    output file (build, emit-llvm)\n  -o <PATH>          short for --output\n  --target <NAME>    target platform; see the list below (default: host)\n  --opt <0-3>        optimisation (build, run, test; default: manifest opt, else 1)\n  --heap-ceiling <BYTES>  fixed heap size (build, run, test)\n  --filter <TEXT>    run tests whose names contain TEXT (test)\n  --crate <DIR>      generate bindings and link a Rust crate; repeatable\n  --link-lib <NAME>  link an FFI archive; repeatable (build, run)\n  --link-search <DIR>  archive search directory; repeatable (build, run)\n  --emit-llvm        keep generated .ll beside the executable (build)\n  --emit-staticlib   write a static archive (build)\n  --threads          use platform threads for parallel (build, run, test)\n  --emit-rust-binding <PATH>  write host bindings with --emit-staticlib\n  --check            report formatting without writing (fmt)\n  --builtins         include built-in operators (symbols)\n  --calls            include resolved call edges (symbols)\n  --mir              include region facts (symbols)\n  --axir             read or write .axir records instead of AXSYM (symbols)\n  --list             list diagnostic codes (explain)\n  --no-banner        skip the startup banner (repl)\n  --out <DIR>        where doc writes its pages (doc)\n  --no-open          render without opening a browser (doc)\n  --missing          list public names with no doc comment (doc)\n  --diagnostic-format <human|ai|json>  diagnostic renderer (default: human)\n  -h, --help         print help; accepted before or after the file\n  -V, --version      print the version; before the command\n  --                 end compiler options\n\nTARGETS:\n  Supported: darwin-aarch64, linux-aarch64.\n  Source-only: darwin-x86_64, freebsd-aarch64, freebsd-x86_64,\n               linux-x86_64, windows-aarch64, windows-x86_64,\n               baremetal-aarch64.\n\nNOTES:\n  A bare input path works wherever --input is accepted. Build output\n  defaults to the manifest's name, else output. Windows adds .exe once.\n\n  --crate searches DIR/axiom for modules and DIR/target/release for\n  archives. Archives also use AXIOM_LINK_SEARCH and each AXIOM_PATH\n  entry's ../target/release. An extern library links when found there.\n\n  Static archives need no main; pub functions become C symbols.\n  --mir forces a slower facts fixpoint; --axir --mir includes lowered\n  bodies. Use --diagnostic-format=ai for AXSYM; JSON symbols are refused.\n\n  Threads work on darwin and linux. FreeBSD uses processes and refuses\n  --threads (AX4006). Windows warns AX4007 and spawning exits with 79.\n  Heap exhaustion exits with 70; threaded spawning with a fixed heap\n  is refused (AX4006). Source-only targets are emitted and assembled,\n  executed by no runner; see README, Targets.\n\n  Human diagnostics always include colour, even in redirected output.\n  AI and JSON diagnostics have no colour escapes.\n\nEXIT CODES:\n  0  success\n  1  the program is wrong: unreadable input, syntax or checking failure,\n     a failed test, a missing entry point, or an unresolvable import\n  2  the command line is wrong: unknown command or flag, or flag arity\n  3  a module could not be read or parsed, or the target is unknown\n  4  a native tool failed or is missing (llc, cc; lld-link for Windows)\n"))
+  (concat
+    (concat "Axiom " axiomVersion)
+    "\n\nUSAGE:\n  axiom [OPTIONS] <COMMAND> [ARGS]\n\nCOMMANDS:\n  build      compile a source file to an executable\n  check      check syntax and types, emitting no code\n  run        compile and run, forwarding further arguments\n  new        start a project with Main.ax and axiom.pkg\n  fetch      check out the project's registry dependencies\n  test       run every test-named function in a file or directory\n  emit-llvm  print the generated LLVM IR\n  fmt        format a source file in place\n  explain    describe a diagnostic code\n  symbols    list top-level symbols in AXSYM\n  doc        render the docs and the library reference in your browser\n  repl       start the interactive read-eval-print loop\n  lsp        run the language server on stdin/stdout\n  version    print the version\n  help       print help, or help <COMMAND> for one command\n\nOPTIONS:\n  --obfuscate        mask literals, scramble symbols and obscure entries\n  --input <PATH>     input file (build, check, run, emit-llvm)\n  --output <PATH>    output file (build, emit-llvm)\n  -o <PATH>          short for --output\n  --target <NAME>    target platform; see the list below (default: host)\n  --opt <0-3>        optimisation (build, run, test; default: manifest opt, else 1)\n  --heap-ceiling <BYTES>  fixed heap size (build, run, test)\n  --filter <TEXT>    run tests whose names contain TEXT (test)\n  --crate <DIR>      generate bindings and link a Rust crate; repeatable\n  --link-lib <NAME>  link an FFI archive; repeatable (build, run)\n  --link-search <DIR>  archive search directory; repeatable (build, run)\n  --emit-llvm        keep generated .ll beside the executable (build)\n  --emit-staticlib   write a static archive (build)\n  --threads          use platform threads for parallel (build, run, test)\n  --emit-rust-binding <PATH>  write host bindings with --emit-staticlib\n  --check            report formatting without writing (fmt)\n  --builtins         include built-in operators (symbols)\n  --calls            include resolved call edges (symbols)\n  --mir              include region facts (symbols)\n  --axir             read or write .axir records instead of AXSYM (symbols)\n  --list             list diagnostic codes (explain)\n  --no-banner        skip the startup banner (repl)\n  --out <DIR>        where doc writes its pages (doc)\n  --no-open          render without opening a browser (doc)\n  --missing          list public names with no doc comment (doc)\n  --diagnostic-format <human|ai|json>  diagnostic renderer (default: human)\n  -h, --help         print help; accepted before or after the file\n  -V, --version      print the version; before the command\n  --                 end compiler options\n\nTARGETS:\n  Supported: darwin-aarch64, linux-aarch64.\n  Source-only: darwin-x86_64, freebsd-aarch64, freebsd-x86_64,\n               linux-x86_64, windows-aarch64, windows-x86_64,\n               baremetal-aarch64.\n\nNOTES:\n  A bare input path works wherever --input is accepted. Build output\n  defaults to the manifest's name, else output. Windows adds .exe once.\n\n  --crate searches DIR/axiom for modules and DIR/target/release for\n  archives. Archives also use AXIOM_LINK_SEARCH and each AXIOM_PATH\n  entry's ../target/release. An extern library links when found there.\n\n  Static archives need no main; pub functions become C symbols.\n  --mir forces a slower facts fixpoint; --axir --mir includes lowered\n  bodies. Use --diagnostic-format=ai for AXSYM; JSON symbols are refused.\n\n  Threads work on darwin and linux. FreeBSD uses processes and refuses\n  --threads (AX4006). Windows warns AX4007 and spawning exits with 79.\n  Heap exhaustion exits with 70; threaded spawning with a fixed heap\n  is refused (AX4006). Source-only targets are emitted and assembled,\n  executed by no runner; see README, Targets.\n\n  Human diagnostics always include colour, even in redirected output.\n  AI and JSON diagnostics have no colour escapes.\n\nEXIT CODES:\n  0  success\n  1  the program is wrong: unreadable input, syntax or checking failure,\n     a failed test, a missing entry point, or an unresolvable import\n  2  the command line is wrong: unknown command or flag, or flag arity\n  3  a module could not be read or parsed, or the target is unknown\n  4  a native tool failed or is missing (llc, cc; lld-link for Windows)\n"))
 
 ; One command's help: its synopsis and the flags it actually reads.
 ;
@@ -2611,16 +2454,16 @@
                   (if (strEq c "doc")
                     "axiom doc - render the documentation and the library reference, and open them\n\nUSAGE:\n  axiom doc [FILE.ax ...] [FILE.md ...] [--out <DIR>] [--no-open]\n  axiom doc [FILE.ax ...] --missing\n\nRenders every page under docs/, README.md, CONTRIBUTING.md,\nCHANGELOG.md and examples/README.md, one page per standard library\nmodule, and the language index, as HTML with one stylesheet, then\nopens index.html in your browser. A FILE.ax operand is rendered as a\nmodule page beside the library's; a FILE.md operand as a page beside\nthe docs.\n\nThe documentation set is found through AXIOM_DOC, a directory holding\ndocs/, else beside the compiler: an install's prefix or a source\ncheckout. A release archive carries docs/, README.md and\nCHANGELOG.md; a checkout has the whole set.\n\n  --out <DIR>   write the pages to DIR (default: $XDG_CACHE_HOME/axiom/doc,\n                else ~/.cache/axiom/doc, else $TMPDIR/axiom-doc)\n  --no-open     render, print the index's path and do not open it\n  --missing     render nothing; list every public declaration of the\n                library (or of the FILE.ax operands) with no `;;` doc\n                comment as `path:line: name`, and exit 1 when there are any\n\nExit 1 when no documentation set is found or the output directory\ncannot be written.\n"
                     (if (strEq c "repl")
-                    "axiom repl - the interactive read-eval-print loop\n\nUSAGE:\n  axiom repl [--no-banner]\n\n  --no-banner   skip the startup banner\n\nType :help at the prompt for the meta-commands.\n"
-                    (if (strEq c "new")
-                      "axiom new - start a new Axiom project\n\nUSAGE:\n  axiom new <NAME>\n\nCreates NAME/ holding Main.ax, a hello-world program, and\naxiom.pkg carrying `name NAME` and `version 0.1.0`. Refuses when\nNAME is not a package name (letters, digits, `.`, `-`, `_`) or\nthe directory already holds a project or is not empty.\n"
-                      (if (strEq c "fetch")
-                        "axiom fetch - check out the project's registry dependencies\n\nUSAGE:\n  axiom fetch\n\nFor every `depend` URL in the nearest `axiom.pkg`, clones it\ninto `.axiom/deps/<slug>/` beside the manifest when no checkout\nis there yet; a checkout already there is left alone. Takes no\noperands. Needs `git` on PATH; the compiler never fetches on its\nown - `build` refuses a missing checkout naming the clone.\n"
-                        (if (strEq c "lsp")
-                          "axiom lsp - run the language server\n\nUSAGE:\n  axiom lsp\n\nSpeaks JSON-RPC over stdin and stdout, so it takes no operand and\nwrites nothing else to stdout.\n"
-                          (if (strEq c "version")
-                            "axiom version - print the version\n\nUSAGE:\n  axiom version\n  axiom --version\n"
-                            usageText)))))))))))))))
+                      "axiom repl - the interactive read-eval-print loop\n\nUSAGE:\n  axiom repl [--no-banner]\n\n  --no-banner   skip the startup banner\n\nType :help at the prompt for the meta-commands.\n"
+                      (if (strEq c "new")
+                        "axiom new - start a new Axiom project\n\nUSAGE:\n  axiom new <NAME>\n\nCreates NAME/ holding Main.ax, a hello-world program, and\naxiom.pkg carrying `name NAME` and `version 0.1.0`. Refuses when\nNAME is not a package name (letters, digits, `.`, `-`, `_`) or\nthe directory already holds a project or is not empty.\n"
+                        (if (strEq c "fetch")
+                          "axiom fetch - check out the project's registry dependencies\n\nUSAGE:\n  axiom fetch\n\nFor every `depend` URL in the nearest `axiom.pkg`, clones it\ninto `.axiom/deps/<slug>/` beside the manifest when no checkout\nis there yet; a checkout already there is left alone. Takes no\noperands. Needs `git` on PATH; the compiler never fetches on its\nown - `build` refuses a missing checkout naming the clone.\n"
+                          (if (strEq c "lsp")
+                            "axiom lsp - run the language server\n\nUSAGE:\n  axiom lsp\n\nSpeaks JSON-RPC over stdin and stdout, so it takes no operand and\nwrites nothing else to stdout.\n"
+                            (if (strEq c "version")
+                              "axiom version - print the version\n\nUSAGE:\n  axiom version\n  axiom --version\n"
+                              usageText)))))))))))))))
 
 ; The value of `--name` / `--name=value`, or "" when absent.
 ; Every `--link-search DIR` and `--link-lib NAME` on the command line,
@@ -2639,18 +2482,8 @@
 (pub fn (linkArgsOf)
   (let ((v vecNew))
     {
-      (collectFlagInto
-        v
-        "--link-search"
-        "-L"
-        1
-        sysArgc)
-      (collectFlagInto
-        v
-        "--link-lib"
-        "-l"
-        1
-        sysArgc)
+      (collectFlagInto v "--link-search" "-L" 1 sysArgc)
+      (collectFlagInto v "--link-lib" "-l" 1 sysArgc)
       v
     }))
 
@@ -2666,15 +2499,8 @@
       (if (strEq a name)
         (if (< (+ i 1) n)
           {
-            (vecPush
-              v
-              (cast Int (concat prefix (sysArg (+ i 1)))))
-            (collectFlagInto
-              v
-              name
-              prefix
-              (+ i 2)
-              n)
+            (vecPush v (cast Int (concat prefix (sysArg (+ i 1)))))
+            (collectFlagInto v name prefix (+ i 2) n)
           }
           0)
         (let ((eq (concat name "=")))
@@ -2683,19 +2509,9 @@
               (vecPush
                 v
                 (cast Int (concat prefix (strSlice a (strLen eq) (- (strLen a) (strLen eq))))))
-              (collectFlagInto
-                v
-                name
-                prefix
-                (+ i 1)
-                n)
+              (collectFlagInto v name prefix (+ i 1) n)
             }
-            (collectFlagInto
-              v
-              name
-              prefix
-              (+ i 1)
-              n)))))))
+            (collectFlagInto v name prefix (+ i 1) n)))))))
 
 (pub :: flagValue (-> String Int String))
 ;@axiom:effect(io)
@@ -2745,9 +2561,57 @@
 ; `--diagnostic-formt=json` quietly produced human output.
 (pub :: flagArity (-> String Int))
 (pub fn (flagArity a)
-  (if (|| (strEq a "--input") (|| (strEq a "--output") (|| (strEq a "-o") (|| (strEq a "--target") (|| (strEq a "--opt") (|| (strEq a "--heap-ceiling") (|| (strEq a "--link-lib") (|| (strEq a "--link-search") (|| (strEq a "--crate") (|| (strEq a "--emit-rust-binding") (|| (strEq a "--filter") (|| (strEq a "--jobs") (|| (strEq a "--diagnostic-format") (strEq a "--out"))))))))))))))
+  (if (||
+        (strEq a "--input")
+        (||
+          (strEq a "--output")
+          (||
+            (strEq a "-o")
+            (||
+              (strEq a "--target")
+              (||
+                (strEq a "--opt")
+                (||
+                  (strEq a "--heap-ceiling")
+                  (||
+                    (strEq a "--link-lib")
+                    (||
+                      (strEq a "--link-search")
+                      (||
+                        (strEq a "--crate")
+                        (||
+                          (strEq a "--emit-rust-binding")
+                          (||
+                            (strEq a "--filter")
+                            (||
+                              (strEq a "--jobs")
+                              (|| (strEq a "--diagnostic-format") (strEq a "--out"))))))))))))))
     1
-    (if (|| (strEq a "--obfuscate") (|| (strEq a "--emit-llvm") (|| (strEq a "--emit-staticlib") (|| (strEq a "--threads") (|| (strEq a "--check") (|| (|| (strEq a "--builtins") (|| (strEq a "--calls") (|| (strEq a "--mir") (strEq a "--axir")))) (|| (strEq a "--list") (|| (strEq a "--no-banner") (|| (strEq a "--help") (|| (strEq a "-h") (|| (strEq a "--version") (|| (strEq a "-V") (|| (strEq a "--no-open") (strEq a "--missing"))))))))))))))
+    (if (||
+          (strEq a "--obfuscate")
+          (||
+            (strEq a "--emit-llvm")
+            (||
+              (strEq a "--emit-staticlib")
+              (||
+                (strEq a "--threads")
+                (||
+                  (strEq a "--check")
+                  (||
+                    (||
+                      (strEq a "--builtins")
+                      (|| (strEq a "--calls") (|| (strEq a "--mir") (strEq a "--axir"))))
+                    (||
+                      (strEq a "--list")
+                      (||
+                        (strEq a "--no-banner")
+                        (||
+                          (strEq a "--help")
+                          (||
+                            (strEq a "-h")
+                            (||
+                              (strEq a "--version")
+                              (|| (strEq a "-V") (|| (strEq a "--no-open") (strEq a "--missing"))))))))))))))
       0
       (- 0 1))))
 
@@ -2887,9 +2751,9 @@
   (let ((v (flagValue "--opt" 1)))
     (if (> (strLen v) 0)
       (if (&&
-        (== (strLen v) 1)
-        (let ((c (strByte v 0)))
-          (&& (>= c 48) (<= c 51))))
+            (== (strLen v) 1)
+            (let ((c (strByte v 0)))
+              (&& (>= c 48) (<= c 51))))
         (- (strByte v 0) 48)
         1)
       (let ((m (pkgOpt entryDir)))
@@ -2998,45 +2862,19 @@
 (pub fn (subcommandNames)
   (let ((v vecNew))
     {
-      (vecPush
-        v
-        (cast Int "build"))
-      (vecPush
-        v
-        (cast Int "check"))
-      (vecPush
-        v
-        (cast Int "run"))
-      (vecPush
-        v
-        (cast Int "test"))
-      (vecPush
-        v
-        (cast Int "emit-llvm"))
-      (vecPush
-        v
-        (cast Int "fmt"))
-      (vecPush
-        v
-        (cast Int "explain"))
-      (vecPush
-        v
-        (cast Int "symbols"))
-      (vecPush
-        v
-        (cast Int "doc"))
-      (vecPush
-        v
-        (cast Int "repl"))
-      (vecPush
-        v
-        (cast Int "lsp"))
-      (vecPush
-        v
-        (cast Int "version"))
-      (vecPush
-        v
-        (cast Int "help"))
+      (vecPush v (cast Int "build"))
+      (vecPush v (cast Int "check"))
+      (vecPush v (cast Int "run"))
+      (vecPush v (cast Int "test"))
+      (vecPush v (cast Int "emit-llvm"))
+      (vecPush v (cast Int "fmt"))
+      (vecPush v (cast Int "explain"))
+      (vecPush v (cast Int "symbols"))
+      (vecPush v (cast Int "doc"))
+      (vecPush v (cast Int "repl"))
+      (vecPush v (cast Int "lsp"))
+      (vecPush v (cast Int "version"))
+      (vecPush v (cast Int "help"))
       v
     }))
 
@@ -3087,10 +2925,10 @@
       (if (&& (== endOpts 0) (strEq a "--"))
         false
         (if (||
-          (== endOpts 1)
-          (if (looksLikeFlag a)
-            false
-            true))
+              (== endOpts 1)
+              (if (looksLikeFlag a)
+                false
+                true))
           (hasFlagAnywhereFrom
             cmd
             want
@@ -3102,10 +2940,10 @@
             (if (strEq name want)
               true
               (if (&&
-                (== (flagArity name) 1)
-                (if (flagHasValuePart a)
-                  false
-                  true))
+                    (== (flagArity name) 1)
+                    (if (flagHasValuePart a)
+                      false
+                      true))
                 (hasFlagAnywhereFrom cmd want (+ i 2) endOpts)
                 (hasFlagAnywhereFrom cmd want (+ i 1) endOpts)))))))))
 
@@ -3141,10 +2979,10 @@
         ; silent skip.
         (checkArgsFrom cmd (+ i 1) 1)
         (if (||
-          (== endOpts 1)
-          (if (looksLikeFlag a)
-            false
-            true))
+              (== endOpts 1)
+              (if (looksLikeFlag a)
+                false
+                true))
           (checkArgsFrom
             cmd
             (+ i 1)
@@ -3156,14 +2994,20 @@
               (if (< ar 0)
                 (usageError (concat "error: unrecognised flag `" (concat name "`\n")))
                 (if (&& (== ar 0) (flagHasValuePart a))
-                  (usageError (concat (concat "error: `" (concat name "` takes no value, but `")) (concat (flagValuePart a) "` was given\n")))
+                  (usageError
+                    (concat
+                      (concat "error: `" (concat name "` takes no value, but `"))
+                      (concat (flagValuePart a) "` was given\n")))
                   (if (&&
-                    (== ar 1)
-                    (if (flagHasValuePart a)
-                      false
-                      true))
+                        (== ar 1)
+                        (if (flagHasValuePart a)
+                          false
+                          true))
                     (if (>= (+ i 1) sysArgc)
-                      (usageError (concat "error: a value is required for `" (concat name "` but none was given\n")))
+                      (usageError
+                        (concat
+                          "error: a value is required for `"
+                          (concat name "` but none was given\n")))
                       {
                         (checkFlagValue name (sysArg (+ i 1)))
                         (checkArgsFrom cmd (+ i 2) endOpts)
@@ -3194,21 +3038,30 @@
 (pub fn (checkFlagValue name v)
   (if (strEq name "--opt")
     (if (&&
-      (== (strLen v) 1)
-      (let ((c (strByte v 0)))
-        (&& (>= c 48) (<= c 51))))
+          (== (strLen v) 1)
+          (let ((c (strByte v 0)))
+            (&& (>= c 48) (<= c 51))))
       0
       (usageError (concat "error: `--opt` takes 0, 1, 2 or 3, but was given `" (concat v "`\n"))))
     (if (strEq name "--heap-ceiling")
       (if (allDigits v 0)
         (if (&& (> (strLen v) 0) (ceilingPositive v))
           0
-          (usageError (concat "error: `--heap-ceiling` takes a positive number of bytes, but was given `" (concat v "`\n"))))
-        (usageError (concat "error: `--heap-ceiling` takes a positive number of bytes, but was given `" (concat v "`\n"))))
+          (usageError
+            (concat
+              "error: `--heap-ceiling` takes a positive number of bytes, but was given `"
+              (concat v "`\n"))))
+        (usageError
+          (concat
+            "error: `--heap-ceiling` takes a positive number of bytes, but was given `"
+            (concat v "`\n"))))
       (if (strEq name "--diagnostic-format")
         (if (>= (parseDiagFormatName v) 0)
           0
-          (usageError (concat "error: `--diagnostic-format` takes human, ai or json, but was given `" (concat v "`\n"))))
+          (usageError
+            (concat
+              "error: `--diagnostic-format` takes human, ai or json, but was given `"
+              (concat v "`\n"))))
         0))))
 
 ; Every byte a digit, and at least one byte: the empty string and

@@ -22,7 +22,8 @@ where its limits are.
         (println "{key}")
         (println (secretLen key))
         (secretWipe key)
-      })
+      }
+    )
     ((Err e) (die (errorText e) 1))))
 ```
 
@@ -227,8 +228,11 @@ secret into as many independent keys as you need.
                     (println (secretLen keys))
                     (secretWipe keys)
                     (secretWipe shared)
-                  }))))
-        }))))
+                  }
+                ))
+            ))
+        })
+    )))
 ```
 
 ```text
@@ -294,7 +298,9 @@ each with the same shape:
                 ((Ok plain) (println plain))
                 ((Err e) (println (errorText e))))
               (aes256GcmKeyWipe key)
-            }))))))
+            })
+        ))
+    )))
 ```
 
 ```text
@@ -374,7 +380,9 @@ exchange can compute it.
             (println (secretLen s1))
             (println (secretEq s1 s2))
             0
-          })))))
+          }
+        ))
+    )))
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -385,7 +393,8 @@ exchange can compute it.
     ((Ok alice)
       (match x25519KeyGenerate
         ((Err e) (die (errorText e) 1))
-        ((Ok bob) (agree alice bob))))))
+        ((Ok bob) (agree alice bob)))
+    )))
 ```
 
 ```text
@@ -426,14 +435,17 @@ deterministic, so the same key and message always give the same
   (match ed25519KeyGenerate
     ((Err e) (die (errorText e) 1))
     ((Ok key)
-      (let ((pk (ed25519PublicKey key))
-            (sig (ed25519Sign key "release 0.8.0")))
+      (let (
+        (pk (ed25519PublicKey key))
+        (sig (ed25519Sign key "release 0.8.0"))
+      )
         {
           (println (strLen (ed25519SignatureBytes sig)))
           (println (ed25519Verify pk "release 0.8.0" sig))
           (println (ed25519Verify pk "release 0.8.1" sig))
           (ed25519KeyWipe key)
-        }))))
+        })
+    )))
 ```
 
 ```text

@@ -536,20 +536,8 @@
           (if (== st mapStateLive)
             (if (== (memGetWord keys h) key)
               h
-              (mapFindLoop
-                states
-                keys
-                cap
-                key
-                (mapNextSlot h cap)
-                (- cap 1)))
-            (mapFindLoop
-              states
-              keys
-              cap
-              key
-              (mapNextSlot h cap)
-              (- cap 1))))))))
+              (mapFindLoop states keys cap key (mapNextSlot h cap) (- cap 1)))
+            (mapFindLoop states keys cap key (mapNextSlot h cap) (- cap 1))))))))
 
 (:: mapFindLoop (-> Int Int Int Int Int Int Int))
 (fn (mapFindLoop states keys cap key i left)
@@ -561,23 +549,11 @@
         (if (== st mapStateLive)
           (if (== (memGetWord keys i) key)
             i
-            (mapFindLoop
-              states
-              keys
-              cap
-              key
-              (mapNextSlot i cap)
-              (- left 1)))
+            (mapFindLoop states keys cap key (mapNextSlot i cap) (- left 1)))
           ; A tombstone: keep going. Treating it as empty here
           ; would make every entry displaced past a removed one
           ; unreachable.
-          (mapFindLoop
-            states
-            keys
-            cap
-            key
-            (mapNextSlot i cap)
-            (- left 1)))))))
+          (mapFindLoop states keys cap key (mapNextSlot i cap) (- left 1)))))))
 
 ; ------------------------------------------------------------------
 ; Reading
@@ -713,18 +689,13 @@
             (memMarkArray m.vals m.cap)
             (set m.refs 1)
           }
-          {
-            (set m.refs 2)
-          })
+          (set m.refs 2))
         (if (&& (== m.refs 1) (== counted 0))
           {
             (memMarkLeaf m.vals)
             (set m.refs 2)
           }))
-      (mapInsertNoGrow
-        m
-        key
-        (cast Int value))
+      (mapInsertNoGrow m key (cast Int value))
     }))
 
 ; Insert or overwrite, assuming there is room. Answers 0; see
@@ -753,15 +724,7 @@
     (let ((h (mapSlotOf key cap)))
       (let ((st (memGetByte states h)))
         (if (== st mapStateEmpty)
-          (mapFillAt
-            m
-            keys
-            vals
-            states
-            h
-            key
-            value
-            1)
+          (mapFillAt m keys vals states h key value 1)
           (if (== st mapStateLive)
             (if (== (memGetWord keys h) key)
               {
@@ -769,28 +732,8 @@
                 (memSetWord vals h value)
                 0
               }
-              (mapInsertLoop
-                m
-                keys
-                vals
-                states
-                cap
-                key
-                value
-                (mapNextSlot h cap)
-                (- 0 1)
-                (- cap 1)))
-            (mapInsertLoop
-              m
-              keys
-              vals
-              states
-              cap
-              key
-              value
-              (mapNextSlot h cap)
-              h
-              (- cap 1))))))))
+              (mapInsertLoop m keys vals states cap key value (mapNextSlot h cap) (- 0 1) (- cap 1)))
+            (mapInsertLoop m keys vals states cap key value (mapNextSlot h cap) h (- cap 1))))))))
 
 (:: mapInsertLoop (-> (Map v) Int Int Int Int Int Int Int Int Int Int))
 (fn (mapInsertLoop m keys vals states cap key value i firstTomb left)
@@ -802,24 +745,8 @@
         ; insert/remove churn reuses slots instead of consuming a
         ; fresh empty one on every cycle.
         (if (< firstTomb 0)
-          (mapFillAt
-            m
-            keys
-            vals
-            states
-            i
-            key
-            value
-            1)
-          (mapFillAt
-            m
-            keys
-            vals
-            states
-            firstTomb
-            key
-            value
-            0))
+          (mapFillAt m keys vals states i key value 1)
+          (mapFillAt m keys vals states firstTomb key value 0))
         (if (== state mapStateLive)
           (if (== (memGetWord keys i) key)
             ; Overwrite: `len` and `used` are both unchanged,
@@ -962,16 +889,16 @@
         (set m.vals newVals)
         (set m.states newStates)
         (let ((n (mapReinsertLoop
-          newKeys
-          newVals
-          newStates
-          newCap
-          oldKeys
-          oldVals
-          oldStates
-          oldCap
-          0
-          0)))
+                   newKeys
+                   newVals
+                   newStates
+                   newCap
+                   oldKeys
+                   oldVals
+                   oldStates
+                   oldCap
+                   0
+                   0)))
           {
             (set m.len n)
             (set m.used n)
@@ -1048,15 +975,7 @@
         (memPutByte states i mapStateLive)
         0
       }
-      (mapPlaceLoop
-        keys
-        vals
-        states
-        cap
-        key
-        value
-        (mapNextSlot i cap)
-        (- left 1)))))
+      (mapPlaceLoop keys vals states cap key value (mapNextSlot i cap) (- left 1)))))
 
 ; ------------------------------------------------------------------
 ; Iteration
@@ -1141,7 +1060,8 @@
       {
         (vecPush out (mapKeyAt m s))
         (mapKeysFrom m (+ s 1) out)
-      })))
+      }
+    )))
 
 (:: mapValuesFrom (-> (Map v) Int (Vec v) (Vec v)))
 (fn (mapValuesFrom m i out)
@@ -1151,7 +1071,8 @@
       {
         (vecPush out (mapValAt m s))
         (mapValuesFrom m (+ s 1) out)
-      })))
+      }
+    )))
 
 ; ------------------------------------------------------------------
 ; Bulk reads

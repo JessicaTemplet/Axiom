@@ -553,13 +553,13 @@ cuts = {
   "grace": [("Task.ax", "(if (&& (== cancelling 1) (>= now graceEnd))", "(if (&& (== cancelling 2) (>= now graceEnd))")],
   # A guard's release no longer asks whose lock it is: a forked copy of
   # a guard then lets go of the lock its parent holds.
-  "pid": [("Sync.ax", "(if (|| (!= (/ (syncLoad m 0) 4) (/ syncMe 4)) (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial)))", "(if (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial))")],
+  "pid": [("Sync.ax", '(if (||\n          (!= (/ (syncLoad m 0) 4) (/ syncMe 4))\n          (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial)))', "(if (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial))")],
   # A guard a trap abandoned lets go without poisoning the mutex.
   "poison": [("Sync.ax", "        (if syncUnwinding\n          (syncStore m 3 1))", "        0")],
   # A task is joined on its answer alone, as it first was.
   "exitjoin": [("Task.ax", "        ((Ok b)\n          (if b\n            1\n            (if answered\n              2\n              0))", "        ((Ok b)\n          (if (|| b answered)\n            1\n            0)")],
   # A refused spawn traps past the pool again: no recovery point.
-  "spawnrp": [("Task.ax", ";@axiom:effect(unsafe)\n(fn (taskSpawn wrapper arg mark)\n  (if (== mark 0)\n    (region r\n      (__axiom_recover\n        __axiom_arena_mark\n        (lambda (x) (taskWordOf (__proc_spawn wrapper arg)))))\n    {\n      (__axiom_arena_mark_into mark)\n      (__axiom_recover\n        mark\n        (lambda (x) (taskWordOf (__proc_spawn wrapper arg))))\n    }))", "(fn (taskSpawn wrapper arg mark)\n  (taskWordOf (__proc_spawn wrapper arg)))")],
+  "spawnrp": [("Task.ax", ';@axiom:effect(unsafe)\n(fn (taskSpawn wrapper arg mark)\n  (if (== mark 0)\n    (region r\n      (__axiom_recover __axiom_arena_mark (lambda (x) (taskWordOf (__proc_spawn wrapper arg)))))\n    {\n      (__axiom_arena_mark_into mark)\n      (__axiom_recover mark (lambda (x) (taskWordOf (__proc_spawn wrapper arg))))\n    }))', "(fn (taskSpawn wrapper arg mark)\n  (taskWordOf (__proc_spawn wrapper arg)))")],
   # A refused spawn no longer cancels the pool.
   "refusecancel": [("Task.ax", "                  {\n                    (set cancelling 1)\n                    (set graceEnd (+ now graceUs))\n                  })", "                  ())")],
   # The checked pool no longer kills its running slots on a refusal.
@@ -570,7 +570,7 @@ cuts = {
   # in the order it finds them ended, and not in submit order: the
   # completion-order fold MM-PAR-14 rules out.
   "completion": [("Task.ax", "                        {\n                          (set progress 1)\n                          (if (&& (== r 1) opts.failFast)", "                        {\n                          (taskDeliver sink scoped st s slab slotBytes)\n                          (set progress 1)\n                          (if (&& (== r 1) opts.failFast)"),
-                 ("Task.ax", "                (let ((k (taskDeliverKept\n                  sink\n                  scoped\n                  st\n                  (% head w)\n                  slab\n                  slotBytes\n                  keep\n                  kept)))", "                (let ((k kept))")],
+                 ("Task.ax", '                (let ((k (taskDeliverKept sink scoped st (% head w) slab slotBytes keep kept)))', "                (let ((k kept))")],
   # Section 13. The `keep` budget is never checked.
   "keepcut": [("Task.ax", "  (if (|| (== keep 0) (!= scoped 0))\n", "  (if true\n")],
   # Section 13. A map's spawn runs in a region again, whose reset
@@ -579,10 +579,10 @@ cuts = {
   # Section 13. The child never caps its arena.
   "capcut": [("Task.ax", "      (taskCapArena memory)\n", "      0\n")],
   # Section 13. The task runs on the stack its process forked with.
-  "stackcut": [("Task.ax", "      (__axiom_stack_run\n        stack\n        (lambda (i) (taskAnswer f slot limit tok i))\n        (/ arg w))\n", "      (taskAnswer f slot limit tok (/ arg w))\n")],
+  "stackcut": [("Task.ax", '      (__axiom_stack_run stack (lambda (i) (taskAnswer f slot limit tok i)) (/ arg w))\n', "      (taskAnswer f slot limit tok (/ arg w))\n")],
   # Section 12. The sleep stops after its first wait, which is asked
   # for a tenth of the time: a sleep that ends short.
-  "shortsleep": [("Sys.ax", "            (if (>= now deadline)\n              (set state 1)\n              {\n                (sysWaitWordTimeout (+ buf 16) 0 (- deadline now))\n              })", "            {\n              (sysWaitWordTimeout (+ buf 16) 0 (/ (- deadline now) 10))\n              (set state 1)\n            }")],
+  "shortsleep": [("Sys.ax", "            (if (>= now deadline)\n              (set state 1)\n              (sysWaitWordTimeout (+ buf 16) 0 (- deadline now)))", "            {\n              (sysWaitWordTimeout (+ buf 16) 0 (/ (- deadline now) 10))\n              (set state 1)\n            }")],
   # Section 10. The raising pool's drain joins newest first.
   "drain": [("Par.ax", "      (while (< joined n)\n        {\n          (vecPush out (__proc_join (vecGet hs (% joined w))))", "      (while (< joined n)\n        {\n          (vecPush out (__proc_join (vecGet hs (% (- n (+ joined 1)) w))))")],
 }[kind]

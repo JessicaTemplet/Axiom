@@ -794,7 +794,7 @@ s = open(p).read()
 # arm occurs twice - once per restriction sharing it - and both copies
 # are scoped. Each count is asserted so the ablation cannot silently
 # become more arms, or none.
-forbump = '                            (if (! (== (isForBump e) 1))\n'
+forbump = '                          (if (! (== (isForBump e) 1))\n'
 floatop = '        (if (! (== (tcFloatOpIn tc (spineHead w)) 1))\n'
 assert s.count(forbump) == 1, ('for-bump', s.count(forbump))
 assert s.count(floatop) == 2, ('float', s.count(floatop))

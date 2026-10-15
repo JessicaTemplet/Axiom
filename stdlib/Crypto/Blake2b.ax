@@ -63,44 +63,49 @@
 ; `x` rotated right by a literal `n` in 1..63: one rotate instruction
 ; after `opt`. The mask clears the sign copies the arithmetic shift
 ; brings in.
-(macro (b2Rotr x n)
-  (let ((x0 x))
-    (| (& (>> x0 n) (- (<< 1 (- 64 n)) 1)) (<< x0 (- 64 n)))))
+(macro (b2Rotr x n) (let ((x0 x))
+  (| (& (>> x0 n) (- (<< 1 (- 64 n)) 1)) (<< x0 (- 64 n)))))
 
 ; The little-endian 64-bit word at `p` + `off`, which need not be
 ; aligned, byte by byte; `opt` combines the bytes into one load.
-(macro (b2Ld64le p off)
-  (let ((q p) (o off))
-    (| (| (__load8 q o)
-          (| (<< (__load8 q (+ o 1)) 8)
-            (| (<< (__load8 q (+ o 2)) 16) (<< (__load8 q (+ o 3)) 24))))
-      (<< (| (__load8 q (+ o 4))
-            (| (<< (__load8 q (+ o 5)) 8)
-              (| (<< (__load8 q (+ o 6)) 16) (<< (__load8 q (+ o 7)) 24))))
-        32))))
+(macro (b2Ld64le p off) (let (
+  (q p)
+  (o off)
+)
+  (|
+    (|
+      (__load8 q o)
+      (| (<< (__load8 q (+ o 1)) 8) (| (<< (__load8 q (+ o 2)) 16) (<< (__load8 q (+ o 3)) 24))))
+    (<<
+      (|
+        (__load8 q (+ o 4))
+        (| (<< (__load8 q (+ o 5)) 8) (| (<< (__load8 q (+ o 6)) 16) (<< (__load8 q (+ o 7)) 24))))
+      32))))
 
 ; Copy `n` bytes from `src` to `dst`, which do not overlap.
-(macro (b2Copy dst src n)
-  (let ((d dst) (s src) (k n))
-    (for i in 0..k
-      (__store8 d i (__load8 s i)))))
+(macro (b2Copy dst src n) (let (
+  (d dst)
+  (s src)
+  (k n)
+)
+  (for i in 0..k
+    (__store8 d i (__load8 s i)))))
 
 ; ------------------------------------------------------------------
 ; The compression function (RFC 7693 section 3.2).
 ; ------------------------------------------------------------------
 ; The mixing function G of section 3.1 on four working words, with
 ; message words `x` and `y`.
-(macro (blake2bG a b c d x y)
-  {
-    (set a (+ (+ a b) x))
-    (set d (b2Rotr (^ d a) 32))
-    (set c (+ c d))
-    (set b (b2Rotr (^ b c) 24))
-    (set a (+ (+ a b) y))
-    (set d (b2Rotr (^ d a) 16))
-    (set c (+ c d))
-    (set b (b2Rotr (^ b c) 63))
-  })
+(macro (blake2bG a b c d x y) {
+  (set a (+ (+ a b) x))
+  (set d (b2Rotr (^ d a) 32))
+  (set c (+ c d))
+  (set b (b2Rotr (^ b c) 24))
+  (set a (+ (+ a b) y))
+  (set d (b2Rotr (^ d a) 16))
+  (set c (+ c d))
+  (set b (b2Rotr (^ b c) 63))
+})
 
 ; Add `inc` to the 128-bit byte counter in the two words at `ctr` (low
 ; word first). The counter is the message length, which is public.
@@ -136,14 +141,12 @@
 ;@axiom:effect(unsafe)
 (fn (blake2bBlocks cv ctr p nblocks mode)
   (let (
-    (inc
-      (if (== mode 0)
-        128
-        0))
-    (flag
-      (if (== mode 1)
-        -1
-        0))
+    (inc (if (== mode 0)
+      128
+      0))
+    (flag (if (== mode 1)
+      -1
+      0))
     (mut h0 (b2Ld64le cv 0))
     (mut h1 (b2Ld64le cv 8))
     (mut h2 (b2Ld64le cv 16))
@@ -161,9 +164,7 @@
           {
             (set t0 (+ t0 inc))
             (if (&& (>= t0 0) (< t0 inc))
-              {
-                (set t1 (+ t1 1))
-              })
+              (set t1 (+ t1 1)))
             (let (
               (m0 (b2Ld64le q 0))
               (m1 (b2Ld64le q 8))
@@ -342,7 +343,11 @@
 (pub fn (blake2bCompress st p inc last)
   {
     (blake2bCount (+ st 64) inc)
-    (blake2bBlocks st (+ st 64) p 1
+    (blake2bBlocks
+      st
+      (+ st 64)
+      p
+      1
       (if last
         1
         2))
@@ -410,7 +415,9 @@
     (for i in 14..30
       (__store64 st i 0))
     (blake2bKeyBlock (+ st 112) (+ st 240) keyLen)
-    (__store64 st 10
+    (__store64
+      st
+      10
       (if (> keyLen 0)
         128
         0))
@@ -430,7 +437,10 @@
 (fn (blake2bAbsorbIn cv ctr buf p n)
   (if (< n 0)
     -1
-    (let ((mut have (__load64 ctr 2)) (mut off 0))
+    (let (
+      (mut have (__load64 ctr 2))
+      (mut off 0)
+    )
       {
         (if (> n 0)
           {
@@ -440,7 +450,7 @@
                 (set have 0)
               })
             (if (> have 0)
-              (let ((take
+              (let ((take 
                 (if (< n (- 128 have))
                   n
                   (- 128 have))))
@@ -485,7 +495,10 @@
 ;@axiom:ct(*cv, *buf, *out)
 ;@axiom:effect(unsafe)
 (fn (blake2bFinishIn cv ctr buf out)
-  (let ((have (__load64 ctr 2)) (outLen (__load64 ctr 3)))
+  (let (
+    (have (__load64 ctr 2))
+    (outLen (__load64 ctr 3))
+  )
     {
       (for i in have..128
         (__store8 buf i 0))
@@ -523,8 +536,10 @@
         (outLen (__load64 st 11))
         (keyLen (__load64 st 12))
       )
-        (&& (&& (>= have 0) (<= have 128))
-          (&& (&& (>= outLen 1) (<= outLen 64))
+        (&&
+          (&& (>= have 0) (<= have 128))
+          (&&
+            (&& (>= outLen 1) (<= outLen 64))
             (&& (&& (>= keyLen 0) (<= keyLen 64)) (== (__load64 st 13) 0))))))))
 
 ;; The BLAKE2b digest of `n` bytes at `p`, `outLen` bytes long and keyed
@@ -651,7 +666,10 @@
   (let ((s h.state))
     (if (blake2bBlobOk s)
       (let ((st (strData s)))
-        (let ((outLen (__load64 st 11)) (keyLen (__load64 st 12)))
+        (let (
+          (outLen (__load64 st 11))
+          (keyLen (__load64 st 12))
+        )
           (let ((out (strAlloc outLen)))
             {
               (blake2bFinish st (strData out))

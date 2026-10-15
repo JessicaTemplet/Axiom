@@ -279,8 +279,8 @@ A Rust binding is an `extern` BLOCK:
 
 ```scheme
 (pub extern "axiom_demo"
-  (add         :: (-> Int Int Int) (symbol "axffi_add"))
-  (countVowels :: (-> String Int)  (symbol "axffi_count_vowels")))
+  (add :: (-> Int Int Int) (symbol "axffi_add"))
+  (countVowels :: (-> String Int) (symbol "axffi_count_vowels")))
 ```
 
 and the program is built with the archive on the link line:
@@ -456,8 +456,8 @@ Dotted module paths map directly to file paths relative to the entry file's dire
 
 ```scheme
 ; Math/Ops.ax defines `square` as `(pub fn (square x) ...)`
-(import Math.Ops (square))    ; brings in only `square`
-(import Math.Ops)             ; brings in every `pub` decl - and only those
+(import Math.Ops (square))  ; brings in only `square`
+(import Math.Ops)  ; brings in every `pub` decl - and only those
 ```
 
 Key facts:
@@ -484,8 +484,10 @@ Key facts:
 **Let bindings with sequential evaluation:**
 ```scheme
 (fn (compute n)
-  (let ((x (+ n 1))
-        (y (* x 2)))
+  (let (
+    (x (+ n 1))
+    (y (* x 2))
+  )
     (+ x y)))
 ```
 
@@ -504,7 +506,7 @@ There is no `printf` and no `print` — probed, both are `AX3001`. `IO`'s
 
 **Algebraic data types:**
 ```scheme
-(data Maybe (a)
+(data Maybe a
   (Nothing)
   (Just a))
 ```
@@ -522,7 +524,11 @@ There is no `printf` and no `print` — probed, both are `AX3001`. `IO`'s
 (import IO)
 
 ;@axiom:effect(io)
-(fn (main) { (println "hello") 0 })
+(fn (main)
+  {
+    (println "hello")
+    0
+  })
 ```
 
 ### 5.5 REPL commands for rapid prototyping

@@ -134,8 +134,10 @@
     (let ((n (ioWriteFd fd (+ buf done) (- count done))))
       (if (== n (- 0 4))
         (ioWriteAllFrom fd buf count done)
-        (< n 0) n
-        (== n 0) (- 0 errShortWrite)
+        (< n 0)
+        n
+        (== n 0)
+        (- 0 errShortWrite)
         (ioWriteAllFrom fd buf count (+ done n))))))
 
 ; read(2): bytes read, 0 at end of input, or `-errno`.
@@ -201,28 +203,48 @@
 (pub :: errorKind (-> Error ErrorKind))
 (pub fn (errorKind e)
   (let ((c (errCode e)))
-    (if
-      (== c 2) NotFound
-      (|| (== c 1) (== c 13)) PermissionDenied
-      (== c eConnRefused) ConnectionRefused
-      (== c eConnReset) ConnectionReset
-      (== c eHostUnreach) HostUnreachable
-      (== c eNetUnreach) NetworkUnreachable
-      (== c eConnAborted) ConnectionAborted
-      (== c eNotConn) NotConnected
-      (== c eAddrInUse) AddrInUse
-      (== c eAddrNotAvail) AddrNotAvailable
-      (== c eNetDown) NetworkDown
-      (== c 32) BrokenPipe
-      (== c eExist) AlreadyExists
-      (== c eAgain) WouldBlock
-      (== c 22) InvalidInput
-      (== c errInvalidData) InvalidData
-      (== c eTimedOut) TimedOut
-      (== c 4) Interrupted
-      (|| (== c eNoSys) (== c eOpNotSupp)) Unsupported
-      (== c errUnexpectedEof) UnexpectedEof
-      (== c 12) OutOfMemory
+    (if (== c 2)
+      NotFound
+      (|| (== c 1) (== c 13))
+      PermissionDenied
+      (== c eConnRefused)
+      ConnectionRefused
+      (== c eConnReset)
+      ConnectionReset
+      (== c eHostUnreach)
+      HostUnreachable
+      (== c eNetUnreach)
+      NetworkUnreachable
+      (== c eConnAborted)
+      ConnectionAborted
+      (== c eNotConn)
+      NotConnected
+      (== c eAddrInUse)
+      AddrInUse
+      (== c eAddrNotAvail)
+      AddrNotAvailable
+      (== c eNetDown)
+      NetworkDown
+      (== c 32)
+      BrokenPipe
+      (== c eExist)
+      AlreadyExists
+      (== c eAgain)
+      WouldBlock
+      (== c 22)
+      InvalidInput
+      (== c errInvalidData)
+      InvalidData
+      (== c eTimedOut)
+      TimedOut
+      (== c 4)
+      Interrupted
+      (|| (== c eNoSys) (== c eOpNotSupp))
+      Unsupported
+      (== c errUnexpectedEof)
+      UnexpectedEof
+      (== c 12)
+      OutOfMemory
       Other)))
 
 ; ------------------------------------------------------------------
@@ -341,12 +363,7 @@
 ;@axiom:effect(unsafe)
 (fn (ioOpenMode path flags mode)
   (if (== openNeedsDirFd 1)
-    (__syscall4
-      sysOpenNum
-      atFdCwd
-      path
-      flags
-      mode)
+    (__syscall4 sysOpenNum atFdCwd path flags mode)
     (__syscall3 sysOpenNum path flags mode)))
 
 (:: ioOpen (-> Int Int Int))
@@ -367,7 +384,8 @@
 (:: ioCloseQuiet (-> Int Int))
 ;@axiom:effect(io)
 (fn (ioCloseQuiet fd)
-  (let ((_ (ioClose fd))) 0))
+  (let ((_ (ioClose fd)))
+    0))
 
 ; `path` as a `char*` a syscall can take, always by copy. A `strSlice`
 ; shares storage and is not NUL-terminated, so handing one to `open`
@@ -411,8 +429,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (ioReadAll fd buf used cap)
-  (let ((n
-    (ioReadFd fd (+ (strData buf) used) (- cap used))))
+  (let ((n (ioReadFd fd (+ (strData buf) used) (- cap used))))
     (if (< n 0)
       (Err (mkError (- 0 n) "readAll"))
       (if (== n 0)
@@ -574,12 +591,7 @@
 ;@axiom:effect(unsafe)
 (fn (ioRename o n)
   (if (== openNeedsDirFd 1)
-    (__syscall4
-      sysRenameNum
-      atFdCwd
-      o
-      atFdCwd
-      n)
+    (__syscall4 sysRenameNum atFdCwd o atFdCwd n)
     (__syscall2 sysRenameNum o n)))
 
 ;; Open `path` with `flags` (`oRdonly`, `oWronlyCreateTrunc`, ...):
@@ -654,8 +666,7 @@
     (if (< fd 0)
       (- 0 fd)
       (let ((probe (strAlloc 1)))
-        (let ((n
-          (ioReadFd fd (strData probe) 1)))
+        (let ((n (ioReadFd fd (strData probe) 1)))
           {
             (ioCloseQuiet fd)
             (if (< n 0)
@@ -704,7 +715,10 @@
 (pub fn (makeDirAll path)
   (match (makeDirAllFrom path 1)
     ((Ok v) (Ok v))
-    ((Err e) (Err (mkError (errCode e) (concat (concat "makeDirAll: " path) (concat ": errno " (fmtInt (errCode e)))))))))
+    ((Err e) (Err
+               (mkError
+                 (errCode e)
+                 (concat (concat "makeDirAll: " path) (concat ": errno " (fmtInt (errCode e)))))))))
 
 ; From 1, not 0: a leading `/` is the root, which exists and cannot
 ; be created, and asking to create "" fails with ENOENT.
@@ -804,14 +818,9 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (ioReadDirLoop fd buf pos out)
-  (let ((n
+  (let ((n 
     (if (== dirReadNeedsPosition 1)
-      (__syscall4
-        sysGetdentsNum
-        fd
-        buf
-        ioDirBufBytes
-        pos)
+      (__syscall4 sysGetdentsNum fd buf ioDirBufBytes pos)
       (__syscall3 sysGetdentsNum fd buf ioDirBufBytes))))
     (if (<= n 0)
       n
@@ -1065,15 +1074,19 @@
 ;; Allocate a zeroed input buffer of n bytes. A negative size traps 77.
 (pub :: readBufferNew (-> Int ReadBuffer))
 (pub fn (readBufferNew n)
-  (if (< n 0) __indexTrap (ReadBuffer (strAlloc n))))
+  (if (< n 0)
+    __indexTrap
+    (ReadBuffer (strAlloc n))))
 
 ;; The buffer's capacity, in bytes.
 (pub :: readBufferLen (-> ReadBuffer Int))
-(pub fn (readBufferLen buf) (strLen buf.bytes))
+(pub fn (readBufferLen buf)
+  (strLen buf.bytes))
 
 ;; Read one byte, with the same bounds check as strByte.
 (pub :: readBufferByte (-> ReadBuffer Int Int))
-(pub fn (readBufferByte buf at) (strByte buf.bytes at))
+(pub fn (readBufferByte buf at)
+  (strByte buf.bytes at))
 
 ;; Copy a checked range into an immutable String. Later reads into the
 ;; buffer do not change the returned bytes.
@@ -1162,7 +1175,11 @@
 
 (:: ioGetInt32 (-> Int Int Int))
 (fn (ioGetInt32 buf off)
-  (+ (memGetByte buf off) (+ (<< (memGetByte buf (+ off 1)) 8) (+ (<< (memGetByte buf (+ off 2)) 16) (<< (memGetByte buf (+ off 3)) 24)))))
+  (+
+    (memGetByte buf off)
+    (+
+      (<< (memGetByte buf (+ off 1)) 8)
+      (+ (<< (memGetByte buf (+ off 2)) 16) (<< (memGetByte buf (+ off 3)) 24)))))
 
 ; Eight bytes, little-endian, at byte `off` of `buf`: an ABI record is
 ; raw bytes, and `memSetWord` would take a share of whatever word the
@@ -1201,15 +1218,16 @@
     (wsBuf (strAlloc 8))
     (ws (strData wsBuf))
   )
-    (let ((rc
+    (let ((rc 
       (if (== ttyUsesTermios 0)
         ioTermUnsupported
         (ioIoctl (ioFd f) tcWinSizeReq ws))))
       (if (< rc 0)
         (Err (mkError (- 0 rc) "termSize"))
-        (Ok (TermSize
-          (+ (memGetByte ws 0) (<< (memGetByte ws 1) 8))
-          (+ (memGetByte ws 2) (<< (memGetByte ws 3) 8))))))))
+        (Ok
+          (TermSize
+            (+ (memGetByte ws 0) (<< (memGetByte ws 1) 8))
+            (+ (memGetByte ws 2) (<< (memGetByte ws 3) 8))))))))
 
 ; Read one of the four flag words out of a saved state, or clear bits in
 ; one: `n` is 0 for c_iflag, 1 for c_oflag, 2 for c_cflag and 3 for
@@ -1295,7 +1313,8 @@
                 (ioClose dup)
                 (Err (mkError (- 0 rc) "termRaw"))
               }
-              (let ((guard (TermGuard (__resource_new (lambda (d) (ioTermRelease d save)) dup))))
+              (let ((guard 
+                (TermGuard (__resource_new (lambda (d) (ioTermRelease d save)) dup))))
                 (let ((r (ioTermRawApply dup save keepSignals)))
                   (if (< r 0)
                     (let ((_ (__resource_close guard.owner)))
@@ -1361,7 +1380,8 @@
 ; The byte offset of event `i`'s token.
 (:: pollerTokenOffset (-> Int Int))
 (fn (pollerTokenOffset i)
-  (+ (* i pollEventSize)
+  (+
+    (* i pollEventSize)
     (if (== pollUsesKqueue 1)
       24
       pollEventFdOffset)))
@@ -1377,15 +1397,19 @@
   (let ((pfd (__syscall3 sysPollCreateNum 0 0 0)))
     (if (< pfd 0)
       (Err (mkError (- 0 pfd) "pollerNew"))
-      (Ok (Poller
-        (__resource_new fileDrop pfd)
-        (strAlloc (* cap pollEventSize))
-        cap
-        0
-        (strAlloc 16)
-        (- 0 1)
-        None
-        (strAlloc (if (< sigInfoSize 8) 8 sigInfoSize)))))))
+      (Ok
+        (Poller
+          (__resource_new fileDrop pfd)
+          (strAlloc (* cap pollEventSize))
+          cap
+          0
+          (strAlloc 16)
+          (- 0 1)
+          None
+          (strAlloc
+            (if (< sigInfoSize 8)
+              8
+              sigInfoSize)))))))
 
 ; One registration record: watch `fd` (or, on the BSDs, the signal
 ; `ident`) under `filter` - `pollReadFilter`, `pollWriteFilter` or
@@ -1422,20 +1446,8 @@
 ;@axiom:effect(unsafe)
 (fn (pollerApply p fd rec op)
   (if (== pollUsesKqueue 1)
-    (__syscall6
-      sysPollWaitNum
-      (pollerFd p)
-      (strData rec)
-      1
-      0
-      0
-      0)
-    (__syscall4
-      sysPollCtlNum
-      (pollerFd p)
-      op
-      fd
-      (strData rec))))
+    (__syscall6 sysPollWaitNum (pollerFd p) (strData rec) 1 0 0 0)
+    (__syscall4 sysPollCtlNum (pollerFd p) op fd (strData rec))))
 
 ;; Watch `f` for readability under `token`: `(Ok 0)`, or `(Err e)`. The
 ;; poller does not keep `f` alive; close it, or let it go, and its
@@ -1444,7 +1456,9 @@
 ;@axiom:effect(io)
 (pub fn (pollerAdd p f token)
   (let ((fd (ioFd f)))
-    (ioAnswer "pollerAdd" (pollerApply p fd (pollerRec fd pollReadFilter pollAddOp token) pollAddOp))))
+    (ioAnswer
+      "pollerAdd"
+      (pollerApply p fd (pollerRec fd pollReadFilter pollAddOp token) pollAddOp))))
 
 ;; Stop watching `f`: `(Ok 0)`, or `(Err e)` - ENOENT when it was not
 ;; being watched.
@@ -1478,7 +1492,8 @@
                     (set p.sigFile (Some sf))
                     (set p.sigToken token)
                     (Ok n)
-                  })))))
+                  }
+                )))))
       })
     ; The BSDs: one EVFILT_SIGNAL registration per signal in the mask.
     ; Signals are 1..31; bit N-1 is signal N.
@@ -1486,7 +1501,11 @@
       {
         (for signo in 1..32
           (if (!= (& mask (sysSigBit signo)) 0)
-            (let ((r (pollerApply p signo (pollerRec signo pollSignalFilter pollAddOp token) pollAddOp)))
+            (let ((r (pollerApply
+                       p
+                       signo
+                       (pollerRec signo pollSignalFilter pollAddOp token)
+                       pollAddOp)))
               (if (< r 0)
                 (set rc r)))))
         (set p.sigToken token)
@@ -1501,41 +1520,20 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (pollerWait p timeoutMs)
-  (let ((r
+  ; kqueue takes a pointer to a timespec and reads NULL as "no
+  ; timeout"; epoll takes milliseconds in a register.
+  ; epoll_pwait's fifth argument is a signal mask this layer does not
+  ; use, and its sixth that mask's size, which the kernel checks.
+  (let ((r 
     (if (== pollUsesKqueue 1)
-      ; kqueue takes a pointer to a timespec and reads NULL as "no
-      ; timeout"; epoll takes milliseconds in a register.
       (if (< timeoutMs 0)
-        (__syscall6
-          sysPollWaitNum
-          (pollerFd p)
-          0
-          0
-          (strData p.events)
-          p.cap
-          0)
+        (__syscall6 sysPollWaitNum (pollerFd p) 0 0 (strData p.events) p.cap 0)
         {
           (ioPutWord (strData p.ts) 0 (/ timeoutMs 1000))
           (ioPutWord (strData p.ts) 8 (* (% timeoutMs 1000) 1000000))
-          (__syscall6
-            sysPollWaitNum
-            (pollerFd p)
-            0
-            0
-            (strData p.events)
-            p.cap
-            (strData p.ts))
+          (__syscall6 sysPollWaitNum (pollerFd p) 0 0 (strData p.events) p.cap (strData p.ts))
         })
-      ; epoll_pwait's fifth argument is a signal mask this layer does not
-      ; use, and its sixth that mask's size, which the kernel checks.
-      (__syscall6
-        sysPollWaitNum
-        (pollerFd p)
-        (strData p.events)
-        p.cap
-        timeoutMs
-        0
-        pollSigsetSize))))
+      (__syscall6 sysPollWaitNum (pollerFd p) (strData p.events) p.cap timeoutMs 0 pollSigsetSize))))
     (if (== r (- 0 4))
       {
         (set p.count 0)
@@ -1577,14 +1575,17 @@
             (let ((n (ioReadFd (ioFd sf) (strData p.sigInfo) sigInfoSize)))
               (if (< n sigInfoSize)
                 None
-                (Some (ioGetInt32 (strData p.sigInfo) 0)))))))
+                (Some (ioGetInt32 (strData p.sigInfo) 0)))))
+        ))
       ; kqueue: the record's own 16-bit filter says whether it is a
       ; signal, and its `ident` is the number.
       (let (
         (b (strData p.events))
         (off (* i pollEventSize))
       )
-        (if (&& (== (memGetByte b (+ off 8)) (& pollSignalFilter 255)) (== (memGetByte b (+ off 9)) (& (>> pollSignalFilter 8) 255)))
+        (if (&&
+              (== (memGetByte b (+ off 8)) (& pollSignalFilter 255))
+              (== (memGetByte b (+ off 9)) (& (>> pollSignalFilter 8) 255)))
           (Some (ioGetWord b off))
           None)))))
 
@@ -1597,7 +1598,9 @@
   {
     (match p.sigFile
       ((Some sf)
-        (let ((_ (fileClose sf))) ()))
+        (let ((_ (fileClose sf)))
+          ())
+      )
       ((None) ()))
     (sysResult "pollerClose" (__resource_close p.owner))
   })
@@ -1659,7 +1662,7 @@
 ;@axiom:effect(io)
 (fn (socketReady fd)
   (let ((r (ioSetNonBlocking fd false)))
-    (let ((r2
+    (let ((r2 
       (if (< r 0)
         r
         (if (== soNoSigPipe 0)
@@ -1695,7 +1698,9 @@
 (pub fn (socketBind s addr)
   (if (! (socketAddrOk addr))
     (socketBadAddr "socketBind")
-    (ioAnswer "socketBind" (__syscall3 sysBindNum (ioFd s) (strData addr) (netAddrSize (strData addr))))))
+    (ioAnswer
+      "socketBind"
+      (__syscall3 sysBindNum (ioFd s) (strData addr) (netAddrSize (strData addr))))))
 
 ;; Listen on a bound socket, queueing up to `backlog` connections.
 (pub :: socketListen (-> File Int (Result Int Error)))
@@ -1728,7 +1733,9 @@
 (pub fn (socketConnect s addr)
   (if (! (socketAddrOk addr))
     (socketBadAddr "socketConnect")
-    (ioAnswer "socketConnect" (__syscall3 sysConnectNum (ioFd s) (strData addr) (netAddrSize (strData addr))))))
+    (ioAnswer
+      "socketConnect"
+      (__syscall3 sysConnectNum (ioFd s) (strData addr) (netAddrSize (strData addr))))))
 
 ;; Close one or both halves: `how` is 0 for reading, 1 for writing and 2
 ;; for both. Anything else is EINVAL.
@@ -1762,7 +1769,9 @@
         ; and FreeBSD, so the low four bytes carry it either way.
         (ioPutWord (strData tv) 0 (/ micros 1000000))
         (ioPutWord (strData tv) 8 (% micros 1000000))
-        (ioAnswer "socketSetTimeout" (__syscall5 sysSetSockOptNum (ioFd s) solSocket opt (strData tv) 16))
+        (ioAnswer
+          "socketSetTimeout"
+          (__syscall5 sysSetSockOptNum (ioFd s) solSocket opt (strData tv) 16))
       })))
 
 ;; The address `s` is bound to, or with `peer` true the address of the
@@ -1777,13 +1786,14 @@
   )
     {
       (ioPutInt32 (strData lenb) 0 netAddrMaxBytes)
-      (let ((r (__syscall3
-        (if peer
-          sysGetPeerNameNum
-          sysGetSockNameNum)
-        (ioFd s)
-        (strData a)
-        (strData lenb))))
+      (let ((r 
+        (__syscall3
+          (if peer
+            sysGetPeerNameNum
+            sysGetSockNameNum)
+          (ioFd s)
+          (strData a)
+          (strData lenb))))
         (if (< r 0)
           (Err (ioFdError (- 0 r) "socketAddr"))
           (Ok a)))
@@ -1805,24 +1815,13 @@
   )
     {
       (while (&& (< off n) (== rc 0))
-        (let ((r (__syscall6
-          sysSendToNum
-          fd
-          (+ p off)
-          (- n off)
-          msgNoSignal
-          0
-          0)))
+        (let ((r (__syscall6 sysSendToNum fd (+ p off) (- n off) msgNoSignal 0 0)))
           (if (< r 0)
             (if (== r (- 0 4))
-              ; EINTR: nothing was sent; try again
               ()
-              {
-                (set rc r)
-              })
-            {
-              (set off (+ off r))
-            })))
+              ; EINTR: nothing was sent; try again
+              (set rc r))
+            (set off (+ off r)))))
       (if (< rc 0)
         (Err (ioFdError (- 0 rc) "socketSend"))
         (Ok off))
@@ -1842,14 +1841,7 @@
   )
     {
       (while (== r (- 0 4))
-        (set r (__syscall6
-          sysSendToNum
-          fd
-          (strData data)
-          (strLen data)
-          msgNoSignal
-          0
-          0)))
+        (set r (__syscall6 sysSendToNum fd (strData data) (strLen data) msgNoSignal 0 0)))
       (ioAnswer "socketSendSome" r)
     }))
 
@@ -1904,7 +1896,7 @@
         (if (< r0 0)
           (ioAnswer "socketConnectWithin" r0)
           (let ((r (__syscall3 sysConnectNum fd (strData addr) (netAddrSize (strData addr)))))
-            (let ((res
+            (let ((res 
               (if (== r 0)
                 0
                 (!= r (- 0 eInProgress))
@@ -1937,7 +1929,9 @@
                 (let ((g (socketOptGetRaw fd solSocket soError v)))
                   (if (< g 0)
                     g
-                    (- 0 (ioGetInt32 (strData v) 0))))))))))))
+                    (- 0 (ioGetInt32 (strData v) 0)))))
+            ))))
+    )))
 
 ;; Switch `f` between blocking (`false`) and non-blocking (`true`),
 ;; keeping its other flags. A read or write that cannot proceed on a

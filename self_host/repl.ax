@@ -221,13 +221,7 @@
     (replReadLine 0)
     (if (< (termRawEnter kin) 0)
       (replReadLine 0)
-      (let ((r (replTermLoop
-        kin
-        ed
-        prompt
-        pending
-        hist
-        cenv)))
+      (let ((r (replTermLoop kin ed prompt pending hist cenv)))
         {
           (termRawLeave kin)
           r
@@ -495,13 +489,7 @@
     )
       (let ((r 
         (if (== cancel 0)
-          (replComplTab
-            cst
-            buf
-            cur
-            1
-            width
-            cenv)
+          (replComplTab cst buf cur 1 width cenv)
           (replComplCancel cst buf cur))))
         {
           (ledSetStr ed (tabBuf r))
@@ -599,14 +587,7 @@
                     {
                       (set sActive 0)
                       (termReadSize kin)
-                      (let ((r (replComplKey
-                        cst
-                        ed
-                        hist
-                        cenv
-                        (termWsCols kin)
-                        out
-                        0)))
+                      (let ((r (replComplKey cst ed hist cenv (termWsCols kin) out 0)))
                         {
                           (ledResize ed (termWsCols kin) (termWsRows kin))
                           (ledRefreshPainted ed out (replPaintCurrent ed pending))
@@ -651,14 +632,7 @@
                         {
                           (set sActive 0)
                           (termReadSize kin)
-                          (let ((r (replComplKey
-                            cst
-                            ed
-                            hist
-                            cenv
-                            (termWsCols kin)
-                            out
-                            1)))
+                          (let ((r (replComplKey cst ed hist cenv (termWsCols kin) out 1)))
                             {
                               (ledResize ed (termWsCols kin) (termWsRows kin))
                               (ledRefreshPainted ed out (replPaintCurrent ed pending))
@@ -764,10 +738,10 @@
   )
     {
       (while (&&
-        (< i n)
-        (if (replIsWs (strByte line i))
-          false
-          true))
+               (< i n)
+               (if (replIsWs (strByte line i))
+                 false
+                 true))
         (set i (+ i 1)))
       i
     }))
@@ -897,7 +871,23 @@
     (if (!= (strByte line 0) 40)
       false
       (let ((w (declHeadWord line)))
-        (|| (strEq w "fn") (|| (strEq w "::") (|| (strEq w "pub") (|| (strEq w "data") (|| (strEq w "struct") (|| (strEq w "import") (|| (strEq w "macro") (|| (strEq w "effect") (|| (strEq w "type") (|| (strEq w "trait") (strEq w "impl")))))))))))))))
+        (||
+          (strEq w "fn")
+          (||
+            (strEq w "::")
+            (||
+              (strEq w "pub")
+              (||
+                (strEq w "data")
+                (||
+                  (strEq w "struct")
+                  (||
+                    (strEq w "import")
+                    (||
+                      (strEq w "macro")
+                      (||
+                        (strEq w "effect")
+                        (|| (strEq w "type") (|| (strEq w "trait") (strEq w "impl")))))))))))))))
 
 ; `impl` was missing while `trait` and `type` were
 ; here, so a trait implementation typed at the prompt
@@ -919,15 +909,15 @@
       (let ((start i))
         {
           (while (&&
-            (< i n)
-            (let ((c (strByte line i)))
-              (if (== c 40)
-                false
-                (if (== c 41)
-                  false
-                  (if (replIsWs c)
-                    false
-                    true)))))
+                   (< i n)
+                   (let ((c (strByte line i)))
+                     (if (== c 40)
+                       false
+                       (if (== c 41)
+                         false
+                         (if (replIsWs c)
+                           false
+                           true)))))
             (set i (+ i 1)))
           (strSlice line start (- i start))
         })
@@ -1035,12 +1025,7 @@
                 (decls (memGetWordVec dr 1))
                 (units (let ((v vecNew))
                   {
-                    (vecPush
-                      v
-                      (cast Int (CUnit2
-                        "<repl>"
-                        declsSrc
-                        (cast String 0))))
+                    (vecPush v (cast Int (CUnit2 "<repl>" declsSrc (cast String 0))))
                     v
                   }))
               )
@@ -1052,13 +1037,13 @@
                       (tmods vecNew)
                     )
                       (let ((allDecls (resolveImports
-                        decls
-                        tbares
-                        tfulls
-                        tmods
-                        (checkedTargetCode hostTarget)
-                        "."
-                        units)))
+                                        decls
+                                        tbares
+                                        tfulls
+                                        tmods
+                                        (checkedTargetCode hostTarget)
+                                        "."
+                                        units)))
                         (let ((exDiags vecNew))
                           (let ((_ex 
                             (expandProgram
@@ -1097,9 +1082,13 @@
     {
       (while (< i (vecLen ds))
         {
-          (let ((d (vecGet ds i)) (code (diagCode d)))
+          (let (
+            (d (vecGet ds i))
+            (code (diagCode d))
+          )
             {
-              (replOut (concat (concat (concat (concat "Type error: [" code) "] ") (diagMsg d)) "\n"))
+              (replOut
+                (concat (concat (concat (concat "Type error: [" code) "] ") (diagMsg d)) "\n"))
               (replOut (concat (concat "  help: run `axiom explain " code) "`\n"))
             })
           (set i (+ i 1))
@@ -1234,35 +1223,15 @@
         (mods vecNew)
         (units (let ((v vecNew))
           {
-            (vecPush
-              v
-              (cast Int (CUnit2
-                "<repl>"
-                wrapper
-                (cast String 0))))
+            (vecPush v (cast Int (CUnit2 "<repl>" wrapper (cast String 0))))
             v
           }))
       )
-        (let ((allDecls (resolveImports
-          decls
-          bares
-          fulls
-          mods
-          tcode
-          "."
-          units)))
+        (let ((allDecls (resolveImports decls bares fulls mods tcode "." units)))
           (let ((eds 
             (let ((v vecNew))
               {
-                (expandProgram
-                  decls
-                  allDecls
-                  v
-                  vecNew
-                  (cast (Vec Int) 0)
-                  bares
-                  fulls
-                  mods)
+                (expandProgram decls allDecls v vecNew (cast (Vec Int) 0) bares fulls mods)
                 v
               })))
             (let ((ds (expMergeInto eds (checkModule decls allDecls units))))
@@ -1374,10 +1343,10 @@
 (fn (replTmpRoot)
   (let ((t (sysEnv "TMPDIR")))
     (if (&&
-      (pathIsAbsolute t)
-      (match (strFindByte t 39 0)
-        ((None) true)
-        ((Some _) false)))
+          (pathIsAbsolute t)
+          (match (strFindByte t 39 0)
+            ((None) true)
+            ((Some _) false)))
       t
       "/tmp")))
 
@@ -1462,21 +1431,11 @@
                       "llc"
                       (let ((v vecNew))
                         {
-                          (vecPush
-                            v
-                            (cast Int ll))
-                          (vecPush
-                            v
-                            (cast Int "-relocation-model=pic"))
-                          (vecPush
-                            v
-                            (cast Int "-filetype=obj"))
-                          (vecPush
-                            v
-                            (cast Int "-o"))
-                          (vecPush
-                            v
-                            (cast Int obj))
+                          (vecPush v (cast Int ll))
+                          (vecPush v (cast Int "-relocation-model=pic"))
+                          (vecPush v (cast Int "-filetype=obj"))
+                          (vecPush v (cast Int "-o"))
+                          (vecPush v (cast Int obj))
                           v
                         }))))
                     (if (!= lrc 0)
@@ -1486,15 +1445,9 @@
                           "cc"
                           (let ((v vecNew))
                             {
-                              (vecPush
-                                v
-                                (cast Int obj))
-                              (vecPush
-                                v
-                                (cast Int "-o"))
-                              (vecPush
-                                v
-                                (cast Int exe))
+                              (vecPush v (cast Int obj))
+                              (vecPush v (cast Int "-o"))
+                              (vecPush v (cast Int exe))
                               v
                             }))))
                         (if (!= crc 0)
@@ -1692,10 +1645,10 @@
         {
           (let ((nd (vecGet newDecls j)))
             (let ((tag (nodeTag nd)))
-              (if (|| (== tag TAG_D_FN) (|| (== tag TAG_D_SIG) (|| (== tag TAG_D_DATA) (== tag TAG_D_STRUCT))))
-                {
-                  (set out (replDropMatching out tag (nodeAName nd)))
-                })))
+              (if (||
+                    (== tag TAG_D_FN)
+                    (|| (== tag TAG_D_SIG) (|| (== tag TAG_D_DATA) (== tag TAG_D_STRUCT))))
+                (set out (replDropMatching out tag (nodeAName nd))))))
           (set j (+ j 1))
         })
       out
@@ -1785,7 +1738,6 @@
         (replOut "  • Ctrl-R steps back through history matching the line; Tab completes names and commands (Escape cancels the menu)\n")
         (replOut "  • Syntax highlighting follows the cursor, brackets included; an unclosed string keeps reading like an open paren\n")
         (replOut "  • An unclosed form keeps reading, indented; Ctrl+C or two blank lines abort it\n")
- 
       })
     (replOut "\n")
     0
@@ -1876,35 +1828,15 @@
               (mods vecNew)
               (units (let ((v vecNew))
                 {
-                  (vecPush
-                    v
-                    (cast Int (CUnit2
-                      arg
-                      src
-                      (cast String 0))))
+                  (vecPush v (cast Int (CUnit2 arg src (cast String 0))))
                   v
                 }))
             )
-              (let ((allDecls (resolveImports
-                decls
-                bares
-                fulls
-                mods
-                tcode
-                (pathDir arg)
-                units)))
+              (let ((allDecls (resolveImports decls bares fulls mods tcode (pathDir arg) units)))
                 (let ((eds 
                   (let ((v vecNew))
                     {
-                      (expandProgram
-                        decls
-                        allDecls
-                        v
-                        vecNew
-                        (cast (Vec Int) 0)
-                        bares
-                        fulls
-                        mods)
+                      (expandProgram decls allDecls v vecNew (cast (Vec Int) 0) bares fulls mods)
                       v
                     })))
                   (let ((ds (orderDiags (expMergeInto eds (checkModule decls allDecls units)))))
@@ -2009,9 +1941,13 @@
         (while (< i n)
           {
             (let ((k (kindInt (tokenKind (vecGet toks i)))))
-              (if (|| (== k (kindInt TK_LPAREN)) (|| (== k (kindInt TK_LBRACE)) (== k (kindInt TK_LBRACKET))))
+              (if (||
+                    (== k (kindInt TK_LPAREN))
+                    (|| (== k (kindInt TK_LBRACE)) (== k (kindInt TK_LBRACKET))))
                 (set depth (+ depth 1))
-                (if (|| (== k (kindInt TK_RPAREN)) (|| (== k (kindInt TK_RBRACE)) (== k (kindInt TK_RBRACKET))))
+                (if (||
+                      (== k (kindInt TK_RPAREN))
+                      (|| (== k (kindInt TK_RBRACE)) (== k (kindInt TK_RBRACKET))))
                   (set depth (- depth 1)))))
             (set i (+ i 1))
           })
@@ -2144,7 +2080,10 @@
       ; is never an entry; measured live, where
       ; the first Up of a fresh session offered
       ; nothing but the previous session's quit.
-      (if (! (|| (strEq (cmdWord line) ":quit") (|| (strEq (cmdWord line) ":q") (strEq (cmdWord line) ":exit"))))
+      (if (!
+            (||
+              (strEq (cmdWord line) ":quit")
+              (|| (strEq (cmdWord line) ":q") (strEq (cmdWord line) ":exit"))))
         (histRecord hist line))
       (let (
         (w (cmdWord line))
@@ -2163,9 +2102,7 @@
             (if (|| (strEq w ":type") (strEq w ":t"))
               (replCmdType src rest)
               (if (|| (strEq w ":load") (strEq w ":l"))
-                {
-                  (set src (replCmdLoad src rest))
-                }
+                (set src (replCmdLoad src rest))
                 (if (|| (strEq w ":reset") (strEq w ":r"))
                   {
                     (set src "")
@@ -2325,14 +2262,10 @@
                                 (set pending "")
                                 (replOut "Aborted: unbalanced input discarded.\n")
                               }
-                              {
-                                (set pending (concat pending "\n"))
-                              })
+                              (set pending (concat pending "\n")))
                             (let ((joined (concat (concat pending "\n") next)))
                               (if (replEntryIncomplete joined)
-                                {
-                                  (set pending joined)
-                                }
+                                (set pending joined)
                                 {
                                   (set pending "")
                                   (if (replDepthNegative joined)
@@ -2372,9 +2305,7 @@
                             ; the two edges - redefinition and a trailing
                             ; tag - are handled where they are.
                             (if (== (replIsAxtagLine line) 1)
-                              {
-                                (set declsSrc (concat (concat declsSrc line) "\n"))
-                              })
+                              (set declsSrc (concat (concat declsSrc line) "\n")))
                             ; A `:` line is a colon command; a bare `?`
                             ; is `:help` by its own advertisement (58 is
                             ; `:`, 63 is `?`). Anything else starting
@@ -2387,19 +2318,13 @@
                                 ; not yet balance (`:type (fn ...`): later
                                 ; lines join `pending` until it does, and
                                 ; the whole entry is recorded then.
-                                {
-                                  (set pending line)
-                                }
-                                {
-                                  (set declsSrc (replColon declsSrc line hist))
-                                })
+                                (set pending line)
+                                (set declsSrc (replColon declsSrc line hist)))
                               ; A decl-or-expr candidate: dispatch now if it is
                               ; already complete (every existing single-line
                               ; entry is), otherwise start buffering.
                               (if (replEntryIncomplete line)
-                                {
-                                  (set pending line)
-                                }
+                                (set pending line)
                                 {
                                   (set declsSrc (replDispatch declsSrc line))
                                   (histRecord hist line)
@@ -2424,15 +2349,17 @@
           (decls (memGetWordVec dr 1))
           (mut i 0)
         )
-          {
-            (while (< i (vecLen decls))
-              (let ((d (vecGet decls i)))
-                {
-                  (if (|| (== (nodeTag d) TAG_D_FN) (|| (== (nodeTag d) TAG_D_SIG) (|| (== (nodeTag d) TAG_D_DATA) (== (nodeTag d) TAG_D_STRUCT))))
-                    (replOut (concat (concat "  " (nodeAName d)) "\n")))
-                  (set i (+ i 1))
-                }))
-          })))
+          (while (< i (vecLen decls))
+            (let ((d (vecGet decls i)))
+              {
+                (if (||
+                      (== (nodeTag d) TAG_D_FN)
+                      (||
+                        (== (nodeTag d) TAG_D_SIG)
+                        (|| (== (nodeTag d) TAG_D_DATA) (== (nodeTag d) TAG_D_STRUCT))))
+                  (replOut (concat (concat "  " (nodeAName d)) "\n")))
+                (set i (+ i 1))
+              })))))
     0
   })
 
