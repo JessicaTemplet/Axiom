@@ -2,6 +2,7 @@
 """Interleaved whole-process timing for `scripts/bench-concurrency.sh`.
 
     benchrun.py --reps N SPEC
+    benchrun.py --once [--cwd DIR] [--expect-ok] [--stdout FILE] -- COMMAND...
 
 SPEC names one command per line, tab-separated: a label, a regular
 expression every run's stdout must match in full, and the command
@@ -24,7 +25,9 @@ comes from one more run of each command under `/usr/bin/time -l` (or
 largest of the children it reaped - the largest single process, not
 their sum.
 """
+import argparse
 import os
+from pathlib import Path
 import platform
 import re
 import shlex
@@ -32,6 +35,44 @@ import statistics
 import subprocess
 import sys
 import time
+
+
+def measure_run(command, cwd=None):
+    # Both readings belong to this process, including on older macOS Python.
+    started = time.perf_counter()
+    result = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
+    return result, time.perf_counter() - started
+
+
+def once(argv):
+    parser = argparse.ArgumentParser(description="Time one successful whole process.")
+    parser.add_argument('--cwd')
+    parser.add_argument('--expect-ok', action='store_true')
+    parser.add_argument('--stdout')
+    parser.add_argument('command', nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+    command = args.command
+    if command[:1] == ['--']:
+        command = command[1:]
+    if not command:
+        parser.error('a command is required')
+    try:
+        result, elapsed = measure_run(command, args.cwd)
+    except OSError as error:
+        print('FAIL timing: ' + str(error), file=sys.stderr)
+        return 1
+    output = result.stdout + result.stderr
+    if result.returncode != 0:
+        print('FAIL timing: command exited %d' % result.returncode, file=sys.stderr)
+        print('\n'.join(output.splitlines()[-5:]), file=sys.stderr)
+        return 1
+    if args.expect_ok and 'OK' not in output:
+        print('FAIL timing: check exited 0 without printing OK', file=sys.stderr)
+        return 1
+    if args.stdout:
+        Path(args.stdout).write_text(result.stdout, encoding='utf-8')
+    print(elapsed)
+    return 0
 
 
 def rss_kib(cmd):
@@ -48,6 +89,8 @@ def rss_kib(cmd):
 
 
 def main(argv):
+    if argv[:1] == ['--once']:
+        return once(argv[1:])
     reps = int(argv[argv.index("--reps") + 1])
     spec = argv[-1]
     rows = []
@@ -61,9 +104,7 @@ def main(argv):
     selft = {r[0]: [] for r in rows}
     for _ in range(reps):
         for label, want, cmd in rows:
-            t0 = time.perf_counter()
-            p = subprocess.run(cmd, capture_output=True, text=True)
-            dt = time.perf_counter() - t0
+            p, dt = measure_run(cmd)
             out = p.stdout.strip()
             if p.returncode != 0 or not want.fullmatch(out):
                 print("WRONG %s: exit %d, output %r, wanted /%s/" % (label, p.returncode, out[:200], want.pattern))

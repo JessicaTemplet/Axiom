@@ -93,19 +93,13 @@ AX
 # The answer goes through a file because this runs inside `$( )`, and a
 # variable set in that subshell never reaches the caller.
 best_ms() {  # <binary> -> milliseconds; the program's answer lands in $work/answer
-  local bin="$1" i s e t best="" out rc
+  local bin="$1" i seconds t best=""
   for (( i = 0; i < REPS; i++ )); do
-    s=$(python3 -c 'import time;print(time.monotonic())')
-    out="$( "$bin" )"; rc=$?
-    e=$(python3 -c 'import time;print(time.monotonic())')
-    if (( rc != 0 )); then
-      echo "FAIL: $bin exited $rc - this gate measured a failure, not a workload" >&2
-      exit 1
-    fi
-    t=$(python3 -c "print(($e - $s) * 1000)")
+    seconds=$(python3 "$repo_root/scripts/lib/benchrun.py" --once \
+        --stdout "$work/answer" -- "$bin") || return 1
+    t=$(python3 -c "print($seconds * 1000)")
     if [[ -z "$best" ]] || (( $(python3 -c "print(1 if $t < $best else 0)") )); then best="$t"; fi
   done
-  printf '%s' "$out" > "$work/answer"
   printf '%s' "$best"
 }
 
@@ -118,9 +112,12 @@ probe live    '__axiom_arena_mark' '(__axiom_arena_reset m)' ';@axiom:effect(uns
 probe noreset '__axiom_arena_mark' '(+ 0 0)'
 probe nomark  '0'                  '(+ 0 0)'
 
-t_live="$(best_ms "$work/live")";       a_live="$(cat "$work/answer")"
-t_nores="$(best_ms "$work/noreset")";   a_nores="$(cat "$work/answer")"
-t_nomark="$(best_ms "$work/nomark")";   a_nomark="$(cat "$work/answer")"
+t_live="$(best_ms "$work/live")" || exit 1
+a_live="$(cat "$work/answer")"
+t_nores="$(best_ms "$work/noreset")" || exit 1
+a_nores="$(cat "$work/answer")"
+t_nomark="$(best_ms "$work/nomark")" || exit 1
+a_nomark="$(cat "$work/answer")"
 printf '     live    %10.2f ms\n     noreset %10.2f ms\n     nomark  %10.2f ms\n' \
   "$t_live" "$t_nores" "$t_nomark"
 
@@ -208,7 +205,8 @@ if ! grep -q '^slabclear:' "$work/noscrub.ll"; then
   llc -filetype=obj -relocation-model=pic "$work/noscrub.ll" -o "$work/noscrub.o" 2>"$work/llc.err" \
     && cc "$work/noscrub.o" -o "$work/noscrub" $link_entry 2>"$work/cc.err"
   if [[ -x "$work/noscrub" ]]; then
-    t_nos="$(best_ms "$work/noscrub")"; a_nos="$(cat "$work/answer")"
+    t_nos="$(best_ms "$work/noscrub")" || exit 1
+    a_nos="$(cat "$work/answer")"
     printf '     noscrub %10.2f ms  answer=%s\n' "$t_nos" "$a_nos"
     if [[ "$a_nos" != "$N" ]]; then
       bad "the ablated binary answered '$a_nos' - it is not the same program"

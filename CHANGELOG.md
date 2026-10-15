@@ -40,6 +40,10 @@ counted environments.
 
 <!-- release-notes: end of highlights -->
 
+- CI scale and arena reset checks measure child commands with clock
+  readings taken in one process. Failed or silent compiler checks remain
+  failures. Tested by `tests/ci/timing.py`.
+
 - Reclamation and channel mutation tests follow canonical block scopes.
   Literal-release mutations preserve static function descriptors, and
   dead-holder mutations leave the surrounding channel scope intact.

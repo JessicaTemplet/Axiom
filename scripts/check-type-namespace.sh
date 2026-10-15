@@ -384,23 +384,11 @@ gen("%s/scale_b.ax" % work, "S%0*d" % (width, total - 1))
 PY
 
 best_of() { # best_of <entry>
-  local entry="$1" i best="" t out rc s e
+  local entry="$1" i best="" t
   for (( i = 0; i < REPS; i++ )); do
-    s=$(python3 -c 'import time;print(time.monotonic())')
-    out="$( cd "$work" && "$axc" check "$entry" 2>&1 )"; rc=$?
-    e=$(python3 -c 'import time;print(time.monotonic())')
-    # A compiler that dies early is fast and would pass any ratio, so a
-    # failed or silent check fails the gate.
-    if (( rc != 0 )); then
-      echo "FAIL scale: \`check $entry\` exited $rc - this measured a failure, not a compile" >&2
-      printf '%s\n' "$out" | tail -5 >&2
-      return 1
-    fi
-    if [[ "$out" != *OK* ]]; then
-      echo "FAIL scale: \`check $entry\` exited 0 without printing OK, so it did no work" >&2
-      return 1
-    fi
-    t=$(python3 -c "print($e - $s)")
+    # A failed or silent check must never contribute a fast timing.
+    t=$(python3 "$repo_root/scripts/lib/benchrun.py" --once --cwd "$work" \
+        --expect-ok -- "$axc" check "$entry") || return 1
     if [[ -z "$best" ]] || (( $(python3 -c "print(1 if $t < $best else 0)") )); then best="$t"; fi
   done
   printf '%s' "$best"

@@ -137,22 +137,10 @@ mk_pair() { # mk_pair <n>
 # minimum is the closest estimate of the cost itself, as in
 # `bench-datastructures.sh`.
 best_of() { # best_of <compiler> <entry>
-  local comp="$1" entry="$2" i best="" t out rc
+  local comp="$1" entry="$2" i best="" t
   for (( i = 0; i < REPS; i++ )); do
-    local s e
-    s=$(python3 -c 'import time;print(time.monotonic())')
-    out="$( cd "$work" && "$comp" check "$entry" 2>&1 )"; rc=$?
-    e=$(python3 -c 'import time;print(time.monotonic())')
-    if (( rc != 0 )); then
-      echo "FAIL: \`check $entry\` exited $rc - this gate measured a failure, not a compile" >&2
-      echo "$out" | tail -5 >&2
-      exit 1
-    fi
-    if [[ "$out" != *OK* ]]; then
-      echo "FAIL: \`check $entry\` exited 0 without printing OK, so it did no work" >&2
-      exit 1
-    fi
-    t=$(python3 -c "print($e - $s)")
+    t=$(python3 "$repo_root/scripts/lib/benchrun.py" --once --cwd "$work" \
+        --expect-ok -- "$comp" check "$entry") || return 1
     if [[ -z "$best" ]] || (( $(python3 -c "print(1 if $t < $best else 0)") )); then best="$t"; fi
   done
   printf '%s' "$best"
@@ -422,17 +410,15 @@ gen_let() { # gen_let <file> <count>
 }
 
 emit_best() { # emit_best <compiler> <n> <reps>: the best emit-llvm time
-  local comp="$1" n="$2" reps="$3" i best="" s e t
+  local comp="$1" n="$2" reps="$3" i best="" t
   [[ -f "$work/let$n.ax" ]] || gen_let "$work/let$n.ax" "$n"
   for (( i = 0; i < reps; i++ )); do
-    s=$(python3 -c 'import time;print(time.monotonic())')
-    if ! ( cd "$work" && "$comp" emit-llvm "let$n.ax" -o "let$n.ll" ) >"$work/let.log" 2>&1; then
+    if ! t=$(python3 "$repo_root/scripts/lib/benchrun.py" --once --cwd "$work" \
+        -- "$comp" emit-llvm "let$n.ax" -o "let$n.ll" 2>"$work/let.log"); then
       echo "FAIL: \`emit-llvm let$n.ax\` failed - this arm measured a failure" >&2
       tail -5 "$work/let.log" >&2
       exit 1
     fi
-    e=$(python3 -c 'import time;print(time.monotonic())')
-    t=$(python3 -c "print($e - $s)")
     if [[ -z "$best" ]] || (( $(python3 -c "print(1 if $t < $best else 0)") )); then best="$t"; fi
   done
   printf '%s' "$best"
@@ -448,8 +434,8 @@ let_verdict() { # let_verdict <label> <t1> <t2> <n>: 0 under, 1 over, 2 under th
   return 0
 }
 
-lt1="$(emit_best "$axc" "$LET_N" "$REPS")"
-lt2="$(emit_best "$axc" "$(( 2 * LET_N ))" "$REPS")"
+lt1="$(emit_best "$axc" "$LET_N" "$REPS")" || exit 1
+lt2="$(emit_best "$axc" "$(( 2 * LET_N ))" "$REPS")" || exit 1
 let_verdict "live" "$lt1" "$lt2" "$LET_N"
 case $? in
   0) ;;
@@ -522,8 +508,8 @@ if ! gate_build_tree "$axiom" "$abl3" "$abl3/stdlib" \
 fi
 # Best of REPS on the small side, where interference would lower the
 # ratio; one run on the large side, where it could only raise it.
-at1="$(emit_best "$work/axc-letscan" "$LET_N" "$REPS")"
-at2="$(emit_best "$work/axc-letscan" "$(( 2 * LET_N ))" 1)"
+at1="$(emit_best "$work/axc-letscan" "$LET_N" "$REPS")" || exit 1
+at2="$(emit_best "$work/axc-letscan" "$(( 2 * LET_N ))" 1)" || exit 1
 let_verdict "ablated" "$at1" "$at2" "$LET_N"
 case $? in
   1) echo "check-name-scale: the ablated compiler fails arm 3, so the arm is load-bearing" ;;
