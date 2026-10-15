@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 import re
-import subprocess
+import runpy
 import sys
 import tempfile
 
@@ -55,6 +55,15 @@ def run(compiler):
         messages = [{"id": "init", "method": "initialize", "params": {}}]
         expected_publications = []
         snapshots = {}
+        barriers = {}
+
+        def barrier(target):
+            # Pin every accepted transaction in this test. A separate race
+            # test exercises cancellation of obsolete background checks.
+            identity = "transaction/%d" % len(barriers)
+            barriers[identity] = state[target]
+            messages.append({"id": identity, "method": "textDocument/documentSymbol",
+                             "params": {"textDocument": {"uri": target}}})
 
         def change(target, version, edits, accepted=None, diagnostics=()):
             messages.append({"method": "textDocument/didChange", "params": {
@@ -63,6 +72,7 @@ def run(compiler):
             if accepted is not None:
                 state[target] = accepted
                 expected_publications.append((target, version, list(diagnostics)))
+                barrier(target)
 
         def opening(target, version, text, accept=True):
             messages.append({"method": "textDocument/didOpen", "params": {
@@ -71,6 +81,7 @@ def run(compiler):
             if accept:
                 state[target] = text
                 expected_publications.append((target, version, []))
+                barrier(target)
 
         def snapshot(label, target=uri):
             snapshots[label] = (target, state[target])
@@ -199,11 +210,30 @@ def run(compiler):
         snapshot("many-incremental-edits")
         messages.extend([{"id": "shutdown", "method": "shutdown", "params": None},
                          {"method": "exit", "params": None}])
-        result = subprocess.run([compiler, "lsp"], input=b"".join(map(frame, messages)),
-                                capture_output=True, cwd=root, timeout=60)
-        assert result.returncode == 0, (result.returncode, result.stderr.decode())
-        assert not result.stderr, result.stderr.decode()
-        replies = unframe(result.stdout)
+        # Await actual responses before sending the next transaction. A
+        # queued request is not a barrier: an edit can cancel active work.
+        Client = runpy.run_path(str(Path(__file__).with_name("workspace-overlays.py")))["Client"]
+        client = Client(compiler, cwd=root)
+        replies = []
+        try:
+            for message in messages:
+                client.send(message["method"], message["params"], message.get("id"))
+                if "id" in message:
+                    while True:
+                        reply = client.inbox.get(timeout=45)
+                        if isinstance(reply, BaseException):
+                            raise reply
+                        replies.append(reply)
+                        if "id" in reply:
+                            assert reply["id"] == message["id"], reply
+                            break
+            client.process.stdin.close()
+            assert client.process.wait(timeout=10) == 0
+            assert not client.process.stderr.read()
+        finally:
+            if client.process.poll() is None:
+                client.process.kill()
+                client.process.wait()
         answers = {m["id"]: m for m in replies if "id" in m}
         assert all("error" not in answer for answer in answers.values()), answers
         capabilities = answers["init"]["result"]["capabilities"]
@@ -236,7 +266,10 @@ def run(compiler):
         definition = answers["imported-definition"]["result"]
         assert definition and definition["uri"] == other, definition
         assert answers["shutdown"]["result"] is None
-        assert len(answers) == 2 * len(snapshots) + 3
+        for identity, text in barriers.items():
+            assert [s["name"] for s in answers[identity]["result"]] == re.findall(
+                r"\((?:pub )?fn \((\w+)\)", text), (identity, answers[identity])
+        assert len(answers) == 2 * len(snapshots) + 3 + len(barriers)
         print("ok   incremental-sync (%d document snapshots, %d versioned checks, "
               "UTF-16 edits, atomic refusals, imports and close/reopen)" %
               (len(snapshots), len(expected_publications) - 1))

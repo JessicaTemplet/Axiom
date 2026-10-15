@@ -799,6 +799,16 @@ unsaved files, malformed-source recovery and close/reopen.
   modules share the canonical formatter layout. The native record-vector
   round trip and generator snapshots cover the numeric conversion boundary.
 
+### Revisioned LSP workers
+
+- LSP requests and diagnostics run in a revisioned process worker on native
+  POSIX hosts. Active and queued cancellation stop obsolete work before
+  acknowledgement, and only current revisions publish results. The bounded
+  FIFO preserves request order and applies input backpressure. Race tests
+  cover stopped workers, cross-document coalescing and shutdown cleanup.
+- Child exit polling checks terminal status before joining. A stopped
+  process remains cancellable instead of blocking the event loop.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

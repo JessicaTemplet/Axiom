@@ -2028,7 +2028,7 @@ Sys - portable syscall wrappers.
 
 ## `Sys.Platform`
 
-`stdlib/Sys/Platform.darwin.ax` — 164 public names
+`stdlib/Sys/Platform.darwin.ax` — 165 public names
 
 Sys.Platform - the numbers this target's kernel uses: syscall
 numbers, open and socket flags, errno values, poll and signal
@@ -2132,6 +2132,7 @@ target being compiled for (this one is `darwin`).
 | `sigInfoSize` | value | `Int` |  |  | The size of one `signalfd_siginfo` record, or 0 where none is read. |
 | `sysKillNum` | value | `Int` |  |  | kill(pid, sig) - BSD 37. |
 | `sigTerm` | value | `Int` |  |  | SIGTERM and SIGINT AGREE on all four targets, which is worth naming rather than assuming because most of their neighbours do not - SIGUSR1 is 30 here and 10 on Linux. |
+| `sigChild` | value | `Int` |  |  | The `SIGCHLD` signal number, or zero when child signals are unavailable. |
 | `sigInt` | value | `Int` |  |  | The `SIGINT` signal number. |
 | `forkChildIsZero` | value | `Int` |  |  | Whether `fork` answers 0 in the child, which is the POSIX convention and what Linux does. Darwin answers the child's pid to both, so `sysForkProcess` normalises; see `sysForkNum` above for the measurement. |
 | `usesSyscallAbi` | value | `Int` |  |  | 1 where the platform is reached through raw syscalls, 0 where it goes through the C library or a host shim. |

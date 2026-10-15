@@ -640,6 +640,9 @@ fi
 if ! python3 tests/lsp/semantic-cache.py "$work/stage1"; then
   status=1
 fi
+if ! python3 tests/lsp/background-analysis.py "$work/stage1"; then
+  status=1
+fi
 
 echo "swept $fixtures fixtures (floor $floor), $rows manifest rows, $orows outline rows"
 
@@ -671,8 +674,9 @@ echo "swept $fixtures fixtures (floor $floor), $rows manifest rows, $orows outli
 # ------------------------------------------------------------------
 sym_floor=2000
 perf=$(SERVER="$work/stage1" SYM_FLOOR="$sym_floor" python3 - <<'PY'
-import json, os, subprocess, sys, time
+import json, os, subprocess, sys, time, runpy
 server=os.environ["SERVER"]; floor=int(os.environ["SYM_FLOOR"])
+run_session=runpy.run_path("tests/lsp/workspace-overlays.py")["run_session"]
 n=floor+50   # one TAG_D_FN symbol per function; the `::` lines are not symbols
 text="".join(f"(:: f{i} (-> Int Int))\n(fn (f{i} x) (+ x {i}))\n" for i in range(n))
 text+="(:: main Int)\n(fn (main) 0)\n"
@@ -688,7 +692,7 @@ def best(msgs):
     b=None; out=None
     for _ in range(3):
         t0=time.time()
-        p=subprocess.run([server,"lsp","--no-banner"],input=b"".join(msgs),capture_output=True,timeout=600)
+        p=run_session(server,b"".join(msgs),timeout=600)
         dt=time.time()-t0
         if p.returncode!=0:
             print(f"FAIL server exited {p.returncode}"); sys.exit(1)
@@ -786,8 +790,9 @@ fi
 item_floor=100
 item_cap=200
 cperf=$(SERVER="$work/stage1" ITEM_FLOOR="$item_floor" ITEM_CAP="$item_cap" python3 - <<'PY'
-import json, os, subprocess, sys, time
+import json, os, subprocess, sys, time, runpy
 server=os.environ["SERVER"]
+run_session=runpy.run_path("tests/lsp/workspace-overlays.py")["run_session"]
 floor=int(os.environ["ITEM_FLOOR"]); cap=int(os.environ["ITEM_CAP"])
 n=2050
 text="".join(f"(:: f{i} (-> Int Int))\n(fn (f{i} x) (+ x {i}))\n" for i in range(n))
@@ -810,7 +815,7 @@ def best(msgs):
     b=None; out=None
     for _ in range(3):
         t0=time.time()
-        p=subprocess.run([server,"lsp","--no-banner"],input=b"".join(msgs),capture_output=True,timeout=600)
+        p=run_session(server,b"".join(msgs),timeout=600)
         dt=time.time()-t0
         if p.returncode!=0:
             print(f"FAIL server exited {p.returncode}"); sys.exit(1)
@@ -986,11 +991,14 @@ def build(cap, name, uri, text, p, rid):
     if name in ("textDocumentSync", "positionEncoding"): return []
     if name not in m: return None
     return [m[name]]
+import runpy
+run_session=runpy.run_path("tests/lsp/workspace-overlays.py")["run_session"]
+
 def caps_of():
     msgs=[frame({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":None,"rootUri":None,"capabilities":{}}}),
           frame({"jsonrpc":"2.0","id":2,"method":"shutdown","params":None}),
           frame({"jsonrpc":"2.0","method":"exit","params":None})]
-    p=subprocess.run([server,"lsp"],input=b"".join(msgs),capture_output=True,timeout=600)
+    p=run_session(server,b"".join(msgs),timeout=600)
     ms,_=unframe(p.stdout)
     return {m["id"]:m for m in ms if "id" in m}[1]["result"]["capabilities"]
 caps=caps_of()
@@ -1019,7 +1027,7 @@ for label,text in docs:
     msgs+=[frame({"jsonrpc":"2.0","id":r,"method":m,"params":ps}) for r,m,ps in reqs]
     msgs+=[frame({"jsonrpc":"2.0","id":2,"method":"shutdown","params":None}),
            frame({"jsonrpc":"2.0","method":"exit","params":None})]
-    p=subprocess.run([server,"lsp"],input=b"".join(msgs),capture_output=True,timeout=1200)
+    p=run_session(server,b"".join(msgs),timeout=1200)
     ms,tail=unframe(p.stdout)
     byid={m["id"]:m for m in ms if "id" in m}
     why=""

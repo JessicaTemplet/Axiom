@@ -174,7 +174,7 @@ ADT instantiation.
 | Selective foreign-item imports and transitive foreign references preserve visibility and module resolution | Planned |
 | The test runner runs tests in parallel | Done |
 | UTF-16 ranged document edits apply in order and atomically, with monotonic versions and versioned diagnostics | Done |
-| The language server cancels obsolete work and serves requests from revisioned background analysis | Not started |
+| The language server cancels obsolete work and serves requests from revisioned background analysis on hosts with process and poller support | Done |
 | Unsaved imported documents feed checks and navigation, with transitive dependency invalidation and diagnostics for open modules | Done |
 | Workspace request results are cached by revision, with exact file and module-search validation | Done |
 | Parsed and checked semantic models are reused across different requests | Not started |

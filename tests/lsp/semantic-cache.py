@@ -26,7 +26,8 @@ class TracedClient(Client):
             if message.get('method') == 'textDocument/publishDiagnostics':
                 self.publications.append(message['params'])
             elif message.get('method') == '$/logTrace':
-                self.traces.append(message['params']['message'])
+                if message['params']['message'].startswith('semantic cache '):
+                    self.traces.append(message['params']['message'])
             else:
                 assert message.get('id') == identity, message
                 assert 'error' not in message, message
@@ -131,6 +132,31 @@ def run(compiler):
             client.barrier()
             assert not client.latest(uri)['diagnostics'], client.latest(uri)
             client.hover(uri, 'Int', reuse=False, line=4)
+
+            # Oversized keys bypass retained storage without evicting an
+            # ordinary key that was already cached at this revision.
+            client.hover(uri, 'Int', reuse=True, line=4)
+            client.traces.clear()
+            client.request('textDocument/hover', {
+                'textDocument': {'uri': uri}, 'position': {'line': 4, 'character': 16},
+                'padding': 'x' * 5000})
+            assert not client.traces, client.traces
+            client.hover(uri, 'Int', reuse=True, line=4)
+
+            # A large outline remains correct but is not repeatedly encoded
+            # into the bounded cache or escaped into an IPC JSON string.
+            large_uri = (root / 'large.ax').as_uri()
+            large = ''.join('(:: item%d Int)\n(fn (item%d) %d)\n' % (n, n, n)
+                            for n in range(2500))
+            client.opening(large_uri, large)
+            for _ in range(2):
+                client.traces.clear()
+                outline = client.request('textDocument/documentSymbol', {
+                    'textDocument': {'uri': large_uri}})
+                assert len(outline) == 2500, len(outline)
+                assert client.traces == ['semantic cache miss'], client.traces
+            client.send('textDocument/didClose', {'textDocument': {'uri': large_uri}})
+            client.barrier()
 
             # Tracing is off unless requested and can be turned off again.
             client.send('$/setTrace', {'value': 'off'})

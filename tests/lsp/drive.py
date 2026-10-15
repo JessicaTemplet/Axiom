@@ -99,6 +99,8 @@ import os
 import re
 import shutil
 import subprocess
+import runpy
+import time
 import sys
 import tempfile
 
@@ -207,6 +209,12 @@ def unframe(out):
         msgs.append(json.loads(out[j + 4:j + 4 + n]))
         i = j + 4 + n
     return msgs, out[i:]
+
+
+def run_protocol(argv, *, input, cwd=None, timeout=600, capture_output=True):
+    # Cancellation races and batched memory probes use separate drivers.
+    session = runpy.run_path(os.path.join(os.path.abspath(fixdir), "workspace-overlays.py"))["run_session"]
+    return session(argv[0], input, cwd=cwd, timeout=timeout)
 
 
 # --------------------------------------------------------------------
@@ -625,7 +633,7 @@ for fx in fixtures:
     # directory, so the URI must be the fixture's real path; it is
     # normalised out of the golden afterwards.
     real_uri = "file://" + os.path.abspath(path)
-    p = subprocess.run([stage1, "lsp"], input=session(real_uri, text),
+    p = run_protocol([stage1, "lsp"], input=session(real_uri, text),
                        capture_output=True, cwd=fixdir)
 
     if p.returncode != 0:
@@ -845,7 +853,7 @@ big_session = b"".join(frame(m) for m in [
     {"jsonrpc": "2.0", "method": "exit", "params": None},
 ])
 
-bp = subprocess.run([stage1, "lsp"], input=big_session, capture_output=True,
+bp = run_protocol([stage1, "lsp"], input=big_session, capture_output=True,
                     cwd=fixdir)
 bmsgs, btail = unframe(bp.stdout)
 bpubs = [m for m in bmsgs if m.get("method") == "textDocument/publishDiagnostics"]
@@ -1202,7 +1210,7 @@ nav_session = b"".join(frame(m) for m in [
     {"jsonrpc": "2.0", "method": "exit", "params": None},
 ])
 
-np_ = subprocess.run([stage1, "lsp"], input=nav_session, capture_output=True,
+np_ = run_protocol([stage1, "lsp"], input=nav_session, capture_output=True,
                      cwd=fixdir)
 nmsgs, ntail = unframe(np_.stdout)
 nresp = {m["id"]: m for m in nmsgs if "id" in m}
@@ -1877,7 +1885,7 @@ nav_session2 = b"".join(frame(m) for m in [
     {"jsonrpc": "2.0", "id": 34, "method": "shutdown", "params": None},
     {"jsonrpc": "2.0", "method": "exit", "params": None},
 ])
-rp = subprocess.run([stage1, "lsp"], input=nav_session2, capture_output=True,
+rp = run_protocol([stage1, "lsp"], input=nav_session2, capture_output=True,
                     cwd=NAVREF_DIR)
 rmsgs, rtail = unframe(rp.stdout)
 rresp = {m["id"]: m for m in rmsgs if "id" in m}
@@ -2128,7 +2136,7 @@ if not nwhy:
             break
 if not nwhy:
     open(os.path.join(NAVREF_DIR, "NavMain.ax"), "w", encoding="utf-8").write(renamed[A_URI])
-    r2 = subprocess.run([stage1, "lsp"], input=b"".join(frame(m) for m in [
+    r2 = run_protocol([stage1, "lsp"], input=b"".join(frame(m) for m in [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
         nav_open(A_URI, renamed[A_URI]), nav_open(B_URI, renamed[B_URI]),
         {"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": None},
@@ -2195,7 +2203,7 @@ closed_session = b"".join(frame(m) for m in [
     {"jsonrpc": "2.0", "id": 4, "method": "shutdown", "params": None},
     {"jsonrpc": "2.0", "method": "exit", "params": None},
 ])
-cp = subprocess.run([stage1, "lsp"], input=closed_session, capture_output=True,
+cp = run_protocol([stage1, "lsp"], input=closed_session, capture_output=True,
                     cwd=NAVREF_DIR)
 cmsgs, _ = unframe(cp.stdout)
 cresp = {m["id"]: m for m in cmsgs if "id" in m}
@@ -2256,7 +2264,7 @@ holes_session = b"".join(frame(m) for m in [
     {"jsonrpc": "2.0", "id": 4, "method": "shutdown", "params": None},
     {"jsonrpc": "2.0", "method": "exit", "params": None},
 ])
-hp = subprocess.run([stage1, "lsp"], input=holes_session, capture_output=True, cwd=NAVREF_DIR)
+hp = run_protocol([stage1, "lsp"], input=holes_session, capture_output=True, cwd=NAVREF_DIR)
 hmsgs, _ = unframe(hp.stdout)
 hresp = {m["id"]: m for m in hmsgs if "id" in m}
 hover_v = json.dumps((hresp.get(2) or {}).get("result") or {})
@@ -2299,7 +2307,7 @@ imp_session = b"".join(frame(m) for m in [
     {"jsonrpc": "2.0", "id": 5, "method": "shutdown", "params": None},
     {"jsonrpc": "2.0", "method": "exit", "params": None},
 ])
-ip = subprocess.run([stage1, "lsp"], input=imp_session, capture_output=True, cwd=NAVREF_DIR)
+ip = run_protocol([stage1, "lsp"], input=imp_session, capture_output=True, cwd=NAVREF_DIR)
 imsgs, _ = unframe(ip.stdout)
 iresp = {m["id"]: m for m in imsgs if "id" in m}
 
@@ -2696,7 +2704,7 @@ CH_PREP_NULL["a keyword"] = _rid
 _rid += 1
 ch_msgs.append(ch_req(90, "shutdown", None))
 ch_msgs.append({"jsonrpc": "2.0", "method": "exit", "params": None})
-chp = subprocess.run([stage1, "lsp"], input=b"".join(frame(m) for m in ch_msgs),
+chp = run_protocol([stage1, "lsp"], input=b"".join(frame(m) for m in ch_msgs),
                      capture_output=True, cwd=CH_DIR)
 chmsgs, chtail = unframe(chp.stdout)
 chresp = {m["id"]: m for m in chmsgs if "id" in m}
@@ -2864,7 +2872,7 @@ for _what, _item in (("an item nothing declares", IT_GHOST),
     _rid += 1
 ch2.append(ch_req(90, "shutdown", None))
 ch2.append({"jsonrpc": "2.0", "method": "exit", "params": None})
-chp2 = subprocess.run([stage1, "lsp"], input=b"".join(frame(m) for m in ch2),
+chp2 = run_protocol([stage1, "lsp"], input=b"".join(frame(m) for m in ch2),
                       capture_output=True, cwd=CH_DIR)
 chmsgs2, chtail2 = unframe(chp2.stdout)
 chresp2 = {m["id"]: m for m in chmsgs2 if "id" in m}
@@ -3222,7 +3230,7 @@ th_msgs.append({"jsonrpc": "2.0", "id": _rid, "method": "textDocument/references
                            "context": {"includeDeclaration": True}}})
 th_msgs.append(ch_req(90, "shutdown", None))
 th_msgs.append({"jsonrpc": "2.0", "method": "exit", "params": None})
-thp = subprocess.run([stage1, "lsp"], input=b"".join(frame(m) for m in th_msgs),
+thp = run_protocol([stage1, "lsp"], input=b"".join(frame(m) for m in th_msgs),
                      capture_output=True, cwd=TH_DIR)
 thmsgs, thtail = unframe(thp.stdout)
 thresp = {m["id"]: m for m in thmsgs if "id" in m}
@@ -3349,7 +3357,7 @@ for _what, _item in (("an item nothing declares", IT_GHOST),
     _rid += 1
 th2.append(ch_req(90, "shutdown", None))
 th2.append({"jsonrpc": "2.0", "method": "exit", "params": None})
-thp2 = subprocess.run([stage1, "lsp"], input=b"".join(frame(m) for m in th2),
+thp2 = run_protocol([stage1, "lsp"], input=b"".join(frame(m) for m in th2),
                       capture_output=True, cwd=TH_DIR)
 thmsgs2, thtail2 = unframe(thp2.stdout)
 thresp2 = {m["id"]: m for m in thmsgs2 if "id" in m}
@@ -3779,7 +3787,7 @@ view_session = b"".join(frame(m) for m in [
     {"jsonrpc": "2.0", "method": "exit", "params": None},
 ])
 
-vp = subprocess.run([stage1, "lsp"], input=view_session, capture_output=True,
+vp = run_protocol([stage1, "lsp"], input=view_session, capture_output=True,
                     cwd=fixdir)
 vmsgs, vtail = unframe(vp.stdout)
 vresp = {m["id"]: m for m in vmsgs if "id" in m}
@@ -4459,7 +4467,7 @@ fix_session = b"".join(frame(m) for m in [
     fixreq(30, "shutdown", None),
     {"jsonrpc": "2.0", "method": "exit", "params": None},
 ])
-fp = subprocess.run([stage1, "lsp"], input=fix_session, capture_output=True, cwd=FIXDIR)
+fp = run_protocol([stage1, "lsp"], input=fix_session, capture_output=True, cwd=FIXDIR)
 fmsgs, ftail = unframe(fp.stdout)
 fresp = {m["id"]: m for m in fmsgs if "id" in m}
 fcaps = (fresp.get(1, {}).get("result") or {}).get("capabilities") or {}
@@ -4699,7 +4707,7 @@ if not fwhy:
             fixreq(3, "shutdown", None),
             {"jsonrpc": "2.0", "method": "exit", "params": None},
         ])
-        sp = subprocess.run([stage1, "lsp"], input=second, capture_output=True, cwd=FIXDIR)
+        sp = run_protocol([stage1, "lsp"], input=second, capture_output=True, cwd=FIXDIR)
         smsgs, stail = unframe(sp.stdout)
         pubs = {m["params"]["uri"]: m["params"]["diagnostics"] for m in smsgs
                 if m.get("method") == "textDocument/publishDiagnostics"}
@@ -5076,7 +5084,7 @@ ca_session = b"".join(frame(m) for m in [
     fixreq(17, "shutdown", None),
     {"jsonrpc": "2.0", "method": "exit", "params": None},
 ])
-cp = subprocess.run([stage1, "lsp"], input=ca_session, capture_output=True, cwd=CADIR)
+cp = run_protocol([stage1, "lsp"], input=ca_session, capture_output=True, cwd=CADIR)
 cmsgs, ctail = unframe(cp.stdout)
 cresp = {m["id"]: m for m in cmsgs if "id" in m}
 ccaps = (cresp.get(1, {}).get("result") or {}).get("capabilities") or {}
@@ -5378,7 +5386,7 @@ if not cawhy:
         fixreq(102, "shutdown", None),
         {"jsonrpc": "2.0", "method": "exit", "params": None},
     ])
-    rp = subprocess.run([stage1, "lsp"], input=reopen, capture_output=True, cwd=CADIR)
+    rp = run_protocol([stage1, "lsp"], input=reopen, capture_output=True, cwd=CADIR)
     rmsgs, rtail = unframe(rp.stdout)
     pubs = {}
     for m in rmsgs:
@@ -5951,7 +5959,7 @@ hl_msgs.append({"jsonrpc": "2.0", "id": 2, "method": HL_FULL,
                 "params": {"textDocument": {"uri": hl_uri("never-opened.ax")}}})
 hl_msgs += [{"jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": None},
             {"jsonrpc": "2.0", "method": "exit", "params": None}]
-hlp = subprocess.run([stage1, "lsp"], input=b"".join(frame(m) for m in hl_msgs),
+hlp = run_protocol([stage1, "lsp"], input=b"".join(frame(m) for m in hl_msgs),
                      capture_output=True, cwd=HL_DIR)
 hlmsgs, hltail = unframe(hlp.stdout)
 hlresp = {m["id"]: m for m in hlmsgs if "id" in m}
@@ -6186,7 +6194,7 @@ for _key, _name, _m, _needle, _sub, _extra in RC_ASK:
     _rid += 1
 rc_msgs += [{"jsonrpc": "2.0", "id": 9, "method": "shutdown", "params": None},
             {"jsonrpc": "2.0", "method": "exit", "params": None}]
-rcp = subprocess.run([stage1, "lsp"], input=b"".join(frame(m) for m in rc_msgs),
+rcp = run_protocol([stage1, "lsp"], input=b"".join(frame(m) for m in rc_msgs),
                      capture_output=True, cwd=RC_DIR)
 rcmsgs, rctail = unframe(rcp.stdout)
 rcresp = {m["id"]: m for m in rcmsgs if "id" in m}
@@ -6382,12 +6390,12 @@ def run_measured(argv, payload, last, cwd):
                 return
             chunks.append(b)
 
-    def shutdown_answered():
+    def response_answered(identity):
         try:
             msgs, _ = unframe(b"".join(chunks))
         except ValueError:                          # a frame half read
             return False
-        return any(m.get("id") == 2 for m in msgs)
+        return any(m.get("id") == identity for m in msgs)
 
     t = threading.Thread(target=drain)
     t.start()
@@ -6396,7 +6404,13 @@ def run_measured(argv, payload, last, cwd):
     except BrokenPipeError:
         pass
     deadline = time.monotonic() + 60
-    while t.is_alive() and not shutdown_answered() and time.monotonic() < deadline:
+    while t.is_alive() and not response_answered(3) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    try:
+        os.write(wfd, frame({"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": None}))
+    except BrokenPipeError:
+        pass
+    while t.is_alive() and not response_answered(2) and time.monotonic() < deadline:
         time.sleep(0.01)
     hwm = proc_kib(pid, "VmHWM") if linux else None
     try:
@@ -6424,8 +6438,9 @@ def edit_session(n):
     for i in range(n):
         ms.append({"jsonrpc": "2.0", "method": "textDocument/didChange",
                    "params": {"textDocument": {"uri": mem_uri, "version": i + 2},
-                              "contentChanges": [{"text": MEM_SRC + "\n; %d\n" % i}]}})
-    ms.append({"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": None})
+                              "contentChanges": [{"text": MEM_SRC + "\n(:: editSentinel%d Int)\n(fn (editSentinel%d) %d)\n" % (i, i, i)}]}})
+    ms.append({"jsonrpc": "2.0", "id": 3, "method": "textDocument/documentSymbol",
+               "params": {"textDocument": {"uri": mem_uri}}})
     return (b"".join(frame(m) for m in ms),
             frame({"jsonrpc": "2.0", "method": "exit", "params": None}))
 
@@ -6458,14 +6473,19 @@ for n in (SMALL, BIG_N):
     seen[n] = (waited, driver)
     msgs, tail = unframe(out)
     pubs = [m for m in msgs if m.get("method") == "textDocument/publishDiagnostics"]
-    answered = {m["id"] for m in msgs if "id" in m}
+    answered = {m["id"]: m for m in msgs if "id" in m}
+    versions = [m["params"].get("version") for m in pubs]
     if st != 0:
         why = f"{n}-edit session exited {st}"
     elif tail:
         why = f"{n}-edit session left {len(tail)} unframed trailing bytes"
-    elif len(pubs) != n + 1:
-        why = (f"{n}-edit session published {len(pubs)} diagnostics, want {n + 1}"
-               " - it did not process every edit, so its memory means nothing")
+    elif (not versions or versions != sorted(set(versions))
+          or versions[0] < 1 or versions[-1] != n + 1):
+        why = f"{n}-edit session published invalid or stale revisions: {versions}"
+    elif (3 not in answered or "error" in answered[3]
+          or not any(s["name"] == "editSentinel%d" % (n - 1)
+                     for s in answered[3].get("result", []))):
+        why = f"{n}-edit session did not retain its final accepted text"
     elif 2 not in answered:
         why = f"{n}-edit session never answered shutdown"
     elif kib is None:
@@ -6508,7 +6528,7 @@ else:
     print(f"ok   editing-session-is-flat ({rss[SMALL]} KiB at {SMALL} edits, "
           f"{rss[BIG_N]} KiB at {BIG_N}, grew {rss[BIG_N] - rss[SMALL]} KiB, "
           f"under {SLOPE_CEILING_KIB} slope and {ABSOLUTE_CEILING_KIB} absolute "
-          f"on {sys.platform}, every edit checked{driver_note})")
+          f"on {sys.platform}, final revision checked{driver_note})")
     passed += 1
 
 # =====================================================================
@@ -6555,7 +6575,7 @@ EXT_C = """  (struct Only
 
 def ext_symbols(text, label):
     uri = "file://" + os.path.join(EXT_DIR, label)
-    r = subprocess.run([stage1, "lsp"], cwd=EXT_DIR, capture_output=True,
+    r = run_protocol([stage1, "lsp"], cwd=EXT_DIR, capture_output=True,
                        input=b"".join(frame(m) for m in [
                            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
                             "params": {}},
@@ -6759,7 +6779,7 @@ for fx in fixtures:
     text = open(path, encoding="utf-8").read()
     uri = "file://" + os.path.abspath(path)
     term = term_diags(path)
-    msgs, tail = unframe(subprocess.run(
+    msgs, tail = unframe(run_protocol(
         [stage1, "lsp"], cwd=fixdir, capture_output=True,
         input=b"".join(frame(m) for m in [
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
@@ -6898,7 +6918,7 @@ for rid, method, uri, text, needle, offset in [
         "textDocument": {"uri": uri}, "position": rc_at(text, needle, offset)}})
 contract_msgs += [{"jsonrpc": "2.0", "id": 7, "method": "shutdown", "params": None},
                   {"jsonrpc": "2.0", "method": "exit", "params": None}]
-contract_run = subprocess.run([stage1, "lsp"], cwd=CONTRACT_DIR, capture_output=True,
+contract_run = run_protocol([stage1, "lsp"], cwd=CONTRACT_DIR, capture_output=True,
     input=b"".join(frame(m) for m in contract_msgs), timeout=60)
 contract_frames, contract_tail = unframe(contract_run.stdout)
 contract_answers = {m["id"]: m.get("result") for m in contract_frames if "id" in m}

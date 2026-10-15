@@ -11,11 +11,12 @@ import threading
 
 
 class Client:
-    def __init__(self, compiler):
+    def __init__(self, compiler, cwd=None):
         self.process = subprocess.Popen([compiler, '--diagnostic-format=ai', 'lsp'],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
         self.inbox = queue.Queue()
         self.publications = []
+        self.frames = []
         self.serial = 0
         threading.Thread(target=self.read, daemon=True).start()
 
@@ -34,6 +35,7 @@ class Client:
                     if not part:
                         raise EOFError('truncated message')
                     body += part
+                self.frames.append(header + b"\r\n" + body)
                 self.inbox.put(json.loads(body))
         except BaseException as error:
             self.inbox.put(error)
@@ -82,6 +84,48 @@ class Client:
         self.send('exit', {})
         self.process.stdin.close()
         assert self.process.wait(timeout=10) == 0, self.process.stderr.read().decode()
+
+
+def run_session(compiler, payload, cwd=None, timeout=600, wait_diagnostics=True):
+    """Drive a snapshot fixture with real response and diagnostic barriers."""
+    import time
+    messages = []
+    remaining = payload
+    while remaining:
+        header, separator, body = remaining.partition(b"\r\n\r\n")
+        assert separator, "test supplied a truncated header"
+        length = int(header.split(b":", 1)[1])
+        assert len(body) >= length, "test supplied a truncated body"
+        messages.append(json.loads(body[:length]))
+        remaining = body[length:]
+    client = Client(compiler, cwd=cwd)
+    deadline = time.monotonic() + timeout
+    try:
+        for message in messages:
+            client.send(message["method"], message.get("params"), message.get("id"))
+            opening = wait_diagnostics and message["method"] in (
+                "textDocument/didOpen", "textDocument/didChange")
+            document = message.get("params", {}).get("textDocument", {}) if opening else {}
+            if "id" in message or opening:
+                while True:
+                    reply = client.inbox.get(timeout=max(0.001, deadline - time.monotonic()))
+                    if isinstance(reply, BaseException):
+                        raise reply
+                    if "id" in reply:
+                        assert reply["id"] == message.get("id"), reply
+                        break
+                    if (opening and reply.get("method") == "textDocument/publishDiagnostics"
+                            and reply["params"]["uri"] == document["uri"]
+                            and reply["params"].get("version") == document["version"]):
+                        break
+        client.process.stdin.close()
+        status = client.process.wait(timeout=max(0.001, deadline - time.monotonic()))
+        return subprocess.CompletedProcess([compiler, "lsp"], status,
+                                           b"".join(client.frames), client.process.stderr.read())
+    finally:
+        if client.process.poll() is None:
+            client.process.kill()
+            client.process.wait()
 
 
 def run(compiler):

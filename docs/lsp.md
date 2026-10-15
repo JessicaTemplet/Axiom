@@ -96,16 +96,36 @@ capabilities included.
 
 Tested by `tests/lsp/incremental-sync.py`.
 
-Not yet: requests run serially and cannot be cancelled while they are
-being answered. See the [roadmap](roadmap.md#tools).
+### Background analysis
+
+Requests and diagnostics run in one isolated process on Linux, Darwin
+and FreeBSD. The event loop keeps reading edits and cancellation messages
+while that worker runs. Results carry a workspace revision; the server
+publishes them only while that revision is current.
+
+`$/cancelRequest` cancels an active or queued request with `-32800`.
+An accepted edit cancels an active request with `-32801` (`ContentModified`).
+The worker is stopped and reaped before cancellation is acknowledged.
+`shutdown` also stops the worker and cancels queued requests before replying.
+Obsolete diagnostic checks are replaced, so rapid edits may publish only
+the latest version. Changes to different documents retain all pending checks.
+
+The queue holds at most 32 frames and applies backpressure after eight MiB
+of pending input. One accepted frame can exceed that threshold; framing
+limits each input and worker result to 64 MiB. Hosts without process and
+poller support use synchronous requests and cannot interrupt active work.
+
+Tested by `tests/lsp/background-analysis.py`.
 
 ### Diagnostics
 
-The server publishes diagnostics on every accepted `didOpen` and
-`didChange`, under the document's own URI and version. It also rechecks
-open documents that import the changed file, including through another
-module. Closing a dependency refreshes its importers from disk. They are `axiom check`'s diagnostics. As
-in the compiler, the first stage that fails decides what you see:
+An accepted `didOpen` or `didChange` schedules diagnostics under the
+document's own URI and version. The server also rechecks open documents
+that import the changed file, including through another module. Closing a
+dependency refreshes its importers from disk.
+
+These are `axiom check`'s diagnostics. As in the compiler, the first stage
+that fails decides what you see:
 
 1. a lexical error;
 2. a parse error, with its span on the token that failed;
@@ -1428,14 +1448,15 @@ sources and module search roots it observed, including missing files that
 could take priority over a resolved module. Accepted document changes,
 saves and watched-file notifications start a new revision.
 
-The result cache holds at most eight entries and four MiB. Completion,
+The result cache holds at most eight entries and four MiB. Large replies
+and oversized request keys bypass it. Completion,
 code actions and semantic-token updates keep their own request paths.
 Set LSP trace to `messages` or `verbose` to see cache hits and misses;
 `$/setTrace` turns tracing off again without restarting the server.
 
 Tested by `tests/lsp/semantic-cache.py`.
 
-Not yet: parsed and checked models are shared between different requests.
+Not yet: reuse of parsed and checked models across different requests.
 See the [roadmap](roadmap.md#tools).
 
 ## The cost rule

@@ -7,6 +7,7 @@ the source determines the checked types, ownership-erasure counts and ranges.
 import json
 from pathlib import Path
 import subprocess
+import runpy
 import sys
 import tempfile
 
@@ -70,8 +71,8 @@ def editor(compiler, path, source, words=()):
         {"jsonrpc": "2.0", "id": 100, "method": "shutdown", "params": None},
         {"jsonrpc": "2.0", "method": "exit", "params": None},
     ])
-    result = subprocess.run([compiler, "lsp"], cwd=path.parent, capture_output=True,
-                            input=b"".join(map(frame, requests)), timeout=60)
+    session = runpy.run_path(str(Path(__file__).with_name("workspace-overlays.py")))["run_session"]
+    result = session(compiler, b"".join(map(frame, requests)), cwd=path.parent, timeout=60)
     assert result.returncode == 0 and not result.stderr, result.stderr.decode()
     messages = unframe(result.stdout)
     assert not [message for message in messages if "error" in message], messages
