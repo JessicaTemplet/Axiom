@@ -16,6 +16,7 @@
 ;   c  comment  p  punct    E  error   ?  literal in progress
 ;   M  matched bracket      X  unmatched bracket
 ;   f  call     C  constructor or type   d  doc comment   t  AXTAG
+;   m  labelled constructor field
 ;
 ; Four things are asserted per case and each fails with its own exit
 ; status, so a red run names what broke rather than only that
@@ -59,7 +60,7 @@
 
 (:: mkHCase (-> String Int String Int Int HCase))
 (fn (mkHCase src cur cls dep mat)
-  (HCase src cur cls dep mat))
+  (HCase :src src :cur cur :cls cls :dep dep :mat mat))
 
 (:: hcSrc (-> HCase String))
 (fn (hcSrc c)
@@ -87,7 +88,8 @@
 ; ------------------------------------------------------------------
 (:: corpus (Vec HCase))
 (fn (corpus)
-  (let ((v vecNew))
+  {
+    (let v vecNew)
     {
       ; 1  a keyword head, and `data` as an ORDINARY NAME in the two
       ;    positions that are not a form head. format.ax:2391 records
@@ -119,9 +121,8 @@
       ;    further digit can fix it, so the first byte - a digit - is
       ;    what keeps it `E` while case 2 stays `?`.
       (vecPush v (mkHCase "99999999999999999999999" 0 "EEEEEEEEEEEEEEEEEEEEEEE" 0 (- 0 1)))
-      ; 9  `mut` is a keyword in a position that is not a form head, so
-      ;    it is deliberately left an ident rather than guessed at
-      (vecPush v (mkHCase "(let ((mut 1)) mut)" 0 "MKKK.ppiii.npp.iiiM" 0 18))
+      ; 9  `mut` outside a direct local declaration is an ordinary name.
+      (vecPush v (mkHCase "(g mut)" 0 "Mf.iiiM" 0 6))
       ; 10 a char literal
       (vecPush v (mkHCase "'x'" 0 "sss" 0 (- 0 1)))
       ; 11 the empty buffer - the first thing a prompt hands over
@@ -173,10 +174,11 @@
       ;    an arm headed by a bare name binds that name
       (vecPush v
         (mkHCase "(match v ((Some x) (f x)) (n n))" 0 "MKKKKK.i.ppCCCC.ip.pf.ipp.pi.ipM" 0 31))
-      ; 27 a `let` binding list binds every entry, and the body calls;
-      ;    `(Point 1 2)` is a construction by case
+      ; 27 a direct local binds its name and the rest of the block calls;
+      ;    named construction marks each field label as a property
       (vecPush v
-        (mkHCase "(let ((o (Point 1 2))) (show o.x))" 0 "MKKK.ppi.pCCCCC.n.nppp.pffff.ipipM" 0 33))
+        (mkHCase "{ (let o (Point :x 1 :y 2)) (show o.x) }" 0
+          "M.pKKK.i.pCCCCC.pm.n.pm.npp.pffff.ipip.M" 0 39))
       ; 28 a doc comment and an AXTAG are not notes: `;;` and
       ;    `;@axiom:` get their own letters, the way the editor's
       ;    grammar colours them apart
@@ -186,16 +188,16 @@
       ; 29 brace and bracket blocks hold calls
       (vecPush v (mkHCase "{ (f 1) [ (g 2) ] }" 0 "M.pf.np.p.pf.np.p.M" 0 18))
       v
-    }))
+    }
+  })
 
 ; One case, four assertions. 0 when they all hold, else the status
 ; that names which one did not.
 (:: checkCase (-> HCase Int Int))
 (fn (checkCase c i)
-  (let (
-    (src (hcSrc c))
-    (cur (hcCur c))
-  )
+  {
+    (let src (hcSrc c))
+    (let cur (hcCur c))
     (if (strEq (replHlClass src cur) (hcCls c))
       (if (== (visLen (replHlPaint src cur 0)) (visLen src))
         (if (== (replHlDepth src) (hcDep c))
@@ -204,17 +206,17 @@
             (+ 150 i))
           (+ 100 i))
         (+ 50 i))
-      i)))
+      i)
+  })
 
 ; Byte 27 in a string. The painter's own output is the only place one
 ; can come from - ESC has no literal spelling in this language.
 (:: escCount (-> String Int))
 (fn (escCount s)
-  (let (
-    (n (strLen s))
-    (mut i 0)
-    (mut c 0)
-  )
+  {
+    (let n (strLen s))
+    (let mut i 0)
+    (let mut c 0)
     {
       (while (< i n)
         {
@@ -224,55 +226,61 @@
           (set i (+ i 1))
         })
       c
-    }))
+    }
+  })
 
 ; How many of the eleven class letters the corpus actually produced.
 (:: distinctLetters (-> (Vec HCase) Int))
 (fn (distinctLetters v)
-  (let (
-    (seen (strAlloc 256))
-    (mut i 0)
-    (mut d 0)
-  )
+  {
+    (let seen (strAlloc 256))
+    (let mut i 0)
+    (let mut d 0)
     {
       (while (< i (vecLen v))
         {
-          (let ((cl (replHlClass (hcSrc (vecGet v i)) (hcCur (vecGet v i)))))
-            (let (
-              (n (strLen cl))
-              (mut q 0)
-            )
+          {
+            (let cl (replHlClass (hcSrc (vecGet v i)) (hcCur (vecGet v i))))
+            {
+              (let n (strLen cl))
+              (let mut q 0)
               (while (< q n)
                 {
-                  (let ((b (strByte cl q)))
+                  {
+                    (let b (strByte cl q))
                     (if (== (strByte seen b) 0)
                       {
                         (memPutByte (strData seen) b 1)
                         (set d (+ d 1))
-                      }))
+                      })
+                  }
                   (set q (+ q 1))
-                })))
+                })
+            }
+          }
           (set i (+ i 1))
         })
       d
-    }))
+    }
+  })
 
 (:: main Int)
 (fn (main)
-  (let (
-    (v corpus)
-    (n (vecLen v))
-    (mut i 0)
-    (mut bad 0)
-    (mut esc 0)
-  )
+  {
+    (let v corpus)
+    (let n (vecLen v))
+    (let mut i 0)
+    (let mut bad 0)
+    (let mut esc 0)
     {
       (while (< i n)
         {
-          (let ((r (checkCase (vecGet v i) (+ i 1))))
+          {
+            (let r (checkCase (vecGet v i) (+ i 1)))
             (set bad (if (&& (== bad 0) (!= r 0))
               r
-              bad)))
+              bad))
+          }
           (set esc (+ esc (escCount (replHlPaint (hcSrc (vecGet v i)) (hcCur (vecGet v i)) 0))))
           (set i (+ i 1))
         })
@@ -289,4 +297,5 @@
             (if (== bad 0)
               42
               bad))))
-    }))
+    }
+  })

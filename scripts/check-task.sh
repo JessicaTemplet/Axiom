@@ -529,8 +529,8 @@ import sys, os
 root, kind = sys.argv[1], sys.argv[2]
 cuts = {
   "lock": [("Sync.ax",
-    "    (if (== (syncLoad m 3) 1)\n      (Err (mkError syncOwnerDead \"mutexLock: the holder died holding it\"))\n      (let ((me syncMe))\n        (if (== (syncCas m 0 me) 0)",
-    "    (if (== (syncLoad m 3) 1)\n      (Err (mkError syncOwnerDead \"mutexLock: the holder died holding it\"))\n      (let ((me syncMe))\n        (if (== 0 0)")],
+    "              (if (== (syncCas m 0 (+ me 1)) 0)",
+    "              (if (== 0 0)")],
   "timed": [("Sys.ax", "      (/ (+ nanos 999) 1000))))", "      (/ (+ nanos 999) 10000))))"),
             ("Sys.ax", "(memSetWord ts 0 (/ nanos 1000000000))", "(memSetWord ts 0 (/ (/ nanos 10) 1000000000))"),
             ("Sys.ax", "(memSetWord ts 1 (% nanos 1000000000))", "(memSetWord ts 1 (% (/ nanos 10) 1000000000))")],
@@ -548,7 +548,7 @@ cuts = {
   # 32 bits `kill` could read as 0 or negative, a process GROUP.)
   "layout": [("Task.ax", "(fn (taskHandlePid h)\n  (__spawn_pid h))", "(fn (taskHandlePid h)\n  (+ (__spawn_pid h) 1073741824))")],
   "look": [("Sys.ax", "(Ok (!= (& (memGetWord buf 0) 4294967295) 0))", "(Ok false)")],
-  "slot": [("Task.ax", "(let ((slot (+ slab (* (% arg w) slotBytes))))", "(let ((slot (+ slab (* (% (+ arg 1) w) slotBytes))))")],
+  "slot": [("Task.ax", "(let slot (+ slab (* (% arg w) slotBytes)))", "(let slot (+ slab (* (% (+ arg 1) w) slotBytes)))")],
   "limit": [("Task.ax", "        (if (> len limit)", "        (if (> len (* limit 1000))")],
   "grace": [("Task.ax", "(if (&& (== cancelling 1) (>= now graceEnd))", "(if (&& (== cancelling 2) (>= now graceEnd))")],
   # A guard's release no longer asks whose lock it is: a forked copy of
@@ -570,7 +570,7 @@ cuts = {
   # in the order it finds them ended, and not in submit order: the
   # completion-order fold MM-PAR-14 rules out.
   "completion": [("Task.ax", "                        {\n                          (set progress 1)\n                          (if (&& (== r 1) opts.failFast)", "                        {\n                          (taskDeliver sink scoped st s slab slotBytes)\n                          (set progress 1)\n                          (if (&& (== r 1) opts.failFast)"),
-                 ("Task.ax", '                (let ((k (taskDeliverKept sink scoped st (% head w) slab slotBytes keep kept)))', "                (let ((k kept))")],
+                 ("Task.ax", '                  (let k (taskDeliverKept sink scoped st (% head w) slab slotBytes keep kept))', "                  (let k kept)")],
   # Section 13. The `keep` budget is never checked.
   "keepcut": [("Task.ax", "  (if (|| (== keep 0) (!= scoped 0))\n", "  (if true\n")],
   # Section 13. A map's spawn runs in a region again, whose reset
@@ -749,7 +749,7 @@ fi
 case "$(uname -s)" in
   Darwin)
     fx="$repo_root/tests/litmus/thread-in-fork.ax"
-    if ablate_cc libcfork '(pub fn (parLibcFork cg)\n  (if (cgThreads cg)\n    (let ((t (memGetWord cg 26)))\n      (if (|| (== t 0) (== t 1))\n        1\n        0))\n    0))' '(pub fn (parLibcFork cg)\n  (if (cgThreads cg)\n    0\n    0))'; then
+    if ablate_cc libcfork '(pub fn (parLibcFork cg)\n  (if (cgThreads cg)\n    {\n      (let t (memGetWord cg 26))\n      (if (|| (== t 0) (== t 1))\n        1\n        0)\n    }\n    0))' '(pub fn (parLibcFork cg)\n  (if (cgThreads cg)\n    0\n    0))'; then
       (cd "$repo_root" && "$work/cc-libcfork/axc" build --input "$fx" --output "$work/cc-libcfork/prog") > "$work/cc-libcfork/prog.build" 2>&1
       rc=0; gate_timeout 30 "$work/cc-libcfork/prog" > "$work/cc-libcfork/out" 2>/dev/null || rc=$?
       if [[ "$rc" != 0 ]] && ! grep -q '^raw fork: 42$' "$work/cc-libcfork/out"; then

@@ -245,7 +245,7 @@ def install(ns):
         ("if", "a >= 2", "deadline"),
         ("set", "answered", "1"),
         ("L", "deadline"),
-        ("pload", "d", "st + 3 * s", "(let ((d (taskSt st s 0)))"),
+        ("pload", "d", "st + 3 * s", "(let d (taskSt st s 0))"),
         ("if", "d > 0 and (wake < 0 or d < wake)", "next", "(if (&& (> d 0) (|| (< wake 0) (< d wake)))"),
         ("set", "wake", "d"),
         ("L", "next"),
@@ -363,7 +363,7 @@ def install(ns):
     # word nobody writes, before it answers.
     F("taskChild", ["tok", "slab", "w", "lim", "beh", "x", "idle", "arg"], ["slot", "p", "r"],
       (TASK, "taskChild"), [
-        ("set", "slot", "slab + %d * (arg %% w)" % SB, "(let ((slot (+ slab (* (% arg w) slotBytes))))"),
+        ("set", "slot", "slab + %d * (arg %% w)" % SB, "(let slot (+ slab (* (% arg w) slotBytes)))"),
         ("pid", "p"),
         ("pstore", "slot + 2", "p", "(memSetWord slot 2 sysPid)"),
         ("call", "r", "taskAnswer", ["tok", "slot", "w", "lim", "beh", "x", "idle", "arg"],
@@ -382,7 +382,7 @@ def install(ns):
         ("sleepuntil", "code", "idle", "0", "c0 + x"),
         ("goto", "nap"),
         ("L", "work"),
-        ("if", "b == %d" % TRAP, "runs", "(let ((r (f i)))"),
+        ("if", "b == %d" % TRAP, "runs", "(let r (f i))"),
         ("ghost", "tTrap", ["arg // w", "72"]),
         ("ret", "72"),
         ("L", "runs"),
@@ -662,7 +662,7 @@ def install(ns):
     def d_slot_mixup(fns):
         # check-task.sh's `slot` ablation: a task answers into its neighbour's slot.
         replace(fns, "taskChild", [("set", "slot", "slab + %d * (arg %% w)" % SB,
-                                    "(let ((slot (+ slab (* (% arg w) slotBytes))))")],
+                                    "(let slot (+ slab (* (% arg w) slotBytes)))")],
                 [("set", "slot", "slab + %d * ((arg + 1) %% w)" % SB)])
 
     def d_start_after_cancel(fns):

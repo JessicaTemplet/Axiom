@@ -49,8 +49,6 @@
   (tuple_pattern)
   (list_pattern)
   (lambda)
-  (let_expression)
-  (let_binding)
   (local_binding)
   (struct_construction)
   (if_expression)

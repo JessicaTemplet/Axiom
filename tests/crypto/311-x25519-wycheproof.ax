@@ -26,68 +26,80 @@
 ; Whether every byte of `s` is zero.
 (:: allZero (-> String Bool))
 (fn (allZero s)
-  (let ((mut acc 0))
+  {
+    (let mut acc 0)
     {
       (for i in 0..(strLen s)
         (set acc (| acc (strByte s i))))
       (== acc 0)
-    }))
+    }
+  })
 
 ; What the key API answers for this case, as a string: the shared
 ; secret's bytes, "refused" for `cryptoInvalidKey`, or "error".
 (:: viaApi (-> String String String))
 ;@axiom:effect(io)
 (fn (viaApi priv pub)
-  (let (
-    (s (orDie (secretFromString priv) "secretFromString"))
-    (pk (orDie (x25519PublicKeyFromBytes pub) "x25519PublicKeyFromBytes"))
-  )
-    (let ((k (orDie (x25519KeyFromSecret s) "x25519KeyFromSecret")))
-      (let ((answer
-        (match (x25519 k pk)
-          ((Ok shared)
-            (let ((b (secretExposeCopy shared)))
+  {
+    (let s (orDie (secretFromString priv) "secretFromString"))
+    (let pk (orDie (x25519PublicKeyFromBytes pub) "x25519PublicKeyFromBytes"))
+    {
+      (let k (orDie (x25519KeyFromSecret s) "x25519KeyFromSecret"))
+      {
+        (let answer
+          (match (x25519 k pk)
+            ((Ok shared)
               {
-                (secretWipe shared)
-                b
-              })
-          )
-          ((Err e)
-            (if (== (errCode e) cryptoInvalidKey)
-              "refused"
-              "error")
-          ))))
+                (let b (secretExposeCopy shared))
+                {
+                  (secretWipe shared)
+                  b
+                }
+              }
+            )
+            ((Err e)
+              (if (== (errCode e) cryptoInvalidKey)
+                "refused"
+                "error")
+            )))
         {
           (x25519KeyWipe k)
           (secretWipe s)
           answer
-        }))))
+        }
+      }
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (raw (tallyNew "wycheproof-x25519-raw"))
-    (api (tallyNew "wycheproof-x25519-api"))
-  )
+  {
+    (let raw (tallyNew "wycheproof-x25519-raw"))
+    (let api (tallyNew "wycheproof-x25519-api"))
     {
       (for line in (katLines "wycheproof-x25519.txt")
-        (let ((f (katFields line)))
-          (let (
-            (label (concat "tcId " (concat (katText f 0) (concat " " (katText f 2)))))
-            (priv (katBytes f 3))
-            (pub (katBytes f 4))
-            (shared (katBytes f 5))
-          )
+        {
+          (let f (katFields line))
+          {
+            (let label (concat "tcId " (concat (katText f 0) (concat " " (katText f 2)))))
+            (let priv (katBytes f 3))
+            (let pub (katBytes f 4))
+            (let shared (katBytes f 5))
             {
               (match (x25519ScalarMult priv pub)
                 ((Ok got) (tallyBytes raw shared got label))
                 ((Err _) (tallyCheck raw false label)))
-              (let ((got (viaApi priv pub)))
+              {
+                (let got (viaApi priv pub))
                 (if (allZero shared)
                   (tallyCheck api (strEq got "refused")
                     (concat label ": the all-zero secret is refused"))
-                  (tallyBytes api shared got label)))
-            })))
+                  (tallyBytes api shared got label))
+              }
+            }
+          }
+        })
       (+ (tallyReport raw) (tallyReport api))
-    }))
+    }
+  })

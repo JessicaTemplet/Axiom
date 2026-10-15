@@ -15,63 +15,66 @@
 ; `text` XORed with the keystream from block `counter`.
 (:: chacha (-> Bool String String Int String String))
 (fn (chacha inPlace key nonce counter text)
-  (let (
-    (n (strLen text))
-    (out (bytesFromAddr (strData text) (strLen text)))
-    (work (strAlloc chacha20BlockBytes))
-  )
-    (let ((src
-      (if inPlace
-        (strData out)
-        (strData text))))
+  {
+    (let n (strLen text))
+    (let out (bytesFromAddr (strData text) (strLen text)))
+    (let work (strAlloc chacha20BlockBytes))
+    {
+      (let src
+        (if inPlace
+          (strData out)
+          (strData text)))
       {
         (chacha20Xor (strData key) (strData nonce) counter src (strData out) n (strData work))
         (ctWipe (strData work) chacha20BlockBytes)
         out
-      })))
+      }
+    }
+  })
 
 ; The next counter chacha20Xor answers: one past the last block used.
 (:: nextCounter (-> String String Int Int Int))
 (fn (nextCounter key nonce counter n)
-  (let (
-    (buf (strAlloc n))
-    (work (strAlloc chacha20BlockBytes))
-  )
-    (chacha20Xor (strData key) (strData nonce) counter (strData buf) (strData buf) n
-      (strData work))))
+  {
+    (let buf (strAlloc n))
+    (let work (strAlloc chacha20BlockBytes))
+    (chacha20Xor (strData key) (strData nonce) counter (strData buf) (strData buf) n (strData work))
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (rfc (tallyNew "chacha20-rfc8439"))
-    (diff (tallyNew "chacha20-openssl"))
-  )
+  {
+    (let rfc (tallyNew "chacha20-rfc8439"))
+    (let diff (tallyNew "chacha20-openssl"))
     {
       (for line in (katLines "chacha20-rfc8439.txt")
-        (let ((f (katFields line)))
-          (let (
-            (id (katText f 0))
-            (key (katBytes f 1))
-            (nonce (katBytes f 2))
-            (counter (katInt f 3))
-            (pt (katBytes f 4))
-            (ct (katBytes f 5))
-          )
+        {
+          (let f (katFields line))
+          {
+            (let id (katText f 0))
+            (let key (katBytes f 1))
+            (let nonce (katBytes f 2))
+            (let counter (katInt f 3))
+            (let pt (katBytes f 4))
+            (let ct (katBytes f 5))
             {
               (tallyBytes rfc ct (chacha false key nonce counter pt) id)
               (tallyBytes rfc pt (chacha true key nonce counter ct) (concat "decrypt " id))
-            })))
+            }
+          }
+        })
       (for line in (katLines "chacha20-diff.txt")
-        (let ((f (katFields line)))
-          (let (
-            (key (katBytes f 0))
-            (nonce (katBytes f 1))
-            (counter (katInt f 2))
-            (pt (katBytes f 3))
-            (ct (katBytes f 4))
-          )
-            (let ((id (concat (hexEncode nonce) (concat " counter " (katText f 2)))))
+        {
+          (let f (katFields line))
+          {
+            (let key (katBytes f 0))
+            (let nonce (katBytes f 1))
+            (let counter (katInt f 2))
+            (let pt (katBytes f 3))
+            (let ct (katBytes f 4))
+            {
+              (let id (concat (hexEncode nonce) (concat " counter " (katText f 2))))
               {
                 (tallyBytes diff ct (chacha false key nonce counter pt) id)
                 (tallyBytes diff ct (chacha true key nonce counter pt) (concat "in place " id))
@@ -79,6 +82,10 @@
                   (== (nextCounter key nonce counter (strLen pt))
                     (+ counter (/ (+ (strLen pt) 63) 64)))
                   (concat "next counter " id))
-              }))))
+              }
+            }
+          }
+        })
       (+ (tallyReport rfc) (tallyReport diff))
-    }))
+    }
+  })

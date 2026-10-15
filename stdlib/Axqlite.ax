@@ -80,13 +80,13 @@
 ;; cache 256 pages (1 MiB).
 (pub :: openOptions OpenOptions)
 (pub fn (openOptions)
-  (OpenOptions true false 256))
+  (OpenOptions :create true :readOnly false :cachePages 256))
 
 ;; Open a database that must already exist, for reading only, with the
 ;; same cache as `openOptions`. Every write on it is `axqReadOnly`.
 (pub :: readOnlyOptions OpenOptions)
 (pub fn (readOnlyOptions)
-  (OpenOptions false true 256))
+  (OpenOptions :create false :readOnly true :cachePages 256))
 
 ; ------------------------------------------------------------------
 ; Handles.
@@ -195,17 +195,17 @@
 ; cut at 80 bytes.
 (:: excerpt (-> String String))
 (fn (excerpt text)
-  (let (
-    (t (strTrim text))
-    (n (strLen (strTrim text)))
-    (mut out "")
-    (mut len 0)
-    (mut space false)
-    (mut i 0)
-  )
+  {
+    (let t (strTrim text))
+    (let n (strLen (strTrim text)))
+    (let mut out "")
+    (let mut len 0)
+    (let mut space false)
+    (let mut i 0)
     {
       (while (&& (< i n) (< len 80))
-        (let ((c (strByte t i)))
+        {
+          (let c (strByte t i))
           {
             (if (strIsSpace c)
               (set space true)
@@ -220,11 +220,13 @@
                 (set len (+ len 1))
               })
             (set i (+ i 1))
-          }))
+          }
+        })
       (if (|| (< i n) (> len 80))
         (concat (strSlice out 0 80) "...")
         out)
-    }))
+    }
+  })
 
 ; `r`, its error saying which statement it came from and which
 ; function ran it.
@@ -261,18 +263,19 @@
   (match r
     ((Ok n) n)
     ((Err e)
-      (let (
-        (m (__handle_get connKind c.slot))
-        (msg e.message)
-        (ctx e.context)
-        (ml (if (> (strLen msg) stashMessageMax)
-          stashMessageMax
-          (strLen msg)))
-        (cl (if (> (strLen ctx) stashContextMax)
-          stashContextMax
-          (strLen ctx)))
-        (base (+ m stashAt))
-      )
+      {
+        (let m (__handle_get connKind c.slot))
+        (let msg e.message)
+        (let ctx e.context)
+        (let ml
+          (if (> (strLen msg) stashMessageMax)
+            stashMessageMax
+            (strLen msg)))
+        (let cl
+          (if (> (strLen ctx) stashContextMax)
+            stashContextMax
+            (strLen ctx)))
+        (let base (+ m stashAt))
         {
           (__store64 base 0 e.code)
           (__store64 base 1 ml)
@@ -280,19 +283,22 @@
           (memCopy (+ base 24) (strData msg) ml)
           (memCopy (+ (+ base 24) ml) (strData ctx) cl)
           -1
-        })
+        }
+      }
     )))
 
 ; A fresh vector holding `params`, for a region to use in place of
 ; the caller's.
 (:: copyParams (-> (Vec Value) (Vec Value)))
 (fn (copyParams params)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (for v in params
         (vecPush out v))
       out
-    }))
+    }
+  })
 
 ; The count, or the error `stashResult` copied into the mapping.
 (:: unstashResult (-> Connection Int (Result Int Error)))
@@ -300,18 +306,18 @@
 (fn (unstashResult c n)
   (if (>= n 0)
     (Ok n)
-    (let (
-      (base (+ (__handle_get connKind c.slot) stashAt))
-      (ml (__load64 base 1))
-      (cl (__load64 base 2))
-      (msg (strAlloc ml))
-      (ctx (strAlloc cl))
-    )
+    {
+      (let base (+ (__handle_get connKind c.slot) stashAt))
+      (let ml (__load64 base 1))
+      (let cl (__load64 base 2))
+      (let msg (strAlloc ml))
+      (let ctx (strAlloc cl))
       {
         (memCopy (strData msg) (+ base 24) ml)
         (memCopy (strData ctx) (+ (+ base 24) ml) cl)
-        (Err (Error (__load64 base 0) msg ctx))
-      })))
+        (Err (Error :code (__load64 base 0) :message msg :context ctx))
+      }
+    }))
 
 ; ------------------------------------------------------------------
 ; Opening and closing.
@@ -325,27 +331,33 @@
 (pub fn (axqOpen path opts)
   (if (< opts.cachePages 1)
     (misuse "the page cache needs at least one page" "axqOpen")
-    (let ((pager (withContext (pagerOpen path opts.create opts.readOnly opts.cachePages)
-                   "axqOpen")?))
+    {
+      (let pager
+        (withContext (pagerOpen path opts.create opts.readOnly opts.cachePages) "axqOpen")?)
       (match (sysMapPrivate connBytes)
         ((Err e)
-          (let ((_ (pagerClose pager)))
-            (Err (errContextOf e "axqOpen")))
+          {
+            (let _ (pagerClose pager))
+            (Err (errContextOf e "axqOpen"))
+          }
         )
         ((Ok m)
-          (let ((h (__handle_new connKind m)))
+          {
+            (let h (__handle_new connKind m))
             (if (== h 0)
-              (let (
-                (_ (pagerClose pager))
-                (_ (sysUnmapPrivate m connBytes))
-              )
-                (misuse "the runtime's handle table is full" "axqOpen"))
+              {
+                (let _ (pagerClose pager))
+                (let _ (sysUnmapPrivate m connBytes))
+                (misuse "the runtime's handle table is full" "axqOpen")
+              }
               {
                 (__store64 m 0 connBytes)
                 (__store64 m cwPager (as pager Int))
-                (Ok (Connection h (__resource_new connDrop h)))
-              }))
-        )))))
+                (Ok (Connection :slot h :owner (__resource_new connDrop h)))
+              })
+          }
+        ))
+    }))
 
 ;; Close the connection, rolling back a transaction it has open. Closing
 ;; it again answers `Ok`, as `fileClose` does; any other later use stops
@@ -359,18 +371,18 @@
     (Ok 0)
     (if (> (connGet c cwReaders) 0)
       (misuse "a query is still running on this connection" "axqClose")
-      (let (
-        (pager (connPager c))
-        (m (__handle_free connKind c.slot))
-      )
-        (let (
-          (r (pagerClose pager))
-          (_ (sysUnmapPrivate m connBytes))
-          (_ (__resource_disarm c.owner))
-        )
+      {
+        (let pager (connPager c))
+        (let m (__handle_free connKind c.slot))
+        {
+          (let r (pagerClose pager))
+          (let _ (sysUnmapPrivate m connBytes))
+          (let _ (__resource_disarm c.owner))
           (match r
             ((Ok _) (Ok 0))
-            ((Err e) (Err (errContextOf e "axqClose")))))))))
+            ((Err e) (Err (errContextOf e "axqClose"))))
+        }
+      })))
 
 ;; Open the database at `path`, run `f` on the connection, and close
 ;; the connection whatever `f` answers. The answer is `f`'s, unless
@@ -383,14 +395,16 @@
   (match (axqOpen path opts)
     ((Err e) (Err e))
     ((Ok db)
-      (let ((r (f db)))
+      {
+        (let r (f db))
         (match (axqClose db)
           ((Ok _) r)
           ((Err e)
             (match r
               ((Ok _) (Err e))
               ((Err _) r))
-          )))
+          ))
+      }
     )))
 
 ; True until `owner` is closed or disarmed: the runtime clears word 1 of
@@ -399,9 +413,10 @@
 (:: ownerLive (-> Handle Bool))
 ;@axiom:effect(unsafe)
 (fn (ownerLive owner)
-  (let ((w
-    (as owner Int)))
-    (|| (== w 0) (!= (__load64 w 1) 0))))
+  {
+    (let w (as owner Int))
+    (|| (== w 0) (!= (__load64 w 1) 0))
+  })
 
 ; ------------------------------------------------------------------
 ; Values as text.
@@ -426,45 +441,46 @@
 
 (:: blobText (-> String String))
 (fn (blobText b)
-  (let (
-    (n (strLen b))
-    (out (strAlloc (+ 3 (* 2 n))))
-    (d (strData out))
-    (digits "0123456789abcdef")
-  )
+  {
+    (let n (strLen b))
+    (let out (strAlloc (+ 3 (* 2 n))))
+    (let d (strData out))
+    (let digits "0123456789abcdef")
     {
       (memPutByte d 0 120)
       (memPutByte d 1 39)
       (for i in 0..n
-        (let ((c (strByte b i)))
+        {
+          (let c (strByte b i))
           {
             (memPutByte d (+ 2 (* 2 i)) (strByte digits (>> c 4)))
             (memPutByte d (+ 3 (* 2 i)) (strByte digits (& c 15)))
-          }))
+          }
+        })
       (memPutByte d (+ 2 (* 2 n)) 39)
       out
-    }))
+    }
+  })
 
 ;; `s` as an AXQL text literal: in single quotes, each quote doubled.
 (pub :: axqlQuoteText (-> String String))
 (pub fn (axqlQuoteText s)
-  (let (
-    (n (strLen s))
-    (mut quotes 0)
-  )
+  {
+    (let n (strLen s))
+    (let mut quotes 0)
     {
       (for i in 0..n
         (if (== (strByte s i) 39)
           (set quotes (+ quotes 1))))
-      (let (
-        (out (strAlloc (+ (+ n quotes) 2)))
-        (d (strData out))
-        (mut k 1)
-      )
+      {
+        (let out (strAlloc (+ (+ n quotes) 2)))
+        (let d (strData out))
+        (let mut k 1)
         {
           (memPutByte d 0 39)
           (for i in 0..n
-            (let ((c (strByte s i)))
+            {
+              (let c (strByte s i))
               {
                 (memPutByte d k c)
                 (set k (+ k 1))
@@ -473,11 +489,14 @@
                     (memPutByte d k 39)
                     (set k (+ k 1))
                   })
-              }))
+              }
+            })
           (memPutByte d k 39)
           out
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Rows.
@@ -515,11 +534,10 @@
 ;; ASCII case; the first when two share it.
 (pub :: rowIndex (-> Row String (Result Int Error)))
 (pub fn (rowIndex r name)
-  (let (
-    (n (vecLen r.names))
-    (mut i 0)
-    (mut found -1)
-  )
+  {
+    (let n (vecLen r.names))
+    (let mut i 0)
+    (let mut found -1)
     {
       (while (&& (< found 0) (< i n))
         {
@@ -532,7 +550,8 @@
           (concat (concat "no result column named " name) (axqlHint name r.names "result columns"))
           "rowIndex")
         (Ok found))
-    }))
+    }
+  })
 
 ;; The value in column `i`.
 (pub :: rowValue (-> Row Int (Result Value Error)))
@@ -563,82 +582,104 @@
 ;; Whether column `i` is NULL.
 (pub :: rowIsNull (-> Row Int (Result Bool Error)))
 (pub fn (rowIsNull r i)
-  (let ((v (rowValue r i)?))
+  {
+    (let v (rowValue r i)?)
     (match v
       ((VNull) (Ok true))
-      (_ (Ok false)))))
+      (_ (Ok false)))
+  })
 
 ;; Column `i` as an INTEGER. Any other type, NULL included, is `axqType`.
 (pub :: rowInt (-> Row Int (Result Int Error)))
 (pub fn (rowInt r i)
-  (let ((v (rowValue r i)?))
+  {
+    (let v (rowValue r i)?)
     (match v
       ((VInt n) (Ok n))
-      (_ (wrongType r i "INTEGER" v "rowInt")))))
+      (_ (wrongType r i "INTEGER" v "rowInt")))
+  })
 
 ;; Column `i` as a REAL. An INTEGER is converted, as a REAL column
 ;; converts one; any other type is `axqType`.
 (pub :: rowReal (-> Row Int (Result Float Error)))
 (pub fn (rowReal r i)
-  (let ((v (rowValue r i)?))
+  {
+    (let v (rowValue r i)?)
     (match v
       ((VReal x) (Ok x))
       ((VInt n)
         (Ok (as n Float))
       )
-      (_ (wrongType r i "REAL" v "rowReal")))))
+      (_ (wrongType r i "REAL" v "rowReal")))
+  })
 
 ;; Column `i` as TEXT.
 (pub :: rowText (-> Row Int (Result String Error)))
 (pub fn (rowText r i)
-  (let ((v (rowValue r i)?))
+  {
+    (let v (rowValue r i)?)
     (match v
       ((VText s) (Ok s))
-      (_ (wrongType r i "TEXT" v "rowText")))))
+      (_ (wrongType r i "TEXT" v "rowText")))
+  })
 
 ;; Column `i` as a BLOB's bytes.
 (pub :: rowBlob (-> Row Int (Result String Error)))
 (pub fn (rowBlob r i)
-  (let ((v (rowValue r i)?))
+  {
+    (let v (rowValue r i)?)
     (match v
       ((VBlob b) (Ok b))
-      (_ (wrongType r i "BLOB" v "rowBlob")))))
+      (_ (wrongType r i "BLOB" v "rowBlob")))
+  })
 
 ;; The value of the column named `name`.
 (pub :: rowValueNamed (-> Row String (Result Value Error)))
 (pub fn (rowValueNamed r name)
-  (let ((i (rowIndex r name)?))
-    (rowValue r i)))
+  {
+    (let i (rowIndex r name)?)
+    (rowValue r i)
+  })
 
 ;; Whether the column named `name` is NULL.
 (pub :: rowIsNullNamed (-> Row String (Result Bool Error)))
 (pub fn (rowIsNullNamed r name)
-  (let ((i (rowIndex r name)?))
-    (rowIsNull r i)))
+  {
+    (let i (rowIndex r name)?)
+    (rowIsNull r i)
+  })
 
 ;; The column named `name` as an INTEGER.
 (pub :: rowIntNamed (-> Row String (Result Int Error)))
 (pub fn (rowIntNamed r name)
-  (let ((i (rowIndex r name)?))
-    (rowInt r i)))
+  {
+    (let i (rowIndex r name)?)
+    (rowInt r i)
+  })
 
 ;; The column named `name` as a REAL.
 (pub :: rowRealNamed (-> Row String (Result Float Error)))
 (pub fn (rowRealNamed r name)
-  (let ((i (rowIndex r name)?))
-    (rowReal r i)))
+  {
+    (let i (rowIndex r name)?)
+    (rowReal r i)
+  })
 
 ;; The column named `name` as TEXT.
 (pub :: rowTextNamed (-> Row String (Result String Error)))
 (pub fn (rowTextNamed r name)
-  (let ((i (rowIndex r name)?))
-    (rowText r i)))
+  {
+    (let i (rowIndex r name)?)
+    (rowText r i)
+  })
 
 ;; The column named `name` as a BLOB's bytes.
 (pub :: rowBlobNamed (-> Row String (Result String Error)))
 (pub fn (rowBlobNamed r name)
-  (let ((i (rowIndex r name)?))
-    (rowBlob r i)))
+  {
+    (let i (rowIndex r name)?)
+    (rowBlob r i)
+  })
 
 ;; The column named `name` as an INTEGER, or `default` when it is not
 ;; one: NULL, another type, or no such column. These four readers are
@@ -688,17 +729,20 @@
             " parameters and was given ")
           (fmtInt (vecLen params))))
       "axqRun")
-    (let ((nan (nanParam params)))
+    {
+      (let nan (nanParam params))
       (if (>= nan 0)
         (axqErr axqType
           (concat (concat "parameter " (fmtInt (+ nan 1))) " is a NaN, which no statement can hold")
           "axqRun")
-        (runChecked c parsed params sink onRow)))))
+        (runChecked c parsed params sink onRow))
+    }))
 
 ; The index of the first parameter that is a REAL NaN, or -1.
 (:: nanParam (-> (Vec Value) Int))
 (fn (nanParam params)
-  (let ((mut found -1))
+  {
+    (let mut found -1)
     {
       (for (v i) in params
         (match v
@@ -708,7 +752,8 @@
           )
           (_ ())))
       found
-    }))
+    }
+  })
 
 (:: runChecked
   (-> Connection Parsed (Vec Value) Sink (-> Row (Result Bool Error)) (Result Int Error)))
@@ -727,97 +772,124 @@
 (:: readBegin (-> Connection (Result Int Error)))
 ;@axiom:effect(io)
 (fn (readBegin c)
-  (let ((pager (connPager c)))
-    (let ((_
-      (if (> (pagerLockLevel pager) 0)
-        (Ok 0)
-        (pagerBeginRead pager))?))
+  {
+    (let pager (connPager c))
+    {
+      (let _
+        (if (> (pagerLockLevel pager) 0)
+          (Ok 0)
+          (pagerBeginRead pager))?)
       {
         (connSet c cwReaders (+ (connGet c cwReaders) 1))
         (Ok 0)
-      })))
+      }
+    }
+  })
 
 (:: readEnd (-> Connection Int))
 ;@axiom:effect(io)
 (fn (readEnd c)
-  (let (
-    (pager (connPager c))
-    (n (- (connGet c cwReaders) 1))
-  )
+  {
+    (let pager (connPager c))
+    (let n (- (connGet c cwReaders) 1))
     {
       (connSet c cwReaders n)
       (if (&& (== n 0) (&& (! (inTxn c)) (! (pagerInWrite pager))))
-        (let ((_ (pagerEndRead pager)))
-          0)
+        {
+          (let _ (pagerEndRead pager))
+          0
+        }
         0)
-    }))
+    }
+  })
 
 (:: runSelect
   (-> Connection Parsed Select (Vec Value) Sink (-> Row (Result Bool Error)) (Result Int Error)))
 ;@axiom:effect(io)
 (fn (runSelect c parsed sel params sink onRow)
-  (let ((_ (readBegin c)?))
-    (let ((r (selectLocked c parsed sel params sink onRow)))
+  {
+    (let _ (readBegin c)?)
+    {
+      (let r (selectLocked c parsed sel params sink onRow))
       {
         (readEnd c)
         r
-      })))
+      }
+    }
+  })
 
 (:: selectLocked
   (-> Connection Parsed Select (Vec Value) Sink (-> Row (Result Bool Error)) (Result Int Error)))
 ;@axiom:effect(io)
 (fn (selectLocked c parsed sel params sink onRow)
-  (let ((ex (axqlExec (connPager c) parsed.text params false)))
-    (let (
-      (schema (axqlLoadSchema ex.pager)?)
-      (plan (axqlPlanSelect ex schema sel)?)
-    )
-      (let ((names (axqlPlanNames plan)))
+  {
+    (let ex (axqlExec (connPager c) parsed.text params false))
+    {
+      (let schema (axqlLoadSchema ex.pager)?)
+      (let plan (axqlPlanSelect ex schema sel)?)
+      {
+        (let names (axqlPlanNames plan))
         {
           (set sink.names names)
-          (let ((_
-            (axqlRunSelect ex plan (lambda (vals) (onRow (Row names vals))))?))
-            (Ok 0))
-        }))))
+          {
+            (let _ (axqlRunSelect ex plan (lambda (vals) (onRow (Row :names names :values vals))))?)
+            (Ok 0)
+          }
+        }
+      }
+    }
+  })
 
 (:: runWrite (-> Connection Parsed (Vec Value) (Result Int Error)))
 ;@axiom:effect(io)
 (fn (runWrite c parsed params)
-  (let ((explicit (inTxn c)))
+  {
+    (let explicit (inTxn c))
     (if (&& (> (connGet c cwReaders) 0) (|| (! explicit) (stmtIsDdl parsed.stmt)))
       (misuse
         (if explicit
           "a query is still running on this connection, and DDL waits for it"
           "a query is still running on this connection; outside a transaction, writes wait for it")
         "axqRun")
-      (let ((pager (connPager c)))
-        (let ((_ (pagerBeginWrite pager)?))
-          (let (
-            (ex (axqlExec pager parsed.text params explicit))
-            (r (axqlRunWrite ex parsed.stmt parsed.text))
-          )
+      {
+        (let pager (connPager c))
+        {
+          (let _ (pagerBeginWrite pager)?)
+          {
+            (let ex (axqlExec pager parsed.text params explicit))
+            (let r (axqlRunWrite ex parsed.stmt parsed.text))
             (match r
               ((Ok n)
-                (let ((_
-                  (if explicit
-                    (Ok 0)
-                    (withContext (pagerCommit pager) "axqRun"))?))
-                  (finishWrite c parsed ex n))
+                {
+                  (let _
+                    (if explicit
+                      (Ok 0)
+                      (withContext (pagerCommit pager) "axqRun"))?)
+                  (finishWrite c parsed ex n)
+                }
               )
               ((Err e)
                 (if explicit
                   (match (axqlUndo pager ex.undo)
                     ((Ok _) (Err e))
                     ((Err _)
-                      (let ((_ (pagerRollback pager)))
+                      {
+                        (let _ (pagerRollback pager))
                         {
                           (endTxn c)
                           (Err (errContextOf e "axqRun, which then rolled back the transaction"))
-                        })
+                        }
+                      }
                     ))
-                  (let ((_ (pagerRollback pager)))
-                    (Err e)))
-              ))))))))
+                  {
+                    (let _ (pagerRollback pager))
+                    (Err e)
+                  })
+              ))
+          }
+        }
+      })
+  })
 
 ; Record what a successful write did.
 (:: finishWrite (-> Connection Parsed Exec Int (Result Int Error)))
@@ -865,7 +937,8 @@
     (misuse "no transaction is open" where)
     (if (> (connGet c cwReaders) 0)
       (misuse "a query is still running on this connection" where)
-      (let ((pager (connPager c)))
+      {
+        (let pager (connPager c))
         {
           (endTxn c)
           (if (pagerInWrite pager)
@@ -873,7 +946,8 @@
             (if (> (pagerLockLevel pager) 0)
               (withContext (pagerEndRead pager) where)
               (Ok 0)))
-        }))))
+        }
+      })))
 
 (:: txnRollback (-> Connection String (Result Int Error)))
 ;@axiom:effect(io)
@@ -882,13 +956,15 @@
     (misuse "no transaction is open" where)
     (if (> (connGet c cwReaders) 0)
       (misuse "a query is still running on this connection" where)
-      (let ((pager (connPager c)))
+      {
+        (let pager (connPager c))
         {
           (endTxn c)
           (if (> (pagerLockLevel pager) 0)
             (withContext (pagerRollback pager) where)
             (Ok 0))
-        }))))
+        }
+      })))
 
 ;; Open a transaction. Statements then run inside it until `axqCommit`
 ;; or `axqRollback`; one that fails is undone and the transaction stays
@@ -899,19 +975,25 @@
 (pub fn (axqBegin c)
   (if (inTxn c)
     (misuse "a transaction is already open" "axqBegin")
-    (let ((h (__handle_new txnKind c.slot)))
+    {
+      (let h (__handle_new txnKind c.slot))
       (if (== h 0)
         (misuse "the runtime's handle table is full" "axqBegin")
         (match (txnOpen c h)
           ((Ok _)
-            (Ok (Transaction h (__resource_new (lambda (slot) (txnDrop c slot)) h) c))
+            (Ok
+              (Transaction
+                :slot h
+                :owner (__resource_new (lambda (slot) (txnDrop c slot)) h)
+                :connection c))
           )
           ((Err e)
             {
               (__handle_free txnKind h)
               (Err e)
             }
-          ))))))
+          )))
+    }))
 
 ; The connection of a transaction handle, retiring the handle. A
 ; transaction handle used again stops the program with status 85.
@@ -930,25 +1012,25 @@
 (pub :: axqCommit (-> Transaction (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (axqCommit t)
-  (let (
-    (h t.slot)
-    (c (txnFinish t))
-  )
+  {
+    (let h t.slot)
+    (let c (txnFinish t))
     (if (|| (! (inTxn c)) (!= (connGet c cwTxnHandle) h))
       (misuse "this transaction has already ended" "axqCommit")
-      (txnCommit c "axqCommit"))))
+      (txnCommit c "axqCommit"))
+  })
 
 ;; Roll the transaction back.
 (pub :: axqRollback (-> Transaction (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (axqRollback t)
-  (let (
-    (h t.slot)
-    (c (txnFinish t))
-  )
+  {
+    (let h t.slot)
+    (let c (txnFinish t))
     (if (|| (! (inTxn c)) (!= (connGet c cwTxnHandle) h))
       (misuse "this transaction has already ended" "axqRollback")
-      (txnRollback c "axqRollback"))))
+      (txnRollback c "axqRollback"))
+  })
 
 ;; Run `f` in a transaction: commit when it answers `Ok`, roll back when
 ;; it answers `Err`, and answer what it answered (or the commit's
@@ -956,16 +1038,22 @@
 (pub :: axqTransaction (-> Connection (-> Connection (Result a Error)) (Result a Error)))
 ;@axiom:effect(io)
 (pub fn (axqTransaction c f)
-  (let ((t (withContext (axqBegin c) "axqTransaction")?))
+  {
+    (let t (withContext (axqBegin c) "axqTransaction")?)
     (match (f c)
       ((Ok v)
-        (let ((_ (axqCommit t)?))
-          (Ok v))
+        {
+          (let _ (axqCommit t)?)
+          (Ok v)
+        }
       )
       ((Err e)
-        (let ((_ (axqRollback t)))
-          (Err e))
-      ))))
+        {
+          (let _ (axqRollback t))
+          (Err e)
+        }
+      ))
+  })
 
 ;; Whether a transaction is open.
 (pub :: axqInTransaction (-> Connection Bool))
@@ -1002,8 +1090,10 @@
 (:: execText (-> Connection String (Result Int Error)))
 ;@axiom:effect(io)
 (fn (execText c text)
-  (let ((parsed (inStatement (axqlParse text) text "axqExec")?))
-    (inStatement (runParsed c parsed vecNew (Sink vecNew) dropRows) text "axqExec")))
+  {
+    (let parsed (inStatement (axqlParse text) text "axqExec")?)
+    (inStatement (runParsed c parsed vecNew (Sink :names vecNew) dropRows) text "axqExec")
+  })
 
 ;; Run a script of statements separated by `;`, such as a migration, in
 ;; one transaction: all of them or none. Outside a transaction it opens
@@ -1021,7 +1111,8 @@
 (:: execScript (-> Connection String (Result Int Error)))
 ;@axiom:effect(io)
 (fn (execScript c script)
-  (let ((stmts (inStatement (axqlParseScript script) script "axqExecBatch")?))
+  {
+    (let stmts (inStatement (axqlParseScript script) script "axqExecBatch")?)
     (if (hasTxnControl stmts)
       (inStatement
         (misuse "a batch runs in one transaction and can't hold BEGIN, COMMIT or ROLLBACK"
@@ -1029,20 +1120,28 @@
         script "axqExecBatch")
       (if (inTxn c)
         (batchInside c stmts)
-        (let ((_ (inStatement (txnOpen c 0) script "axqExecBatch")?))
+        {
+          (let _ (inStatement (txnOpen c 0) script "axqExecBatch")?)
           (match (batchRun c stmts 0 0)
             ((Ok n)
-              (let ((_ (inStatement (txnCommit c "axqExecBatch") script "axqExecBatch")?))
-                (Ok n))
+              {
+                (let _ (inStatement (txnCommit c "axqExecBatch") script "axqExecBatch")?)
+                (Ok n)
+              }
             )
             ((Err e)
-              (let ((_ (txnRollback c "axqExecBatch")))
-                (Err e))
-            )))))))
+              {
+                (let _ (txnRollback c "axqExecBatch"))
+                (Err e)
+              }
+            ))
+        }))
+  })
 
 (:: hasTxnControl (-> (Vec Parsed) Bool))
 (fn (hasTxnControl stmts)
-  (let ((mut found false))
+  {
+    (let mut found false)
     {
       (for p in stmts
         (match p.stmt
@@ -1057,28 +1156,33 @@
           )
           (_ ())))
       found
-    }))
+    }
+  })
 
 (:: batchRun (-> Connection (Vec Parsed) Int Int (Result Int Error)))
 ;@axiom:effect(io)
 (fn (batchRun c stmts i total)
   (if (>= i (vecLen stmts))
     (Ok total)
-    (let ((p (vecGet stmts i)))
-      (let ((n (inStatement (runParsed c p vecNew (Sink vecNew) dropRows) p.text "axqExecBatch")?))
-        (batchRun c stmts (+ i 1) (+ total n))))))
+    {
+      (let p (vecGet stmts i))
+      {
+        (let n
+          (inStatement (runParsed c p vecNew (Sink :names vecNew) dropRows) p.text "axqExecBatch")?)
+        (batchRun c stmts (+ i 1) (+ total n))
+      }
+    }))
 
 ; A batch inside the caller's transaction: each statement's undo log is
 ; kept, so a failure can undo the statements before it too.
 (:: batchInside (-> Connection (Vec Parsed) (Result Int Error)))
 ;@axiom:effect(io)
 (fn (batchInside c stmts)
-  (let (
-    (pager (connPager c))
-    (all vecNew)
-    (mut total 0)
-    (mut failure None)
-  )
+  {
+    (let pager (connPager c))
+    (let all vecNew)
+    (let mut total 0)
+    (let mut failure None)
     {
       (for p in stmts
         (if (isNone failure)
@@ -1095,16 +1199,19 @@
           (match (axqlUndo pager all)
             ((Ok _) (Err e))
             ((Err _)
-              (let ((_ (pagerRollback pager)))
+              {
+                (let _ (pagerRollback pager))
                 {
                   (endTxn c)
                   (Err
                     (errContextOf e
                       (concat (errContext e) ", which then rolled back the transaction")))
-                })
+                }
+              }
             ))
         ))
-    }))
+    }
+  })
 
 ; One statement of a batch inside a transaction. A write is logged into
 ; `all` as well as undone on its own failure.
@@ -1112,14 +1219,15 @@
 ;@axiom:effect(io)
 (fn (batchStep c p all)
   (match p.stmt
-    ((SSelect _) (runParsed c p vecNew (Sink vecNew) dropRows))
+    ((SSelect _) (runParsed c p vecNew (Sink :names vecNew) dropRows))
     (_
-      (let ((pager (connPager c)))
-        (let ((_ (pagerBeginWrite pager)?))
-          (let (
-            (ex (axqlExec pager p.text vecNew true))
-            (r (axqlRunWrite ex p.stmt p.text))
-          )
+      {
+        (let pager (connPager c))
+        {
+          (let _ (pagerBeginWrite pager)?)
+          {
+            (let ex (axqlExec pager p.text vecNew true))
+            (let r (axqlRunWrite ex p.stmt p.text))
             (match r
               ((Ok n)
                 {
@@ -1132,7 +1240,10 @@
                 (match (axqlUndo pager ex.undo)
                   ((Ok _) (Err e))
                   ((Err u) (Err u)))
-              )))))
+              ))
+          }
+        }
+      }
     )))
 
 ; ------------------------------------------------------------------
@@ -1164,26 +1275,28 @@
 (:: stmtConn (-> Statement Connection))
 ;@axiom:effect(unsafe)
 (fn (stmtConn s)
-  (let ((c s.connection))
+  {
+    (let c s.connection)
     {
       (stmtMap s)
       (__handle_get connKind c.slot)
       c
-    }))
+    }
+  })
 
 ;; The statement's text, copied into the caller's arena.
 (pub :: axqStatementText (-> Statement String))
 ;@axiom:effect(unsafe)
 (pub fn (axqStatementText s)
-  (let (
-    (m (stmtMap s))
-    (n (__load64 m 2))
-    (out (strAlloc n))
-  )
+  {
+    (let m (stmtMap s))
+    (let n (__load64 m 2))
+    (let out (strAlloc n))
     {
       (memCopy (strData out) (+ m stmtHeader) n)
       out
-    }))
+    }
+  })
 
 ;; How many parameters the statement takes.
 (pub :: axqParamCount (-> Statement Int))
@@ -1198,22 +1311,23 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (axqPrepare c text)
-  (let (
-    (parsed (inStatement (axqlParse text) text "axqPrepare")?)
-    (_ (inStatement (checkParsed c parsed) text "axqPrepare")?)
-  )
-    (let (
-      (n (strLen text))
-      (len (+ stmtHeader (+ n 1)))
-    )
+  {
+    (let parsed (inStatement (axqlParse text) text "axqPrepare")?)
+    (let _ (inStatement (checkParsed c parsed) text "axqPrepare")?)
+    {
+      (let n (strLen text))
+      (let len (+ stmtHeader (+ n 1)))
       (match (sysMapPrivate len)
         ((Err e) (inStatement (Err e) text "axqPrepare"))
         ((Ok m)
-          (let ((h (__handle_new stmtKind m)))
+          {
+            (let h (__handle_new stmtKind m))
             (if (== h 0)
-              (let ((_ (sysUnmapPrivate m len)))
+              {
+                (let _ (sysUnmapPrivate m len))
                 (inStatement (misuse "the runtime's handle table is full" "axqPrepare") text
-                  "axqPrepare"))
+                  "axqPrepare")
+              }
               {
                 (__store64 m 0 len)
                 (__store64 m 1 c.slot)
@@ -1224,9 +1338,12 @@
                     1
                     0))
                 (memCopy (+ m stmtHeader) (strData text) n)
-                (Ok (Statement h (__resource_new stmtDrop h) c))
-              }))
-        )))))
+                (Ok (Statement :slot h :owner (__resource_new stmtDrop h) :connection c))
+              })
+          }
+        ))
+    }
+  })
 
 ; Resolve a parsed statement's names under a read lock.
 (:: checkParsed (-> Connection Parsed (Result Int Error)))
@@ -1239,20 +1356,28 @@
       ((SCommit) (Ok 0))
       ((SRollback) (Ok 0))
       (_
-        (let ((_ (readBegin c)?))
-          (let ((r (checkLocked c parsed)))
+        {
+          (let _ (readBegin c)?)
+          {
+            (let r (checkLocked c parsed))
             {
               (readEnd c)
               r
-            }))
+            }
+          }
+        }
       ))))
 
 (:: checkLocked (-> Connection Parsed (Result Int Error)))
 ;@axiom:effect(io)
 (fn (checkLocked c parsed)
-  (let ((ex (axqlExec (connPager c) parsed.text vecNew false)))
-    (let ((schema (axqlLoadSchema ex.pager)?))
-      (axqlCheckNames ex schema parsed.stmt))))
+  {
+    (let ex (axqlExec (connPager c) parsed.text vecNew false))
+    {
+      (let schema (axqlLoadSchema ex.pager)?)
+      (axqlCheckNames ex schema parsed.stmt)
+    }
+  })
 
 ;; Finalize the statement, freeing its mapping. Finalizing it again
 ;; answers `Ok`; any other later use stops the program with status 85.
@@ -1262,30 +1387,32 @@
 (pub fn (axqFinalize s)
   (if (! (ownerLive s.owner))
     (Ok 0)
-    (let (
-      (m (__handle_free stmtKind s.slot))
-      (r (sysUnmapPrivate m (__load64 m 0)))
-    )
+    {
+      (let m (__handle_free stmtKind s.slot))
+      (let r (sysUnmapPrivate m (__load64 m 0)))
       {
         (__resource_disarm s.owner)
         r
-      })))
+      }
+    }))
 
 ; The statement's text parsed again.
 (:: reparse (-> Statement String (Result Parsed Error)))
 (fn (reparse s where)
-  (let ((text (axqStatementText s)))
-    (inStatement (axqlParse text) text where)))
+  {
+    (let text (axqStatementText s))
+    (inStatement (axqlParse text) text where)
+  })
 
 ;; The index in a statement's parameter vector (from 0) of the named
 ;; parameter `name`, written with its colon: `":id"`.
 (pub :: axqParamIndex (-> Statement String (Result Int Error)))
 (pub fn (axqParamIndex s name)
-  (let ((parsed (reparse s "axqParamIndex")?))
-    (let (
-      (names parsed.paramNames)
-      (mut found -1)
-    )
+  {
+    (let parsed (reparse s "axqParamIndex")?)
+    {
+      (let names parsed.paramNames)
+      (let mut found -1)
       {
         (for (n i) in names
           (if (&& (< found 0) (strEq n name))
@@ -1295,7 +1422,9 @@
             (misuse (concat "the statement has no parameter named " name) "axqParamIndex")
             parsed.text "axqParamIndex")
           (Ok found))
-      })))
+      }
+    }
+  })
 
 ;; Run a statement that returns no rows with `params`, one per
 ;; parameter. Answers the rows changed. A SELECT is `axqMisuse`: use
@@ -1303,41 +1432,51 @@
 (pub :: axqRun (-> Statement (Vec Value) (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (axqRun s params)
-  (let ((c (stmtConn s)))
+  {
+    (let c (stmtConn s))
     (unstashResult c
       (region stmt
-        (stashResult c (runStatement c s (copyParams params)))))))
+        (stashResult c (runStatement c s (copyParams params)))))
+  })
 
 (:: runStatement (-> Connection Statement (Vec Value) (Result Int Error)))
 ;@axiom:effect(io)
 (fn (runStatement c s params)
-  (let ((parsed (reparse s "axqRun")?))
+  {
+    (let parsed (reparse s "axqRun")?)
     (if (stmtIsQuery parsed.stmt)
       (inStatement (misuse "the statement returns rows: use axqQuery or axqQueryEach" "axqRun")
         parsed.text "axqRun")
-      (inStatement (runParsed c parsed params (Sink vecNew) dropRows) parsed.text "axqRun"))))
+      (inStatement (runParsed c parsed params (Sink :names vecNew) dropRows) parsed.text "axqRun"))
+  })
 
 ;; Run a SELECT with `params` and answer all its rows.
 (pub :: axqQuery (-> Statement (Vec Value) (Result Rows Error)))
 ;@axiom:effect(io)
 (pub fn (axqQuery s params)
-  (let ((c (stmtConn s)))
-    (let ((parsed (reparse s "axqQuery")?))
-      (queryParsed c parsed params "axqQuery"))))
+  {
+    (let c (stmtConn s))
+    {
+      (let parsed (reparse s "axqQuery")?)
+      (queryParsed c parsed params "axqQuery")
+    }
+  })
 
 (:: queryParsed (-> Connection Parsed (Vec Value) String (Result Rows Error)))
 ;@axiom:effect(io)
 (fn (queryParsed c parsed params where)
   (if (! (stmtIsQuery parsed.stmt))
     (inStatement (misuse "the statement returns no rows: use axqRun" where) parsed.text where)
-    (let (
-      (acc vecNew)
-      (sink (Sink vecNew))
-    )
-      (let ((_
-        (inStatement (runParsed c parsed params sink (lambda (r) (collectRow acc r))) parsed.text
-          where)?))
-        (Ok (Rows sink.names acc))))))
+    {
+      (let acc vecNew)
+      (let sink (Sink :names vecNew))
+      {
+        (let _
+          (inStatement (runParsed c parsed params sink (lambda (r) (collectRow acc r))) parsed.text
+            where)?)
+        (Ok (Rows :columns sink.names :rows acc))
+      }
+    }))
 
 (:: collectRow (-> (Vec Row) Row (Result Bool Error)))
 (fn (collectRow acc r)
@@ -1352,9 +1491,13 @@
 (pub :: axqQueryEach (-> Statement (Vec Value) (-> Row (Result Bool Error)) (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (axqQueryEach s params f)
-  (let ((c (stmtConn s)))
-    (let ((parsed (reparse s "axqQueryEach")?))
-      (eachParsed c parsed params f "axqQueryEach"))))
+  {
+    (let c (stmtConn s))
+    {
+      (let parsed (reparse s "axqQueryEach")?)
+      (eachParsed c parsed params f "axqQueryEach")
+    }
+  })
 
 ; How many rows a callback saw, and the failure it answered, which is
 ; handed back exactly as it answered it.
@@ -1368,17 +1511,19 @@
 (fn (eachParsed c parsed params f where)
   (if (! (stmtIsQuery parsed.stmt))
     (inStatement (misuse "the statement returns no rows: use axqRun" where) parsed.text where)
-    (let (
-      (count (Counter 0 None))
-      (sink (Sink vecNew))
-      (r (runParsed c parsed params sink (lambda (r) (countRow count f r))))
-    )
+    {
+      (let count (Counter :n 0 :failure None))
+      (let sink (Sink :names vecNew))
+      (let r (runParsed c parsed params sink (lambda (r) (countRow count f r))))
       (match count.failure
         ((Some e) (Err e))
         ((None)
-          (let ((_ (inStatement r parsed.text where)?))
-            (Ok count.n))
-        )))))
+          {
+            (let _ (inStatement r parsed.text where)?)
+            (Ok count.n)
+          }
+        ))
+    }))
 
 (:: countRow (-> Counter (-> Row (Result Bool Error)) Row (Result Bool Error)))
 (fn (countRow count f r)
@@ -1399,11 +1544,11 @@
 ; `Axqlite.AxqlMacro` build them.
 ; ------------------------------------------------------------------
 ;; A statement's text with no parameters: `(axqSql "SELECT 1")` is
-;; `(Query "SELECT 1" vecNew)` without building the empty vector.
-;; Give the parameters with `(Query text params)`.
+;; `(Query :text "SELECT 1" :params vecNew)` without building the empty vector.
+;; Give the parameters with `(Query :text text :params params)`.
 (pub :: axqSql (-> String Query))
 (pub fn (axqSql text)
-  (Query text vecNew))
+  (Query :text text :params vecNew))
 
 ;; Run a query that returns no rows. Answers the rows changed.
 (pub :: axqRunOn (-> Connection Query (Result Int Error)))
@@ -1411,59 +1556,71 @@
 (pub fn (axqRunOn c q)
   (unstashResult c
     (region stmt
-      (stashResult c (runQuery c (Query (strDup q.text) (copyParams q.params)))))))
+      (stashResult c (runQuery c (Query :text (strDup q.text) :params (copyParams q.params)))))))
 
 (:: runQuery (-> Connection Query (Result Int Error)))
 ;@axiom:effect(io)
 (fn (runQuery c q)
-  (let ((parsed (inStatement (axqlParse q.text) q.text "axqRunOn")?))
+  {
+    (let parsed (inStatement (axqlParse q.text) q.text "axqRunOn")?)
     (if (stmtIsQuery parsed.stmt)
       (inStatement (misuse "the query returns rows: use axqQueryOn or axqQueryEachOn" "axqRunOn")
         q.text "axqRunOn")
-      (inStatement (runParsed c parsed q.params (Sink vecNew) dropRows) q.text "axqRunOn"))))
+      (inStatement (runParsed c parsed q.params (Sink :names vecNew) dropRows) q.text "axqRunOn"))
+  })
 
 ;; Run a query and answer all its rows.
 (pub :: axqQueryOn (-> Connection Query (Result Rows Error)))
 ;@axiom:effect(io)
 (pub fn (axqQueryOn c q)
-  (let ((parsed (inStatement (axqlParse q.text) q.text "axqQueryOn")?))
-    (queryParsed c parsed q.params "axqQueryOn")))
+  {
+    (let parsed (inStatement (axqlParse q.text) q.text "axqQueryOn")?)
+    (queryParsed c parsed q.params "axqQueryOn")
+  })
 
 ;; Run a query and answer just its rows, without the `Rows` wrapper:
 ;; the everyday form when the column names are not needed.
 (pub :: axqAll (-> Connection Query (Result (Vec Row) Error)))
 ;@axiom:effect(io)
 (pub fn (axqAll c q)
-  (let ((rs (axqQueryOn c q)?))
-    (Ok rs.rows)))
+  {
+    (let rs (axqQueryOn c q)?)
+    (Ok rs.rows)
+  })
 
 ;; Run a query, calling `f` with each row as it is produced, as
 ;; `axqQueryEach` does.
 (pub :: axqQueryEachOn (-> Connection Query (-> Row (Result Bool Error)) (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (axqQueryEachOn c q f)
-  (let ((parsed (inStatement (axqlParse q.text) q.text "axqQueryEachOn")?))
-    (eachParsed c parsed q.params f "axqQueryEachOn")))
+  {
+    (let parsed (inStatement (axqlParse q.text) q.text "axqQueryEachOn")?)
+    (eachParsed c parsed q.params f "axqQueryEachOn")
+  })
 
 ;; Run a query and answer `f` of each row, stopping at the first `Err`
 ;; from the query or from `f`.
 (pub :: axqQueryMap (-> Connection Query (-> Row (Result a Error)) (Result (Vec a) Error)))
 ;@axiom:effect(io)
 (pub fn (axqQueryMap c q f)
-  (let (
-    (out vecNew)
-    (r (axqQueryEachOn c q (lambda (row) (mapRow out f row))))
-  )
-    (let ((_ r?))
-      (Ok out))))
+  {
+    (let out vecNew)
+    (let r (axqQueryEachOn c q (lambda (row) (mapRow out f row))))
+    {
+      (let _ r?)
+      (Ok out)
+    }
+  })
 
 (:: mapRow (-> (Vec a) (-> Row (Result a Error)) Row (Result Bool Error)))
 (fn (mapRow out f row)
-  (let ((v (f row)?))
+  {
+    (let v (f row)?)
     {
       (vecPush out v)
       (Ok true)
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; One row, one value.
@@ -1483,10 +1640,13 @@
 (pub :: axqQueryOne (-> Connection Query (Result (Option Row) Error)))
 ;@axiom:effect(io)
 (pub fn (axqQueryOne c q)
-  (let ((first (FirstRow None)))
-    (let ((_
-      (axqQueryEachOn c q (lambda (r) (keepFirst first r)))?))
-      (Ok first.row))))
+  {
+    (let first (FirstRow :row None))
+    {
+      (let _ (axqQueryEachOn c q (lambda (r) (keepFirst first r)))?)
+      (Ok first.row)
+    }
+  })
 
 ;; The INTEGER in the first column of the first row a query answers,
 ;; such as `SELECT count(*) FROM t`. No row is `axqNotFound`; NULL or
@@ -1494,26 +1654,30 @@
 (pub :: axqQueryInt (-> Connection Query (Result Int Error)))
 ;@axiom:effect(io)
 (pub fn (axqQueryInt c q)
-  (let ((got (axqQueryOne c q)?))
+  {
+    (let got (axqQueryOne c q)?)
     (match got
       ((Some r) (inStatement (rowInt r 0) q.text "axqQueryInt"))
       ((None)
         (inStatement (axqErr axqNotFound "the query found no row" "axqQueryInt") q.text
           "axqQueryInt")
-      ))))
+      ))
+  })
 
 ;; The TEXT in the first column of the first row a query answers.
 ;; No row is `axqNotFound`; NULL or another type is `axqType`.
 (pub :: axqQueryText (-> Connection Query (Result String Error)))
 ;@axiom:effect(io)
 (pub fn (axqQueryText c q)
-  (let ((got (axqQueryOne c q)?))
+  {
+    (let got (axqQueryOne c q)?)
     (match got
       ((Some r) (inStatement (rowText r 0) q.text "axqQueryText"))
       ((None)
         (inStatement (axqErr axqNotFound "the query found no row" "axqQueryText") q.text
           "axqQueryText")
-      ))))
+      ))
+  })
 
 ; ------------------------------------------------------------------
 ; The schema.
@@ -1541,15 +1705,19 @@
 (:: withSchema (-> Connection String (-> Schema (Result a Error)) (Result a Error)))
 ;@axiom:effect(io)
 (fn (withSchema c where f)
-  (let ((_ (withContext (readBegin c) where)?))
-    (let ((r
-      (match (axqlLoadSchema (connPager c))
-        ((Ok s) (f s))
-        ((Err e) (Err e)))))
+  {
+    (let _ (withContext (readBegin c) where)?)
+    {
+      (let r
+        (match (axqlLoadSchema (connPager c))
+          ((Ok s) (f s))
+          ((Err e) (Err e))))
       {
         (readEnd c)
         (withContext r where)
-      })))
+      }
+    }
+  })
 
 ;; The names of the database's tables, in the order they were created.
 (pub :: axqTables (-> Connection (Result (Vec String) Error)))
@@ -1559,17 +1727,24 @@
 
 (:: columnInfos (-> TableDef (Vec ColumnInfo)))
 (fn (columnInfos t)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (for col in t.cols
         (vecPush out
-          (ColumnInfo col.name
-            (if (strIsEmpty col.link)
-              (typeName col.ctype)
-              "LINK")
-            col.notNull col.primaryKey col.link col.text)))
+          (ColumnInfo
+            :name col.name
+            :columnType
+              (if (strIsEmpty col.link)
+                (typeName col.ctype)
+                "LINK")
+            :notNull col.notNull
+            :primaryKey col.primaryKey
+            :link col.link
+            :text col.text)))
       out
-    }))
+    }
+  })
 
 ;; The columns of table `table`, in order. A table that doesn't exist
 ;; is `axqSchema`.
@@ -1578,24 +1753,32 @@
 (pub fn (axqColumns c table)
   (withSchema c "axqColumns"
     (lambda (s)
-      (let ((t (axqlTableDef s table)?))
-        (Ok (columnInfos t)))
+      {
+        (let t (axqlTableDef s table)?)
+        (Ok (columnInfos t))
+      }
     )))
 
 (:: indexInfos (-> TableDef (Vec IndexInfo)))
 (fn (indexInfos t)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (for ix in t.indexes
-        (let ((names vecNew))
+        {
+          (let names vecNew)
           {
             (for ci in ix.cols
-              (let ((col (vecGet t.cols ci)))
-                (vecPush names col.name)))
-            (vecPush out (IndexInfo ix.name ix.unique names))
-          }))
+              {
+                (let col (vecGet t.cols ci))
+                (vecPush names col.name)
+              })
+            (vecPush out (IndexInfo :name ix.name :unique ix.unique :columns names))
+          }
+        })
       out
-    }))
+    }
+  })
 
 ;; The indices of table `table`, in the order they were created.
 (pub :: axqIndexes (-> Connection String (Result (Vec IndexInfo) Error)))
@@ -1603,8 +1786,10 @@
 (pub fn (axqIndexes c table)
   (withSchema c "axqIndexes"
     (lambda (s)
-      (let ((t (axqlTableDef s table)?))
-        (Ok (indexInfos t)))
+      {
+        (let t (axqlTableDef s table)?)
+        (Ok (indexInfos t))
+      }
     )))
 
 ; ------------------------------------------------------------------
@@ -1613,15 +1798,15 @@
 ; `parts` joined into one string, copied once.
 (:: joinParts (-> (Vec String) String))
 (fn (joinParts parts)
-  (let ((mut n 0))
+  {
+    (let mut n 0)
     {
       (for x in parts
         (set n (+ n (strLen x))))
-      (let (
-        (out (strAlloc n))
-        (d (strData out))
-        (mut at 0)
-      )
+      {
+        (let out (strAlloc n))
+        (let d (strData out))
+        (let mut at 0)
         {
           (for x in parts
             {
@@ -1629,16 +1814,17 @@
               (set at (+ at (strLen x)))
             })
           out
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; Every table's definition, in the order they were created.
 (:: tableDefs (-> Schema (Result (Vec TableDef) Error)))
 (fn (tableDefs s)
-  (let (
-    (out vecNew)
-    (mut failure None)
-  )
+  {
+    (let out vecNew)
+    (let mut failure None)
     {
       (for name in (axqlTableNames s)
         (if (! (isSome failure))
@@ -1650,43 +1836,51 @@
       (match failure
         ((Some e) (Err e))
         ((None) (Ok out)))
-    }))
+    }
+  })
 
 ; Whether every table `t` links to, itself aside, is among `done`.
 (:: linksPlaced (-> TableDef (Vec String) Bool))
 (fn (linksPlaced t done)
-  (let ((mut ready true))
+  {
+    (let mut ready true)
     {
       (for ld in t.links
-        (let ((tgt ld.target))
+        {
+          (let tgt ld.target)
           (if (! (|| (axqlNameEq tgt.name t.name) (hasName done tgt.name)))
-            (set ready false))))
+            (set ready false))
+        })
       ready
-    }))
+    }
+  })
 
 (:: hasName (-> (Vec String) String Bool))
 (fn (hasName names name)
-  (let ((mut found false))
+  {
+    (let mut found false)
     {
       (for n in names
         (if (axqlNameEq n name)
           (set found true)))
       found
-    }))
+    }
+  })
 
 ; The tables in an order that puts every table a LINK points at before
 ; the table that links to it, or the refusal of a cycle.
 (:: dumpOrder (-> Schema (Result (Vec TableDef) Error)))
 (fn (dumpOrder s)
-  (let ((todo (tableDefs s)?))
-    (let (
-      (order vecNew)
-      (done vecNew)
-      (mut going true)
-    )
+  {
+    (let todo (tableDefs s)?)
+    {
+      (let order vecNew)
+      (let done vecNew)
+      (let mut going true)
       {
         (while going
-          (let ((mut moved false))
+          {
+            (let mut moved false)
             {
               (for t in todo
                 (if (! (|| (hasName done t.name) (! (linksPlaced t done))))
@@ -1696,24 +1890,31 @@
                     (set moved true)
                   }))
               (set going (&& moved (< (vecLen done) (vecLen todo))))
-            }))
+            }
+          })
         (if (< (vecLen done) (vecLen todo))
           (axqErr axqSchema "tables link to each other in a cycle, which a dump can't order"
             "axqDump")
           (Ok order))
-      })))
+      }
+    }
+  })
 
 ; Whether `t` has a LINK to itself.
 (:: linksItself (-> TableDef Bool))
 (fn (linksItself t)
-  (let ((mut found false))
+  {
+    (let mut found false)
     {
       (for ld in t.links
-        (let ((tgt ld.target))
+        {
+          (let tgt ld.target)
           (if (axqlNameEq tgt.name t.name)
-            (set found true))))
+            (set found true))
+        })
       found
-    }))
+    }
+  })
 
 ; The state of one table's INSERTs while it is dumped.
 (struct DumpTable
@@ -1756,12 +1957,11 @@
 (pub :: axqDump (-> Connection (Result String Error)))
 ;@axiom:effect(io)
 (pub fn (axqDump c)
-  (let ((tables
-    (withSchema c "axqDump" (lambda (s) (dumpOrder s)))?))
-    (let (
-      (parts vecNew)
-      (mut failure None)
-    )
+  {
+    (let tables (withSchema c "axqDump" (lambda (s) (dumpOrder s)))?)
+    {
+      (let parts vecNew)
+      (let mut failure None)
       {
         (vecPush parts "-- An AXQLite dump: run it with axqExecBatch on an empty database.\n")
         (for t in tables
@@ -1782,34 +1982,38 @@
             )))
         (for t in tables
           (if (! (isSome failure))
-            (let (
-              (names vecNew)
-              (hasRowid (< (axqlColumnIndex t.cols "rowid") 0))
-              (keep (vecLen t.cols))
-            )
+            {
+              (let names vecNew)
+              (let hasRowid (< (axqlColumnIndex t.cols "rowid") 0))
+              (let keep (vecLen t.cols))
               {
                 (for col in t.cols
                   (vecPush names (axqlQuoteName col.name)))
-                (let (
-                  (withId (&& hasRowid (< t.pk 0)))
-                  (head (concat (concat (concat "INSERT INTO " (axqlQuoteName t.name)) " (")
-                          (concat (joinParts (joinWith names ", "))
-                            (if (&& hasRowid (< t.pk 0))
-                              ", rowid) VALUES\n  "
-                              ") VALUES\n  "))))
-                  (d (DumpTable parts head
-                       (if (linksItself t)
-                         0
-                         1000)
-                       0))
-                  (select (concat
-                            (concat "SELECT *"
-                              (if (&& hasRowid (< t.pk 0))
-                                ", rowid"
-                                ""))
-                            (concat " FROM " (axqlQuoteName t.name))))
-                )
-                  (match (axqQueryEachOn c (Query select vecNew)
+                {
+                  (let withId (&& hasRowid (< t.pk 0)))
+                  (let head
+                    (concat (concat (concat "INSERT INTO " (axqlQuoteName t.name)) " (")
+                      (concat (joinParts (joinWith names ", "))
+                        (if (&& hasRowid (< t.pk 0))
+                          ", rowid) VALUES\n  "
+                          ") VALUES\n  "))))
+                  (let d
+                    (DumpTable
+                      :parts parts
+                      :head head
+                      :chunk
+                        (if (linksItself t)
+                          0
+                          1000)
+                      :inRow 0))
+                  (let select
+                    (concat
+                      (concat "SELECT *"
+                        (if (&& hasRowid (< t.pk 0))
+                          ", rowid"
+                          ""))
+                      (concat " FROM " (axqlQuoteName t.name))))
+                  (match (axqQueryEachOn c (Query :text select :params vecNew)
                            (lambda (r)
                              (dumpRow d
                                (if withId
@@ -1824,8 +2028,10 @@
                     )
                     ((Err e)
                       (set failure (Some e))
-                    )))
-              })))
+                    ))
+                }
+              }
+            }))
         (if (! (isSome failure))
           (match (withSchema c "axqDump" (lambda (s) (Ok s)))
             ((Ok s)
@@ -1842,12 +2048,15 @@
         (match failure
           ((Some e) (Err e))
           ((None) (Ok (joinParts parts))))
-      })))
+      }
+    }
+  })
 
 ; `xs` with `sep` between each two, as parts for `joinParts`.
 (:: joinWith (-> (Vec String) String (Vec String)))
 (fn (joinWith xs sep)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (for (x i) in xs
         {
@@ -1857,7 +2066,8 @@
           (vecPush out x)
         })
       out
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Reading a row field by field, for `axqlTable`.
@@ -1872,7 +2082,7 @@
 ;; A reader over `row`.
 (pub :: axqlReader (-> Row RowReader))
 (pub fn (axqlReader row)
-  (RowReader row None))
+  (RowReader :row row :failure None))
 
 (:: readFailed (-> RowReader Error Int))
 (fn (readFailed rd e)
@@ -1996,19 +2206,20 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (connDrop slot)
-  (let ((_
-    (axqClose (Connection slot (as 0 Handle)))))
-    0))
+  {
+    (let _ (axqClose (Connection :slot slot :owner (as 0 Handle))))
+    0
+  })
 
 (:: stmtDrop (-> Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (stmtDrop slot)
-  (let (
-    (m (__handle_free stmtKind slot))
-    (_ (sysUnmapPrivate m (__load64 m 0)))
-  )
-    0))
+  {
+    (let m (__handle_free stmtKind slot))
+    (let _ (sysUnmapPrivate m (__load64 m 0)))
+    0
+  })
 
 (:: txnDrop (-> Connection Int Int))
 ;@axiom:effect(io)
@@ -2021,9 +2232,10 @@
       0
     }
     (if (&& (inTxn c) (== (connGet c cwTxnHandle) slot))
-      (let ((_
-        (axqRollback (Transaction slot (as 0 Handle) c))))
-        0)
+      {
+        (let _ (axqRollback (Transaction :slot slot :owner (as 0 Handle) :connection c)))
+        0
+      }
       {
         (__handle_free txnKind slot)
         0

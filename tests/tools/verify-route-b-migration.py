@@ -138,6 +138,82 @@ class MigrationTests(unittest.TestCase):
         before = "(import Geo.Inner) (fn (f) (Geo::Inner::Point (Geo.Inner::Point 1)))"
         self.assertIn("(Geo::Inner::Point :x (Geo.Inner::Point :x 1))", self.migrate(before))
 
+    def test_transitive_records_keep_defining_module_qualification(self):
+        self.module("Leaf", "(pub struct Point (x : Int))")
+        self.module("Mid", "(import Leaf) (pub fn (mid) 1)")
+        source = "(import Mid) (fn (f) (Point (Leaf::Point 1)))"
+        self.assertIn("(Point :x (Leaf::Point :x 1))", self.migrate(source))
+        wrong = "(import Mid) (fn (f) (Mid::Point 1))"
+        self.assertEqual(self.migrate(wrong), wrong)
+
+    def test_selective_import_filters_its_own_module_only(self):
+        self.module("Leaf", "(pub struct Point (x : Int)) (pub fn (id x) x)")
+        self.module("Mid", "(import Leaf) (pub fn (mid) 1)")
+        for selection in ("(mid)", "()"):
+            source = f"(import Mid {selection}) (fn (f) (Point 1))"
+            self.assertIn("(Point :x 1)", self.migrate(source))
+        self.module("Selected", "(import Leaf (id)) (pub fn (selected) 1)")
+        for spelling in ("Point", "Leaf::Point", "Selected::Point"):
+            source = f"(import Selected) (fn (f) ({spelling} 1))"
+            self.assertEqual(self.migrate(source), source)
+
+    def test_transitive_diamond_deduplicates_defining_symbols(self):
+        self.module("Leaf", "(pub struct Point (x : Int))")
+        self.module("Left", "(import Leaf)")
+        self.module("Right", "(import Leaf)")
+        source = "(import Left) (import Right) (fn (f) (Point 1))"
+        self.assertIn("(Point :x 1)", self.migrate(source))
+        module = MIGRATION.Module(self.path, source, MIGRATION.read(source, self.path))
+        imported, errors = self.repository.imported_symbols(module)
+        self.assertEqual(len(imported["Point"]), 1)
+        self.assertEqual(errors, [])
+
+    def test_transitive_cycles_terminate_and_preserve_qualification(self):
+        self.module("A", "(import B) (pub struct First (a : Int))")
+        self.module("B", "(import A) (pub struct Second (b : Int))")
+        source = "(import A) (fn (f) (First (B::Second 1)))"
+        self.assertIn("(First :a (B::Second :b 1))", self.migrate(source))
+
+    def test_distinct_transitive_selection_paths_union_visibility(self):
+        self.module("Leaf", "(pub struct Point (x : Int)) (pub fn (id x) x)")
+        self.module("Left", "(import Leaf (Point))")
+        self.module("Right", "(import Leaf (id))")
+        for imports in ("(import Left) (import Right)", "(import Right) (import Left)",
+                        "(import Leaf (id)) (import Left)"):
+            self.assertIn("(Point :x 1)", self.migrate(imports + " (fn (f) (Point 1))"))
+
+    def test_entry_declarations_take_precedence_without_hiding_exported_collisions(self):
+        self.module("Leaf", "(pub struct Point (leaf : Int))")
+        source = "(import Leaf) (struct Point (own : Int)) (fn (f) (Point 1))"
+        self.assertIn("(Point :own 1)", self.migrate(source))
+        function = "(import Leaf) (fn (Point x) x) (fn (f) (Point 1))"
+        self.assertEqual(self.migrate(function), function)
+        self.module("Outer", "(import Leaf) (pub struct Point (outer : Int))")
+        with self.assertRaisesRegex(MIGRATION.MigrationError, "ambiguous constructor"):
+            self.migrate("(import Outer) (fn (f) (Point 1))")
+        explicit = "(import Outer) (fn (f) (Outer::Point (Leaf::Point 1)))"
+        self.assertIn("(Outer::Point :outer (Leaf::Point :leaf 1))", self.migrate(explicit))
+
+    def test_transitive_private_declarations_are_invisible(self):
+        self.module("Leaf", "(pub struct Point (leaf : Int)) (struct Secret (hidden : Int))")
+        self.module("Mid", "(import Leaf) (struct Point (private : Int))")
+        self.assertIn("(Point :leaf 1)", self.migrate("(import Mid) (fn (f) (Point 1))"))
+        source = "(import Mid) (fn (f) (Secret 1))"
+        self.assertEqual(self.migrate(source), source)
+
+    def test_transitive_search_keeps_entry_root_precedence(self):
+        self.module("Leaf", "(pub struct Point (root : Int))", directory=".")
+        self.module("Nested.Leaf", "(pub struct Point (wrong : Int))", directory=".")
+        self.module("Nested.Mid", "(import Leaf)", directory=".")
+        source = "(import Nested.Mid) (fn (f) (Point 1))"
+        self.assertIn("(Point :root 1)", self.migrate(source))
+
+    def test_transitive_unresolved_imports_refuse_known_constructors(self):
+        self.module("Leaf", "(pub struct Point (x : Int))")
+        self.module("Mid", "(import Leaf) (import Missing)")
+        with self.assertRaisesRegex(MIGRATION.MigrationError, "cannot prove constructor.*Missing"):
+            self.migrate("(import Mid) (fn (f) (Point 1))")
+
     def test_ambiguous_imports_refuse_with_location(self):
         self.module("A", "(pub struct Point (x : Int))")
         self.module("B", "(pub struct Point (x : Int))")
@@ -320,6 +396,22 @@ class MigrationTests(unittest.TestCase):
         self.assertIn('(let x "a\\nb")', changed)
         self.assertEqual(MIGRATION.migrate_python(changed, self.root / "source.py", self.repository), changed)
 
+    def test_python_unicode_separators_do_not_shift_source_offsets(self):
+        import ast
+        axiom = '(fn (f) (let ((x 1)) x))'
+        for separator in ("\u2028", "\u0085", "\u2029"):
+            for newline in ("\n", "\r\n"):
+                with self.subTest(separator=repr(separator), newline=repr(newline)):
+                    prefix = 'oracle = "before' + separator + 'after"' + newline
+                    container = prefix + 'sentinel = 42; source = ' + repr(axiom) + newline
+                    changed = MIGRATION.migrate_python(container, self.root / "source.py", self.repository)
+                    self.assertTrue(changed.startswith(prefix + 'sentinel = 42; source = '))
+                    tree = ast.parse(changed)
+                    self.assertEqual(ast.literal_eval(tree.body[0].value), 'before' + separator + 'after')
+                    self.assertEqual(ast.literal_eval(tree.body[1].value), 42)
+                    self.assertEqual(ast.literal_eval(tree.body[2].value), self.migrate(axiom))
+                    self.assertEqual(MIGRATION.migrate_python(changed, self.root / "source.py", self.repository), changed)
+
     def test_python_expected_and_computed_source_refuse(self):
         for container in ['expected_source = "(fn (f) (let ((x 1)) x))"\n',
                           'source = "(let ((x " + str(1) + ")) x)"\n',
@@ -396,6 +488,49 @@ let source = r#"(fn (f) (let ((x 1)) x))"#;'''
         new = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(new.returncode, 0, new.stderr)
         self.assertEqual(new.stdout, old.stdout)
+
+    @unittest.skipUnless(os.environ.get("AXIOM_ROUTE_B_BRIDGE"), "set AXIOM_ROUTE_B_BRIDGE for import visibility probes")
+    def test_compiler_agrees_on_transitive_import_visibility(self):
+        self.module("Leaf", "(pub struct Point (leaf : Int)) (struct Secret (hidden : Int)) (pub fn (id x) x)")
+        self.module("Mid", "(import Leaf) (pub fn (mid) 1)")
+        self.module("Selected", "(import Leaf (id))")
+        self.module("Left", "(import Leaf (Point))")
+        self.module("Right", "(import Leaf)")
+        self.module("Outer", "(import Leaf) (pub struct Point (own : Int))")
+        self.module("A", "(import B) (pub struct First (a : Int))")
+        self.module("B", "(import A) (pub struct Second (b : Int))")
+        env = os.environ.copy()
+        env["AXIOM_PATH"] = str(self.root / "stdlib")
+        probes = [
+            ("(import Mid) (fn (f) (Point 1))", None),
+            ("(import Mid) (fn (f) (Leaf::Point 1))", None),
+            ("(import Mid) (fn (f) (Mid::Point 1))", "AX3001"),
+            ("(import Mid (mid)) (fn (f) (Point 1))", None),
+            ("(import Mid ()) (fn (f) (Point 1))", None),
+            ("(import Mid (Point)) (fn (f) (Point 1))", "AX3023"),
+            ("(import Mid) (fn (f) (Secret 1))", "AX3001"),
+            ("(import Selected) (fn (f) (Point 1))", "AX3001"),
+            ("(import Selected) (fn (f) (Leaf::Point 1))", "AX3001"),
+            ("(import Left) (import Right) (fn (f) (Point 1))", None),
+            ("(import Leaf) (import Left) (fn (f) (Point 1))", None),
+            ("(import A) (fn (f) (B::Second 1))", None),
+            ("(import Outer) (fn (f) (Point 1))", "AX3044"),
+            ("(import Outer) (fn (f) (Outer::Point 1))", None),
+            ("(import Leaf) (struct Point (own : Int)) (fn (f) (Point 1))", None),
+            ("(import Leaf) (fn (Point x) x) (fn (f) (Point 1))", None),
+        ]
+        command = [os.environ["AXIOM_ROUTE_B_BRIDGE"], "--diagnostic-format=ai", "check", str(self.path)]
+        for source, error_code in probes:
+            with self.subTest(source=source):
+                self.path.write_text(source + "\n")
+                old = subprocess.run(command, env=env, capture_output=True, text=True)
+                self.assertEqual(old.returncode, 1 if error_code else 0, old.stdout + old.stderr)
+                if error_code:
+                    self.assertIn(error_code, old.stdout + old.stderr)
+                else:
+                    self.path.write_text(self.migrate(source) + "\n")
+                    new = subprocess.run(command, env=env, capture_output=True, text=True)
+                    self.assertEqual(new.returncode, 0, new.stdout + new.stderr)
 
 
 if __name__ == "__main__":

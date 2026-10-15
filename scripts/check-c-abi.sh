@@ -86,7 +86,7 @@ cat > "$work/usec.ax" <<'AX'
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (main)
-  (let ((s "hello, world"))
+  { (let s "hello, world")
     {
       (println (fmtInt (cAdd 20 22)))
       (println (fmtInt (cMul3 2 3 7)))
@@ -94,7 +94,7 @@ cat > "$work/usec.ax" <<'AX'
       (println (fmtInt (cLen s)))
       (println (fmtInt (cCnt s 108)))
     }
-  )
+  }
 )
 AX
 

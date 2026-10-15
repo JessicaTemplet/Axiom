@@ -40,7 +40,8 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (take c k)
-  (let ((mut sum 0))
+  {
+    (let mut sum 0)
     {
       (for i in 0..k
         (match (chanRecv c)
@@ -49,17 +50,17 @@
           )
           ((None) ())))
       sum
-    }))
+    }
+  })
 
 ; The rest, after the close: their sum.
 (:: drain (-> Chan Int))
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (drain c)
-  (let (
-    (mut sum 0)
-    (mut more 1)
-  )
+  {
+    (let mut sum 0)
+    (let mut more 1)
     {
       (while (== more 1)
         (match (chanRecv c)
@@ -70,7 +71,8 @@
             (set more 0)
           )))
       sum
-    }))
+    }
+  })
 
 ; One round: a channel of its own, lent to two bindings, drained by the
 ; parent once both have joined, and let go as this returns.
@@ -79,25 +81,29 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (round n)
-  (let ((c (made (chanNew 64))))
+  {
+    (let c (made (chanNew 64)))
     (parallel p (
       (fed (feed c n))
       (got (take c (/ n 2)))
     )
-      (+ got (drain c)))))
+      (+ got (drain c)))
+  })
 
 (:: rounds (-> Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (rounds k n)
-  (let ((mut good 0))
+  {
+    (let mut good 0)
     {
       (for i in 0..k
         (if (== (round n) (/ (* n (+ n 1)) 2))
           (set good (+ good 1))))
       good
-    }))
+    }
+  })
 
 ; In the child: wait for `go`, then send 1 .. 5 on `c` and take them
 ; back, and report their sum on `done`.
@@ -123,27 +129,37 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (handOff go done)
-  (let ((c (made (chanNew 8))))
-    (__proc_spawn (lambda (x) (childUse c go done)) 0)))
+  {
+    (let c (made (chanNew 8)))
+    (__proc_spawn (lambda (x) (childUse c go done)) 0)
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((good (rounds 2000 40)))
+  {
+    (let good (rounds 2000 40))
     {
       (println "lent rounds: {good} of 2000 lost no word")
-      (let (
-        (go (made (chanNew 1)))
-        (done (made (chanNew 1)))
-      )
-        (let ((h (handOff go done)))
+      {
+        (let go (made (chanNew 1)))
+        (let done (made (chanNew 1)))
+        {
+          (let h (handOff go done))
           {
             (chanSend go 1)
-            (let ((sum (take done 1)))
-              (println "the child's view after the parent let go: sum {sum}"))
-            (let ((st (__proc_join h)))
-              (println "the child exited {st}"))
-          }))
-    }))
+            {
+              (let sum (take done 1))
+              (println "the child's view after the parent let go: sum {sum}")
+            }
+            {
+              (let st (__proc_join h))
+              (println "the child exited {st}")
+            }
+          }
+        }
+      }
+    }
+  })

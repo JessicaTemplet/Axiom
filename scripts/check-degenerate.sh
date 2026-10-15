@@ -115,11 +115,11 @@ deg empty-arg 1 <<'AXEOF'
 AXEOF
 deg empty-let-val 0 <<'AXEOF'
 (:: main ())
-(fn (main) (let ((x ())) ()))
+(fn (main) { (let x ()) ()})
 AXEOF
 deg empty-let-body 1 <<'AXEOF'
 (:: main Int)
-(fn (main) (let ((x 1)) ()))
+(fn (main) { (let x 1) ()})
 AXEOF
 deg empty-if-test 1 <<'AXEOF'
 (:: main Int)
@@ -243,7 +243,7 @@ deg empty-data-decl 0 <<'AXEOF'
 AXEOF
 deg empty-let-binds 0 <<'AXEOF'
 (:: main ())
-(fn (main) (let () ()))
+(fn (main) {  ()})
 AXEOF
 # A lambda with no parameters can never be called, since `(f)` and `f`
 # are the same expression, so it is refused with AX3068. The case pins
@@ -460,7 +460,7 @@ deg string-escape-bad 1 <<'AXEOF'
 AXEOF
 deg ident-dot 1 <<'AXEOF'
 (:: main Int)
-(fn (main) (let ((tmp.1 5)) tmp.1))
+(fn (main) { (let tmp.1 5) tmp.1})
 AXEOF
 deg ident-only-colons 1 <<'AXEOF'
 (:: main Int)
@@ -564,7 +564,7 @@ def frame(o):
 
 # Version 2 is the one that matters: a document with an empty form in it.
 texts = ["(:: main Int)\n(fn (main) 0)\n",
-         "(:: main Int)\n(fn (main) (let ((x ())) 0))\n",
+         "(:: main Int)\n(fn (main) { (let x ()) 0})\n",
          "(:: main Int)\n(fn (main) ())\n",
          "(:: main Int)\n(fn (main) {})\n",
          "(:: main Int)\n(fn (main) 1)\n"]

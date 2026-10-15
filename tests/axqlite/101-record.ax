@@ -42,11 +42,13 @@
 (:: withByte (-> String Int Int String))
 ;@axiom:effect(unsafe)
 (fn (withByte s i b)
-  (let ((c (strDup s)))
+  {
+    (let c (strDup s))
     {
       (__store8 (strData c) i b)
       c
-    }))
+    }
+  })
 
 ;; A damaged record: a random row of edge values with one to three
 ;; bytes changed, cut short or lengthened, or, every fourth case, a
@@ -55,58 +57,69 @@
 ;@axiom:effect(unsafe)
 (fn (fuzzCase r i vals)
   (if (== (% i 4) 0)
-    (let ((s (rngBytes r (+ 2 (rngBelow r 30)) 256)))
+    {
+      (let s (rngBytes r (+ 2 (rngBelow r 30)) 256))
       {
         (__store8 (strData s) 0 0)
         (__store8 (strData s) 1 (rngBelow r 4))
         s
-      })
-    (let ((row vecNew))
+      }
+    }
+    {
+      (let row vecNew)
       {
         (for k in 0..(rngBelow r 5)
-          (let ((v (vecGet vals (rngBelow r (vecLen vals)))))
+          {
+            (let v (vecGet vals (rngBelow r (vecLen vals))))
             (match v
               ((VReal x)
                 (if (! (floatIsNan x))
                   (vecPush row v))
               )
-              (_ (vecPush row v)))))
+              (_ (vecPush row v)))
+          })
         (match (recEncode row)
           ((Err e) "")
           ((Ok rec)
-            (let ((c (strDup rec)))
+            {
+              (let c (strDup rec))
               {
                 (for k in 0..(+ 1 (rngBelow r 3))
                   (__store8 (strData c) (rngBelow r (strLen c)) (rngBelow r 256)))
-                (let ((how (rngBelow r 3)))
+                {
+                  (let how (rngBelow r 3))
                   (if (== how 0)
                     (strSlice c 0 (rngBelow r (strLen c)))
                     (if (== how 1)
                       (concat c (rngBytes r (+ 1 (rngBelow r 4)) 256))
-                      c)))
-              })
+                      c))
+                }
+              }
+            }
           ))
-      })))
+      }
+    }))
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (t tallyNew)
-    (vals edgeValues)
-  )
+  {
+    (let t tallyNew)
+    (let vals edgeValues)
     {
       ; each edge value alone, then all of them in one row
       (roundTrip t vecNew "empty row")
       (for v in vals
         (roundTrip t (vecPush vecNew v) (showValue v)))
       (roundTrip t vals "every edge value")
-      (let ((wide vecNew))
+      {
+        (let wide vecNew)
         {
           (for i in 0..3000
             (vecPush wide (VInt (* i 7919))))
           (roundTrip t wide "3000 columns")
-        })
+        }
+      }
       ; -0.0 keeps its sign bit through a record
       (match (recEncode (vecPush vecNew (VReal (floatFromBits intMin))))
         ((Ok rec)
@@ -117,20 +130,21 @@
         ((Err e) (check t false "-0.0 encode")))
       ; a NaN is refused, and so are more than 65535 columns
       (check t (== (codeOf (recEncode (vecPush vecNew (VReal floatNan)))) axqType) "NaN refused")
-      (let ((huge vecNew))
+      {
+        (let huge vecNew)
         {
           (for i in 0..65536
             (vecPush huge VNull))
           (check t (== (codeOf (recEncode huge)) axqTooBig) "65536 columns refused")
-        })
+        }
+      }
       ; every truncation of a record holding every edge value is corrupt,
       ; and so is the record with one byte more
       (match (recEncode vals)
         ((Ok rec)
-          (let (
-            (n (strLen rec))
-            (mut corrupt 0)
-          )
+          {
+            (let n (strLen rec))
+            (let mut corrupt 0)
             {
               (for k in 0..n
                 (if (isCorrupt (strSlice rec 0 k))
@@ -138,15 +152,18 @@
               (check t (== corrupt n) "every truncation is corrupt")
               (check t (isCorrupt (concat rec "x")) "a trailing byte is corrupt")
               ; every type code outside 0..4, in the first column's slot
-              (let ((mut bad 0))
+              {
+                (let mut bad 0)
                 {
                   (for code in 5..256
                     (if (isCorrupt (withByte rec 2 code))
                       (set bad (+ bad 1))))
                   (check t (== bad 251) "every unknown type code is corrupt")
-                })
+                }
+              }
               (println "a record of {n} bytes: {corrupt} truncations, all corrupt")
-            })
+            }
+          }
         )
         ((Err e) (check t false "encode every edge value")))
       ; a TEXT whose length claims more bytes than the record has
@@ -163,16 +180,17 @@
         ((Err e) (check t false "encode text row")))
       ; damaged records: every answer is either corrupt, or a record that
       ; encodes back to exactly those bytes
-      (let (
-        (r (rngNew 101))
-        (mut ok 0)
-        (mut corrupt 0)
-        (mut other 0)
-      )
+      {
+        (let r (rngNew 101))
+        (let mut ok 0)
+        (let mut corrupt 0)
+        (let mut other 0)
         {
           (for i in 0..20000
-            (let ((s (fuzzCase r i vals)))
-              (let ((len (strLen s)))
+            {
+              (let s (fuzzCase r i vals))
+              {
+                (let len (strLen s))
                 (match (recDecode s)
                   ((Err e)
                     (if (== (errCode e) axqCorrupt)
@@ -192,10 +210,14 @@
                           (set ok (+ ok 1))
                           (set other (+ other 1)))
                       ))
-                  )))))
+                  ))
+              }
+            })
           (check t (== other 0) "damaged records: corrupt or canonical")
           (check t (> ok 100) "damaged records: some decode")
           (println "damaged records: {ok} decoded and re-encoded exactly, {corrupt} corrupt")
-        })
+        }
+      }
       (tallyReport t "101-record")
-    }))
+    }
+  })

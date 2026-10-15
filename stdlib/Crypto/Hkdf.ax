@@ -66,18 +66,17 @@
 ;@axiom:ct(*prk)
 ;@axiom:effect(unsafe)
 (pub fn (hkdfSha256ExpandRaw prk prkLen info infoLen out len)
-  (let (
-    (chains (memAlloc 64))
-    (n (/ (+ len 31) 32))
-    (ctr (memAlloc 8))
-  )
-    (let (
-      (t (memAlloc (* 32 n)))
-      (m {
-        (hmacSha256Chains prk prkLen chains)
-        (hmacSha256NewChains chains)
-      })
-    )
+  {
+    (let chains (memAlloc 64))
+    (let n (/ (+ len 31) 32))
+    (let ctr (memAlloc 8))
+    {
+      (let t (memAlloc (* 32 n)))
+      (let m
+        {
+          (hmacSha256Chains prk prkLen chains)
+          (hmacSha256NewChains chains)
+        })
       {
         (for i in 1..(+ n 1)
           {
@@ -92,7 +91,9 @@
         (hkdfErase t (* 32 n))
         (hkdfErase chains 64)
         (hmacSha256Wipe m)
-      })))
+      }
+    }
+  })
 
 ;; HKDF-Expand with HMAC-SHA-512: as `hkdfSha256ExpandRaw` with 64-byte
 ;; blocks. `len` is 1 to 16320. Answers 0.
@@ -100,18 +101,17 @@
 ;@axiom:ct(*prk)
 ;@axiom:effect(unsafe)
 (pub fn (hkdfSha512ExpandRaw prk prkLen info infoLen out len)
-  (let (
-    (chains (memAlloc 128))
-    (n (/ (+ len 63) 64))
-    (ctr (memAlloc 8))
-  )
-    (let (
-      (t (memAlloc (* 64 n)))
-      (m {
-        (hmacSha512Chains prk prkLen chains)
-        (hmacSha512NewChains chains)
-      })
-    )
+  {
+    (let chains (memAlloc 128))
+    (let n (/ (+ len 63) 64))
+    (let ctr (memAlloc 8))
+    {
+      (let t (memAlloc (* 64 n)))
+      (let m
+        {
+          (hmacSha512Chains prk prkLen chains)
+          (hmacSha512NewChains chains)
+        })
       {
         (for i in 1..(+ n 1)
           {
@@ -126,7 +126,9 @@
         (hkdfErase t (* 64 n))
         (hkdfErase chains 128)
         (hmacSha512Wipe m)
-      })))
+      }
+    }
+  })
 
 ;; HKDF with HMAC-SHA-256, extract then expand, by address: `len` bytes
 ;; to `out`. The pseudorandom key lives only in scratch memory, erased
@@ -134,24 +136,28 @@
 (pub :: hkdfSha256Raw (-> Int Int Int Int Int Int Int Int Int))
 ;@axiom:ct(*ikm)
 (pub fn (hkdfSha256Raw ikm ikmLen salt saltLen info infoLen out len)
-  (let ((prk (memAlloc 32)))
+  {
+    (let prk (memAlloc 32))
     {
       (hmacSha256Raw salt saltLen ikm ikmLen prk)
       (hkdfSha256ExpandRaw prk 32 info infoLen out len)
       (hkdfErase prk 32)
-    }))
+    }
+  })
 
 ;; HKDF with HMAC-SHA-512, extract then expand, by address. `len` is 1
 ;; to 16320. Answers 0.
 (pub :: hkdfSha512Raw (-> Int Int Int Int Int Int Int Int Int))
 ;@axiom:ct(*ikm)
 (pub fn (hkdfSha512Raw ikm ikmLen salt saltLen info infoLen out len)
-  (let ((prk (memAlloc 64)))
+  {
+    (let prk (memAlloc 64))
     {
       (hmacSha512Raw salt saltLen ikm ikmLen prk)
       (hkdfSha512ExpandRaw prk 64 info infoLen out len)
       (hkdfErase prk 64)
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; SecretBytes in, SecretBytes out.
@@ -161,11 +167,13 @@
 (:: hkdfSeal (-> Int Int (Result SecretBytes Error)))
 ;@axiom:effect(io)
 (fn (hkdfSeal p n)
-  (let ((r (secretFromAddr p n)))
+  {
+    (let r (secretFromAddr p n))
     {
       (hkdfErase p n)
       r
-    }))
+    }
+  })
 
 ; An output length check for a hash of `hashLen` bytes: `Ok len`, or
 ; `cryptoInvalidLength` naming the range.
@@ -184,11 +192,13 @@
 (pub :: hkdfSha256Extract (-> String SecretBytes (Result SecretBytes Error)))
 ;@axiom:effect(io)
 (pub fn (hkdfSha256Extract salt ikm)
-  (let ((prk (memAlloc 32)))
+  {
+    (let prk (memAlloc 32))
     {
       (hmacSha256Raw (strData salt) (strLen salt) (secretAddr ikm) (secretLen ikm) prk)
       (hkdfSeal prk 32)
-    }))
+    }
+  })
 
 ;; HKDF-Expand with HMAC-SHA-256 (section 2.3): `len` bytes from `prk`
 ;; for the context `info`. `prk` must be at least 32 bytes and `len` 1
@@ -201,16 +211,20 @@
     (match (hkdfCheckLen len 32 "hkdfSha256Expand")
       ((Err e) (Err e))
       ((Ok _)
-        (let ((out (memAlloc (* 8 (/ (+ len 7) 8)))))
+        {
+          (let out (memAlloc (* 8 (/ (+ len 7) 8))))
           {
             (hkdfSha256ExpandRaw (secretAddr prk) (secretLen prk) (strData info) (strLen info) out
               len)
-            (let ((r (secretFromAddr out len)))
+            {
+              (let r (secretFromAddr out len))
               {
                 (hkdfErase out (* 8 (/ (+ len 7) 8)))
                 r
-              })
-          })
+              }
+            }
+          }
+        }
       ))))
 
 ;; HKDF with HMAC-SHA-256: extract from `ikm` with `salt`, then expand
@@ -222,16 +236,20 @@
   (match (hkdfCheckLen len 32 "hkdfSha256")
     ((Err e) (Err e))
     ((Ok _)
-      (let ((out (memAlloc (* 8 (/ (+ len 7) 8)))))
+      {
+        (let out (memAlloc (* 8 (/ (+ len 7) 8))))
         {
           (hkdfSha256Raw (secretAddr ikm) (secretLen ikm) (strData salt) (strLen salt)
             (strData info) (strLen info) out len)
-          (let ((r (secretFromAddr out len)))
+          {
+            (let r (secretFromAddr out len))
             {
               (hkdfErase out (* 8 (/ (+ len 7) 8)))
               r
-            })
-        })
+            }
+          }
+        }
+      }
     )))
 
 ;; HKDF-Extract with HMAC-SHA-512: the 64-byte pseudorandom key
@@ -239,11 +257,13 @@
 (pub :: hkdfSha512Extract (-> String SecretBytes (Result SecretBytes Error)))
 ;@axiom:effect(io)
 (pub fn (hkdfSha512Extract salt ikm)
-  (let ((prk (memAlloc 64)))
+  {
+    (let prk (memAlloc 64))
     {
       (hmacSha512Raw (strData salt) (strLen salt) (secretAddr ikm) (secretLen ikm) prk)
       (hkdfSeal prk 64)
-    }))
+    }
+  })
 
 ;; HKDF-Expand with HMAC-SHA-512: `len` bytes from `prk` for the context
 ;; `info`. `prk` must be at least 64 bytes and `len` 1 to 16320;
@@ -256,16 +276,20 @@
     (match (hkdfCheckLen len 64 "hkdfSha512Expand")
       ((Err e) (Err e))
       ((Ok _)
-        (let ((out (memAlloc (* 8 (/ (+ len 7) 8)))))
+        {
+          (let out (memAlloc (* 8 (/ (+ len 7) 8))))
           {
             (hkdfSha512ExpandRaw (secretAddr prk) (secretLen prk) (strData info) (strLen info) out
               len)
-            (let ((r (secretFromAddr out len)))
+            {
+              (let r (secretFromAddr out len))
               {
                 (hkdfErase out (* 8 (/ (+ len 7) 8)))
                 r
-              })
-          })
+              }
+            }
+          }
+        }
       ))))
 
 ;; HKDF with HMAC-SHA-512: extract from `ikm` with `salt`, then expand
@@ -277,14 +301,18 @@
   (match (hkdfCheckLen len 64 "hkdfSha512")
     ((Err e) (Err e))
     ((Ok _)
-      (let ((out (memAlloc (* 8 (/ (+ len 7) 8)))))
+      {
+        (let out (memAlloc (* 8 (/ (+ len 7) 8))))
         {
           (hkdfSha512Raw (secretAddr ikm) (secretLen ikm) (strData salt) (strLen salt)
             (strData info) (strLen info) out len)
-          (let ((r (secretFromAddr out len)))
+          {
+            (let r (secretFromAddr out len))
             {
               (hkdfErase out (* 8 (/ (+ len 7) 8)))
               r
-            })
-        })
+            }
+          }
+        }
+      }
     )))

@@ -27,65 +27,75 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (t tallyNew)
-    (ta (Box 0))
-    (ib (Box 0))
-  )
+  {
+    (let t tallyNew)
+    (let ta (Box :v 0))
+    (let ib (Box :v 0))
     {
-      (let ((_
-        (buildBase "base.db"
-          (lambda (p)
-            (andThen (btreeCreate p btreeIndex)
-              (lambda (i)
-                (let ((mut failed None))
+      {
+        (let _
+          (buildBase "base.db"
+            (lambda (p)
+              (andThen (btreeCreate p btreeIndex)
+                (lambda (i)
                   {
-                    (set ib.v i)
-                    (for n in 0..500
-                      (match (btreePut p i (indexKey n) "")
-                        ((Err e)
-                          (set failed (Some e))
-                        )
-                        ((Ok _) ())))
-                    (match failed
-                      ((Some e) (Err e))
-                      ((None)
-                        (andThen (btreeCreate p btreeTable)
-                          (lambda (a)
-                            {
-                              (set ta.v a)
-                              (putRows p a 0 1000 1 50)
-                            }
-                          ))
-                      ))
-                  })
-              ))
-          ))))
-        ())
-      (let ((roots (vecPush (vecPush (vecPush vecNew btreeSchemaRoot) ta.v) ib.v)))
-        (let ((txn
-          (lambda (p)
-            (andThen (deleteRowsDown p ta.v 400 1000)
-              (lambda (_)
-                (let ((mut failed None))
-                  {
-                    (for n in 100..300
-                      (if (! (isSome failed))
-                        (match (btreeDelete p ib.v (indexKey n))
+                    (let mut failed None)
+                    {
+                      (set ib.v i)
+                      (for n in 0..500
+                        (match (btreePut p i (indexKey n) "")
                           ((Err e)
                             (set failed (Some e))
                           )
-                          ((Ok _) ()))))
-                    (match failed
-                      ((Some e) (Err e))
-                      ((None) (Ok 0)))
-                  })
-              ))
-          )))
+                          ((Ok _) ())))
+                      (match failed
+                        ((Some e) (Err e))
+                        ((None)
+                          (andThen (btreeCreate p btreeTable)
+                            (lambda (a)
+                              {
+                                (set ta.v a)
+                                (putRows p a 0 1000 1 50)
+                              }
+                            ))
+                        ))
+                    }
+                  }
+                ))
+            )))
+        ()
+      }
+      {
+        (let roots (vecPush (vecPush (vecPush vecNew btreeSchemaRoot) ta.v) ib.v))
+        {
+          (let txn
+            (lambda (p)
+              (andThen (deleteRowsDown p ta.v 400 1000)
+                (lambda (_)
+                  {
+                    (let mut failed None)
+                    {
+                      (for n in 100..300
+                        (if (! (isSome failed))
+                          (match (btreeDelete p ib.v (indexKey n))
+                            ((Err e)
+                              (set failed (Some e))
+                            )
+                            ((Ok _) ()))))
+                      (match failed
+                        ((Some e) (Err e))
+                        ((None) (Ok 0)))
+                    }
+                  }
+                ))
+            ))
           {
             (crashSweep t "delete" "base.db" 5 txn roots (lambda (_) roots))
             (check t (< (sizeOf "after.db") (sizeOf "base.db")) "the deletes shrink the file")
             (recoverySweep t "delete" "base.db" 5 txn 4)
-          }))
+          }
+        }
+      }
       (tallyReport t "202-crash-delete")
-    }))
+    }
+  })

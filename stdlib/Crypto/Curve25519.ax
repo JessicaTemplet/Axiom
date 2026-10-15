@@ -2,12 +2,15 @@
 ;;! curve -x^2 + y^2 = 1 + d x^2 y^2 over GF(2^255 - 19), their
 ;;! arithmetic and their 32-byte encoding.
 ;;!
-;;!     (let ((h (memAlloc ge25519P3Bytes)) (enc (strAlloc 32)))
+;;!     {
+;;!       (let h (memAlloc ge25519P3Bytes))
+;;!       (let enc (strAlloc 32))
 ;;!       {
-;;!         (ge25519ScalarMultBase h (strData scalar))   ; h = [scalar]B
-;;!         (ge25519ToBytes (strData enc) h)             ; RFC 8032 encoding
-;;!         (ge25519FromBytesVartime h (strData enc))    ; 0: decoded again
-;;!       })
+;;!         (ge25519ScalarMultBase h (strData scalar))  ; h = [scalar]B
+;;!         (ge25519ToBytes (strData enc) h)  ; RFC 8032 encoding
+;;!         (ge25519FromBytesVartime h (strData enc))  ; 0: decoded again
+;;!       }
+;;!     }
 ;
 ; This is the hazardous layer under `Crypto.Ed25519`. It works on raw
 ; addresses, checks nothing but what it says, and has no idea what a
@@ -293,12 +296,12 @@
 ;@axiom:ct(*s, *h)
 ;@axiom:effect(unsafe)
 (pub fn (ge25519ToBytes s h)
-  (let ((w (memAlloc 240)))
-    (let (
-      (recip w)
-      (x (+ w 80))
-      (y (+ w 160))
-    )
+  {
+    (let w (memAlloc 240))
+    {
+      (let recip w)
+      (let x (+ w 80))
+      (let y (+ w 160))
       {
         (fe25519Invert recip (gZ h))
         (fe25519Mul x (gX h) recip)
@@ -306,7 +309,9 @@
         (fe25519ToBytes s y)
         (__store8 s 31 (^ (__load8 s 31) (<< (fe25519IsNegative x) 7)))
         (ctWipe w 240)
-      })))
+      }
+    }
+  })
 
 ; 1 when the low 255 bits of the 32 bytes at `s` are a canonical y,
 ; below p = 2^255 - 19; 0 when they are p or one of the 18 values
@@ -314,14 +319,16 @@
 (:: geYCanonical (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (geYCanonical s)
-  (let ((mut all 255))
+  {
+    (let mut all 255)
     {
       (for i in 1..31
         (set all (& all (__load8 s i))))
       (if (&& (== all 255) (&& (== (& (__load8 s 31) 127) 127) (>= (__load8 s 0) 237)))
         0
         1)
-    }))
+    }
+  })
 
 ;; Decode the 32 bytes at `s` into the P3 at `h`, strictly (RFC 8032,
 ;; section 5.1.3): answers 0, or -1 when y is not below p, when no x
@@ -337,14 +344,14 @@
 (pub fn (ge25519FromBytesVartime h s)
   (if (== (geYCanonical s) 0)
     -1
-    (let ((w (memAlloc 400)))
-      (let (
-        (u w)
-        (v (+ w 80))
-        (v3 (+ w 160))
-        (vxx (+ w 240))
-        (check (+ w 320))
-      )
+    {
+      (let w (memAlloc 400))
+      {
+        (let u w)
+        (let v (+ w 80))
+        (let v3 (+ w 160))
+        (let vxx (+ w 240))
+        (let check (+ w 320))
         {
           (fe25519FromBytes (gY h) s)
           (fe25519One (gZ h))
@@ -364,20 +371,22 @@
           (fe25519Sq vxx (gX h))
           (fe25519Mul vxx vxx v)
           (fe25519Sub check vxx u)
-          (let ((root
-            (if (== (fe25519IsZero check) 1)
-              0
-              {
-                (fe25519Add check vxx u)
-                (if (== (fe25519IsZero check) 1)
-                  {
-                    (fe25519SqrtM1 check)
-                    (fe25519Mul (gX h) (gX h) check)
-                    0
-                  }
-                  -1)
-              })))
-            (let ((sign (>> (__load8 s 31) 7)))
+          {
+            (let root
+              (if (== (fe25519IsZero check) 1)
+                0
+                {
+                  (fe25519Add check vxx u)
+                  (if (== (fe25519IsZero check) 1)
+                    {
+                      (fe25519SqrtM1 check)
+                      (fe25519Mul (gX h) (gX h) check)
+                      0
+                    }
+                    -1)
+                }))
+            {
+              (let sign (>> (__load8 s 31) 7))
               (if (!= root 0)
                 -1
                 (&& (== (fe25519IsZero (gX h)) 1) (== sign 1))
@@ -387,8 +396,12 @@
                     (fe25519Neg (gX h) (gX h)))
                   (fe25519Mul (gT h) (gX h) (gY h))
                   0
-                })))
-        }))))
+                })
+            }
+          }
+        }
+      }
+    }))
 
 ;; h = -h, for a P3.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
@@ -537,30 +550,39 @@
 (:: geCombAdd (-> Int Int Int Int Int Int Int Int))
 ;@axiom:ct(*h, *s, *c, *ta, *r)
 (fn (geCombAdd h comb s i c ta r)
-  (let ((teeth (| (| (geBit s i) (<< (geBit s (+ i 32)) 1))
-                 (| (<< (geBit s (+ i 64)) 2) (<< (geBit s (+ i 96)) 3)))))
-    (let ((high (>> teeth 3)))
-      (let ((index (& (^ teeth (- high 1)) 7)))
+  {
+    (let teeth
+      (| (| (geBit s i) (<< (geBit s (+ i 32)) 1))
+        (| (<< (geBit s (+ i 64)) 2) (<< (geBit s (+ i 96)) 3))))
+    {
+      (let high (>> teeth 3))
+      {
+        (let index (& (^ teeth (- high 1)) 7))
         {
           (for j in 0..8
-            (let (
-              (m (ctMaskEq j index))
-              (e (+ comb (* j 240)))
-            )
+            {
+              (let m (ctMaskEq j index))
+              (let e (+ comb (* j 240)))
               {
                 (fe25519CMov m (gX c) (gX e))
                 (fe25519CMov m (gY c) (gY e))
                 (fe25519CMov m (gZ c) (gZ e))
-              }))
+              }
+            })
           (fe25519Neg ta (gZ c))
-          (let ((neg (ctMaskFromBit (^ high 1))))
+          {
+            (let neg (ctMaskFromBit (^ high 1)))
             {
               (fe25519CSwap neg (gZ c) ta)
               (fe25519CSwap neg (gX c) (gY c))
-            })
+            }
+          }
           (ge25519Madd r h c ta)
           (ge25519P1P1ToP3 h r)
-        }))))
+        }
+      }
+    }
+  })
 
 ;; h = [a]B for the 32-byte scalar at `a`, any value below 2^256, in
 ;; time that does not depend on `a`.
@@ -568,16 +590,16 @@
 ;@axiom:ct(*h, *a)
 ;@axiom:effect(unsafe)
 (pub fn (ge25519ScalarMultBase h a)
-  (let ((w (memAlloc 4608)))
-    (let (
-      (table w)
-      (s (+ w 3840))
-      (half (+ w 3872))
-      (halfOnes (+ w 3904))
-      (c (+ w 3936))
-      (ta (+ w 4176))
-      (r (+ w 4256))
-    )
+  {
+    (let w (memAlloc 4608))
+    {
+      (let table w)
+      (let s (+ w 3840))
+      (let half (+ w 3872))
+      (let halfOnes (+ w 3904))
+      (let c (+ w 3936))
+      (let ta (+ w 4176))
+      (let r (+ w 4256))
       {
         (ge25519CombTable table)
         ; 1/2 and (2^256 - 1)/2 modulo L, little-endian words
@@ -601,7 +623,9 @@
             (geCombAdd h (+ table 1920) s (+ i 128) c ta r)
           })
         (ctWipe w 4608)
-      })))
+      }
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Double-scalar multiplication for verification, variable time
@@ -618,18 +642,17 @@
       (__store64 r i (geBit a i)))
     (for i in 0..256
       (if (! (== (__load64 r i) 0))
-        (let (
-          (mut b 1)
-          (mut stop 0)
-        )
+        {
+          (let mut b 1)
+          (let mut stop 0)
           (while (&& (== stop 0) (&& (<= b 6) (< (+ i b) 256)))
             {
-              (let ((rb (__load64 r (+ i b))))
+              {
+                (let rb (__load64 r (+ i b)))
                 (if (! (== rb 0))
-                  (let (
-                    (ri (__load64 r i))
-                    (step (<< rb b))
-                  )
+                  {
+                    (let ri (__load64 r i))
+                    (let step (<< rb b))
                     (if (<= (+ ri step) 15)
                       {
                         (__store64 r i (+ ri step))
@@ -638,10 +661,9 @@
                       (>= (- ri step) -15)
                       {
                         (__store64 r i (- ri step))
-                        (let (
-                          (mut k (+ i b))
-                          (mut done 0)
-                        )
+                        {
+                          (let mut k (+ i b))
+                          (let mut done 0)
                           (while (&& (== done 0) (< k 256))
                             (if (== (__load64 r k) 0)
                               {
@@ -651,11 +673,15 @@
                               {
                                 (__store64 r k 0)
                                 (set k (+ k 1))
-                              })))
+                              }))
+                        }
                       }
-                      (set stop 1)))))
+                      (set stop 1))
+                  })
+              }
               (set b (+ b 1))
-            }))))
+            })
+        }))
     0
   })
 
@@ -682,19 +708,19 @@
 (pub :: ge25519DoubleScalarMultVartime (-> Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (ge25519DoubleScalarMultVartime r a A b)
-  (let ((w (memAlloc 10720)))
-    (let (
-      (aslide w)
-      (bslide (+ w 2048))
-      (ai (+ w 4096))
-      (bi (+ w 6656))
-      (t (+ w 9216))
-      (u (+ w 9536))
-      (p2 (+ w 9856))
-      (base (+ w 10176))
-      (fe (+ w 10496))
-      (mut i 255)
-    )
+  {
+    (let w (memAlloc 10720))
+    {
+      (let aslide w)
+      (let bslide (+ w 2048))
+      (let ai (+ w 4096))
+      (let bi (+ w 6656))
+      (let t (+ w 9216))
+      (let u (+ w 9536))
+      (let p2 (+ w 9856))
+      (let base (+ w 10176))
+      (let fe (+ w 10496))
+      (let mut i 255)
       {
         (geSlide aslide a)
         (geSlide bslide b)
@@ -705,10 +731,9 @@
         (while (&& (>= i 0) (&& (== (__load64 aslide i) 0) (== (__load64 bslide i) 0)))
           (set i (- i 1)))
         (while (>= i 0)
-          (let (
-            (da (__load64 aslide i))
-            (db (__load64 bslide i))
-          )
+          {
+            (let da (__load64 aslide i))
+            (let db (__load64 bslide i))
             {
               (ge25519P2Dbl t r fe)
               (if (> da 0)
@@ -733,6 +758,9 @@
                 })
               (ge25519P1P1ToP2 r t)
               (set i (- i 1))
-            }))
+            }
+          })
         0
-      })))
+      }
+    }
+  })

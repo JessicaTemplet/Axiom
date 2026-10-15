@@ -70,51 +70,63 @@
 ;; the last `)` (`ctCloseAt`'s rule).
 (pub :: nolintNames (-> String (Vec Int)))
 (pub fn (nolintNames content)
-  (let ((out vecNew))
-    (let ((op
-      (match (strFindByte content 40 0)
-        ((None) (- 0 1))
-        ((Some k) k))))
+  {
+    (let out vecNew)
+    {
+      (let op
+        (match (strFindByte content 40 0)
+          ((None) (- 0 1))
+          ((Some k) k)))
       (if (< op 0)
         out
         (if (strEq (strSlice content 0 op) "nolint")
-          (let ((parts (strSplit (strSlice content (+ op 1) (- (ctCloseAt content) (+ op 1))) 44)))
-            (let ((mut i 0))
+          {
+            (let parts (strSplit (strSlice content (+ op 1) (- (ctCloseAt content) (+ op 1))) 44))
+            {
+              (let mut i 0)
               {
                 (while (< i (vecLen parts))
                   {
-                    (let ((t (strTrim (vecGetStr parts i))))
+                    {
+                      (let t (strTrim (vecGetStr parts i)))
                       (if (! (== (strLen t) 0))
-                        (vecPushStr out t)))
+                        (vecPushStr out t))
+                    }
                     (set i (+ i 1))
                   })
                 out
-              }))
-          out)))))
+              }
+            }
+          }
+          out))
+    }
+  })
 
 ;; Whether a set of names quiets `code`. `kind` is 1 for an editor
 ;; hint and 0 for a checker warning: `all` quiets both, `hints` the
 ;; hints and `warnings` the warnings, and a name quiets its own code.
 (pub :: nolintCovers (-> (Vec Int) String Int Bool))
 (pub fn (nolintCovers names code kind)
-  (let (
-    (mut i 0)
-    (mut hit false)
-  )
+  {
+    (let mut i 0)
+    (let mut hit false)
     {
       (while (< i (vecLen names))
         {
-          (let ((n (vecGetStr names i)))
+          {
+            (let n (vecGetStr names i))
             (if (|| (strEq n code)
                   (|| (strEq n "all")
                     (if (== kind 1)
                       (strEq n "hints")
                       (strEq n "warnings"))))
-              (set hit true)))
+              (set hit true))
+          }
           (set i (+ i 1))
         })
       hit
-    }))
+    }
+  })
 
 ; The table: word 0 the file-wide names, word 1 the owners (declaration
 ; names) and word 2 their name vectors, parallel. Built once per
@@ -122,44 +134,51 @@
 ; declaration.
 (pub :: nolintTable (-> (Vec Int) Int))
 (pub fn (nolintTable decls)
-  (let ((t (memAlloc 32)))
+  {
+    (let t (memAlloc 32))
     {
       (memSetWord t 0 vecNew)
       (memSetWord t 1 vecNew)
       (memSetWord t 2 vecNew)
-      (let ((mut i 0))
+      {
+        (let mut i 0)
         (while (< i (vecLen decls))
           {
             (nolintTableDecl t (vecGet decls i))
             (set i (+ i 1))
-          }))
+          })
+      }
       t
-    }))
+    }
+  })
 
 (:: nolintTableDecl (-> Int Int Int))
 (fn (nolintTableDecl t d)
   (if (== (memGetWord d 7) 0)
     0
-    (let (
-      (tags (memGetWordVec d 7))
-      (mut i 0)
-    )
+    {
+      (let tags (memGetWordVec d 7))
+      (let mut i 0)
       {
         (while (< i (vecLen tags))
           {
-            (let ((names (nolintNames (memGetWordStr (vecGet tags i) 1))))
+            {
+              (let names (nolintNames (memGetWordStr (vecGet tags i) 1)))
               (if (! (== (vecLen names) 0))
                 (if (== (nodeTag d) TAG_D_IMPORT)
                   (nolintAppend (memGetWordVec t 0) names)
-                  (nolintTableAdd t (nodeAName d) names))))
+                  (nolintTableAdd t (nodeAName d) names)))
+            }
             (set i (+ i 1))
           })
         0
-      })))
+      }
+    }))
 
 (:: nolintAppend (-> (Vec Int) (Vec Int) Int))
 (fn (nolintAppend into names)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i (vecLen names))
         {
@@ -167,18 +186,18 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; Merge under an owner: a tag above each half of a `::`/`fn` pair is
 ; two entries for one declaration.
 (:: nolintTableAdd (-> Int String (Vec Int) Int))
 (fn (nolintTableAdd t owner names)
-  (let (
-    (owners (memGetWordVec t 1))
-    (sets (memGetWordVec t 2))
-    (mut j 0)
-    (mut at (- 0 1))
-  )
+  {
+    (let owners (memGetWordVec t 1))
+    (let sets (memGetWordVec t 2))
+    (let mut j 0)
+    (let mut at (- 0 1))
     {
       (while (< j (vecLen owners))
         {
@@ -193,7 +212,8 @@
           0
         }
         (nolintAppend (vecGetVec sets at) names))
-    }))
+    }
+  })
 
 ;; Whether the table quiets `code` (of `kind`: 1 hint, 0 warning) on
 ;; the declaration named `owner`: by the file-wide names, or by the
@@ -202,12 +222,11 @@
 (pub fn (nolintQuiets t owner code kind)
   (if (nolintCovers (memGetWordVec t 0) code kind)
     true
-    (let (
-      (owners (memGetWordVec t 1))
-      (sets (memGetWordVec t 2))
-      (mut j 0)
-      (mut hit false)
-    )
+    {
+      (let owners (memGetWordVec t 1))
+      (let sets (memGetWordVec t 2))
+      (let mut j 0)
+      (let mut hit false)
       {
         (while (< j (vecLen owners))
           {
@@ -217,7 +236,8 @@
             (set j (+ j 1))
           })
         hit
-      })))
+      }
+    }))
 
 ; The declaration a byte offset belongs to: the last one whose span
 ; starts at or before it. Declarations come in source order and a
@@ -226,23 +246,25 @@
 ; no declaration starts before the offset.
 (pub :: nolintOwnerAt (-> (Vec Int) Int String))
 (pub fn (nolintOwnerAt decls off)
-  (let (
-    (mut i 0)
-    (mut owner "")
-  )
+  {
+    (let mut i 0)
+    (let mut owner "")
     {
       (while (< i (vecLen decls))
         {
-          (let ((d (vecGet decls i)))
+          {
+            (let d (vecGet decls i))
             (if (!= (nodeSpan d) 0)
               (if (<= (spanStart (nodeSpan d)) off)
                 (set owner (nodeAName d))
                 owner)
-              owner))
+              owner)
+          }
           (set i (+ i 1))
         })
       owner
-    }))
+    }
+  })
 
 ;; The checker's diagnostics for this file with the quieted warnings
 ;; taken out. Every error stays. A warning goes when the file-wide
@@ -251,23 +273,27 @@
 ;; alone: that file's own tags decide for it.
 (pub :: nolintQuietDiags (-> (Vec Int) (Vec Int) (Vec Int)))
 (pub fn (nolintQuietDiags decls diags)
-  (let ((t (nolintTable decls)))
+  {
+    (let t (nolintTable decls))
     (if (&& (== (vecLen (memGetWordVec t 0)) 0) (== (vecLen (memGetWordVec t 1)) 0))
       diags
-      (let (
-        (out vecNew)
-        (mut i 0)
-      )
+      {
+        (let out vecNew)
+        (let mut i 0)
         {
           (while (< i (vecLen diags))
             {
-              (let ((d (vecGet diags i)))
+              {
+                (let d (vecGet diags i))
                 (if (! (nolintDropDiag t decls d))
-                  (vecPush out d)))
+                  (vecPush out d))
+              }
               (set i (+ i 1))
             })
           out
-        }))))
+        }
+      })
+  })
 
 (:: nolintDropDiag (-> Int (Vec Int) Int Bool))
 (fn (nolintDropDiag t decls d)

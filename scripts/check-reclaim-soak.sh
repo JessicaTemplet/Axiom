@@ -206,13 +206,13 @@ cat > "$work/soak.ax" <<'AX'
 (fn (churn v k live maxLen seed acc)
   (if (== k 0)
     acc
-    (let ((s1 (next seed)))
-      (let ((s2 (next s1)))
-        (let ((slot (% (/ s1 16) live)) (len (+ 1 (% (/ s2 16) maxLen))))
+    { (let s1 (next seed))
+      { (let s2 (next s1))
+        { (let slot (% (/ s1 16) live)) (let len (+ 1 (% (/ s2 16) maxLen)))
           {
             (vecSet v slot (strAlloc len))
             (churn v (- k 1) live maxLen s2 (+ acc len))
-          })))))
+          }}}}))
 
 (:: liveBytes (-> (Vec String) Int Int Int))
 (fn (liveBytes v i acc)
@@ -234,14 +234,14 @@ cat > "$work/soak.ax" <<'AX'
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((n (argInt 1)) (live (argInt 2)) (maxLen (argInt 3)))
-    (let ((v (vecNew)))
+  { (let n (argInt 1)) (let live (argInt 2)) (let maxLen (argInt 3))
+    { (let v (vecNew))
       {
         (fill v 0 live)
-        (let ((total (churn v n live maxLen 42 0)))
-          (let ((lb (liveBytes v 0 0)) (held (__axiom_mem_stat 0)) (filed (__axiom_mem_stat 1)))
-            (println "{total} {lb} {held} {filed}")))
-      })))
+        { (let total (churn v n live maxLen 42 0))
+          { (let lb (liveBytes v 0 0)) (let held (__axiom_mem_stat 0)) (let filed (__axiom_mem_stat 1))
+            (println "{total} {lb} {held} {filed}")}}
+      }}})
 AX
 soak() {  # <binary> <n> <live> <maxLen> <key>
   local o r
@@ -307,19 +307,19 @@ cat > "$work/cycles.ax" <<'AX'
 (:: knot (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (knot i)
-  (let ((a (Node i (as 0 Node))) (b (Node (+ i 1) (as 0 Node))))
+  { (let a (Node :v i :next (as 0 Node))) (let b (Node :v (+ i 1) :next (as 0 Node)))
     {
       (set a.next b)
       (set b.next a)
       (+ a.v b.v)
-    }))
+    }})
 
 (:: chain (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (chain i)
-  (let ((b (Node (+ i 1) (as 0 Node))))
-    (let ((a (Node i b)))
-      (+ a.v b.v))))
+  { (let b (Node :v (+ i 1) :next (as 0 Node)))
+    { (let a (Node :v i :next b))
+      (+ a.v b.v)}})
 
 (:: loop (-> Int Int Int Int))
 (fn (loop shape k acc)
@@ -332,11 +332,11 @@ cat > "$work/cycles.ax" <<'AX'
 (fn (scoped m k acc)
   (if (== k 0)
     acc
-    (let ((r (knot k)))
+    { (let r (knot k))
       {
         (__axiom_arena_reset m)
         (scoped m (- k 1) (+ acc r))
-      })))
+      }}))
 
 (:: atoiFrom (-> String Int Int Int))
 (fn (atoiFrom s i acc)
@@ -347,13 +347,13 @@ cat > "$work/cycles.ax" <<'AX'
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((shape (atoiFrom (sysArg 1) 0 0)) (n (atoiFrom (sysArg 2) 0 0)))
-    (let ((b0 (- (__axiom_mem_stat 0) (__axiom_mem_stat 1))))
-      (let ((r (if (== shape 1) (scoped __axiom_arena_mark n 0) (loop shape n 0))))
-        (let ((per (/ (- (- (__axiom_mem_stat 0) (__axiom_mem_stat 1)) b0) n)))
+  { (let shape (atoiFrom (sysArg 1) 0 0)) (let n (atoiFrom (sysArg 2) 0 0))
+    { (let b0 (- (__axiom_mem_stat 0) (__axiom_mem_stat 1)))
+      { (let r (if (== shape 1) (scoped __axiom_arena_mark n 0) (loop shape n 0)))
+        { (let per (/ (- (- (__axiom_mem_stat 0) (__axiom_mem_stat 1)) b0) n))
           {
             (println "{per}")
-          })))))
+          }}}}})
 AX
 if build "$work/cycles.ax" "$work/cycles" 1; then
   for shape in 0 1 2; do
@@ -434,52 +434,52 @@ else
 
 (:: bad (-> Int Int Int Int))
 (fn (bad p words tag)
-  (let ((mut k 0))
+  { (let mut k 0)
     {
       (for i in 0..words
         (if (== (memGetWord p i) (+ (* tag 1000003) i)) 0 (set k (+ k 1))))
       k
-    }))
+    }})
 
 (:: churnOnce (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (churnOnce salt)
-  (let ((m __axiom_arena_mark) (mut k 0))
+  { (let m __axiom_arena_mark) (let mut k 0)
     {
-      (let ((mut sz 16))
+      { (let mut sz 16)
         (while (<= sz 65536)
-          (let ((p (memAlloc sz)))
+          { (let p (memAlloc sz))
             {
               (__retain p)
               (pat p (/ sz 8) 5)
               (__release p)
               (set sz (+ sz 48))
-            })))
+            }})}
       (__axiom_arena_reset m)
       (if (== (__axiom_mem_stat 1) 0) 0 (set k (+ k 1)))
-      (let ((v (vecNew)))
+      { (let v (vecNew))
         {
           (for i in 0..64
-            (let ((p (memAlloc 1100)))
+            { (let p (memAlloc 1100))
               {
                 (if (== (memGetWord p 3) 0) 0 (set k (+ k 1)))
                 (vecPush v (pat p 137 (+ salt i)))
-              }))
+              }})
           (for i in 0..64
             (set k (+ k (bad (vecGet v i) 137 (+ salt i)))))
-        })
+        }}
       (__axiom_arena_reset m)
       k
-    }))
+    }})
 
 (:: worker (-> Int Int))
 (fn (worker salt)
-  (let ((mut k 0))
+  { (let mut k 0)
     {
       (for r in 0..20
         (set k (+ k (churnOnce (+ salt (* r 100))))))
       k
-    }))
+    }})
 
 (:: main ())
 ;@axiom:effect(io)
@@ -487,20 +487,20 @@ else
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((p (memAlloc 4000)))
+  { (let p (memAlloc 4000))
     {
       (__retain p)
       (__release p)
-      (let ((h1 (__thread_spawn (lambda (x) (worker x)) 1000))
-            (h2 (__thread_spawn (lambda (x) (worker x)) 2000))
-            (h3 (__thread_spawn (lambda (x) (worker x)) 3000))
-            (h4 (__thread_spawn (lambda (x) (worker x)) 4000)))
-        (let ((b (+ (+ (__thread_join h1) (__thread_join h2)) (+ (__thread_join h3) (__thread_join h4)))))
-          (let ((same (== p (memAlloc 4000))))
+      { (let h1 (__thread_spawn (lambda (x) (worker x)) 1000))
+            (let h2 (__thread_spawn (lambda (x) (worker x)) 2000))
+            (let h3 (__thread_spawn (lambda (x) (worker x)) 3000))
+            (let h4 (__thread_spawn (lambda (x) (worker x)) 4000))
+        { (let b (+ (+ (__thread_join h1) (__thread_join h2)) (+ (__thread_join h3) (__thread_join h4))))
+          { (let same (== p (memAlloc 4000)))
             {
               (println "bad {b} main-block-back {same}")
-            })))
-    }))
+            }}}}
+    }})
 AX
   if build "$work/threads.ax" "$work/threads" 1; then
     got="$("$work/threads" 2>&1)"
@@ -555,7 +555,7 @@ cat > "$work/res.ax" <<'AX'
           (match (openPath "/dev/null" 0)
             ((Ok f)
               {
-                (if (== mode 2) (let ((_ (fileClose f))) 0) 0)
+                (if (== mode 2) { (let _ (fileClose f)) 0} 0)
                 (boom 0)
               })
             ((Err e) 0))))
@@ -582,20 +582,20 @@ cat > "$work/res.ax" <<'AX'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (child)
-  (let ((w (memAlloc 16)))
+  { (let w (memAlloc 16))
     {
       (memSetWord w 0 7)
-      (let ((st (__axiom_recover __axiom_arena_mark
+      { (let st (__axiom_recover __axiom_arena_mark
         (lambda (x)
-          (let ((h (__proc_spawn (lambda (y) { (sysWaitWordTimeout w 7 5000000000) y }) 1)))
-            (boom 0))))))
+          { (let h (__proc_spawn (lambda (y) { (sysWaitWordTimeout w 7 5000000000) y }) 1))
+            (boom 0)})))
         {
-          (let ((pid sysPid))
-            (println "pid {pid} status {st}"))
+          { (let pid sysPid)
+            (println "pid {pid} status {st}")}
           (sysWaitWordTimeout w 7 1500000000)
           0
-        })
-    }))
+        }}
+    }})
 
 (:: atoiFrom (-> String Int Int Int))
 (fn (atoiFrom s i acc)
@@ -608,34 +608,34 @@ cat > "$work/res.ax" <<'AX'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((mode (atoiFrom (sysArg 1) 0 0)) (n (atoiFrom (sysArg 2) 0 0)))
+  { (let mode (atoiFrom (sysArg 1) 0 0)) (let n (atoiFrom (sysArg 2) 0 0))
     (if (== mode 3)
       child
       (== mode 4)
-      (let (
-        (held vecNew)
-        (before openCount)
-      )
+      {
+        (let held vecNew)
+        (let before openCount)
+
         {
           (holdAll held n)
-          (let (
-            (after openCount)
-            (kept (vecLen held))
-          )
+          {
+            (let after openCount)
+            (let kept (vecLen held))
+
             {
               (println "{before} {after}")
               0
-            })
-        })
-      (let ((before openCount))
+            }}
+        }}
+      { (let before openCount)
         {
           (cycles mode __axiom_arena_mark n)
-          (let ((after openCount))
+          { (let after openCount)
             {
               (println "{before} {after}")
               0
-            })
-        }))))
+            }}
+        }})})
 AX
 if build "$work/res.ax" "$work/res" 1; then
   nfd=10000

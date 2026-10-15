@@ -44,10 +44,12 @@
 ; forwards means finding all the others first.
 (pub :: pathLastSlash (-> String (Option Int)))
 (pub fn (pathLastSlash p)
-  (let ((i (pathLastSlashFrom p (- (strLen p) 1))))
+  {
+    (let i (pathLastSlashFrom p (- (strLen p) 1)))
     (if (< i 0)
       None
-      (Some i))))
+      (Some i))
+  })
 
 (:: pathLastSlashFrom (-> String Int Int))
 (fn (pathLastSlashFrom p i)
@@ -127,11 +129,15 @@
 ; both "no directory" and "a directory with no dot inside it".
 (pub :: pathExtIndex (-> String (Option Int)))
 (pub fn (pathExtIndex p)
-  (let ((slash (pathLastSlashFrom p (- (strLen p) 1))))
-    (let ((dot (pathLastDotFrom p (- (strLen p) 1) slash)))
+  {
+    (let slash (pathLastSlashFrom p (- (strLen p) 1)))
+    {
+      (let dot (pathLastDotFrom p (- (strLen p) 1) slash))
       (if (<= dot (+ slash 1))
         None
-        (Some dot)))))
+        (Some dot))
+    }
+  })
 
 (:: pathLastDotFrom (-> String Int Int Int))
 (fn (pathLastDotFrom p i stop)
@@ -205,13 +211,17 @@
 (pub fn (pathClean p)
   (if (== (strLen p) 0)
     "."
-    (let ((abs (pathIsAbsolute p)))
-      (let ((body (pathCleanFrom p (strLen p) 0 "" abs)))
+    {
+      (let abs (pathIsAbsolute p))
+      {
+        (let body (pathCleanFrom p (strLen p) 0 "" abs))
         (if abs
           (concat "/" body)
           (if (== (strLen body) 0)
             "."
-            body))))))
+            body))
+      }
+    }))
 
 ; Walks `p` backward one segment at a time from `end`, exactly as
 ; `pathLastSlashFrom` does, folding each into `acc` - built up in
@@ -230,29 +240,39 @@
 ; then goes to `pathLeadingDotDot` rather than another `..` to cancel.
 (:: pathCleanFrom (-> String Int Int String Bool String))
 (fn (pathCleanFrom p end skip acc abs)
-  (let ((slash (pathLastSlashFrom p (- end 1))))
-    (let ((seg (strSlice p (+ slash 1) (- end (+ slash 1)))))
-      (let ((kind
-        (if (strEq seg "..")
-          0
-          (if (|| (== (strLen seg) 0) (strEq seg "."))
-            1
-            (if (> skip 0)
-              2
-              3)))))
-        (let ((skip2
-          (if (== kind 0)
-            (+ skip 1)
-            (if (== kind 2)
-              (- skip 1)
-              skip))))
-          (let ((acc2
-            (if (== kind 3)
-              (pathPrependSeg seg acc)
-              acc)))
+  {
+    (let slash (pathLastSlashFrom p (- end 1)))
+    {
+      (let seg (strSlice p (+ slash 1) (- end (+ slash 1))))
+      {
+        (let kind
+          (if (strEq seg "..")
+            0
+            (if (|| (== (strLen seg) 0) (strEq seg "."))
+              1
+              (if (> skip 0)
+                2
+                3))))
+        {
+          (let skip2
+            (if (== kind 0)
+              (+ skip 1)
+              (if (== kind 2)
+                (- skip 1)
+                skip)))
+          {
+            (let acc2
+              (if (== kind 3)
+                (pathPrependSeg seg acc)
+                acc))
             (if (< slash 0)
               (pathLeadingDotDot skip2 acc2 abs)
-              (pathCleanFrom p slash skip2 acc2 abs))))))))
+              (pathCleanFrom p slash skip2 acc2 abs))
+          }
+        }
+      }
+    }
+  })
 
 ; `seg` and `acc` as one path, with exactly one `/` between them when
 ; `acc` already holds something - `pathJoin`'s rule, folded onto the

@@ -77,15 +77,22 @@
 ; splitmix64's finaliser over `i`; `*` and `+` wrap.
 (:: mixHash (-> Int Int))
 (fn (mixHash i)
-  (let ((z (+ (* i 7046029254386353131) 1442695040888963407)))
-    (let ((a (* (^ z (>> z 30)) 5573014789349097917)))
-      (let ((b (* (^ a (>> a 27)) 1181783497276652981)))
-        (^ b (>> b 31))))))
+  {
+    (let z (+ (* i 7046029254386353131) 1442695040888963407))
+    {
+      (let a (* (^ z (>> z 30)) 5573014789349097917))
+      {
+        (let b (* (^ a (>> a 27)) 1181783497276652981))
+        (^ b (>> b 31))
+      }
+    }
+  })
 
 ; 2^e for e in -31 .. 32.
 (:: pow2 (-> Int Float))
 (fn (pow2 e)
-  (let ((mut x 1.0))
+  {
+    (let mut x 1.0)
     {
       (if (>= e 0)
         (for k in 0..e
@@ -93,20 +100,23 @@
         (for k in 0..(- 0 e)
           (set x (* x 0.5))))
       x
-    }))
+    }
+  })
 
 (:: term (-> Int Float))
 (fn (term i)
-  (let (
-    (h (mixHash i))
-    (frac (/ (as (& h 1048575) Float) 1048576.0))
-    (tail (/ 1.0 (as (+ i 3) Float)))
-    (e (- (& (>> h 20) 63) 31))
-  )
-    (let ((mag (* (+ 1.0 (+ frac tail)) (pow2 e))))
+  {
+    (let h (mixHash i))
+    (let frac (/ (as (& h 1048575) Float) 1048576.0))
+    (let tail (/ 1.0 (as (+ i 3) Float)))
+    (let e (- (& (>> h 20) 63) 31))
+    {
+      (let mag (* (+ 1.0 (+ frac tail)) (pow2 e)))
       (if (== (& (>> h 40) 1) 1)
         (- 0.0 mag)
-        mag))))
+        mag)
+    }
+  })
 
 ; Sleep `us` microseconds on a word of its own that nobody changes.
 (:: nap (-> Int Int))
@@ -114,12 +124,14 @@
 ;@axiom:effect(block)
 (fn (nap us)
   (if (> us 0)
-    (let ((idle (memAlloc 8)))
+    {
+      (let idle (memAlloc 8))
       {
         (memSetWord idle 0 0)
         (sysWaitWordTimeout idle 0 (* us 1000))
         0
-      })
+      }
+    }
     0))
 
 ; Task `i`'s answer, after its jitter: its term's bits.
@@ -158,12 +170,14 @@
 ; ---- the sequential answers ---------------------------------------------
 (:: seqSum (-> Int Int Int))
 (fn (seqSum lo hi)
-  (let ((mut acc 0.0))
+  {
+    (let mut acc 0.0)
     {
       (for i in lo..hi
         (set acc (+ acc (term i))))
       (bitsOf acc)
-    }))
+    }
+  })
 
 ; The sum of i * 1.0000001 for i in 0 .. n: a multiply feeding an add,
 ; the shape a contracting backend fuses into one rounding and a
@@ -171,19 +185,20 @@
 ; mark this IR to allow each and must see it happen.
 (:: dotSum (-> Int Int))
 (fn (dotSum n)
-  (let ((mut acc 0.0))
+  {
+    (let mut acc 0.0)
     {
       (for i in 0..n
         (set acc (+ (* (as i Float) 1.0000001) acc)))
       (bitsOf acc)
-    }))
+    }
+  })
 
 (:: revSum (-> Int Int))
 (fn (revSum n)
-  (let (
-    (mut acc 0.0)
-    (mut i (- n 1))
-  )
+  {
+    (let mut acc 0.0)
+    (let mut i (- n 1))
     {
       (while (>= i 0)
         {
@@ -191,7 +206,8 @@
           (set i (- i 1))
         })
       (bitsOf acc)
-    }))
+    }
+  })
 
 (:: treeSum (-> Int Int Float))
 (fn (treeSum lo hi)
@@ -199,8 +215,10 @@
     (if (== (- hi lo) 1)
       (term lo)
       0.0)
-    (let ((mid (+ lo (/ (- hi lo) 2))))
-      (+ (treeSum lo mid) (treeSum mid hi)))))
+    {
+      (let mid (+ lo (/ (- hi lo) 2)))
+      (+ (treeSum lo mid) (treeSum mid hi))
+    }))
 
 ; Chunk `k` of `K` over `0 .. n`: `n * k / K` to `n * (k + 1) / K`.
 (:: chunkLo (-> Int Int Int Int))
@@ -214,12 +232,14 @@
 ; The chunk sums added in index order, from 0.0 like every other sum.
 (:: chunked (-> Int Int Int))
 (fn (chunked n parts)
-  (let ((mut acc 0.0))
+  {
+    (let mut acc 0.0)
     {
       (for k in 0..parts
         (set acc (+ acc (floatOf (chunkSum n parts k)))))
       (bitsOf acc)
-    }))
+    }
+  })
 
 (:: add2 (-> Int Int Int))
 (fn (add2 a b)
@@ -280,11 +300,13 @@
   (if (== i 10)
     {
       (nap 150000)
-      (let ((v vecNew))
+      {
+        (let v vecNew)
         {
           (vecPush v 1)
           (vecGet v (+ i 5))
-        })
+        }
+      }
     }
     (if (== i 12)
       (/ i (- i 12))
@@ -302,7 +324,8 @@
 (:: showWords (-> (Vec (Result Int Error)) Int))
 ;@axiom:effect(io)
 (fn (showWords rs)
-  (let ((mut good 0))
+  {
+    (let mut good 0)
     {
       (for i in 0..(vecLen rs)
         (match (vecGet rs i)
@@ -312,17 +335,21 @@
               (println "{i} wrong {w}"))
           )
           ((Err e)
-            (let ((c (errCode e)))
-              (println "{i} err {c}"))
+            {
+              (let c (errCode e))
+              (println "{i} err {c}")
+            }
           )))
       (println "ok {good}")
       0
-    }))
+    }
+  })
 
 (:: showTexts (-> (Vec (Result String Error)) Int))
 ;@axiom:effect(io)
 (fn (showTexts rs)
-  (let ((mut good 0))
+  {
+    (let mut good 0)
     {
       (for i in 0..(vecLen rs)
         (match (vecGet rs i)
@@ -332,12 +359,15 @@
               (println "{i} wrong {s}"))
           )
           ((Err e)
-            (let ((c (errCode e)))
-              (println "{i} err {c}"))
+            {
+              (let c (errCode e))
+              (println "{i} err {c}")
+            }
           )))
       (println "ok {good}")
       0
-    }))
+    }
+  })
 
 (:: say (-> String Int Int))
 ;@axiom:effect(io)
@@ -352,19 +382,18 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (mode (sysArg 1))
-    (n (argInt 2))
-    (w (argInt 3))
-    (jit (argInt 4))
-  )
+  {
+    (let mode (sysArg 1))
+    (let n (argInt 2))
+    (let w (argInt 3))
+    (let jit (argInt 4))
     (if (strEq mode "seq")
-      (let (
-        (s (seqSum 0 n))
-        (r (revSum n))
-        (t (bitsOf (treeSum 0 n)))
-      )
-        (println "seq {s} rev {r} tree {t}"))
+      {
+        (let s (seqSum 0 n))
+        (let r (revSum n))
+        (let t (bitsOf (treeSum 0 n)))
+        (println "seq {s} rev {r} tree {t}")
+      }
       (if (strEq mode "dot")
         (say "dot" (dotSum n))
         (if (strEq mode "fold")
@@ -372,44 +401,45 @@
             (taskFold (lambda (i) (taskText jit i)) n (taskOpts w 32) 0
               (lambda (acc i r) (addText acc r))))
           (if (strEq mode "map")
-            (let (
-              (rs (taskMap (lambda (i) (taskText jit i)) n w 32))
-              (mut acc 0)
-            )
+            {
+              (let rs (taskMap (lambda (i) (taskText jit i)) n w 32))
+              (let mut acc 0)
               {
                 (for i in 0..(vecLen rs)
                   (set acc (addText acc (vecGet rs i))))
                 (say "map" acc)
-              })
+              }
+            }
             (if (strEq mode "words")
-              (let (
-                (ws (taskMapWords (lambda (i) (taskWord jit i)) n w))
-                (mut acc 0)
-              )
+              {
+                (let ws (taskMapWords (lambda (i) (taskWord jit i)) n w))
+                (let mut acc 0)
                 {
                   (for i in 0..(vecLen ws)
                     (set acc (add2 acc (vecGet ws i))))
                   (say "words" acc)
-                })
+                }
+              }
               (if (strEq mode "checked")
-                (let (
-                  (rs (taskMapWordsChecked (lambda (i) (taskWord jit i)) n w))
-                  (mut acc 0)
-                )
+                {
+                  (let rs (taskMapWordsChecked (lambda (i) (taskWord jit i)) n w))
+                  (let mut acc 0)
                   {
                     (for i in 0..(vecLen rs)
                       (set acc (addWord acc (vecGet rs i))))
                     (say "checked" acc)
-                  })
+                  }
+                }
                 (if (strEq mode "bind")
                   ; `bind K N`: the width is argument 2 here.
                   (say "bind" (bind n w))
                   (if (strEq mode "chunked")
                     (say "chunked" (chunked w n))
                     (if (strEq mode "fail-words")
-                      (let ((ws
-                        (taskMapWords (lambda (i) (failWord i)) n w)))
-                        (say "unreachable" (vecLen ws)))
+                      {
+                        (let ws (taskMapWords (lambda (i) (failWord i)) n w))
+                        (say "unreachable" (vecLen ws))
+                      }
                       (if (strEq mode "fail-checked")
                         (showWords (taskMapWordsChecked (lambda (i) (failWord i)) n w))
                         (if (strEq mode "fail-tasks")
@@ -419,4 +449,5 @@
                               (taskMapWith (lambda (i) (failText i)) n
                                 (taskWithGrace (taskWithFailFast (taskOpts w 32) true) 1000000)))
                             (println
-                              "usage: par-determinism seq N | dot N | fold|map|words|checked N W J | bind|chunked K N | fail-words|fail-checked|fail-tasks|fail-fast N W")))))))))))))))
+                              "usage: par-determinism seq N | dot N | fold|map|words|checked N W J | bind|chunked K N | fail-words|fail-checked|fail-tasks|fail-fast N W")))))))))))))
+  })

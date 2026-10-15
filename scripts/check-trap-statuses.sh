@@ -136,7 +136,7 @@ AX
 # A recursion a 64 KiB mapped stack cannot hold (86).
 cat > "$work/stack-overflow.ax" <<'AX'
 (:: deep (-> Int Int))
-(fn (deep n) (if (== n 0) 0 (let ((r (deep (- n 1)))) (if (> r n) r (+ r 1)))))
+(fn (deep n) (if (== n 0) 0 { (let r (deep (- n 1))) (if (> r n) r (+ r 1))}))
 ;@axiom:effect(io)
 (fn (main) (__axiom_stack_run 65536 (lambda (x) (deep x)) 1000000))
 AX

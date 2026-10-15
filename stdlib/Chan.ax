@@ -122,7 +122,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (chanOwned ch)
-  (Chan (__resource_new chanDrop ch)))
+  (Chan :owner (__resource_new chanDrop ch)))
 
 ; The cleanup of a channel's last owner in this address space: unmap
 ; this address space's view of the ring. Answers 0, or the negated
@@ -168,10 +168,12 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (chanAcquire ch me b timed)
-  (let ((mut state 0))
+  {
+    (let mut state 0)
     {
       (while (== state 0)
-        (let ((v (__atomic_load ch)))
+        {
+          (let v (__atomic_load ch))
           (if (== v 0)
             (if (== (__atomic_cas ch 0 (+ me 1)) 0)
               (set state 1))
@@ -179,22 +181,30 @@
               (set state 2)
               (if (chanOutOfTime b timed)
                 (set state 3)
-                (let ((w (chanMarkWaiting ch v)))
+                {
+                  (let w (chanMarkWaiting ch v))
                   (if (! (== w 0))
-                    (let ((slice (chanLockSlice b timed)))
-                      (let ((code (sysWaitWordTimeout ch w slice)))
+                    {
+                      (let slice (chanLockSlice b timed))
+                      {
+                        (let code (sysWaitWordTimeout ch w slice))
                         {
                           (if (== timed 1)
                             (chanTimeSpent b code slice))
                           (if (&& (== code 1) (chanHolderDead w me))
                             (chanPoison ch w))
-                        })))))))))
+                        }
+                      }
+                    })
+                })))
+        })
       (if (== state 1)
         0
         (if (== state 2)
           2
           1))
-    }))
+    }
+  })
 
 ; Lock value `v` with the waiter bit set - already, or by this call - or
 ; 0 when the word moved first and the caller must look again.
@@ -217,24 +227,30 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (chanHolderDead w me)
-  (let ((owner (/ w 4)))
+  {
+    (let owner (/ w 4))
     (if (|| (== owner 0) (== (* owner 4) me))
       false
       (match (sysKill owner 0)
         ((Ok r) (chanChildEnded owner))
-        ((Err e) (== (errCode e) 3))))))
+        ((Err e) (== (errCode e) 3))))
+  })
 
 ; Whether `pid` is this process's own child and has exited, unreaped.
 (:: chanChildEnded (-> Int Bool))
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (chanChildEnded pid)
-  (let ((buf (chanBlock sysChildPollBytes)))
-    (let ((ended (chanYes (sysChildExited pid buf))))
+  {
+    (let buf (chanBlock sysChildPollBytes))
+    {
+      (let ended (chanYes (sysChildExited pid buf)))
       {
         (chanBlockDone buf)
         ended
-      })))
+      }
+    }
+  })
 
 ; `Ok True`, and nothing else, is yes: a look that failed has seen nothing.
 (:: chanYes (-> (Result Bool Error) Bool))
@@ -311,11 +327,13 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (chanSleepFor ch seen nanos)
-  (let ((code (sysWaitWordTimeout (+ ch 8) seen nanos)))
+  {
+    (let code (sysWaitWordTimeout (+ ch 8) seen nanos))
     {
       (__atomic_add (+ ch 16) (- 0 1))
       code
-    }))
+    }
+  })
 
 ; ---- time left ---------------------------------------------------------
 ; A timed call keeps two words in a 32-byte scratch block: word 2 the
@@ -330,12 +348,14 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (chanScratch nanos)
-  (let ((b (chanBlock 32)))
+  {
+    (let b (chanBlock 32))
     {
       (__store64 b 2 nanos)
       (__store64 b 3 (sysTimeoutMicros b))
       b
-    }))
+    }
+  })
 
 ; A block of `n` bytes with a share taken, and the share given back:
 ; the release files it for reuse (MM-LIFE-2k), so a loop that asks for
@@ -343,11 +363,13 @@
 (:: chanBlock (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (chanBlock n)
-  (let ((b (memAlloc n)))
+  {
+    (let b (memAlloc n))
     {
       (__retain b)
       b
-    }))
+    }
+  })
 
 (:: chanBlockDone (-> Int Int))
 ;@axiom:effect(unsafe)
@@ -366,16 +388,18 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (chanTimeSpent b code slice)
-  (let (
-    (left (__load64 b 2))
-    (now (sysTimeoutMicros b))
-  )
-    (let ((step (chanStep code slice (* (- now (__load64 b 3)) 1000))))
+  {
+    (let left (__load64 b 2))
+    (let now (sysTimeoutMicros b))
+    {
+      (let step (chanStep code slice (* (- now (__load64 b 3)) 1000)))
       {
         (__store64 b 2 (- left step))
         (__store64 b 3 now)
         0
-      })))
+      }
+    }
+  })
 
 ; How long the next wait may be: the time left, or `chanSliceNanos` if
 ; that is shorter. A slice bounds what one clock step can cost: with the
@@ -460,7 +484,8 @@
 (pub fn (chanNew cap)
   (if (|| (< cap 1) (> cap 1048576))
     (Err (mkError 22 "chanNew: capacity must be 1..1048576"))
-    (let ((len (* 8 (+ cap 8))))
+    {
+      (let len (* 8 (+ cap 8)))
       (match (sysMapShared len)
         ((Ok ch)
           {
@@ -469,7 +494,8 @@
             (Ok (chanOwned ch))
           }
         )
-        ((Err e) (Err e))))))
+        ((Err e) (Err e)))
+    }))
 
 ;; Send `v`, waiting while the ring is full. `True` once it is in the
 ;; ring; `False` if the channel is closed - before the call or while it
@@ -478,20 +504,18 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (chanSend c v)
-  (let (
-    (ch (chanAt c))
-    (me chanMe)
-    (mut state 0)
-  )
+  {
+    (let ch (chanAt c))
+    (let me chanMe)
+    (let mut state 0)
     {
       (while (== state 0)
         (if (!= (chanLock ch me 0 0) 0)
           (set state 2)
-          (let (
-            (head (chanGet ch 3))
-            (tail (chanGet ch 4))
-            (cap (chanGet ch 5))
-          )
+          {
+            (let head (chanGet ch 3))
+            (let tail (chanGet ch 4))
+            (let cap (chanGet ch 5))
             (if (== (chanGet ch 6) 1)
               {
                 (chanUnlock ch me)
@@ -506,13 +530,17 @@
                   (chanNotify ch)
                   (set state 1)
                 }
-                (let ((seen (chanPark ch)))
+                {
+                  (let seen (chanPark ch))
                   {
                     (chanUnlock ch me)
                     (chanSleep ch seen)
-                  }))))))
+                  }
+                }))
+          }))
       (== state 1)
-    }))
+    }
+  })
 
 ;; Receive the oldest word, waiting while the ring is empty and open.
 ;; `None` once the channel is closed AND drained - the end of the stream
@@ -521,21 +549,19 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (chanRecv c)
-  (let (
-    (ch (chanAt c))
-    (me chanMe)
-    (mut state 0)
-    (mut got 0)
-  )
+  {
+    (let ch (chanAt c))
+    (let me chanMe)
+    (let mut state 0)
+    (let mut got 0)
     {
       (while (== state 0)
         (if (!= (chanLock ch me 0 0) 0)
           (set state 2)
-          (let (
-            (head (chanGet ch 3))
-            (tail (chanGet ch 4))
-            (cap (chanGet ch 5))
-          )
+          {
+            (let head (chanGet ch 3))
+            (let tail (chanGet ch 4))
+            (let cap (chanGet ch 5))
             (if (< head tail)
               {
                 (set got (chanGet ch (+ 8 (% head cap))))
@@ -550,15 +576,19 @@
                   (chanUnlock ch me)
                   (set state 2)
                 }
-                (let ((seen (chanPark ch)))
+                {
+                  (let seen (chanPark ch))
                   {
                     (chanUnlock ch me)
                     (chanSleep ch seen)
-                  }))))))
+                  }
+                }))
+          }))
       (if (== state 1)
         (Some got)
         None)
-    }))
+    }
+  })
 
 ;; `chanSend`, waiting at most `nanos` nanoseconds - for the lock and for
 ;; room. `Ok True` once `v` is in the ring; `Ok False` if the channel is
@@ -572,24 +602,23 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (chanSendTimeout c v nanos)
-  (let (
-    (ch (chanAt c))
-    (me chanMe)
-    (b (chanScratch nanos))
-    (mut state 0)
-  )
+  {
+    (let ch (chanAt c))
+    (let me chanMe)
+    (let b (chanScratch nanos))
+    (let mut state 0)
     {
       (while (== state 0)
-        (let ((got (chanLock ch me b 1)))
+        {
+          (let got (chanLock ch me b 1))
           (if (== got 1)
             (set state 3)
             (if (== got 2)
               (set state 4)
-              (let (
-                (head (chanGet ch 3))
-                (tail (chanGet ch 4))
-                (cap (chanGet ch 5))
-              )
+              {
+                (let head (chanGet ch 3))
+                (let tail (chanGet ch 4))
+                (let cap (chanGet ch 5))
                 (if (== (chanGet ch 6) 1)
                   {
                     (chanUnlock ch me)
@@ -609,21 +638,24 @@
                         (chanUnlock ch me)
                         (set state 3)
                       }
-                      (let (
-                        (seen (chanPark ch))
-                        (slice (chanSlice b))
-                      )
+                      {
+                        (let seen (chanPark ch))
+                        (let slice (chanSlice b))
                         {
                           (chanUnlock ch me)
                           (chanTimeSpent b (chanSleepFor ch seen slice) slice)
-                        })))))))))
+                        }
+                      })))
+              }))
+        })
       (chanBlockDone b)
       (if (== state 3)
         (Err (mkError sysTimedOut "chanSendTimeout: timed out"))
         (if (== state 4)
           (Err (mkError syncOwnerDead "chanSendTimeout: a binding died holding the channel"))
           (Ok (== state 1))))
-    }))
+    }
+  })
 
 ;; `chanRecv`, waiting at most `nanos` nanoseconds - for the lock and for
 ;; a word. `Ok (Some w)` the oldest word; `Ok None` the end of the stream
@@ -635,25 +667,24 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (chanRecvTimeout c nanos)
-  (let (
-    (ch (chanAt c))
-    (me chanMe)
-    (b (chanScratch nanos))
-    (mut state 0)
-    (mut got 0)
-  )
+  {
+    (let ch (chanAt c))
+    (let me chanMe)
+    (let b (chanScratch nanos))
+    (let mut state 0)
+    (let mut got 0)
     {
       (while (== state 0)
-        (let ((locked (chanLock ch me b 1)))
+        {
+          (let locked (chanLock ch me b 1))
           (if (== locked 1)
             (set state 3)
             (if (== locked 2)
               (set state 4)
-              (let (
-                (head (chanGet ch 3))
-                (tail (chanGet ch 4))
-                (cap (chanGet ch 5))
-              )
+              {
+                (let head (chanGet ch 3))
+                (let tail (chanGet ch 4))
+                (let cap (chanGet ch 5))
                 (if (< head tail)
                   {
                     (set got (chanGet ch (+ 8 (% head cap))))
@@ -673,14 +704,16 @@
                         (chanUnlock ch me)
                         (set state 3)
                       }
-                      (let (
-                        (seen (chanPark ch))
-                        (slice (chanSlice b))
-                      )
+                      {
+                        (let seen (chanPark ch))
+                        (let slice (chanSlice b))
                         {
                           (chanUnlock ch me)
                           (chanTimeSpent b (chanSleepFor ch seen slice) slice)
-                        })))))))))
+                        }
+                      })))
+              }))
+        })
       (chanBlockDone b)
       (if (== state 1)
         (Ok (Some got))
@@ -689,7 +722,8 @@
           (if (== state 4)
             (Err (mkError syncOwnerDead "chanRecvTimeout: a binding died holding the channel"))
             (Err (mkError sysTimedOut "chanRecvTimeout: timed out")))))
-    }))
+    }
+  })
 
 ;; Send without waiting for room: `True` if `v` went into the ring,
 ;; `False` if it did not because the ring is full, closed or poisoned.
@@ -698,17 +732,15 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (chanTrySend c v)
-  (let (
-    (ch (chanAt c))
-    (me chanMe)
-  )
+  {
+    (let ch (chanAt c))
+    (let me chanMe)
     (if (!= (chanLock ch me 0 0) 0)
       false
-      (let (
-        (head (chanGet ch 3))
-        (tail (chanGet ch 4))
-        (cap (chanGet ch 5))
-      )
+      {
+        (let head (chanGet ch 3))
+        (let tail (chanGet ch 4))
+        (let cap (chanGet ch 5))
         (if (== (chanGet ch 6) 1)
           {
             (chanUnlock ch me)
@@ -726,7 +758,9 @@
             {
               (chanUnlock ch me)
               false
-            }))))))
+            }))
+      })
+  })
 
 ;; Receive without waiting for a word: the oldest word, or `None` when
 ;; there is none right now - empty, whether or not it is closed, or
@@ -735,30 +769,32 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (chanTryRecv c)
-  (let (
-    (ch (chanAt c))
-    (me chanMe)
-  )
+  {
+    (let ch (chanAt c))
+    (let me chanMe)
     (if (!= (chanLock ch me 0 0) 0)
       None
-      (let (
-        (head (chanGet ch 3))
-        (tail (chanGet ch 4))
-        (cap (chanGet ch 5))
-      )
+      {
+        (let head (chanGet ch 3))
+        (let tail (chanGet ch 4))
+        (let cap (chanGet ch 5))
         (if (< head tail)
-          (let ((v (chanGet ch (+ 8 (% head cap)))))
+          {
+            (let v (chanGet ch (+ 8 (% head cap))))
             {
               (chanPut ch 3 (+ head 1))
               (chanBump ch)
               (chanUnlock ch me)
               (chanNotify ch)
               (Some v)
-            })
+            }
+          }
           {
             (chanUnlock ch me)
             None
-          })))))
+          })
+      })
+  })
 
 ;; End the stream. Idempotent. Every waiter wakes: a sender to be
 ;; refused, a receiver to drain and then see `None`. A poisoned channel
@@ -767,10 +803,9 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (chanClose c)
-  (let (
-    (ch (chanAt c))
-    (me chanMe)
-  )
+  {
+    (let ch (chanAt c))
+    (let me chanMe)
     (if (!= (chanLock ch me 0 0) 0)
       0
       {
@@ -779,24 +814,27 @@
         (chanUnlock ch me)
         (chanNotify ch)
         0
-      })))
+      })
+  })
 
 ;; Whether the stream has ended: closed, or poisoned.
 (pub :: chanClosed (-> Chan Bool))
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (chanClosed c)
-  (let (
-    (ch (chanAt c))
-    (me chanMe)
-  )
+  {
+    (let ch (chanAt c))
+    (let me chanMe)
     (if (!= (chanLock ch me 0 0) 0)
       true
-      (let ((c (chanGet ch 6)))
+      {
+        (let c (chanGet ch 6))
         {
           (chanUnlock ch me)
           (== c 1)
-        }))))
+        }
+      })
+  })
 
 ;; Whether a binding died holding this channel's lock, which poisoned it
 ;; (the module header's "a holder that dies"). Takes no lock.
@@ -809,17 +847,19 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (chanLen c)
-  (let (
-    (ch (chanAt c))
-    (me chanMe)
-  )
+  {
+    (let ch (chanAt c))
+    (let me chanMe)
     (if (!= (chanLock ch me 0 0) 0)
       0
-      (let ((n (- (chanGet ch 4) (chanGet ch 3))))
+      {
+        (let n (- (chanGet ch 4) (chanGet ch 3)))
         {
           (chanUnlock ch me)
           n
-        }))))
+        }
+      })
+  })
 
 ;; How many values the channel can hold before a send blocks.
 (pub :: chanCap (-> Chan Int))

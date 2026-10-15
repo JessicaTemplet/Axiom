@@ -21,7 +21,6 @@
 (function_definition) @local.scope
 (lambda) @local.scope
 (block) @local.scope
-(let_expression) @local.scope
 (match_arm) @local.scope
 (for_expression) @local.scope
 (parallel_expression) @local.scope
@@ -36,13 +35,10 @@
 (function_definition parameter: (identifier) @local.definition)
 (lambda parameter: (identifier) @local.definition)
 
-; A binding's own value does not see it: in `(let ((ps ps)) ...)` the
-; second `ps` is the one from outside.
+; A binding's own value does not see it: in `{ (let ps ps) ps }` the
+; initializer uses the `ps` from outside the block.
 (local_binding
   name: (identifier) @local.definition
-  value: (_) @local.definition-value)
-(let_binding
-  pattern: (identifier) @local.definition
   value: (_) @local.definition-value)
 (parallel_binding
   name: (identifier) @local.definition

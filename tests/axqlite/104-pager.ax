@@ -35,8 +35,10 @@
 (fn (openCode path create readOnly)
   (match (pagerOpen path create readOnly 16)
     ((Ok p)
-      (let ((_ (pagerClose p)))
-        0)
+      {
+        (let _ (pagerClose p))
+        0
+      }
     )
     ((Err e) (errCode e))))
 
@@ -44,11 +46,13 @@
 (:: build (-> Tally String Int Int))
 ;@axiom:effect(io)
 (fn (build t path n)
-  (let ((p (openOrDie path 16)))
+  {
+    (let p (openOrDie path 16))
     {
       (pagerSetDurable p false)
       (ok t (pagerBeginWrite p) "build: begin")
-      (let ((root (unwrapOr (btreeCreate p btreeTable) 0)))
+      {
+        (let root (unwrapOr (btreeCreate p btreeTable) 0))
         {
           (for i in 1..(+ n 1)
             (ok t
@@ -58,8 +62,10 @@
           (ok t (pagerCommit p) "build: commit")
           (ok t (pagerClose p) "build: close")
           root
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; What a fresh connection answers when it reads every row of `root`.
 (:: readCode (-> String Int Int))
@@ -68,22 +74,27 @@
   (match (pagerOpen path false false 16)
     ((Err e) (errCode e))
     ((Ok p)
-      (let ((r
-        (andThen (pagerBeginRead p) (lambda (_) (readTree p root)))))
+      {
+        (let r (andThen (pagerBeginRead p) (lambda (_) (readTree p root))))
         {
-          (let ((_ (pagerClose p)))
-            ())
+          {
+            (let _ (pagerClose p))
+            ()
+          }
           (codeOf r)
-        })
+        }
+      }
     )))
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((t tallyNew))
+  {
+    (let t tallyNew)
     {
       ; a new file
-      (let ((p (openOrDie "a.db" 16)))
+      {
+        (let p (openOrDie "a.db" 16))
         {
           (is t (pagerPageCount p) axqMisuse "no lock, no header")
           (is t (pagerGet p 1) axqMisuse "no lock, no page")
@@ -118,8 +129,10 @@
           (check t (== (unwrapOr (pagerBumpSchemaVersion p) 0) 1) "bump the schema version")
           (ok t (pagerCommit p) "commit")
           (ok t (pagerClose p) "close")
-        })
-      (let ((p (openOrDie "a.db" 16)))
+        }
+      }
+      {
+        (let p (openOrDie "a.db" 16))
         {
           (ok t (pagerBeginRead p) "begin read")
           (check t (== (unwrapOr (pagerMeta p 0) 0) 42) "meta 0 persists")
@@ -128,13 +141,16 @@
           (check t (== (unwrapOr (pagerChangeCounter p) 0) 2) "a commit adds one to the counter")
           (ok t (pagerEndRead p) "end read")
           ; rollback restores pages, header and length
-          (let ((before (fileHash "a.db")))
+          {
+            (let before (fileHash "a.db"))
             {
               (ok t (pagerBeginWrite p) "begin write")
-              (let ((root (unwrapOr (btreeCreate p btreeTable) 0)))
+              {
+                (let root (unwrapOr (btreeCreate p btreeTable) 0))
                 (for i in 0..300
                   (ok t (btreePut p root (keyRowid i) "a value that takes some room in a leaf")
-                    "put")))
+                    "put"))
+              }
               (ok t (pagerSetMeta p 0 7) "set meta")
               (ok t (btreePut p btreeSchemaRoot "t" "1") "put in the schema table")
               (ok t (pagerRollback p) "rollback")
@@ -145,36 +161,44 @@
               (check t (== (unwrapOr (btreeCount p btreeSchemaRoot) -1) 0)
                 "rollback restores the schema table")
               (ok t (pagerEndRead p) "end read")
-            })
+            }
+          }
           ; a transaction bigger than the cache spills, and rolls back exactly
           (ok t (pagerClose p) "close")
-        })
-      (let ((p (unwrapOr (pagerOpen "a.db" false false 4) (openOrDie "a.db" 4))))
+        }
+      }
+      {
+        (let p (unwrapOr (pagerOpen "a.db" false false 4) (openOrDie "a.db" 4)))
         {
-          (let ((before (fileHash "a.db")))
+          {
+            (let before (fileHash "a.db"))
             {
               (ok t (pagerBeginWrite p) "begin big write")
-              (let ((root (unwrapOr (btreeCreate p btreeTable) 0)))
+              {
+                (let root (unwrapOr (btreeCreate p btreeTable) 0))
                 (for i in 0..2000
                   (ok t (btreePut p root (keyRowid i) "a value that takes some room in a leaf")
-                    "put")))
+                    "put"))
+              }
               (check t (> (pagerStat p 5) 0) "a 4-page cache spills a big transaction")
               (check t (!= (fileHash "a.db") before) "spilled pages reached the file")
               (ok t (pagerRollback p) "rollback")
               (check t (== (fileHash "a.db") before)
                 "rollback after spilling leaves the file byte for byte")
-            })
+            }
+          }
           (ok t (pagerClose p) "close")
-        })
+        }
+      }
       ; free pages are reused, and a page freed at the end shrinks the file
-      (let ((p (openOrDie "a.db" 16)))
+      {
+        (let p (openOrDie "a.db" 16))
         {
           (ok t (pagerBeginWrite p) "begin")
-          (let (
-            (a (unwrapOr (pagerAlloc p) 0))
-            (b (unwrapOr (pagerAlloc p) 0))
-            (c (unwrapOr (pagerAlloc p) 0))
-          )
+          {
+            (let a (unwrapOr (pagerAlloc p) 0))
+            (let b (unwrapOr (pagerAlloc p) 0))
+            (let c (unwrapOr (pagerAlloc p) 0))
             {
               (check t (&& (== a 2) (&& (== b 3) (== c 4)))
                 "new pages come from the end of the file")
@@ -194,20 +218,25 @@
               (check t (== (unwrapOr (pagerAlloc p) 0) 4) "then the end of the file")
               (is t (pagerFree p 1) axqCorrupt "page 1 can't be freed")
               (ok t (pagerRollback p) "rollback")
-            })
+            }
+          }
           (ok t (pagerClose p) "close")
-        })
+        }
+      }
       ; after a commit the journal's header is zero
       (check t (fileExists "a.db-journal") "a write transaction leaves a journal file")
-      (let ((mut zero true))
+      {
+        (let mut zero true)
         {
           (for i in 0..48
             (if (! (== (fileByte "a.db-journal" i) 0))
               (set zero false)))
           (check t zero "the journal's header is zero once the transaction is over")
-        })
+        }
+      }
       ; read-only
-      (let ((p (unwrapOr (pagerOpen "a.db" false true 16) (openOrDie "a.db" 16))))
+      {
+        (let p (unwrapOr (pagerOpen "a.db" false true 16) (openOrDie "a.db" 16)))
         {
           (check t (pagerIsReadOnly p) "opened read-only")
           (is t (pagerBeginWrite p) axqReadOnly "a read-only pager refuses a write transaction")
@@ -216,23 +245,32 @@
             "a read-only pager refuses tree changes")
           (ok t (pagerEndRead p) "end read")
           (ok t (pagerClose p) "close")
-        })
+        }
+      }
       (check t (== (openCode "missing.db" false false) axqIoFailed) "a missing file without create")
       (check t (== (openCode "missing.db" false true) axqIoFailed) "a missing file, read-only")
-      (let ((_ (writeFile "empty.db" "")))
-        ())
+      {
+        (let _ (writeFile "empty.db" ""))
+        ()
+      }
       (check t (== (openCode "empty.db" false true) axqNotADatabase)
         "an empty file can't be made a database read-only")
       (check t (== (openCode "empty.db" false false) 0) "an empty file becomes a database")
       (check t (== (sizeOf "empty.db") 8192) "and has two pages")
-      (let ((_ (writeFile "text.db" "hello, this is not a database")))
-        ())
+      {
+        (let _ (writeFile "text.db" "hello, this is not a database"))
+        ()
+      }
       ; files that aren't databases
       (check t (== (openCode "text.db" false false) axqNotADatabase)
         "a text file is not a database")
-      (let ((r (rngNew 104)))
-        (let ((_ (writeFile "noise.db" (rngBytes r 10000 256))))
-          ()))
+      {
+        (let r (rngNew 104))
+        {
+          (let _ (writeFile "noise.db" (rngBytes r 10000 256)))
+          ()
+        }
+      }
       (check t (== (openCode "noise.db" false false) axqNotADatabase)
         "random bytes are not a database")
       (copyOver "a.db" "v2.db")
@@ -242,11 +280,13 @@
       (patchByte "hdr.db" 300 1)
       (check t (== (openCode "hdr.db" false false) axqCorrupt) "a header that fails its checksum")
       ; damaged pages answer axqCorrupt, never their bytes
-      (let ((root (build t "b.db" 400)))
+      {
+        (let root (build t "b.db" 400))
         {
           (check t (== (readCode "b.db" root) 0) "the built file reads")
           ; changing existing pages under a 4-page cache, then rolling back
-          (let ((before (fileHash "b.db")))
+          {
+            (let before (fileHash "b.db"))
             (match (pagerOpen "b.db" false false 4)
               ((Ok p)
                 {
@@ -266,29 +306,44 @@
                   (ok t (pagerClose p) "close")
                 }
               )
-              ((Err e) (check t false "open b.db"))))
+              ((Err e) (check t false "open b.db")))
+          }
           (copyOver "b.db" "flip.db")
           ; a byte in the middle of the first leaf's cells
           (patchByte "flip.db" (+ (* 3 4096) 2000) (^ (fileByte "b.db" (+ (* 3 4096) 2000)) 1))
           (check t (== (readCode "flip.db" root) axqCorrupt) "a flipped bit in a leaf is corrupt")
           (copyOver "b.db" "moved.db")
-          (let ((s (unwrapOr (readFile "b.db") "")))
-            (let ((pg4 (strSlice s (* 4 4096) 4096)))
-              (let ((_ (writeFile "moved.db"
-                         (concat (concat (strSlice s 0 (* 3 4096)) pg4)
-                           (strSlice s (* 4 4096) (strLen s))))))
-                ())))
+          {
+            (let s (unwrapOr (readFile "b.db") ""))
+            {
+              (let pg4 (strSlice s (* 4 4096) 4096))
+              {
+                (let _
+                  (writeFile "moved.db"
+                    (concat (concat (strSlice s 0 (* 3 4096)) pg4)
+                      (strSlice s (* 4 4096) (strLen s)))))
+                ()
+              }
+            }
+          }
           ; page 4's bytes, checksum and all, where page 3 should be
           (check t (== (readCode "moved.db" root) axqCorrupt)
             "a valid page in the wrong place is corrupt")
-          (let ((s (unwrapOr (readFile "b.db") "")))
-            (let ((_ (writeFile "short.db" (strSlice s 0 (- (strLen s) 4096)))))
-              ()))
+          {
+            (let s (unwrapOr (readFile "b.db") ""))
+            {
+              (let _ (writeFile "short.db" (strSlice s 0 (- (strLen s) 4096))))
+              ()
+            }
+          }
           (check t (== (openCode "short.db" false false) axqCorrupt)
             "a file shorter than its page count")
-          (let ((_ (writeFile "long.db"
-                     (concat (unwrapOr (readFile "b.db") "") (rngBytes (rngNew 5) 4096 256)))))
-            ())
+          {
+            (let _
+              (writeFile "long.db"
+                (concat (unwrapOr (readFile "b.db") "") (rngBytes (rngNew 5) 4096 256))))
+            ()
+          }
           (check t (== (openCode "long.db" false false) axqCorrupt)
             "a file longer than its page count")
           (match (pagerOpen "flip.db" false false 16)
@@ -302,6 +357,8 @@
               }
             )
             ((Err e) (check t false "open flip.db")))
-        })
+        }
+      }
       (tallyReport t "104-pager")
-    }))
+    }
+  })

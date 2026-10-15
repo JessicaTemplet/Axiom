@@ -123,24 +123,26 @@
 ; only for a SELF call. `skipLineComment` is self-recursive, so that
 ; one it does flatten.
 (pub fn (skipWhitespace src pos len)
-  (let (
-    (mut p pos)
-    (mut go 1)
-  )
+  {
+    (let mut p pos)
+    (let mut go 1)
     {
       (while (== go 1)
         (if (>= p len)
           (set go 0)
-          (let ((ch (strByte src p)))
+          {
+            (let ch (strByte src p))
             (if (isSpace ch)
               (set p (+ p 1))
               (if (== ch 59)
                 (set p (skipLineComment src (+ p 1) len))
                 (if (&& (== ch 35) (isBlockOpen src p len))
                   (set p (skipBlockComment src (+ p 2) len))
-                  (set go 0)))))))
+                  (set go 0))))
+          }))
       p
-    }))
+    }
+  })
 
 ; The position just past the newline that ends this comment, or `len`.
 ; It used to continue into `skipWhitespace` itself; the caller's loop
@@ -192,10 +194,9 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: skipBlockComment (-> String Int Int Int))
 (pub fn (skipBlockComment src pos len)
-  (let (
-    (mut p pos)
-    (mut depth 1)
-  )
+  {
+    (let mut p pos)
+    (let mut depth 1)
     {
       (while (&& (< p len) (> depth 0))
         (if (isBlockOpen src p len)
@@ -210,7 +211,8 @@
             }
             (set p (+ p 1)))))
       p
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Emit a token.
@@ -218,8 +220,10 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: emitToken (-> TokenKind Int Int (Vec Int) String (Vec Int)))
 (pub fn (emitToken kind start end tokens src)
-  (let ((lex (strSlice src start (- end start))))
-    (vecPush tokens (mkToken kind lex (mkSpan start end)))))
+  {
+    (let lex (strSlice src start (- end start)))
+    (vecPush tokens (mkToken kind lex (mkSpan start end)))
+  })
 
 ; ------------------------------------------------------------------
 ; Skip helpers.
@@ -229,10 +233,12 @@
 (pub fn (skipIdent src pos len)
   (if (>= pos len)
     pos
-    (let ((ch (strByte src pos)))
+    {
+      (let ch (strByte src pos))
       (if (isIdentChar ch)
         (skipIdent src (+ pos 1) len)
-        pos))))
+        pos)
+    }))
 
 ; `_` is a digit separator, consumed as part of the number and filtered
 ; out when the value is decoded - `1_000_000` is one token, exactly as
@@ -244,12 +250,14 @@
 (pub fn (skipDigits src pos len)
   (if (>= pos len)
     pos
-    (let ((ch (strByte src pos)))
+    {
+      (let ch (strByte src pos))
       (if (isDigit ch)
         (skipDigits src (+ pos 1) len)
         (if (== ch 95)
           (skipDigits src (+ pos 1) len)
-          pos)))))
+          pos))
+    }))
 
 ; A backslash escapes whatever follows it, so an escaped quote does not
 ; end the literal. Without this, `"c\""` ended at the middle quote and
@@ -269,7 +277,8 @@
   ; answered String (probed 2026-08-07).
   (if (>= pos len)
     (- 0 (+ pos 1))
-    (let ((ch (strByte src pos)))
+    {
+      (let ch (strByte src pos))
       (if (== ch 92)
         (scanStringEnd src (+ pos 2) len)
         (if (== ch 34)
@@ -289,7 +298,8 @@
           ; break would be a language decision, not a lexer detail, and
           ; would have to move the tree-sitter grammar and the formatter
           ; with it - so it is not made here by accident.
-          (scanStringEnd src (+ pos 1) len))))))
+          (scanStringEnd src (+ pos 1) len)))
+    }))
 
 ; ------------------------------------------------------------------
 ; Lexical validity.
@@ -320,18 +330,19 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: intLitFits (-> String Int Int Bool))
 (pub fn (intLitFits src start end)
-  (let (
-    (negative (&& (< start end) (== (strByte src start) 45)))
-    (mut i start)
-    (mut acc 0)
-    (mut ok true)
-  )
+  {
+    (let negative (&& (< start end) (== (strByte src start) 45)))
+    (let mut i start)
+    (let mut acc 0)
+    (let mut ok true)
     {
       (while (&& ok (< i end))
-        (let ((b (strByte src i)))
+        {
+          (let b (strByte src i))
           {
             (if (! (|| (== b 95) (== b 45)))
-              (let ((d (- b 48)))
+              {
+                (let d (- b 48))
                 (if (|| (< acc -922337203685477580)
                       (&& (== acc -922337203685477580)
                         (> d
@@ -339,11 +350,14 @@
                             8
                             7))))
                   (set ok false)
-                  (set acc (- (* acc 10) d)))))
+                  (set acc (- (* acc 10) d)))
+              })
             (set i (+ i 1))
-          }))
+          }
+        })
       ok
-    }))
+    }
+  })
 
 ; The characters stage0 accepts after a backslash. It writes the set
 ; out twice - once for strings (axiom-lexer/src/lib.rs:513) and once
@@ -361,13 +375,13 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: badEscapeIn (-> String Int Int Int))
 (pub fn (badEscapeIn src start end)
-  (let (
-    (mut i (+ start 1))
-    (mut found (- 0 1))
-  )
+  {
+    (let mut i (+ start 1))
+    (let mut found (- 0 1))
     {
       (while (&& (< i (- end 1)) (< found 0))
-        (let ((b (strByte src i)))
+        {
+          (let b (strByte src i))
           (if (== b 92)
             {
               (if (!
@@ -378,9 +392,11 @@
                 (set found i))
               (set i (+ i 2))
             }
-            (set i (+ i 1)))))
+            (set i (+ i 1)))
+        })
       found
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Main lexer loop.
@@ -407,7 +423,8 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: lexTokens (-> String Int Int (Vec Int) (Vec Int)))
 (pub fn (lexTokens src pos len tokens)
-  (let ((mut p pos))
+  {
+    (let mut p pos)
     {
       (while (< p len)
         (set p (stepToken src p len tokens (strByte src p))))
@@ -415,7 +432,8 @@
       ; literal at EOF - which is the position the recursive version
       ; gave EOF too.
       (emitToken TK_EOF p p tokens src)
-    }))
+    }
+  })
 
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: stepToken (-> String Int Int (Vec Int) Int Int))
@@ -446,34 +464,42 @@
       (if (isDigit ch)
         (stepNumberFrom src pos (+ pos 1) len tokens)
         (if (isIdentStart ch)
-          (let ((ep (skipIdent src (+ pos 1) len)))
+          {
+            (let ep (skipIdent src (+ pos 1) len))
             {
               (emitToken TK_IDENT pos ep tokens src)
               ep
-            })
+            }
+          }
           (if (== ch 34)
-            (let ((ep0 (scanStringEnd src (+ pos 1) len)))
+            {
+              (let ep0 (scanStringEnd src (+ pos 1) len))
               (if (< ep0 0)
                 ; Unterminated: the error spans from the opening quote to
                 ; where the scan stopped, which - since a newline no longer
                 ; stops it - is the end of the source, exactly as stage0's
                 ; `span(start)` at axiom-lexer/src/lib.rs:541 is.
-                (let ((stop
-                  (let ((s (- (- 0 ep0) 1)))
-                    (if (> s len)
-                      len
-                      s))))
+                {
+                  (let stop
+                    {
+                      (let s (- (- 0 ep0) 1))
+                      (if (> s len)
+                        len
+                        s)
+                    })
                   {
                     (emitToken TK_ERROR pos stop tokens src)
                     stop
-                  })
+                  }
+                }
                 ; Terminated, but stage0 also rejects an escape outside its
                 ; set - and this lexer used to pass one through, changing
                 ; the string's BYTES rather than refusing (`"A\qB"` built
                 ; and printed `AqB`). The error spans the two characters of
                 ; the escape; lexing resumes past the whole literal, so one
                 ; bad escape does not cascade.
-                (let ((bad (badEscapeIn src pos ep0)))
+                {
+                  (let bad (badEscapeIn src pos ep0))
                   (if (< bad 0)
                     {
                       (emitToken TK_STRING pos ep0 tokens src)
@@ -482,7 +508,9 @@
                     {
                       (emitToken TK_ERROR_ESC bad (+ bad 2) tokens src)
                       ep0
-                    }))))
+                    })
+                })
+            }
             (if (== ch 40)
               {
                 (emitToken TK_LPAREN pos (+ pos 1) tokens src)
@@ -578,21 +606,26 @@
                                         (emitToken TK_QUESTION pos (+ pos 1) tokens src)
                                         (+ pos 1)
                                       }
-                                      (let ((ce (+ pos (lexErrCharLen src pos len))))
+                                      {
+                                        (let ce
+                                          (+ pos (lexErrCharLen src pos len)))
                                         {
                                           (emitToken TK_ERROR pos ce tokens src)
                                           ce
-                                        }))))))))))))))))))))
+                                        }
+                                      })))))))))))))))))))
 
 ; Bytes in the unexpected character at `pos`: its well-formed UTF-8
 ; length, or 1 for a byte that begins none.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: lexErrCharLen (-> String Int Int Int))
 (pub fn (lexErrCharLen src pos len)
-  (let ((w (utf8WellFormedAt src pos len)))
+  {
+    (let w (utf8WellFormedAt src pos len))
     (if (< w 1)
       1
-      w)))
+      w)
+  })
 
 ; A character literal, following stage0's `consume_char`
 ; (axiom-lexer/src/lib.rs:546) step for step, because the ORDER of its
@@ -619,21 +652,24 @@
 (pub fn (stepCharToken src pos len tokens)
   ; Lexing resumes past the whole literal however it turned out, so
   ; one bad character literal reports once instead of cascading.
-  (let ((esc (== (strByte src (+ pos 1)) 92)))
-    (let (
-      (ep (if esc
-        (+ pos 4)
-        (+ (+ pos 2) (utf8SeqLen (strByte src (+ pos 1))))))
-      (badEsc (if (&& esc (< (+ pos 2) len))
-        (if (isEscapeChar (strByte src (+ pos 2)))
-          false
-          true)
-        false))
-    )
-      (let ((stop
-        (if (> ep len)
-          len
-          ep)))
+  {
+    (let esc (== (strByte src (+ pos 1)) 92))
+    {
+      (let ep
+        (if esc
+          (+ pos 4)
+          (+ (+ pos 2) (utf8SeqLen (strByte src (+ pos 1))))))
+      (let badEsc
+        (if (&& esc (< (+ pos 2) len))
+          (if (isEscapeChar (strByte src (+ pos 2)))
+            false
+            true)
+          false))
+      {
+        (let stop
+          (if (> ep len)
+            len
+            ep))
         (if badEsc
           {
             (emitToken TK_ERROR_ESC (+ pos 1) (+ pos 3) tokens src)
@@ -647,23 +683,30 @@
               (emitToken TK_CHARLIT pos ep tokens src)
               ep
             }
-            (let ((estop
-              (if (> (- ep 1) len)
-                len
-                (- ep 1))))
+            {
+              (let estop
+                (if (> (- ep 1) len)
+                  len
+                  (- ep 1)))
               {
                 (emitToken TK_ERROR pos estop tokens src)
                 stop
-              })))))))
+              }
+            }))
+      }
+    }
+  })
 
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: stepIdentToken (-> String Int Int (Vec Int) Int))
 (pub fn (stepIdentToken src pos len tokens)
-  (let ((ep (skipIdent src (+ pos 1) len)))
+  {
+    (let ep (skipIdent src (+ pos 1) len))
     {
       (emitToken TK_IDENT pos ep tokens src)
       ep
-    }))
+    }
+  })
 
 ; Digits (and separators), then `.digit`, make a float literal: `1.5`
 ; is one token, where `1.x` is an integer followed by a field access.
@@ -673,13 +716,16 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: stepNumberFrom (-> String Int Int Int (Vec Int) Int))
 (pub fn (stepNumberFrom src numStart scanFrom len tokens)
-  (let ((ep (skipDigits src scanFrom len)))
+  {
+    (let ep (skipDigits src scanFrom len))
     (if (&& (< (+ ep 1) len) (&& (== (strByte src ep) 46) (isDigit (strByte src (+ ep 1)))))
-      (let ((fp (skipDigits src (+ ep 1) len)))
+      {
+        (let fp (skipDigits src (+ ep 1) len))
         {
           (emitToken TK_FLOAT numStart fp tokens src)
           fp
-        })
+        }
+      }
       (if (intLitFits src numStart ep)
         {
           (emitToken TK_INT numStart ep tokens src)
@@ -692,7 +738,8 @@
         {
           (emitToken TK_ERROR numStart ep tokens src)
           ep
-        }))))
+        }))
+  })
 
 ; Public lexer interface.
 ; ------------------------------------------------------------------
@@ -740,14 +787,14 @@
 (pub :: scanAxtags (-> String (Vec Int)))
 ;@axiom:effect(unsafe)
 (pub fn (scanAxtags src)
-  (let (
-    (acc vecNew)
-    (len (strLen src))
-    (mut pos 0)
-  )
+  {
+    (let acc vecNew)
+    (let len (strLen src))
+    (let mut pos 0)
     {
       (while (< pos len)
-        (let ((ch (strByte src pos)))
+        {
+          (let ch (strByte src pos))
           (if (== ch 34)
             (set pos (skipStringBody src (+ pos 1) len))
             ; An IDENTIFIER, consumed whole, and it has to come before the
@@ -784,17 +831,23 @@
                   ; a comment there and must not become a tag here.
                   (set pos (skipBlockComment src (+ pos 2) len))
                   (if (== ch 59)
-                    (let ((nl (findNewline src pos len)))
+                    {
+                      (let nl (findNewline src pos len))
                       {
                         (if (== (hasAxiomPrefix src (+ pos 1) len) 1)
                           (vecPush acc
-                            (as (AxtagEnt pos (strSlice src (+ pos 8) (- nl (+ pos 8)))) Int))
+                            (as (AxtagEnt
+                                  :off pos
+                                  :content (strSlice src (+ pos 8) (- nl (+ pos 8)))) Int))
                           (as 0 (Vec Int)))
                         (set pos nl)
-                      })
-                    (set pos (+ pos 1)))))))))
+                      }
+                    }
+                    (set pos (+ pos 1)))))))
+        })
       acc
-    }))
+    }
+  })
 
 ; `@axiom:` is seven bytes; the tag's content starts one past them,
 ; which is why the slice above begins at pos+8 (the `;` plus seven).
@@ -826,21 +879,25 @@
 (pub fn (skipStringBody src pos len)
   (if (>= pos len)
     len
-    (let ((ch (strByte src pos)))
+    {
+      (let ch (strByte src pos))
       (if (== ch 92)
         (skipStringBody src (+ pos 2) len)
         (if (== ch 34)
           (+ pos 1)
-          (skipStringBody src (+ pos 1) len))))))
+          (skipStringBody src (+ pos 1) len)))
+    }))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: skipCharBody (-> String Int Int Int))
 (pub fn (skipCharBody src pos len)
   (if (>= pos len)
     len
-    (let ((ch (strByte src pos)))
+    {
+      (let ch (strByte src pos))
       (if (== ch 92)
         (skipCharBody src (+ pos 2) len)
         (if (== ch 39)
           (+ pos 1)
-          (skipCharBody src (+ pos 1) len))))))
+          (skipCharBody src (+ pos 1) len)))
+    }))

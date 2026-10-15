@@ -105,7 +105,7 @@
 ;; An `Error` with `code` and `message` and no context yet.
 (pub :: mkError (-> Int String Error))
 (pub fn (mkError code message)
-  (Error code message ""))
+  (Error :code code :message message :context ""))
 
 ;; The error's numeric code, one of the `err*` constants.
 (pub :: errCode (-> Error Int))
@@ -193,7 +193,7 @@
 ;; `withContext` does the same to the error inside a `Result`.
 (pub :: errContextOf (-> Error String Error))
 (pub fn (errContextOf e ctx)
-  (Error e.code e.message ctx))
+  (Error :code e.code :message e.message :context ctx))
 
 ;; Set the context of the error inside `r` to `ctx`, so a caller up the
 ;; stack can say what it was doing. An `Ok` passes through unchanged.
@@ -358,10 +358,12 @@
 (pub fn (addChecked a b)
   ; Both operands on the same side of zero, the answer on the other:
   ; the sign bit of `(a ^ s) & (b ^ s)` is set exactly then.
-  (let ((s (+ a b)))
+  {
+    (let s (+ a b))
     (if (< (& (^ a s) (^ b s)) 0)
       (Err (mkError errOverflow "sum is not representable"))
-      (Ok s))))
+      (Ok s))
+  })
 
 ;; `a - b`, or `Err` with `errOverflow` when the difference does not
 ;; fit an `Int`.
@@ -369,10 +371,12 @@
 (pub fn (subChecked a b)
   ; A subtraction can only overflow when the operands disagree in
   ; sign, and then only if the answer disagrees with the first.
-  (let ((s (- a b)))
+  {
+    (let s (- a b))
     (if (< (& (^ a b) (^ a s)) 0)
       (Err (mkError errOverflow "difference is not representable"))
-      (Ok s))))
+      (Ok s))
+  })
 
 ;; `a * b`, or `Err` with `errOverflow` when the product does not fit
 ;; an `Int`.
@@ -395,10 +399,12 @@
     ; at every level the compiler emitted.)
     (if (|| (&& (== a intMin) (== b (- 0 1))) (&& (== b intMin) (== a (- 0 1))))
       (Err (mkError errOverflow "product is not representable"))
-      (let ((p (* a b)))
+      {
+        (let p (* a b))
         (if (!= (/ p a) b)
           (Err (mkError errOverflow "product is not representable"))
-          (Ok p))))))
+          (Ok p))
+      })))
 
 ;; `a / b` truncated toward zero, or `Err` with `errDivideByZero` for a
 ;; zero divisor and `errOverflow` for `intMin / -1`.

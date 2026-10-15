@@ -11,7 +11,8 @@
 ; The rows a query answers, one text line each.
 (:: rowsOf (-> (Result Rows Error) (Vec String)))
 (fn (rowsOf r)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (match r
         ((Ok rs)
@@ -20,18 +21,18 @@
         )
         ((Err e) (vecPush out (kitErrText e))))
       out
-    }))
+    }
+  })
 
 ; Run a macro query and its text twin, and say whether they agree.
 (:: agree (-> Connection String Query Query Int))
 ;@axiom:effect(io)
 (fn (agree db label a b)
-  (let (
-    (ra (rowsOf (axqQueryOn db a)))
-    (rb (rowsOf (axqQueryOn db b)))
-    (n (vecLen ra))
-    (mut same (== (vecLen ra) (vecLen rb)))
-  )
+  {
+    (let ra (rowsOf (axqQueryOn db a)))
+    (let rb (rowsOf (axqQueryOn db b)))
+    (let n (vecLen ra))
+    (let mut same (== (vecLen ra) (vecLen rb)))
     {
       (for (x i) in ra
         (if (&& same (! (strEq x (vecGet rb i))))
@@ -42,15 +43,15 @@
       (for x in ra
         (println "  {x}"))
       0
-    }))
+    }
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (db (kitOpen "macro.db"))
-    (people (vec3 (VText "ada") (VText "bob") (VText "cy")))
-  )
+  {
+    (let db (kitOpen "macro.db"))
+    (let people (vec3 (VText "ada") (VText "bob") (VText "cy")))
     {
       (kitRun "create"
         (axqRunOn db
@@ -71,26 +72,31 @@
           (axqlUpdate people (assign (score (+ score (real 1.0))) (age (+ age (int 1))))
             (where (>= age (int 35))))))
       (kitRun "delete" (axqRunOn db (axqlDelete people (where (= name (text "eve"))))))
-      (let ((minAge 31))
+      {
+        (let minAge 31)
         {
-          (agree db "all" (axqlSelect people *) (Query "SELECT * FROM people" vec0))
+          (agree db "all" (axqlSelect people *) (Query :text "SELECT * FROM people" :params vec0))
           (agree db "filtered"
             (axqlSelect people (name age) (where (and (> age (int minAge)) (isNotNull score)))
               (orderBy (age desc)))
             (Query
-              "SELECT name, age FROM people WHERE (age > ?) AND (score IS NOT NULL) ORDER BY age DESC"
-              (vec1 (VInt minAge))))
+              :text
+                "SELECT name, age FROM people WHERE (age > ?) AND (score IS NOT NULL) ORDER BY age DESC"
+              :params (vec1 (VInt minAge))))
           (agree db "expressions"
             (axqlSelect people (name (alias (* age (int 2)) twice))
               (where (or (isNull age) (< age (int 33)))) (orderBy name))
             (Query
-              "SELECT name, age * 2 AS twice FROM people WHERE age IS NULL OR age < 33 ORDER BY name"
-              vec0))
+              :text
+                "SELECT name, age * 2 AS twice FROM people WHERE age IS NULL OR age < 33 ORDER BY name"
+              :params vec0))
           (agree db "paged" (axqlSelect people id (orderBy (id desc)) (limit 2) (offset 1))
-            (Query "SELECT id FROM people ORDER BY id DESC LIMIT 2 OFFSET 1" vec0))
-        })
+            (Query :text "SELECT id FROM people ORDER BY id DESC LIMIT 2 OFFSET 1" :params vec0))
+        }
+      }
       (kitRun "drop index" (axqRunOn db (axqlDropIndex byName)))
       (kitRun "drop" (axqRunOn db (axqlDropTable IF EXISTS people)))
       (kitRun "drop again" (axqRunOn db (axqlDropTable people)))
       (kitRun "close" (axqClose db))
-    }))
+    }
+  })

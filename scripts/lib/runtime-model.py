@@ -533,13 +533,15 @@ class Trace:
         lines = []
         for item in frame.body:
             if isinstance(item, Frame):
-                binds = " ".join(f"(mut {v} 0)" for v in item.variables) or "(mut unused 0)"
                 lines.append(f"{pad}(region {item.name}")
-                lines.append(f"{pad}  (let ({binds})")
+                lines.append(f"{pad}  {{")
+                for variable in item.variables or ["unused"]:
+                    lines.append(f"{pad}    (let mut {variable} 0)")
                 lines.append(f"{pad}    {{")
                 lines.extend(self.render_frame(item, indent + 6))
                 lines.append(f"{pad}      0")
-                lines.append(f"{pad}    }}))")
+                lines.append(f"{pad}    }}")
+                lines.append(f"{pad}  }})")
             else:
                 lines.append(pad + item)
         return lines
@@ -547,10 +549,13 @@ class Trace:
     def render(self, directory):
         assert len(self.frames) == 1, "unclosed region"
         top = self.frames[0]
-        bindings = "\n".join(f"    (mut {v} 0)" for v in ["acc"] + top.variables)
+        bindings = "\n".join(f"    (let mut {v} 0)" for v in ["acc"] + top.variables)
         body = "\n".join(self.render_frame(top, 6))
-        report = '''      (let ((first (& acc 4294967295)) (nfail (>> acc 32)))
-        (println "{first} {nfail}"))'''
+        report = '''      {
+        (let first (& acc 4294967295))
+        (let nfail (>> acc 32))
+        (println "{first} {nfail}")
+      }'''
         if self.terminal:
             tail = f'''{report}
       {self.terminal_code}
@@ -566,13 +571,16 @@ class Trace:
 (:: nonzero (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (nonzero h n)
-  (let ((mut k 0) (mut i 0))
+  {{
+    (let mut k 0)
+    (let mut i 0)
     {{
       (while (< i n)
         (if (== (__load64 h i) 0) 0 (set k (+ k 1)))
         (set i (+ i 1)))
       k
-    }}))
+    }}
+  }})
 
 (:: check (-> Int Bool Int Int))
 (fn (check acc condition number)
@@ -585,15 +593,15 @@ class Trace:
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (main)
-  (let (
-    (prime (__alloc 16))
-    (origin (__alloc 0))
+  {{
+    (let prime (__alloc 16))
+    (let origin (__alloc 0))
 {bindings}
-  )
     {{
 {body}
 {tail}
-    }}))
+    }}
+  }})
 '''
         (directory / f"{self.name}.ax").write_text(source)
         return {

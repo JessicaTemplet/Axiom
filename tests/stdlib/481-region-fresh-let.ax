@@ -69,8 +69,10 @@
   (if (<= i 0)
     acc
     (region r
-      (let ((b (mkBox i)))
-        (spinLet (- i 1) (+ acc (useBox b 0)))))))
+      {
+        (let b (mkBox i))
+        (spinLet (- i 1) (+ acc (useBox b 0)))
+      })))
 
 (:: main ())
 ;@axiom:effect(io)
@@ -79,53 +81,76 @@
     ; --- 1. let-bound fresh call in a region ---
     (println
       (region r
-        (let ((b (mkBox 40)))
-          (useBox b 2))))
+        {
+          (let b (mkBox 40))
+          (useBox b 2)
+        }))
     ; --- 2. two nested let-bound fresh calls ---
     (println
       (region r
-        (let ((b (mkBox 1)))
-          (let ((c (mkBox 2)))
-            (+ (useBox b 0) (useBox c 0))))))
+        {
+          (let b (mkBox 1))
+          {
+            (let c (mkBox 2))
+            (+ (useBox b 0) (useBox c 0))
+          }
+        }))
     ; --- 3. let-bound reader result: the release stays ---
     (println
       (region r
-        (let ((b (idBox (MkBox 9))))
-          (useBox b 0))))
+        {
+          (let b (idBox (MkBox 9)))
+          (useBox b 0)
+        }))
     ; --- 4. no region, no elision, same answer ---
     (println
-      (let ((b (mkBox 40)))
-        (useBox b 2)))
+      {
+        (let b (mkBox 40))
+        (useBox b 2)
+      })
     ; --- 5. let-bound closure call: the release stays ---
     (println
       (region r
-        (let ((k
-          (lambda (q) (mkBox q))))
-          (let ((b (k 40)))
-            (useBox b 0)))))
+        {
+          (let k (lambda (q) (mkBox q)))
+          {
+            (let b (k 40))
+            (useBox b 0)
+          }
+        }))
     ; --- 6. one binding borrowed twice: one share elided ---
     (println
       (region r
-        (let ((b (mkBox 21)))
-          (+ (useBox b 0) (useBox b 0)))))
+        {
+          (let b (mkBox 21))
+          (+ (useBox b 0) (useBox b 0))
+        }))
     ; --- 7. the waterline comes back, releases elided ---
-    (let ((m1 __axiom_arena_mark))
+    {
+      (let m1 __axiom_arena_mark)
       {
         (region r
           {
-            (let ((b (mkBox 1)))
-              (useBox b 0))
-            (let ((b (mkBox 2)))
-              (useBox b 0))
-            (let ((b (mkBox 3)))
-              (useBox b 0))
+            {
+              (let b (mkBox 1))
+              (useBox b 0)
+            }
+            {
+              (let b (mkBox 2))
+              (useBox b 0)
+            }
+            {
+              (let b (mkBox 3))
+              (useBox b 0)
+            }
             0
           })
         (println
           (if (<= (- (memGetWord __axiom_arena_mark 0) (memGetWord m1 0)) 48)
             1
             0))
-      })
+      }
+    }
     ; --- 8. fifty thousand regions, one sum ---
     (println (spinLet 50000 0))
   })

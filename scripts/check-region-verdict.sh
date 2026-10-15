@@ -316,11 +316,11 @@ cat > "$work/litprobe.ax" <<'AX'
 
 (:: boxOf (-> Int Int))
 
-(fn (boxOf n) (as (Box "in field position" n) Int))
+(fn (boxOf n) (as (Box :label "in field position" :n n) Int))
 
 (:: letOf (-> Int Int))
 
-(fn (letOf n) (let ((s "in let position")) (strLen s)))
+(fn (letOf n) { (let s "in let position") (strLen s)})
 
 (:: tailOf (-> Int String Int))
 
@@ -490,8 +490,8 @@ cat > "$work/combo.ax" <<'AX'
 (:: loop (-> Int Int))
 
 (fn (loop n)
-  (let ((mut i n))
-    (let ((mut acc 0))
+  { (let mut i n)
+    { (let mut acc 0)
       {
         (while (> i 0)
           {
@@ -501,8 +501,8 @@ cat > "$work/combo.ax" <<'AX'
           })
         acc
       }
-    )
-  )
+    }
+  }
 )
 
 (:: main ())

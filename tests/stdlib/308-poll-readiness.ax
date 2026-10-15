@@ -43,19 +43,18 @@
 (:: listenOn (-> Int (Result TcpListener Error)))
 ;@axiom:effect(io)
 (fn (listenOn port)
-  (let (
-    (lsn (tcpListenAddr (loopback port))?)
-    (_ (tcpListenerSetNonBlocking lsn true)?)
-  )
-    (Ok lsn)))
+  {
+    (let lsn (tcpListenAddr (loopback port))?)
+    (let _ (tcpListenerSetNonBlocking lsn true)?)
+    (Ok lsn)
+  })
 
 ; Whether `token` is among the `n` events of the last wait.
 (:: hasToken (-> Poller Int Int Bool))
 (fn (hasToken p n token)
-  (let (
-    (mut i 0)
-    (mut found false)
-  )
+  {
+    (let mut i 0)
+    (let mut found false)
     {
       (while (< i n)
         {
@@ -64,7 +63,8 @@
           (set i (+ i 1))
         })
       found
-    }))
+    }
+  })
 
 (:: waitCount (-> Poller Int Int))
 ;@axiom:effect(io)
@@ -76,7 +76,8 @@
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((base (+ 20000 (% sysPid 9000))))
+  {
+    (let base (+ 20000 (% sysPid 9000)))
     (match (listenOn base)
       ((Err e) (say false "two listeners are bound"))
       ((Ok la)
@@ -101,20 +102,24 @@
                     ((Err e) (say false "a client connects"))
                     ((Ok ca)
                       {
-                        (let ((n (waitCount p 2000)))
+                        {
+                          (let n (waitCount p 2000))
                           {
                             (say (== n 1) "one connection wakes exactly one event")
                             (say (&& (== n 1) (== (pollerToken p 0) 1))
                               "the event carries the token of the listener that was connected to")
-                          })
+                          }
+                        }
                         ; TAKE THE CONNECTION BEFORE GOING ON. A listening
                         ; socket stays readable until its pending connection
                         ; is accepted, so a second wait would answer the stale
                         ; event at once.
                         (match (tcpAccept la)
                           ((Ok acc)
-                            (let ((_ (tcpClose acc)))
-                              ())
+                            {
+                              (let _ (tcpClose acc))
+                              ()
+                            }
                           )
                           ((Err e) ()))
                         ; NOW BOTH AT ONCE, and this is the shape the stride
@@ -129,10 +134,9 @@
                             (match (tcpConnectAddr (loopback (+ base 1)))
                               ((Err e) (say false "a client connects"))
                               ((Ok cc)
-                                (let (
-                                  (mut n2 (waitCount p 2000))
-                                  (mut tries 0)
-                                )
+                                {
+                                  (let mut n2 (waitCount p 2000))
+                                  (let mut tries 0)
                                   {
                                     (while (&& (< n2 2) (< tries 50))
                                       {
@@ -142,27 +146,31 @@
                                     (say (== n2 2) "two ready listeners wake two events")
                                     (say (&& (== n2 2) (&& (hasToken p n2 1) (hasToken p n2 2)))
                                       "both events decode at the right stride")
-                                    (let (
-                                      (_ (tcpClose cc))
-                                      (_ (tcpClose cb))
-                                    )
-                                      ())
-                                  })
+                                    {
+                                      (let _ (tcpClose cc))
+                                      (let _ (tcpClose cb))
+                                      ()
+                                    }
+                                  }
+                                }
                               ))
                           ))
-                        (let ((_ (tcpClose ca)))
-                          ())
+                        {
+                          (let _ (tcpClose ca))
+                          ()
+                        }
                       }
                     ))
                   (say (isOk (pollerRemoveListener p la)) "a listener can be unregistered")
-                  (let (
-                    (_ (tcpListenerClose la))
-                    (_ (tcpListenerClose lb))
-                  )
-                    ())
+                  {
+                    (let _ (tcpListenerClose la))
+                    (let _ (tcpListenerClose lb))
+                    ()
+                  }
                   (say (isOk (pollerClose p)) "the poller closes")
                   0
                 }
               ))
           ))
-      ))))
+      ))
+  })

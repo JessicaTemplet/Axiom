@@ -1394,8 +1394,8 @@ maps to scopes. The token types, in the order the integers index them:
 | `macro` | a `macro` name and its rule heads |
 | `type` | a `data`, `struct`, `type` or `subtype` name and every type in a signature, field or `as`; a builtin such as `Int` with `defaultLibrary` |
 | `typeParameter` | a lowercase name in a type position |
-| `enumMember` | a constructor, declared or applied, and a positional struct build |
-| `property` | a struct or constructor field at its declaration, and a `.field` read |
+| `enumMember` | a constructor, declared or applied, including a named struct build |
+| `property` | a struct or constructor field at its declaration, a named construction label, and a `.field` read |
 | `parameter` | a `fn` or `lambda` parameter, `declaration` at its binder |
 | `variable` | a `let` binder (`readonly` unless `mut`), a `set` target (`modification`), every other local |
 | `effect` | an `effect` name and the effects a `handle` lists; a built-in one with `defaultLibrary` |

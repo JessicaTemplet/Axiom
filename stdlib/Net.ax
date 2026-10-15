@@ -78,25 +78,29 @@
 ;; program with `ipParse`, which answers `Err` instead.
 (pub :: ipV4 (-> Byte Byte Byte Byte IpAddr))
 (pub fn (ipV4 a b c d)
-  (IpAddr false 0 (| (<< a 24) (| (<< b 16) (| (<< c 8) d)))))
+  (IpAddr :v6 false :hi 0 :lo (| (<< a 24) (| (<< b 16) (| (<< c 8) d)))))
 
 ;; The IPv6 address with groups `g0` to `g7` in reading order: `::1` is
 ;; `(ipV6 0 0 0 0 0 0 0 1)`.
 (pub :: ipV6 (-> Segment Segment Segment Segment Segment Segment Segment Segment IpAddr))
 (pub fn (ipV6 g0 g1 g2 g3 g4 g5 g6 g7)
-  (IpAddr true (pack16 g0 g1 g2 g3) (pack16 g4 g5 g6 g7)))
+  (IpAddr :v6 true :hi (pack16 g0 g1 g2 g3) :lo (pack16 g4 g5 g6 g7)))
 
 ; An IPv4 address from four octets the parser has already checked.
 (:: ipOfOctets (-> (Vec Int) IpAddr))
 (fn (ipOfOctets q)
-  (IpAddr false 0
-    (| (<< (vecGet q 0) 24) (| (<< (vecGet q 1) 16) (| (<< (vecGet q 2) 8) (vecGet q 3))))))
+  (IpAddr
+    :v6 false
+    :hi 0
+    :lo (| (<< (vecGet q 0) 24) (| (<< (vecGet q 1) 16) (| (<< (vecGet q 2) 8) (vecGet q 3))))))
 
 ; An IPv6 address from eight groups the parser has already checked.
 (:: ipOfGroups (-> (Vec Int) IpAddr))
 (fn (ipOfGroups g)
-  (IpAddr true (pack16 (vecGet g 0) (vecGet g 1) (vecGet g 2) (vecGet g 3))
-    (pack16 (vecGet g 4) (vecGet g 5) (vecGet g 6) (vecGet g 7))))
+  (IpAddr
+    :v6 true
+    :hi (pack16 (vecGet g 0) (vecGet g 1) (vecGet g 2) (vecGet g 3))
+    :lo (pack16 (vecGet g 4) (vecGet g 5) (vecGet g 6) (vecGet g 7))))
 
 ; Octet `i` (0..3) of an IPv4 address.
 (:: ipOctet (-> IpAddr Int Int))
@@ -129,7 +133,8 @@
 ;; interface and there is no lookup to resolve it.
 (pub :: ipParse (-> String (Result IpAddr Error)))
 (pub fn (ipParse text)
-  (let ((n (strLen text)))
+  {
+    (let n (strLen text))
     (if (== n 0)
       (netBadAddr "empty" "ipParse")
       (match (strFindByte text 58 0)
@@ -139,11 +144,14 @@
             ((None) (netBadAddr "not an IPv6 address" "ipParse")))
         )
         ((None)
-          (let ((q vecNew))
+          {
+            (let q vecNew)
             (if (parseV4Into text 0 n q)
               (Ok (ipOfOctets q))
-              (netBadAddr "not an IPv4 address" "ipParse")))
-        )))))
+              (netBadAddr "not an IPv4 address" "ipParse"))
+          }
+        )))
+  })
 
 ;; The address as text: dotted-quad IPv4, or IPv6 in the RFC 5952 form
 ;; (lower case, the longest run of zero groups as `::`, an IPv4-mapped
@@ -166,30 +174,36 @@
 ;; IPv6.
 (pub :: ipOctets (-> IpAddr (Vec Int)))
 (pub fn (ipOctets a)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (if a.v6
         (for i in 0..8
-          (let ((g (ipGroup a i)))
+          {
+            (let g (ipGroup a i))
             {
               (vecPush out (>> g 8))
               (vecPush out (& g 255))
-            }))
+            }
+          })
         (for i in 0..4
           (vecPush out (ipOctet a i))))
       out
-    }))
+    }
+  })
 
 ;; The eight 16-bit groups of an IPv6 address. An IPv4 address answers
 ;; the groups of its IPv4-mapped form, `::ffff:a.b.c.d`.
 (pub :: ipSegments (-> IpAddr (Vec Int)))
 (pub fn (ipSegments a)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (for i in 0..8
         (vecPush out (ipGroup a i)))
       out
-    }))
+    }
+  })
 
 ;; Whether the address is `0.0.0.0` or `::`, which a listener binds to
 ;; accept connections on every interface.
@@ -218,11 +232,11 @@
 (pub fn (ipIsPrivate a)
   (if a.v6
     (== (& (ipGroup a 0) 65024) 64512)
-    (let (
-      (o0 (ipOctet a 0))
-      (o1 (ipOctet a 1))
-    )
-      (|| (== o0 10) (|| (&& (== o0 172) (== (& o1 240) 16)) (&& (== o0 192) (== o1 168)))))))
+    {
+      (let o0 (ipOctet a 0))
+      (let o1 (ipOctet a 1))
+      (|| (== o0 10) (|| (&& (== o0 172) (== (& o1 240) 16)) (&& (== o0 192) (== o1 168))))
+    }))
 
 ;; Whether the address is link-local: `169.254.0.0/16` or `fe80::/10`.
 (pub :: ipIsLinkLocal (-> IpAddr Bool))
@@ -244,9 +258,11 @@
 (pub fn (ipIsDocumentation a)
   (if a.v6
     (&& (== (ipGroup a 0) 8193) (== (ipGroup a 1) 3512))
-    (let ((net (>> a.lo 8)))
+    {
+      (let net (>> a.lo 8))
       (|| (== net (+ (<< 192 16) 2))
-        (|| (== net (+ (<< 198 16) (+ (<< 51 8) 100))) (== net (+ (<< 203 16) 113)))))))
+        (|| (== net (+ (<< 198 16) (+ (<< 51 8) 100))) (== net (+ (<< 203 16) 113))))
+    }))
 
 ; Whether an IPv6 address is IPv4-mapped, `::ffff:a.b.c.d`.
 (:: ipMapped (-> IpAddr Bool))
@@ -260,7 +276,7 @@
 (pub :: ipToCanonical (-> IpAddr IpAddr))
 (pub fn (ipToCanonical a)
   (if (ipMapped a)
-    (IpAddr false 0 (& a.lo 4294967295))
+    (IpAddr :v6 false :hi 0 :lo (& a.lo 4294967295))
     a))
 
 ;; An IPv4 address as its IPv4-mapped IPv6 address, `::ffff:a.b.c.d`;
@@ -269,7 +285,7 @@
 (pub fn (ipToV6Mapped a)
   (if a.v6
     a
-    (IpAddr true 0 (| (<< 65535 32) a.lo))))
+    (IpAddr :v6 true :hi 0 :lo (| (<< 65535 32) a.lo))))
 
 ; Whether `a` and `b` are of one family.
 (:: sameFamily (-> IpAddr IpAddr Bool))
@@ -293,25 +309,25 @@
     (if a.v6
       1
       -1)
-    (let (
-      (mut r 0)
-      (mut i 0)
-    )
+    {
+      (let mut r 0)
+      (let mut i 0)
       {
         (while (&& (== r 0) (< i 8))
           {
-            (let (
-              (x (ipGroup a i))
-              (y (ipGroup b i))
-            )
+            {
+              (let x (ipGroup a i))
+              (let y (ipGroup b i))
               (if (< x y)
                 (set r -1)
                 (> x y)
-                (set r 1)))
+                (set r 1))
+            }
             (set i (+ i 1))
           })
         r
-      })))
+      }
+    }))
 
 ;; `127.0.0.1`.
 (pub :: ipLocalhostV4 IpAddr)
@@ -352,30 +368,31 @@
     -1
     (if (&& (> (- hi lo) 1) (== (strByte s lo) 48))
       -1
-      (let (
-        (mut v 0)
-        (mut ok true)
-      )
+      {
+        (let mut v 0)
+        (let mut ok true)
         {
           (for i in lo..hi
-            (let ((c (strByte s i)))
+            {
+              (let c (strByte s i))
               (if (&& (>= c 48) (<= c 57))
                 (set v (+ (* v 10) (- c 48)))
-                (set ok false))))
+                (set ok false))
+            })
           (if ok
             v
             -1)
-        }))))
+        }
+      })))
 
 ; A hex group of one to four digits in `s[lo..hi)`, or -1.
 (:: hexField (-> String Int Int Int))
 (fn (hexField s lo hi)
   (if (|| (<= hi lo) (> (- hi lo) 4))
     -1
-    (let (
-      (mut v 0)
-      (mut ok true)
-    )
+    {
+      (let mut v 0)
+      (let mut ok true)
       {
         (for i in lo..hi
           (match (strHexVal (strByte s i))
@@ -388,38 +405,43 @@
         (if ok
           v
           -1)
-      })))
+      }
+    }))
 
 ; The four octets of dotted-quad `s[lo..hi)` pushed onto `out`, or false.
 (:: parseV4Into (-> String Int Int (Vec Int) Bool))
 (fn (parseV4Into s lo hi out)
-  (let (
-    (mut at lo)
-    (mut n 0)
-    (mut ok true)
-  )
+  {
+    (let mut at lo)
+    (let mut n 0)
+    (let mut ok true)
     {
       (while (&& ok (< n 4))
-        (let ((mut e at))
+        {
+          (let mut e at)
           {
             (while (&& (< e hi) (!= (strByte s e) 46))
               (set e (+ e 1)))
-            (let ((v (decField s at e 3)))
+            {
+              (let v (decField s at e 3))
               (if (|| (< v 0) (> v 255))
                 (set ok false)
                 {
                   (vecPush out v)
                   (set n (+ n 1))
                   (set at (+ e 1))
-                }))
+                })
+            }
             ; three dots between four octets, and nothing after the last
             (if (&& ok (&& (< n 4) (>= e hi)))
               (set ok false))
             (if (&& ok (&& (== n 4) (!= e hi)))
               (set ok false))
-          }))
+          }
+        })
       ok
-    }))
+    }
+  })
 
 ; The eight groups of IPv6 text `s[lo..hi)`, in RFC 4291 section 2.2's
 ; forms: eight groups; one `::` standing for a run of zero groups; and
@@ -427,14 +449,13 @@
 ; anything else, including a zone (`%eth0`), which needs a name lookup.
 (:: parseV6 (-> String Int Int (Option (Vec Int))))
 (fn (parseV6 s lo hi)
-  (let (
-    (head vecNew)
-    (tail vecNew)
-    (mut inTail false)
-    (mut at lo)
-    (mut ok true)
-    (mut done false)
-  )
+  {
+    (let head vecNew)
+    (let tail vecNew)
+    (let mut inTail false)
+    (let mut at lo)
+    (let mut ok true)
+    (let mut done false)
     {
       ; `::` at the very start
       (if (&& (< (+ lo 1) hi) (&& (== (strByte s lo) 58) (== (strByte s (+ lo 1)) 58)))
@@ -445,27 +466,33 @@
             (set done true))
         })
       (while (&& ok (! done))
-        (let ((mut e at))
+        {
+          (let mut e at)
           {
             (while (&& (< e hi) (&& (!= (strByte s e) 58) (!= (strByte s e) 46)))
               (set e (+ e 1)))
             (if (&& (< e hi) (== (strByte s e) 46))
               ; an IPv4 tail: it runs to the end, and counts as two groups
-              (let ((q vecNew))
+              {
+                (let q vecNew)
                 (if (parseV4Into s at hi q)
                   {
-                    (let ((dst
-                      (if inTail
-                        tail
-                        head)))
+                    {
+                      (let dst
+                        (if inTail
+                          tail
+                          head))
                       {
                         (vecPush dst (+ (* (vecGet q 0) 256) (vecGet q 1)))
                         (vecPush dst (+ (* (vecGet q 2) 256) (vecGet q 3)))
-                      })
+                      }
+                    }
                     (set done true)
                   }
-                  (set ok false)))
-              (let ((g (hexField s at e)))
+                  (set ok false))
+              }
+              {
+                (let g (hexField s at e))
                 (if (< g 0)
                   (set ok false)
                   {
@@ -488,16 +515,20 @@
                           ; a trailing single `:`
                           (set ok false)
                           (set at (+ e 1)))))
-                  })))
-          }))
-      (let ((n (+ (vecLen head) (vecLen tail))))
+                  })
+              })
+          }
+        })
+      {
+        (let n (+ (vecLen head) (vecLen tail)))
         (if (! ok)
           None
           (if inTail
             ; `::` stands for at least one zero group
             (if (>= n 8)
               None
-              (let ((out vecNew))
+              {
+                (let out vecNew)
                 {
                   (for g in head
                     (vecPush out g))
@@ -506,23 +537,28 @@
                   (for g in tail
                     (vecPush out g))
                   (Some out)
-                }))
+                }
+              })
             (if (== n 8)
               (Some head)
-              None))))
-    }))
+              None)))
+      }
+    }
+  })
 
 ; Whether IPv6 address `p` is IPv4-mapped, `::ffff:a.b.c.d`: ten zero
 ; bytes and then two of 255 (RFC 4291 section 2.5.5.2). The sixteen
 ; address bytes start at 8 in both layouts `Sys.netAddr6` writes.
 (:: mappedV4 (-> Int Bool))
 (fn (mappedV4 p)
-  (let ((mut z 0))
+  {
+    (let mut z 0)
     {
       (for i in 8..18
         (set z (| z (memGetByte p i))))
       (&& (== z 0) (&& (== (memGetByte p 18) 255) (== (memGetByte p 19) 255)))
-    }))
+    }
+  })
 
 ; The IP text of a live address, with an IPv4-mapped address in RFC 5952
 ; section 5's mixed form, as `std::net` prints it.
@@ -551,14 +587,16 @@
 ; The `sockaddr` bytes for `a` and `port`.
 (:: sockBytes (-> IpAddr Int String))
 (fn (sockBytes a port)
-  (let ((s (strAlloc netAddrMaxBytes)))
+  {
+    (let s (strAlloc netAddrMaxBytes))
     {
       (if a.v6
         (netAddr6 (strData s) port (ipGroup a 0) (ipGroup a 1) (ipGroup a 2) (ipGroup a 3)
           (ipGroup a 4) (ipGroup a 5) (ipGroup a 6) (ipGroup a 7))
         (netAddr4 (strData s) port (ipOctet a 0) (ipOctet a 1) (ipOctet a 2) (ipOctet a 3)))
       s
-    }))
+    }
+  })
 
 ; The IP address in `sockaddr` bytes at `p`: four bytes from offset 4
 ; for IPv4, sixteen from offset 8 for IPv6, in both layouts `Sys` writes
@@ -566,20 +604,25 @@
 (:: ipOfSock (-> Int IpAddr))
 (fn (ipOfSock p)
   (if (== (netAddrFamily p) afInet6)
-    (let ((g vecNew))
+    {
+      (let g vecNew)
       {
         (for i in 0..8
           (vecPush g (+ (<< (memGetByte p (+ 8 (* 2 i))) 8) (memGetByte p (+ 9 (* 2 i))))))
         (ipOfGroups g)
-      })
-    (IpAddr false 0
-      (| (<< (memGetByte p 4) 24)
-        (| (<< (memGetByte p 5) 16) (| (<< (memGetByte p 6) 8) (memGetByte p 7)))))))
+      }
+    }
+    (IpAddr
+      :v6 false
+      :hi 0
+      :lo
+        (| (<< (memGetByte p 4) 24)
+          (| (<< (memGetByte p 5) 16) (| (<< (memGetByte p 6) 8) (memGetByte p 7)))))))
 
 ;; The socket address of `ip` and `port`.
 (pub :: socketAddrNew (-> IpAddr Port SocketAddr))
 (pub fn (socketAddrNew ip port)
-  (SocketAddr (sockBytes ip port)))
+  (SocketAddr :bytes (sockBytes ip port)))
 
 ;; Read a socket address from text: `a.b.c.d:port` for IPv4, or
 ;; `[ipv6]:port` with the brackets RFC 3986 section 3.2.2 requires, so
@@ -587,7 +630,8 @@
 ;; is no resolver.
 (pub :: socketAddrParse (-> String (Result SocketAddr Error)))
 (pub fn (socketAddrParse text)
-  (let ((n (strLen text)))
+  {
+    (let n (strLen text))
     (if (== n 0)
       (netBadAddr "empty" "socketAddrParse")
       (if (== (strByte text 0) 91)
@@ -597,41 +641,48 @@
           ((Some close)
             (if (|| (>= (+ close 1) n) (!= (strByte text (+ close 1)) 58))
               (netBadAddr "an IPv6 address needs `]:port`" "socketAddrParse")
-              (let ((port (decField text (+ close 2) n 5)))
+              {
+                (let port (decField text (+ close 2) n 5))
                 (if (|| (< port 0) (> port 65535))
                   (netBadAddr "the port is not a number in 0..65535" "socketAddrParse")
                   (match (parseV6 text 1 close)
                     ((None) (netBadAddr "not an IPv6 address" "socketAddrParse"))
-                    ((Some gs) (Ok (SocketAddr (sockBytes (ipOfGroups gs) port))))))))
+                    ((Some gs) (Ok (SocketAddr :bytes (sockBytes (ipOfGroups gs) port))))))
+              })
           ))
         ; IPv4: the last `:` separates the port
-        (let ((mut colon -1))
+        {
+          (let mut colon -1)
           {
             (for i in 0..n
               (if (== (strByte text i) 58)
                 (set colon i)))
             (if (< colon 0)
               (netBadAddr "no port" "socketAddrParse")
-              (let (
-                (port (decField text (+ colon 1) n 5))
-                (q vecNew)
-              )
+              {
+                (let port (decField text (+ colon 1) n 5))
+                (let q vecNew)
                 (if (|| (< port 0) (> port 65535))
                   (netBadAddr "the port is not a number in 0..65535" "socketAddrParse")
                   (if (parseV4Into text 0 colon q)
-                    (Ok (SocketAddr (sockBytes (ipOfOctets q) port)))
+                    (Ok (SocketAddr :bytes (sockBytes (ipOfOctets q) port)))
                     (netBadAddr "not an IPv4 address; an IPv6 one goes in brackets"
-                      "socketAddrParse")))))
-          })))))
+                      "socketAddrParse")))
+              })
+          }
+        }))
+  })
 
 ;; The address as text, `a.b.c.d:port` or `[ipv6]:port`, with the IP
 ;; written as `ipText` writes it.
 (pub :: socketAddrText (-> SocketAddr String))
 (pub fn (socketAddrText a)
-  (let ((p (strData a.bytes)))
+  {
+    (let p (strData a.bytes))
     (if (== (netAddrFamily p) afInet6)
       (concat "[" (concat (ipTextOf p) (concat "]:" (fmtInt (netAddrPort p)))))
-      (concat (ipTextOf p) (concat ":" (fmtInt (netAddrPort p)))))))
+      (concat (ipTextOf p) (concat ":" (fmtInt (netAddrPort p)))))
+  })
 
 ;; The IP address.
 (pub :: socketAddrIp (-> SocketAddr IpAddr))
@@ -646,12 +697,12 @@
 ;; The same address with port `port`.
 (pub :: socketAddrWithPort (-> SocketAddr Port SocketAddr))
 (pub fn (socketAddrWithPort a port)
-  (SocketAddr (sockBytes (socketAddrIp a) port)))
+  (SocketAddr :bytes (sockBytes (socketAddrIp a) port)))
 
 ;; The same port with IP address `ip`, which may change the family.
 (pub :: socketAddrWithIp (-> SocketAddr IpAddr SocketAddr))
 (pub fn (socketAddrWithIp a ip)
-  (SocketAddr (sockBytes ip (socketAddrPort a))))
+  (SocketAddr :bytes (sockBytes ip (socketAddrPort a))))
 
 ;; Whether the address is IPv4.
 (pub :: socketAddrIsV4 (-> SocketAddr Bool))
@@ -672,18 +723,20 @@
 ;; `ipCompare` orders them, then by port.
 (pub :: socketAddrCompare (-> SocketAddr SocketAddr Int))
 (pub fn (socketAddrCompare a b)
-  (let ((c (ipCompare (socketAddrIp a) (socketAddrIp b))))
+  {
+    (let c (ipCompare (socketAddrIp a) (socketAddrIp b)))
     (if (!= c 0)
       c
-      (let (
-        (x (socketAddrPort a))
-        (y (socketAddrPort b))
-      )
+      {
+        (let x (socketAddrPort a))
+        (let y (socketAddrPort b))
         (if (< x y)
           -1
           (> x y)
           1
-          0)))))
+          0)
+      })
+  })
 
 ; ------------------------------------------------------------------
 ; Listeners and streams.
@@ -712,7 +765,7 @@
 ; buffered.
 (:: streamOf (-> File TcpStream))
 (fn (streamOf f)
-  (TcpStream f "" false))
+  (TcpStream :file f :pending "" :nonBlocking false))
 
 ; `e`, from the operation `where` on `s`. On a blocking stream EAGAIN
 ; can only mean a timeout set by `tcpSetReadTimeout` or
@@ -787,10 +840,12 @@
     ((Ok f)
       (match (netListenOn f addr)
         ((Err e)
-          (let ((_ (fileClose f)))
-            (Err (errContextOf e "tcpListen")))
+          {
+            (let _ (fileClose f))
+            (Err (errContextOf e "tcpListen"))
+          }
         )
-        ((Ok _) (Ok (TcpListener f))))
+        ((Ok _) (Ok (TcpListener :file f))))
     )))
 
 ; The setup between `socket` and a listening socket, each step's error
@@ -880,8 +935,10 @@
     ((Ok f)
       (match (socketConnect f addr.bytes)
         ((Err e)
-          (let ((_ (fileClose f)))
-            (Err (errContextOf e "tcpConnect")))
+          {
+            (let _ (fileClose f))
+            (Err (errContextOf e "tcpConnect"))
+          }
         )
         ((Ok _) (Ok (streamOf f))))
     )))
@@ -899,8 +956,10 @@
       ((Ok f)
         (match (socketConnectWithin f addr.bytes ms)
           ((Err e)
-            (let ((_ (fileClose f)))
-              (Err (errContextOf e "tcpConnectTimeout")))
+            {
+              (let _ (fileClose f))
+              (Err (errContextOf e "tcpConnectTimeout"))
+            }
           )
           ((Ok _) (Ok (streamOf f))))
       ))))
@@ -913,7 +972,8 @@
 (:: netFill (-> TcpStream Int String (Result Int Error)))
 ;@axiom:effect(io)
 (fn (netFill s max where)
-  (let ((buf (readBufferNew max)))
+  {
+    (let buf (readBufferNew max))
     (match (fileRead s.file buf 0 max)
       ((Err e) (Err (streamErr s e where)))
       ((Ok n)
@@ -922,20 +982,23 @@
             (set s.pending (concat s.pending (readBufferText buf 0 n))))
           (Ok n)
         }
-      ))))
+      ))
+  })
 
 ; The first `n` buffered bytes, removed from the buffer.
 (:: netTake (-> TcpStream Int String))
 (fn (netTake s n)
-  (let (
-    (p s.pending)
-    (len (strLen s.pending))
-  )
-    (let ((out (strDup (strSlice p 0 n))))
+  {
+    (let p s.pending)
+    (let len (strLen s.pending))
+    {
+      (let out (strDup (strSlice p 0 n)))
       {
         (set s.pending (strDup (strSlice p n (- len n))))
         out
-      })))
+      }
+    }
+  })
 
 ;; How many bytes a read-ahead holds: `tcpReadLine` and `tcpPeek` take
 ;; more than they answer, and the rest waits here for the next read. A
@@ -954,11 +1017,13 @@
   (if (|| (|| (< at 0) (< count 0)) (> (+ at count) (readBufferLen buf)))
     __indexTrap
     (if (> (strLen s.pending) 0)
-      (let ((n
-        (if (< count (strLen s.pending))
-          count
-          (strLen s.pending))))
-        (Ok (readBufferPut buf at (netTake s n))))
+      {
+        (let n
+          (if (< count (strLen s.pending))
+            count
+            (strLen s.pending)))
+        (Ok (readBufferPut buf at (netTake s n)))
+      }
       (match (fileRead s.file buf at count)
         ((Ok n) (Ok n))
         ((Err e) (Err (streamErr s e "tcpRead")))))))
@@ -990,10 +1055,9 @@
 (pub fn (tcpReadExact s n)
   (if (< n 0)
     __indexTrap
-    (let (
-      (mut failed None)
-      (mut eof false)
-    )
+    {
+      (let mut failed None)
+      (let mut eof false)
       {
         (while (&& (isNone failed) (&& (! eof) (< (strLen s.pending) n)))
           (match (netFill s (- n (strLen s.pending)) "tcpReadExact")
@@ -1012,7 +1076,8 @@
                 (errContextOf (mkError errUnexpectedEof "the stream ended early") "tcpReadExact"))
               (Ok (netTake s n)))
           ))
-      })))
+      }
+    }))
 
 ; The length of buffered line text ending just before byte `nl`, a
 ; newline: one shorter when a carriage return precedes it.
@@ -1035,14 +1100,16 @@
 (pub fn (tcpReadLine s max)
   (if (< max 0)
     __indexTrap
-    (let ((mut answer None))
+    {
+      (let mut answer None)
       {
         (while (isNone answer)
           (set answer (lineStep s max)))
         (match answer
           ((Some r) r)
           ((None) (Ok None)))
-      })))
+      }
+    }))
 
 ; One step of `tcpReadLine`: `Some` with its answer, or `None` after
 ; reading more into the buffer, to look again.
@@ -1053,8 +1120,10 @@
     ((Some nl)
       (if (> (lineLen s.pending nl) max)
         (Some (netBadData "the line is longer than the limit"))
-        (let ((line (netTake s (+ nl 1))))
-          (Some (Ok (Some (strDup (strSlice line 0 (lineLen line nl))))))))
+        {
+          (let line (netTake s (+ nl 1)))
+          (Some (Ok (Some (strDup (strSlice line 0 (lineLen line nl))))))
+        })
     )
     ; a carriage return may still end the line at `max + 1`
     ((None)
@@ -1085,19 +1154,23 @@
 (pub fn (tcpPeek s max)
   (if (< max 0)
     __indexTrap
-    (let ((filled
-      (if (&& (== (strLen s.pending) 0) (> max 0))
-        (netFill s max "tcpPeek")
-        (Ok 0))))
+    {
+      (let filled
+        (if (&& (== (strLen s.pending) 0) (> max 0))
+          (netFill s max "tcpPeek")
+          (Ok 0)))
       (match filled
         ((Err e) (Err e))
         ((Ok _)
-          (let ((n
-            (if (< max (strLen s.pending))
-              max
-              (strLen s.pending))))
-            (Ok (strDup (strSlice s.pending 0 n))))
-        )))))
+          {
+            (let n
+              (if (< max (strLen s.pending))
+                max
+                (strLen s.pending)))
+            (Ok (strDup (strSlice s.pending 0 n)))
+          }
+        ))
+    }))
 
 ;; Everything until the peer closes its side, buffered bytes first.
 (pub :: tcpReadAll (-> TcpStream (Result String Error)))
@@ -1175,7 +1248,7 @@
 (fn (netNameOf f peer where)
   (match (socketAddr f peer)
     ((Err e) (Err (errContextOf e where)))
-    ((Ok b) (Ok (SocketAddr b)))))
+    ((Ok b) (Ok (SocketAddr :bytes b)))))
 
 ; Whether socket `f` is IPv6.
 (:: netIsV6 (-> File String (Result Bool Error)))

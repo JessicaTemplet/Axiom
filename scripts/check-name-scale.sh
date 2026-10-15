@@ -415,9 +415,9 @@ LET_BOUND="${LET_BOUND:-5.50}"
 gen_let() { # gen_let <file> <count>
   local out="$1" n="$2" i
   {
-    printf '(import IO)\n(struct Cell\n  (name : String))\n\n(:: main Int)\n;@axiom:effect(io)\n(fn (main)\n  (let (\n'
-    for (( i = 0; i < n; i++ )); do printf '    (c%d (Cell (strDup "none")))\n' "$i"; done
-    printf '  )\n    {\n      (println c0.name)\n      0\n    }))\n'
+    printf '(import IO)\n(struct Cell\n  (name : String))\n\n(:: main Int)\n;@axiom:effect(io)\n(fn (main)\n  {\n'
+    for (( i = 0; i < n; i++ )); do printf '    (let c%d (Cell :name (strDup "none")))\n' "$i"; done
+    printf '    {\n      (println c0.name)\n      0\n    }\n  })\n'
   } > "$out"
 }
 
@@ -489,11 +489,11 @@ scan = """(pub :: boundInScan (-> String Int Int))
 (pub fn (boundInScan name sum)
   (if (== (memGetWord sum 0) 1)
     1
-    (let (
-      (set (memGetWord sum 1))
-      (mut i 0)
-      (mut hit 0)
-    )
+    {
+      (let set (memGetWord sum 1))
+      (let mut i 0)
+      (let mut hit 0)
+
       {
         (while (< i (internCount set))
           {
@@ -503,7 +503,7 @@ scan = """(pub :: boundInScan (-> String Int Int))
             (set i (+ i 1))
           })
         hit
-      })))
+      }}))
 
 """
 open(p, "w").write(s.replace(anchor, scan + anchor))

@@ -151,33 +151,33 @@ cat > "$work/nest.ax" <<'PROBE'
 
 ;@axiom:effect(io)
 (fn (middle x)
-  (let ((mi __axiom_arena_mark))
-    (let ((a (__axiom_recover mi (lambda (y) (inner y)))))
+  { (let mi __axiom_arena_mark)
+    { (let a (__axiom_recover mi (lambda (y) (inner y))))
       {
         (println "inner caught {a}")
         0
       }
-    )
-  )
+    }
+  }
 )
 
 (:: main ())
 
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mo __axiom_arena_mark))
-    (let (
-      (b (__axiom_recover mo (lambda (y) (middle y))))
-      (c (__axiom_recover mo (lambda (y) (inner y))))
-      (d (__axiom_recover mo (lambda (y) (descend 5000))))
-    )
+  { (let mo __axiom_arena_mark)
+    {
+      (let b (__axiom_recover mo (lambda (y) (middle y))))
+      (let c (__axiom_recover mo (lambda (y) (inner y))))
+      (let d (__axiom_recover mo (lambda (y) (descend 5000))))
+
       {
         (println "outer saw {b}")
         (println "outer caught {c}")
         (println "deep {d}")
       }
-    )
-  )
+    }
+  }
 )
 PROBE
 nest_want='inner caught 72
@@ -274,15 +274,15 @@ emit_abort_loop() {
 ;@axiom:effect(io)
 (fn (main)
   (handle
-    (let (
-      (m __axiom_arena_mark)
-      (t (spin m $count 0))
-    )
+    {
+      (let m __axiom_arena_mark)
+      (let t (spin m $count 0))
+
       {
         (println "{t}")
         0
       }
-    )    (Console Alloc IO Mut Unsafe)    (lambda (s) 0)
+    }    (Console Alloc IO Mut Unsafe)    (lambda (s) 0)
   )
 )
 PROBE

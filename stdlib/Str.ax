@@ -69,7 +69,8 @@
 (pub :: strWrapOwned (-> Int Int Int String))
 ;@axiom:effect(unsafe)
 (pub fn (strWrapOwned bytes len owner)
-  (let ((s (memAllocMapped 24 4)))
+  {
+    (let s (memAllocMapped 24 4))
     {
       (memSetWord s 0 len)
       (memSetWord s 1 bytes)
@@ -82,7 +83,8 @@
       ; (`tyIsReprScalar`), and this is the explicit escape it asks
       ; for rather than an exemption.
       (as s String)
-    }))
+    }
+  })
 
 ;; A `Str` over freshly allocated, zeroed space for `len` bytes. A
 ;; negative `len` stops the program with status 77, as a bad index does.
@@ -104,11 +106,13 @@
     ; the rule uniform ("a `Str` header's death releases its owner
     ; once"), which is what lets a slice outlive the header it was
     ; cut from without the buffer going early or staying forever
-    (let ((bytes (memAlloc (+ len 1))))
+    {
+      (let bytes (memAlloc (+ len 1)))
       {
         (__retain bytes)
         (strWrapOwned bytes len bytes)
-      })))
+      }
+    }))
 
 ;; A `Str` sharing the bytes at a NUL-terminated address.
 ;
@@ -200,18 +204,22 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: strCmp (-> String String Int))
 (pub fn (strCmp a b)
-  (let (
-    (la (strLen a))
-    (lb (strLen b))
-  )
-    (let ((shared
-      (if (< la lb)
-        la
-        lb)))
-      (let ((diff (memCmp (strData a) (strData b) shared)))
+  {
+    (let la (strLen a))
+    (let lb (strLen b))
+    {
+      (let shared
+        (if (< la lb)
+          la
+          lb))
+      {
+        (let diff (memCmp (strData a) (strData b) shared))
         (if (!= diff 0)
           diff
-          (- la lb))))))
+          (- la lb))
+      }
+    }
+  })
 
 ;; Whether `a` and `b` hold the same bytes.
 ;
@@ -234,10 +242,12 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: strEq (-> String String Bool))
 (pub fn (strEq a b)
-  (let ((la (strLen a)))
+  {
+    (let la (strLen a))
     (if (!= la (strLen b))
       false
-      (== (memCmp (strData a) (strData b) la) 0))))
+      (== (memCmp (strData a) (strData b) la) 0))
+  })
 
 ; ------------------------------------------------------------------
 ; Slicing and joining
@@ -257,51 +267,67 @@
 ;@axiom:effect(unsafe)
 (pub fn (strSlice s start count)
   ; the slice's own share of the bytes it now points into
-  (let ((len (strLen s)))
-    (let ((from
-      (if (< start 0)
-        0
-        (if (> start len)
-          len
-          start))))
-      (let ((avail (- len from)))
-        (let ((n
-          (if (< count 0)
-            0
-            (if (> count avail)
-              avail
-              count))))
-          (let ((owner (strOwner s)))
+  {
+    (let len (strLen s))
+    {
+      (let from
+        (if (< start 0)
+          0
+          (if (> start len)
+            len
+            start)))
+      {
+        (let avail (- len from))
+        {
+          (let n
+            (if (< count 0)
+              0
+              (if (> count avail)
+                avail
+                count)))
+          {
+            (let owner (strOwner s))
             {
               (__retain owner)
               (strWrapOwned (+ (strData s) from) n owner)
-            }))))))
+            }
+          }
+        }
+      }
+    }
+  })
 
 ;; An owned, NUL-terminated copy of `s`.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: strDup (-> String String))
 (pub fn (strDup s)
-  (let ((len (strLen s)))
-    (let ((out (strAlloc len)))
+  {
+    (let len (strLen s))
+    {
+      (let out (strAlloc len))
       {
         (memCopy (strData out) (strData s) len)
         out
-      })))
+      }
+    }
+  })
 
 ;; `a` followed by `b`, as a new string.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: concat (-> String String String))
 (pub fn (concat a b)
-  (let (
-    (la (strLen a))
-    (lb (strLen b))
-  )
-    (let ((out (strAlloc (+ la lb))))
+  {
+    (let la (strLen a))
+    (let lb (strLen b))
+    {
+      (let out (strAlloc (+ la lb)))
       {
         (memCopy (strData out) (strData a) la)
         (memCopy (+ (strData out) la) (strData b) lb)
         out
-      })))
+      }
+    }
+  })
 
 ; True when a NUL follows the bytes of `s`, so `strData` is already a C
 ; string. The read is in bounds for every `Str`: one built here owns
@@ -317,14 +343,14 @@
 ;@axiom:restrict(no-io,no-foreign)
 (:: strCStrCopy (-> String Int))
 (fn (strCStrCopy s)
-  (let (
-    (n (strLen s))
-    (p (memAlloc (+ (strLen s) 1)))
-  )
+  {
+    (let n (strLen s))
+    (let p (memAlloc (+ (strLen s) 1)))
     {
       (memCopy p (strData s) n)
       p
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Searching
@@ -360,11 +386,10 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: strFindByte (-> String Int Int (Option Int)))
 (pub fn (strFindByte s byte from)
-  (let (
-    (len (strLen s))
-    (mut i from)
-    (mut hit 0)
-  )
+  {
+    (let len (strLen s))
+    (let mut i from)
+    (let mut hit 0)
     {
       (while (&& (== hit 0) (< i len))
         (if (== (strByte s i) byte)
@@ -373,16 +398,19 @@
       (if (== hit 0)
         None
         (Some i))
-    }))
+    }
+  })
 
 ;; Whether `s` begins with `prefix`.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: strStartsWith (-> String String Bool))
 (pub fn (strStartsWith s prefix)
-  (let ((lp (strLen prefix)))
+  {
+    (let lp (strLen prefix))
     (if (> lp (strLen s))
       false
-      (== (memCmp (strData s) (strData prefix) lp) 0))))
+      (== (memCmp (strData s) (strData prefix) lp) 0))
+  })
 
 ; ------------------------------------------------------------------
 ; Byte classification.
@@ -486,11 +514,13 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: strSplit (-> String Int (Vec String)))
 (pub fn (strSplit s byte)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (strSplitFrom s byte 0 out)
       out
-    }))
+    }
+  })
 
 ;; Split `s` on `byte` starting at index `from`, pushing each piece
 ;; onto `out`. Answers how many pieces were pushed.
@@ -528,11 +558,13 @@
 (pub :: strFromByte (-> Byte String))
 ;@axiom:effect(unsafe)
 (pub fn (strFromByte b)
-  (let ((s (strAlloc 1)))
+  {
+    (let s (strAlloc 1))
     {
       (__store8 (strData s) 0 b)
       s
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Case, substring search, trimming and integer parsing.
@@ -554,30 +586,32 @@
 (pub :: strLower (-> String String))
 ;@axiom:effect(unsafe)
 (pub fn (strLower s)
-  (let (
-    (len (strLen s))
-    (mut upper 0)
-  )
+  {
+    (let len (strLen s))
+    (let mut upper 0)
     {
       (for k in 0..len
         (if (&& (>= (strByte s k) 65) (<= (strByte s k) 90))
           (set upper (+ upper 1))))
       (if (== upper 0)
         s
-        (let (
-          (out (strAlloc len))
-          (d (strData out))
-        )
+        {
+          (let out (strAlloc len))
+          (let d (strData out))
           {
             (for i in 0..len
-              (let ((c (strByte s i)))
+              {
+                (let c (strByte s i))
                 (__store8 d i
                   (if (&& (>= c 65) (<= c 90))
                     (+ c 32)
-                    c))))
+                    c))
+              })
             out
-          }))
-    }))
+          }
+        })
+    }
+  })
 
 ;; The index of the first occurrence of `needle` in `s` at or after
 ;; `from`, or `None`. An empty needle is found at `from` whenever
@@ -587,14 +621,14 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: strFind (-> String String Int (Option Int)))
 (pub fn (strFind s needle from)
-  (let (
-    (len (strLen s))
-    (ln (strLen needle))
-    (mut i (if (< from 0)
-      0
-      from))
-    (mut found (- 0 1))
-  )
+  {
+    (let len (strLen s))
+    (let ln (strLen needle))
+    (let mut i
+      (if (< from 0)
+        0
+        from))
+    (let mut found (- 0 1))
     {
       (while (&& (< found 0) (<= (+ i ln) len))
         (if (== (memCmp (+ (strData s) i) (strData needle) ln) 0)
@@ -603,7 +637,8 @@
       (if (< found 0)
         None
         (Some found))
-    }))
+    }
+  })
 
 ;; `s` without the `strIsSpace` bytes at either end. The result is a
 ;; slice sharing `s`'s storage, so it is not NUL-terminated unless it
@@ -611,18 +646,18 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: strTrim (-> String String))
 (pub fn (strTrim s)
-  (let (
-    (len (strLen s))
-    (mut lo 0)
-    (mut hi (strLen s))
-  )
+  {
+    (let len (strLen s))
+    (let mut lo 0)
+    (let mut hi (strLen s))
     {
       (while (&& (< lo len) (strIsSpace (strByte s lo)))
         (set lo (+ lo 1)))
       (while (&& (> hi lo) (strIsSpace (strByte s (- hi 1))))
         (set hi (- hi 1)))
       (strSlice s lo (- hi lo))
-    }))
+    }
+  })
 
 ;; The decimal integer `s` spells - an optional `-`, then one or more
 ;; ASCII digits and nothing else - or `None`: for an empty string, a
@@ -640,25 +675,27 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: strParseInt (-> String (Option Int)))
 (pub fn (strParseInt s)
-  (let (
-    (len (strLen s))
-    (neg (== (strByte s 0) 45))
-    (mut i (if (== (strByte s 0) 45)
-      1
-      0))
-    (mut acc 0)
-    (mut bad 0)
-    (mut digits 0)
-  )
+  {
+    (let len (strLen s))
+    (let neg (== (strByte s 0) 45))
+    (let mut i
+      (if (== (strByte s 0) 45)
+        1
+        0))
+    (let mut acc 0)
+    (let mut bad 0)
+    (let mut digits 0)
     {
       (while (&& (== bad 0) (< i len))
-        (let ((c (strByte s i)))
+        {
+          (let c (strByte s i))
           {
             (if (strIsDigit c)
               ; -922337203685477580 is the last accumulator a further
               ; digit can extend; at exactly that value the digit may
               ; be 7, or 8 when the sign is negative.
-              (let ((d (- c 48)))
+              {
+                (let d (- c 48))
                 (if (|| (< acc (- 0 922337203685477580))
                       (&& (== acc (- 0 922337203685477580))
                         (> d
@@ -669,17 +706,20 @@
                   {
                     (set acc (- (* acc 10) d))
                     (set digits (+ digits 1))
-                  }))
+                  })
+              }
               (set bad 1))
             (set i (+ i 1))
-          }))
+          }
+        })
       (if (|| (== bad 1) (== digits 0))
         None
         (Some
           (if neg
             acc
             (- 0 acc))))
-    }))
+    }
+  })
 
 ;; `format` — a String, built at compile time from a literal's runs and
 ;; holes, or the hole lowering applied to anything else.

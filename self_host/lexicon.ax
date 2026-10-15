@@ -26,11 +26,10 @@
 ; one.
 (:: lexIn (-> String String Bool))
 (fn (lexIn w set)
-  (let (
-    (parts (strSplit set 32))
-    (mut i 0)
-    (mut hit false)
-  )
+  {
+    (let parts (strSplit set 32))
+    (let mut i 0)
+    (let mut hit false)
     {
       (while (< i (vecLen parts))
         {
@@ -39,7 +38,8 @@
           (set i (+ i 1))
         })
       hit
-    }))
+    }
+  })
 
 ;; The kind of a lexicon word: `keyword`, `type`, `effect`, `operator`,
 ;; `literal`, `form` (a word that is special inside a form) or "" when
@@ -77,7 +77,7 @@
       (if (strEq w "lambda")
         "(lambda (param ...) body)"
         (if (strEq w "let")
-          "(let ((name value) (mut slot value) ...) body)"
+          "(let name value)"
           (if (strEq w "set")
             "(set slot value)"
             (if (strEq w "if")
@@ -141,7 +141,7 @@
 (:: lexFormWords (-> String String))
 (fn (lexFormWords w)
   (if (strEq w "mut")
-    "(let ((mut name value)) body)"
+    "(let mut name value)"
     (if (strEq w "in")
       "(for x in xs body)"
       (if (strEq w "by")
@@ -256,7 +256,7 @@
       (if (strEq w "lambda")
         "An anonymous function. It captures the bindings it uses, can be passed as a value and may be applied to fewer arguments than it takes, answering another lambda. A `lambda` with no parameters is refused with `AX3068`."
         (if (strEq w "let")
-          "Binds names for the body. Each binding is `(name value)`; `(mut name value)` makes a slot that `set` can overwrite. A pattern can stand where a name does, `(let (((Point x y) p)) ...)`. The body's value is the form's value."
+          "Declares a local inside a `{ ... }` block. The value is evaluated before the name enters scope; later statements can read it, and a later declaration can shadow it. Use `(let mut name value)` for a local that `set` can change. Destructure values with `match`. The block answers its last expression."
           (if (strEq w "set")
             "Overwrites a `mut` slot. The slot owns what it holds, so the previous value is released (`MM-MUT-1`). Writing to a binding that is not `mut` is `AX3012`."
             (if (strEq w "if")
@@ -270,7 +270,7 @@
                     (if (strEq w "data")
                       "Declares a sum type: a set of constructors, each with zero or more field types. Constructors start with a capital, build values when applied and take values apart in `match`. Type parameters go in a list after the name."
                       (if (strEq w "struct")
-                        "Declares a product type with named, typed fields. Build one with the name applied positionally, `(Point 1 2)`, and read a field with a dot, `p.x`. A field without its `:` is refused with `AX3056`."
+                        "Declares a product type with named, typed fields. Build one with named values, `(Point :x 1 :y 2)`, and read a field with a dot, `p.x`. Supply each field exactly once. Values are evaluated in written order. A field declaration without its `:` is refused with `AX3056`."
                         (if (strEq w "type")
                           "Gives an existing type a second name. Declare parameters before `=`, `(type Items a = (Vec a))`, and apply them in type position, `(Items Int)`. Aliases expand transparently and must be finite."
                           (if (strEq w "subtype")
@@ -648,7 +648,8 @@
 ;; lists them: keywords, forms, types, effects, operators, literals.
 (pub :: lexWords (Vec String))
 (pub fn (lexWords)
-  (let ((v vecNew))
+  {
+    (let v vecNew)
     {
       (vecPush v "|>")
       (vecPush v "fn")
@@ -756,12 +757,14 @@
       (vecPush v "Ok")
       (vecPush v "Err")
       v
-    }))
+    }
+  })
 
 ;; Every AXTAG key the lexicon documents, checked keys first.
 (pub :: lexTagKeys (Vec String))
 (pub fn (lexTagKeys)
-  (let ((v vecNew))
+  {
+    (let v vecNew)
     {
       (vecPush v "effect")
       (vecPush v "restrict")
@@ -779,32 +782,37 @@
       (vecPush v "scoped")
       (vecPush v "compute")
       v
-    }))
+    }
+  })
 
 ;; One word's entry as Markdown: the form in an `axiom` fence, its
 ;; kind, the prose and the reference section. "" for an unknown word.
 (pub :: lexEntryMarkdown (-> String String))
 (pub fn (lexEntryMarkdown w)
-  (let ((form (lexForm w)))
+  {
+    (let form (lexForm w))
     (if (== (strLen form) 0)
       ""
       (concat (concat (concat "```axiom\n" form) "\n```\n\n")
         (concat (concat (concat "*" (lexKind w)) "*\n\n")
           (concat (concat (lexDoc w) "\n\n")
-            (concat (concat "Reference: `docs/" (lexAnchor w)) "`\n")))))))
+            (concat (concat "Reference: `docs/" (lexAnchor w)) "`\n")))))
+  })
 
 ;; An AXTAG's entry as Markdown: the tag in a fence, the key's prose
 ;; and, when `v` is a value the lexicon knows, the value's prose. "" for
 ;; an unknown key.
 (pub :: lexTagMarkdown (-> String String String))
 (pub fn (lexTagMarkdown k v)
-  (let ((kd (lexTagKeyDoc k)))
+  {
+    (let kd (lexTagKeyDoc k))
     (if (== (strLen kd) 0)
       ""
-      (let ((vd
-        (if (== (strLen v) 0)
-          ""
-          (lexTagValueDoc k v))))
+      {
+        (let vd
+          (if (== (strLen v) 0)
+            ""
+            (lexTagValueDoc k v)))
         (concat
           (concat (concat "```axiom\n;@axiom:" k)
             (if (== (strLen v) 0)
@@ -815,7 +823,9 @@
               (if (== (strLen vd) 0)
                 ""
                 (concat (concat (concat "\n`" v) "`: ") (concat vd "\n")))
-              "\nReference: `docs/reference.md#axtag-metadata`\n")))))))
+              "\nReference: `docs/reference.md#axtag-metadata`\n")))
+      })
+  })
 
 ; `axiom explain WORD`: the lexicon's entry for a keyword, a builtin
 ; type, an effect, an operator or a literal, or for an AXTAG key
@@ -823,7 +833,9 @@
 ; has no entry, so the caller reports the unknown code.
 (pub :: explainLexicon (-> String String))
 (pub fn (explainLexicon word)
-  (let ((w (strTrim word)))
+  {
+    (let w (strTrim word))
     (if (strStartsWith w "@")
       (lexTagMarkdown (strSlice w 1 (- (strLen w) 1)) "")
-      (lexEntryMarkdown w))))
+      (lexEntryMarkdown w))
+  })

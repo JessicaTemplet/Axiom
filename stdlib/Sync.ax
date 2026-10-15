@@ -191,11 +191,13 @@
 ; holds the 0 the last release left, so no release can succeed.
 (:: syncTake (-> Int Int))
 (fn (syncTake m)
-  (let ((g (syncNextGuard m)))
+  {
+    (let g (syncNextGuard m))
     {
       (syncStore m 1 g)
       g
-    }))
+    }
+  })
 
 ; A 32-byte scratch block for a timed wait: words 0-1 the clock's own
 ; buffer, 2 the nanoseconds left, 3 the last clock reading (`Chan.ax`'s
@@ -204,13 +206,15 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (syncScratch nanos)
-  (let ((b (memAlloc 32)))
+  {
+    (let b (memAlloc 32))
     {
       (__retain b)
       (__store64 b 2 nanos)
       (__store64 b 3 (sysTimeoutMicros b))
       b
-    }))
+    }
+  })
 
 ; A block of `n` bytes with a share taken, and the share given back by
 ; `syncScratchDone`: the release files it for reuse (MM-LIFE-2k), so a
@@ -218,11 +222,13 @@
 (:: syncBlock (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (syncBlock n)
-  (let ((b (memAlloc n)))
+  {
+    (let b (memAlloc n))
     {
       (__retain b)
       b
-    }))
+    }
+  })
 
 (:: syncScratchDone (-> Int Int))
 ;@axiom:effect(unsafe)
@@ -244,16 +250,18 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (syncTimeSpent b code slice)
-  (let (
-    (left (__load64 b 2))
-    (now (sysTimeoutMicros b))
-  )
-    (let ((step (syncStep code slice (* (- now (__load64 b 3)) 1000))))
+  {
+    (let left (__load64 b 2))
+    (let now (sysTimeoutMicros b))
+    {
+      (let step (syncStep code slice (* (- now (__load64 b 3)) 1000)))
       {
         (__store64 b 2 (- left step))
         (__store64 b 3 now)
         0
-      })))
+      }
+    }
+  })
 
 ; The nanoseconds one wait costs: all of `slice` when the kernel timed
 ; it out, otherwise the clock's step `d` clamped to [0, slice].
@@ -297,7 +305,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (syncOwned m)
-  (Mutex (__resource_new syncDrop m)))
+  (Mutex :owner (__resource_new syncDrop m)))
 
 ; This binding's mark in the lock word: its pid, shifted past bit 0.
 (:: syncMe Int)
@@ -316,7 +324,8 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (syncHolderDead m v me)
-  (let ((owner (/ v 4)))
+  {
+    (let owner (/ v 4))
     (if (|| (== owner 0) (== (* owner 4) me))
       false
       (match (sysKill owner 0)
@@ -329,7 +338,8 @@
           (if (== (errCode e) 3)
             (== (/ (syncLoad m 0) 4) owner)
             false)
-        )))))
+        )))
+  })
 
 ; Whether `pid` is this process's own child and has exited, unreaped:
 ; `Chan.ax`'s `chanChildEnded`. `waitid` with WNOWAIT does not reap it,
@@ -338,12 +348,16 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (syncChildEnded pid)
-  (let ((buf (syncBlock sysChildPollBytes)))
-    (let ((ended (syncYes (sysChildExited pid buf))))
+  {
+    (let buf (syncBlock sysChildPollBytes))
+    {
+      (let ended (syncYes (sysChildExited pid buf)))
       {
         (syncScratchDone buf)
         ended
-      })))
+      }
+    }
+  })
 
 ; `Ok True`, and nothing else, is yes: a look that failed has seen nothing.
 (:: syncYes (-> (Result Bool Error) Bool))
@@ -387,16 +401,16 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (syncAcquire m b timed)
-  (let (
-    (me syncMe)
-    (mut state 0)
-    (mut guard 0)
-  )
+  {
+    (let me syncMe)
+    (let mut state 0)
+    (let mut guard 0)
     {
       (while (== state 0)
         (if (== (syncLoad m 3) 1)
           (set state 2)
-          (let ((v (syncLoad m 0)))
+          {
+            (let v (syncLoad m 0))
             (if (== v 0)
               ; Taken after a wait: marked contended, because another
               ; waiter may still sleep on the word.
@@ -407,10 +421,13 @@
                 })
               (if (syncOutOfTime b timed)
                 (set state 3)
-                (let ((w (syncMarkWaiting m v)))
+                {
+                  (let w (syncMarkWaiting m v))
                   (if (! (== w 0))
-                    (let ((slice (syncSlice b timed)))
-                      (let ((code (sysWaitWordTimeout m w slice)))
+                    {
+                      (let slice (syncSlice b timed))
+                      {
+                        (let code (sysWaitWordTimeout m w slice))
                         {
                           (if (== timed 1)
                             (syncTimeSpent b code slice))
@@ -419,13 +436,18 @@
                               (syncPoison m)
                               (set state 2)
                             })
-                        })))))))))
+                        }
+                      }
+                    })
+                }))
+          }))
       (if (== state 1)
         guard
         (if (== state 2)
           (- 0 2)
           (- 0 1)))
-    }))
+    }
+  })
 
 ;; Wait until this binding holds the lock. `Ok` the guard, which holds
 ;; the lock until it goes; `Err` code `syncOwnerDead` if the holder is
@@ -434,29 +456,39 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (mutexLock mx)
-  (let ((m (syncAt mx)))
+  {
+    (let m (syncAt mx))
     (if (== (syncLoad m 3) 1)
       (Err (mkError syncOwnerDead "mutexLock: the holder died holding it"))
-      (let ((me syncMe))
+      {
+        (let me syncMe)
         (if (== (syncCas m 0 me) 0)
           (Ok (syncGuard mx (syncTake m)))
-          (let ((g (syncAcquire m 0 0)))
+          {
+            (let g (syncAcquire m 0 0))
             (if (> g 0)
               (Ok (syncGuard mx g))
-              (Err (mkError syncOwnerDead "mutexLock: the holder died holding it")))))))))
+              (Err (mkError syncOwnerDead "mutexLock: the holder died holding it")))
+          })
+      })
+  })
 
 ;; Take the lock if it is free right now: `Some` the guard, `None` if it
 ;; is held - or poisoned, which `mutexOwnerDead` tells apart.
 (pub :: mutexTryLock (-> Mutex (Option MutexGuard)))
 ;@axiom:effect(io)
 (pub fn (mutexTryLock mx)
-  (let ((m (syncAt mx)))
+  {
+    (let m (syncAt mx))
     (if (== (syncLoad m 3) 1)
       None
-      (let ((me syncMe))
+      {
+        (let me syncMe)
         (if (== (syncCas m 0 me) 0)
           (Some (syncGuard mx (syncTake m)))
-          None)))))
+          None)
+      })
+  })
 
 ;; `mutexLock`, waiting at most `nanos` nanoseconds. `Ok` the guard;
 ;; `Err` code `sysTimedOut` when the time ran out with the lock still
@@ -468,14 +500,18 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (pub fn (mutexLockTimeout mx nanos)
-  (let ((m (syncAt mx)))
+  {
+    (let m (syncAt mx))
     (if (== (syncLoad m 3) 1)
       (Err (mkError syncOwnerDead "mutexLockTimeout: the holder died holding it"))
-      (let ((me syncMe))
+      {
+        (let me syncMe)
         (if (== (syncCas m 0 me) 0)
           (Ok (syncGuard mx (syncTake m)))
-          (let ((b (syncScratch nanos)))
-            (let ((g (syncAcquire m b 1)))
+          {
+            (let b (syncScratch nanos))
+            {
+              (let g (syncAcquire m b 1))
               {
                 (syncScratchDone b)
                 (if (> g 0)
@@ -483,7 +519,11 @@
                   (if (== g (- 0 2))
                     (Err (mkError syncOwnerDead "mutexLockTimeout: the holder died holding it"))
                     (Err (mkError sysTimedOut "mutexLockTimeout: timed out"))))
-              })))))))
+              }
+            }
+          })
+      })
+  })
 
 ; The guard for acquisition `serial` of `mx`. Its cleanup captures the
 ; mutex, so the mutex outlives every guard of it.
@@ -491,7 +531,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (syncGuard mx serial)
-  (MutexGuard (__resource_new (lambda (g) (syncRelease mx g)) serial)))
+  (MutexGuard :owner (__resource_new (lambda (g) (syncRelease mx g)) serial)))
 
 ; Whether a recovery abort is running this release (MM-EXEC-20).
 (:: syncUnwinding Bool)
@@ -507,22 +547,26 @@
 (:: syncRelease (-> Mutex Int Int))
 ;@axiom:effect(io)
 (fn (syncRelease mx serial)
-  (let ((m (syncAt mx)))
+  {
+    (let m (syncAt mx))
     (if (|| (!= (/ (syncLoad m 0) 4) (/ syncMe 4))
           (|| (<= serial 0) (!= (syncCasAt m 1 serial 0) serial)))
       0
       {
         (if syncUnwinding
           (syncStore m 3 1))
-        (let ((v (syncLoad m 0)))
+        {
+          (let v (syncLoad m 0))
           (if (&& (== (% v 2) 0) (== (syncCas m v 0) v))
             0
             {
               (syncStore m 0 0)
               (sysWakeWord m)
               0
-            }))
-      })))
+            })
+        }
+      })
+  })
 
 ;; Whether the mutex is poisoned: a holder was found dead holding it, or
 ;; a trap ended a guard's scope (the header).

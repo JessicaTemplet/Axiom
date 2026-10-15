@@ -88,19 +88,27 @@
 (pub :: memAllocMapped (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (memAllocMapped bytes map)
-  (let ((h (__alloc bytes)))
+  {
+    (let h (__alloc bytes))
     (if (== bytes 0)
       h
-      (let ((sw (__load64 (- h 8) 0)))
-        (let ((cnt (& (>> sw 1) 16383)))
-          (let ((lim
-            (if (> cnt 47)
-              47
-              cnt)))
+      {
+        (let sw (__load64 (- h 8) 0))
+        {
+          (let cnt (& (>> sw 1) 16383))
+          {
+            (let lim
+              (if (> cnt 47)
+                47
+                cnt))
             {
               (__store64 (- h 8) 0 (| sw (<< (& map (- (<< 1 lim) 1)) 16)))
               h
-            }))))))
+            }
+          }
+        }
+      })
+  })
 
 ;; Mark the block at `h` as an array of `n` handles: payload words
 ;; 0..n-1 are handles to other counted blocks, so releasing it releases
@@ -307,10 +315,9 @@
 (:: memCmpFrom (-> Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (memCmpFrom a b count start)
-  (let (
-    (mut i start)
-    (mut diff 0)
-  )
+  {
+    (let mut i start)
+    (let mut diff 0)
     {
       (while (&& (< i count) (== diff 0))
         {
@@ -318,7 +325,8 @@
           (set i (+ i 1))
         })
       diff
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Word-granular access
@@ -450,12 +458,12 @@
 ;@axiom:restrict(no-io,no-unsafe,no-foreign)
 (pub :: memStats MemoryStats)
 (pub fn (memStats)
-  (let (
-    (held (__axiom_mem_stat 0))
-    (filed (__axiom_mem_stat 1))
-    (mapped (__axiom_mem_stat 2))
-  )
-    (MemoryStats held filed mapped (- held filed))))
+  {
+    (let held (__axiom_mem_stat 0))
+    (let filed (__axiom_mem_stat 1))
+    (let mapped (__axiom_mem_stat 2))
+    (MemoryStats :heldBytes held :filedBytes filed :mappedBytes mapped :backlogBytes (- held filed))
+  })
 
 ; ------------------------------------------------------------------
 ; Identity
@@ -480,7 +488,7 @@
 ;; immediates.
 (pub :: addrOf (-> a Addr))
 (pub fn (addrOf x)
-  (Addr (as x Int)))
+  (Addr :slot (as x Int)))
 
 ;; Whether `a` and `b` are the address of one value.
 (pub :: addrEq (-> Addr Addr Bool))
@@ -493,9 +501,13 @@
 ;; first, as `Map.mapHash` does to a key.
 (pub :: addrHash (-> Addr Int))
 (pub fn (addrHash a)
-  (let ((x (* (^ a.slot (addrShr33 a.slot)) (- 0 49064778989728563))))
-    (let ((y (* (^ x (addrShr33 x)) (- 0 4265267296055464877))))
-      (& (^ y (addrShr33 y)) 9223372036854775807))))
+  {
+    (let x (* (^ a.slot (addrShr33 a.slot)) (- 0 49064778989728563)))
+    {
+      (let y (* (^ x (addrShr33 x)) (- 0 4265267296055464877)))
+      (& (^ y (addrShr33 y)) 9223372036854775807)
+    }
+  })
 
 ; The logical right shift by 33 that the finaliser needs: `>>` fills
 ; with the sign bit, and the mask keeps only the 31 bits the shift moved.

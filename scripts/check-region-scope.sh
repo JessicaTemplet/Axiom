@@ -253,20 +253,20 @@ cat > "$work/esc.ax" <<'EOF'
 
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut out ""))
+  { (let mut out "")
     {
       (region r
         {
           (set out (concat "hello" " world"))
           0
         })
-      (let ((fresh (concat "XXXXX" "XXXXXX")))
+      { (let fresh (concat "XXXXX" "XXXXXX"))
         {
           (println out)
           (strLen fresh)
-        })
+        }}
     }
-  )
+  }
 )
 EOF
 checks=$((checks + 1))

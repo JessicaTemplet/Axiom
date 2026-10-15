@@ -47,12 +47,14 @@
 ; Map `mib` MiB of arena, touching each block. Answers how many.
 (:: hog (-> Int Int))
 (fn (hog mib)
-  (let ((keep vecNew))
+  {
+    (let keep vecNew)
     {
       (for i in 0..mib
         (vecPush keep (strAlloc 1048576)))
       (vecLen keep)
-    }))
+    }
+  })
 
 (:: keepRun Int)
 ;@axiom:effect(io)
@@ -86,47 +88,57 @@
 (fn (shutdownRun)
   (match taskTokenNew
     ((Ok tok)
-      (let ((big (strAlloc 32768)))
-        (let ((rs
-          (taskMapWith
-            (lambda (i)
-              (if (== i 1)
-                {
-                  (taskCancel tok)
-                  (concat "cancelled, " (fmtInt (strLen big)))
-                }
-                (if (== i 0)
+      {
+        (let big (strAlloc 32768))
+        {
+          (let rs
+            (taskMapWith
+              (lambda (i)
+                (if (== i 1)
                   {
-                    (while (! (taskCancelled tok))
-                      0)
-                    (concat "stopped, " (fmtInt (strLen big)))
+                    (taskCancel tok)
+                    (concat "cancelled, " (fmtInt (strLen big)))
                   }
-                  "ran"))
-            )
-            6 (taskWithToken (taskOpts 2 64) tok))))
-          (showAll "shutdown" rs)))
+                  (if (== i 0)
+                    {
+                      (while (! (taskCancelled tok))
+                        0)
+                      (concat "stopped, " (fmtInt (strLen big)))
+                    }
+                    "ran"))
+              )
+              6 (taskWithToken (taskOpts 2 64) tok)))
+          (showAll "shutdown" rs)
+        }
+      }
     )
     ((Err e) 1)))
 
 (:: live Int)
 (fn (live)
-  (let ((st memStats))
-    st.backlogBytes))
+  {
+    (let st memStats)
+    st.backlogBytes
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((before live))
+  {
+    (let before live)
     {
       keepRun
       memoryRun
       shutdownRun
-      (let ((grew (- live before)))
+      {
+        (let grew (- live before))
         (println
           (concat "the arena's live bytes came back: "
             (if (<= grew 4096)
               "yes"
-              (fmtInt grew)))))
-    }))
+              (fmtInt grew))))
+      }
+    }
+  })

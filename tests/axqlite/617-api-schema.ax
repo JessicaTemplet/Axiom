@@ -18,15 +18,15 @@
   (match (axqColumns db table)
     ((Ok cs)
       (for c in cs
-        (let (
-          (n c.name)
-          (t c.columnType)
-          (nn c.notNull)
-          (pk c.primaryKey)
-          (l c.link)
-          (x c.text)
-        )
-          (println "  {n} {t} notNull={nn} pk={pk} link={l}: {x}")))
+        {
+          (let n c.name)
+          (let t c.columnType)
+          (let nn c.notNull)
+          (let pk c.primaryKey)
+          (let l c.link)
+          (let x c.text)
+          (println "  {n} {t} notNull={nn} pk={pk} link={l}: {x}")
+        })
     )
     ((Err e) (println (kitErrText e)))))
 
@@ -36,25 +36,27 @@
   (match (axqIndexes db table)
     ((Ok ixs)
       (for ix in ixs
-        (let (
-          (n ix.name)
-          (u ix.unique)
-          (cs (kitJoinNames ix.columns))
-        )
-          (println "  index {n} unique={u} on {cs}")))
+        {
+          (let n ix.name)
+          (let u ix.unique)
+          (let cs (kitJoinNames ix.columns))
+          (println "  index {n} unique={u} on {cs}")
+        })
     )
     ((Err e) (println (kitErrText e)))))
 
 (:: kitJoinNames (-> (Vec String) String))
 (fn (kitJoinNames names)
-  (let ((mut out ""))
+  {
+    (let mut out "")
     {
       (for (n i) in names
         (set out (if (== i 0)
           n
           (concat out (concat "," n)))))
       out
-    }))
+    }
+  })
 
 (:: dumpOf (-> Connection String))
 ;@axiom:effect(io)
@@ -66,7 +68,8 @@
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((db (kitOpen "schema.db")))
+  {
+    (let db (kitOpen "schema.db"))
     {
       (kitRun "teams"
         (axqExec db "CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"))
@@ -83,8 +86,10 @@
         (axqExec db "INSERT INTO notes (rowid, body) VALUES (7, 'seven'), (9, NULL)"))
       (match (axqTables db)
         ((Ok ts)
-          (let ((names (kitJoinNames ts)))
-            (println "tables: {names}"))
+          {
+            (let names (kitJoinNames ts))
+            (println "tables: {names}")
+          }
         )
         ((Err e) (println (kitErrText e))))
       (println "people:")
@@ -103,28 +108,34 @@
       (kitRun "count" (axqQueryInt db (axqlSelect people (alias (count *) n))))
       (kitRun "count of no row" (axqQueryInt db (axqlSelect people (id) (where (= id (int 9))))))
       (kitRun "an int of TEXT" (axqQueryInt db (axqlSelect people (name))))
-      (let ((first (dumpOf db)))
+      {
+        (let first (dumpOf db))
         {
           (println first)
-          (let ((copy (kitOpen "copy.db")))
+          {
+            (let copy (kitOpen "copy.db"))
             {
               (kitRun "load" (axqExecBatch copy first))
-              (let (
-                (second (dumpOf copy))
-                (same (strEq first second))
-              )
-                (println "the copy dumps the same: {same}"))
+              {
+                (let second (dumpOf copy))
+                (let same (strEq first second))
+                (println "the copy dumps the same: {same}")
+              }
               (kitDump copy "SELECT name, team.name, boss.name, score FROM people ORDER BY id")
               (kitRun "close copy" (axqClose copy))
-            })
-        })
+            }
+          }
+        }
+      }
       (kitRun "default with a parameter"
-        (axqRunOn db (Query "CREATE TABLE x (a INTEGER DEFAULT ?)" (vec1 (VInt 1)))))
+        (axqRunOn db (Query :text "CREATE TABLE x (a INTEGER DEFAULT ?)" :params (vec1 (VInt 1)))))
       (kitRun "check with a parameter"
-        (axqRunOn db (Query "CREATE TABLE x (a INTEGER CHECK (a > ?))" (vec1 (VInt 1)))))
+        (axqRunOn db
+          (Query :text "CREATE TABLE x (a INTEGER CHECK (a > ?))" :params (vec1 (VInt 1)))))
       (kitRun "a" (axqExec db "CREATE TABLE a (id INTEGER PRIMARY KEY)"))
       (kitRun "b" (axqExec db "CREATE TABLE b (id INTEGER PRIMARY KEY, toA LINK a)"))
       (kitRun "a links b" (axqExec db "ALTER TABLE a ADD COLUMN toB LINK b"))
       (println (dumpOf db))
       (kitRun "close" (axqClose db))
-    }))
+    }
+  })

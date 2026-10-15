@@ -13,57 +13,61 @@
 
 (:: mac (-> String String String))
 (fn (mac key msg)
-  (let (
-    (tag (strAlloc 16))
-    (st (strAlloc poly1305StateBytes))
-  )
+  {
+    (let tag (strAlloc 16))
+    (let st (strAlloc poly1305StateBytes))
     {
       (poly1305Mac (strData tag) (strData key) (strData msg) (strLen msg) (strData st))
       tag
-    }))
+    }
+  })
 
 ; Whether the state was wiped: poly1305Mac leaves it all zeros.
 (:: stateWiped (-> String String Bool))
 (fn (stateWiped key msg)
-  (let (
-    (tag (strAlloc 16))
-    (st (strAlloc poly1305StateBytes))
-    (mut z true)
-  )
+  {
+    (let tag (strAlloc 16))
+    (let st (strAlloc poly1305StateBytes))
+    (let mut z true)
     {
       (poly1305Mac (strData tag) (strData key) (strData msg) (strLen msg) (strData st))
       (for i in 0..poly1305StateBytes
         (if (!= (strByte st i) 0)
           (set z false)))
       z
-    }))
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (rfc (tallyNew "poly1305-rfc8439"))
-    (diff (tallyNew "poly1305-rustcrypto"))
-  )
+  {
+    (let rfc (tallyNew "poly1305-rfc8439"))
+    (let diff (tallyNew "poly1305-rustcrypto"))
     {
       (for line in (katLines "poly1305-rfc8439.txt")
-        (let ((f (katFields line)))
-          (let (
-            (id (katText f 0))
-            (key (katBytes f 1))
-            (msg (katBytes f 2))
-            (tag (katBytes f 3))
-          )
-            (tallyBytes rfc tag (mac key msg) id))))
+        {
+          (let f (katFields line))
+          {
+            (let id (katText f 0))
+            (let key (katBytes f 1))
+            (let msg (katBytes f 2))
+            (let tag (katBytes f 3))
+            (tallyBytes rfc tag (mac key msg) id)
+          }
+        })
       (for line in (katLines "poly1305-diff.txt")
-        (let ((f (katFields line)))
-          (let (
-            (key (katBytes f 0))
-            (msg (katBytes f 1))
-            (tag (katBytes f 2))
-          )
-            (tallyBytes diff tag (mac key msg) (concat "key " (hexEncode key))))))
+        {
+          (let f (katFields line))
+          {
+            (let key (katBytes f 0))
+            (let msg (katBytes f 1))
+            (let tag (katBytes f 2))
+            (tallyBytes diff tag (mac key msg) (concat "key " (hexEncode key)))
+          }
+        })
       (tallyCheck rfc (stateWiped "0123456789abcdef0123456789abcdef" "a message")
         "the state is wiped")
       (+ (tallyReport rfc) (tallyReport diff))
-    }))
+    }
+  })

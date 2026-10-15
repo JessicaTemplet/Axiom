@@ -62,9 +62,10 @@ with tempfile.TemporaryDirectory(prefix="axiom-route-b-layout-") as directory:
 
 for expression in ("(Point :x 1 2)", "(Point :x)", "(Point : 1 2)",
                    "{(let value)}", "{(let mut value)}", "{(let 1 2)}",
-                   "(let value 1)"):
+                   "(let value 1)", "(let ((value 1)) value)",
+                   "{(let ((value 1)) value)}"):
     result = subprocess.run([compiler, "fmt", "-"],
         input=f"(:: main Int)\n(fn (main) {expression})\n",
         capture_output=True, text=True, timeout=30)
     assert result.returncode != 0 and not result.stdout, (expression, result.stdout)
-print("four Route B layouts preserve field order, comments, scope and native behaviour; seven malformed forms refuse")
+print("four Route B layouts preserve field order, comments, scope and native behaviour; nine malformed or retired forms refuse")

@@ -17,7 +17,9 @@
 ;@axiom:restrict(no-unsafe)
 (fn (parseAnswer s)
   (match (strParseInt s)
-    ((Some n) (Ok (Parsed n (concat s " decoded") (strSplit (concat s ",a,b") 44))))
+    ((Some n)
+      (Ok (Parsed :value n :text (concat s " decoded") :parts (strSplit (concat s ",a,b") 44)))
+    )
     ((None) (Err (errContextOf (mkError 2111 "expected a number") "answer.value")))))
 
 (:: worker (-> Int String))
@@ -41,24 +43,25 @@
 ;@axiom:effect(block)
 ;@axiom:restrict(no-unsafe)
 (fn (decodedOrder)
-  (let (
-    (calls vecNew)
-    (opts (taskWithFailFast (taskOpts 2 64) true))
-    (rs (taskMapDecodedWith worker
-          (lambda (s)
-            {
-              (vecPush calls s)
-              (parseAnswer s)
-            }
-          )
-          6 opts))
-    (mut good (&& (== (vecLen calls) 6) (== (vecLen rs) 6)))
-  )
+  {
+    (let calls vecNew)
+    (let opts (taskWithFailFast (taskOpts 2 64) true))
+    (let rs
+      (taskMapDecodedWith worker
+        (lambda (s)
+          {
+            (vecPush calls s)
+            (parseAnswer s)
+          }
+        )
+        6 opts))
+    (let mut good (&& (== (vecLen calls) 6) (== (vecLen rs) 6)))
     {
       (for i in 0..6
         (set good (&& good (&& (strEq (vecGet calls i) (worker i)) (validResult (vecGet rs i) i)))))
       good
-    }))
+    }
+  })
 
 (:: bypassedErrors (-> Int Int Int Bool))
 ;@axiom:effect(io)
@@ -66,18 +69,18 @@
 ;@axiom:effect(block)
 ;@axiom:restrict(no-unsafe)
 (fn (bypassedErrors n limit code)
-  (let (
-    (calls vecNew)
-    (rs (taskMapDecoded (lambda (i) "answer too long")
-          (lambda (s)
-            {
-              (vecPush calls s)
-              (parseAnswer s)
-            }
-          )
-          n 2 limit))
-    (mut good (&& (== (vecLen calls) 0) (== (vecLen rs) n)))
-  )
+  {
+    (let calls vecNew)
+    (let rs
+      (taskMapDecoded (lambda (i) "answer too long")
+        (lambda (s)
+          {
+            (vecPush calls s)
+            (parseAnswer s)
+          }
+        )
+        n 2 limit))
+    (let mut good (&& (== (vecLen calls) 0) (== (vecLen rs) n)))
     {
       (for i in 0..n
         (match (vecGet rs i)
@@ -88,7 +91,8 @@
             (set good (&& good (== e.code code)))
           )))
       good
-    }))
+    }
+  })
 
 (:: emptyPool Bool)
 ;@axiom:effect(io)
@@ -96,11 +100,11 @@
 ;@axiom:effect(block)
 ;@axiom:restrict(no-unsafe)
 (fn (emptyPool)
-  (let (
-    (zero (taskMapDecoded worker parseAnswer 0 0 64))
-    (negative (taskMapDecoded worker parseAnswer (- 0 4) 2 64))
-  )
-    (&& (== (vecLen zero) 0) (== (vecLen negative) 0))))
+  {
+    (let zero (taskMapDecoded worker parseAnswer 0 0 64))
+    (let negative (taskMapDecoded worker parseAnswer (- 0 4) 2 64))
+    (&& (== (vecLen zero) 0) (== (vecLen negative) 0))
+  })
 
 (:: clampedWidth Bool)
 ;@axiom:effect(io)
@@ -108,9 +112,10 @@
 ;@axiom:effect(block)
 ;@axiom:restrict(no-unsafe)
 (fn (clampedWidth)
-  (let ((rs
-    (taskMapDecoded (lambda (i) (fmtInt i)) parseAnswer 3 0 64)))
-    (&& (== (vecLen rs) 3) (validResult (vecGet rs 1) 1))))
+  {
+    (let rs (taskMapDecoded (lambda (i) (fmtInt i)) parseAnswer 3 0 64))
+    (&& (== (vecLen rs) 3) (validResult (vecGet rs 1) 1))
+  })
 
 (:: main ())
 ;@axiom:effect(io)

@@ -116,11 +116,11 @@
   (match r
     ((Ok s) (println "{i} ok {s}"))
     ((Err e)
-      (let (
-        (c (errCode e))
-        (m (errMessage e))
-      )
-        (println "{i} err {c} {m}"))
+      {
+        (let c (errCode e))
+        (let m (errMessage e))
+        (println "{i} err {c} {m}")
+      }
     )))
 
 (:: showAll (-> (Vec (Result String Error)) Int))
@@ -136,7 +136,8 @@
 (:: goneCount (-> Int Int Int Int))
 ;@axiom:effect(io)
 (fn (goneCount page lo hi)
-  (let ((mut gone 0))
+  {
+    (let mut gone 0)
     {
       (for k in lo..hi
         (match (sysKill (memGetWord page k) 0)
@@ -146,26 +147,28 @@
               (set gone (+ gone 1)))
           )))
       gone
-    }))
+    }
+  })
 
 (:: pids2 (-> Int Int Int Int))
 ;@axiom:effect(io)
 (fn (pids2 page a b)
-  (let (
-    (p (memGetWord page a))
-    (q (memGetWord page b))
-  )
+  {
+    (let p (memGetWord page a))
+    (let q (memGetWord page b))
     {
       (println "pids {p} {q}")
       0
-    }))
+    }
+  })
 
 ; Wait until words `lo .. hi` of `page` all hold a pid.
 (:: awaitPids (-> Int Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (awaitPids page lo hi)
-  (let ((mut missing 1))
+  {
+    (let mut missing 1)
     {
       (while (== missing 1)
         {
@@ -177,7 +180,8 @@
             (sysWaitWordTimeout page 0 1000000))
         })
       0
-    }))
+    }
+  })
 
 (:: elapsedMs (-> Int Int Int))
 ;@axiom:effect(io)
@@ -194,10 +198,9 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (results n w)
-  (let (
-    (rs (taskMap answer n w 64))
-    (mut bad (- 0 1))
-  )
+  {
+    (let rs (taskMap answer n w 64))
+    (let mut bad (- 0 1))
     {
       (for i in 0..n
         (match (vecGet rs i)
@@ -215,7 +218,8 @@
       (if (< bad 0)
         (say "equal" (vecLen rs))
         (say "differ" bad))
-    }))
+    }
+  })
 
 ; ---- mixed -----------------------------------------------------------------
 (:: mixedWork (-> Int Int String))
@@ -269,8 +273,10 @@
 (fn (trapAfterPid page)
   {
     (awaitPids page 1 2)
-    (let ((p (memGetWord page 1)))
-      (println "pids {p}"))
+    {
+      (let p (memGetWord page 1))
+      (println "pids {p}")
+    }
     (/ 1 (- (memGetWord page 0) (memGetWord page 0)))
   })
 
@@ -315,7 +321,8 @@
 ;@axiom:effect(block)
 (fn (cancelWork page idle tok i)
   (if (== i 0)
-    (let ((mut waited 0))
+    {
+      (let mut waited 0)
       {
         (while (&&
                  (if (taskCancelled tok)
@@ -327,7 +334,8 @@
             (set waited (+ waited 10))
           })
         "stopped"
-      })
+      }
+    }
     (if (== i 1)
       (stubborn page idle 1)
       (answer i))))
@@ -364,11 +372,13 @@
 ; ---- fold / keep -----------------------------------------------------------
 (:: big (-> Int String))
 (fn (big i)
-  (let ((s (strAlloc 4096)))
+  {
+    (let s (strAlloc 4096))
     {
       (memSet (strData s) (+ 97 (% i 26)) 4096)
       s
-    }))
+    }
+  })
 
 (:: addLen (-> Int Int (Result String Error) Int))
 (fn (addLen acc i r)
@@ -402,15 +412,15 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (mode (sysArg 1))
-    (buf (memAlloc 16))
-  )
+  {
+    (let mode (sysArg 1))
+    (let buf (memAlloc 16))
     (match (sysMapShared 4096)
       ((Ok idle)
         (match (sysMapShared 4096)
           ((Ok page)
-            (let ((t0 (sysTimeoutMicros buf)))
+            {
+              (let t0 (sysTimeoutMicros buf))
               (if (strEq mode "results")
                 (results (argInt 2) (argInt 3))
                 (if (strEq mode "mixed")
@@ -440,8 +450,10 @@
                                 (b (cancelLater idle tok))
                               )
                                 (+ a b))
-                              (let ((p (memGetWord page 1)))
-                                (println "pids {p}"))
+                              {
+                                (let p (memGetWord page 1))
+                                (println "pids {p}")
+                              }
                               (say "gone" (goneCount page 1 2))
                               (say "ms" (elapsedMs buf t0))
                             }
@@ -460,8 +472,10 @@
                               (taskFold big (argInt 2) (taskOpts (argInt 3) 8192) 0
                                 (lambda (acc i r) (addLen acc i r))))
                             (if (strEq mode "keep")
-                              (let ((rs (taskMap big (argInt 2) (argInt 3) 8192)))
-                                (say "keep" (vecLen rs)))
+                              {
+                                (let rs (taskMap big (argInt 2) (argInt 3) 8192))
+                                (say "keep" (vecLen rs))
+                              }
                               (if (strEq mode "parenttrap")
                                 (say "fold"
                                   (taskFold (lambda (i) (trapWork page idle i)) 4 (taskOpts 4 64) 0
@@ -495,8 +509,10 @@
                                         {
                                           (println "usage: task-load MODE ...")
                                           2
-                                        }))))))))))))))
+                                        })))))))))))))
+            }
           )
           ((Err e) 2))
       )
-      ((Err e) 1))))
+      ((Err e) 1))
+  })

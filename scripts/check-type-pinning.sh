@@ -5,8 +5,8 @@
 # to the type it first meets. Without that, a let-bound container could
 # take a different element type at each use:
 #
-#     (let ((v vecNew))
-#       { (vecPush v 42) (needVec (vecGet v 0)) })
+#     { (let v vecNew)
+#       { (vecPush v 42) (needVec (vecGet v 0)) } }
 #
 # `check` would accept that program, and it exits 139: an `Int` read
 # back as a block header with no `cast` written anywhere. That is
@@ -81,13 +81,13 @@ probe two-types refuse <<'AX'
 (:: put (-> (Box a) a (Box a)))
 (fn (put b x) b)
 (fn (main)
-  (let ((v emptyBox))
+  { (let v emptyBox)
     {
       (put v 42)
       (put v "hi")
       0
     }
-  )
+  }
 )
 AX
 
@@ -103,12 +103,12 @@ probe read-back refuse <<'AX'
 (:: needStr (-> String Int))
 (fn (needStr s) 0)
 (fn (main)
-  (let ((v emptyBox))
+  { (let v emptyBox)
     {
       (put v 42)
       (needStr (peek v))
     }
-  )
+  }
 )
 AX
 
@@ -117,25 +117,25 @@ probe self-containing-vector refuse <<'AX'
 (import Vec)
 (import Str)
 (fn (main)
-  (let ((v vecNew))
+  { (let v vecNew)
     {
       (vecPush v v)
       (vecPush v "hello")
       (strLen (vecGet v 0))
-    }))
+    }})
 AX
 
 probe mutually-containing-vectors refuse <<'AX'
 (import Vec)
 (import Str)
 (fn (main)
-  (let ((a vecNew) (b vecNew))
+  { (let a vecNew) (let b vecNew)
     {
       (vecPush a b)
       (vecPush b a)
       (vecPush b "hello")
       (strLen (vecGet b 0))
-    }))
+    }})
 AX
 
 echo "== what pinning must NOT break =="
@@ -147,13 +147,13 @@ probe one-type accept <<'AX'
 (:: put (-> (Box a) a (Box a)))
 (fn (put b x) b)
 (fn (main)
-  (let ((v emptyBox))
+  { (let v emptyBox)
     {
       (put v 1)
       (put v 2)
       0
     }
-  )
+  }
 )
 AX
 
@@ -176,16 +176,16 @@ probe per-binding accept <<'AX'
 (:: put (-> (Box a) a (Box a)))
 (fn (put b x) b)
 (fn (main)
-  (let (
-    (ints emptyBox)
-    (strs emptyBox)
-  )
+  {
+    (let ints emptyBox)
+    (let strs emptyBox)
+
     {
       (put ints 1)
       (put strs "s")
       0
     }
-  )
+  }
 )
 AX
 
@@ -194,13 +194,13 @@ probe finite-nested-vectors run-42 <<'AX'
 (import Vec)
 (import Str)
 (fn (main)
-  (let ((strings vecNew) (nested vecNew) (ints vecNew))
+  { (let strings vecNew) (let nested vecNew) (let ints vecNew)
     {
       (vecPush strings "hello")
       (vecPush nested strings)
       (vecPush ints 37)
       (+ (strLen (vecGet (vecGet nested 0) 0)) (vecGet ints 0))
-    }))
+    }})
 AX
 
 probe nominal-recursive-data run-42 <<'AX'
@@ -212,11 +212,11 @@ probe nominal-recursive-data run-42 <<'AX'
     ((Leaf n) n)
     ((Branch children) (total (vecGet children 0)))))
 (fn (main)
-  (let ((children vecNew))
+  { (let children vecNew)
     {
       (vecPush children (Leaf 42))
       (total (Branch children))
-    }))
+    }})
 AX
 
 echo

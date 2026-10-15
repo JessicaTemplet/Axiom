@@ -30,20 +30,22 @@
 (:: closes (-> (-> Int Int) Bool))
 ;@axiom:effect(io)
 (fn (closes k)
-  (let ((before openCount))
+  {
+    (let before openCount)
     {
       (k 0)
       (== openCount before)
-    }))
+    }
+  })
 
 (:: scope (-> Int Int))
 ;@axiom:effect(io)
 (fn (scope x)
-  (let (
-    (f (requireFile "/dev/null" oRdonly))
-    (alias f)
-  )
-    0))
+  {
+    (let f (requireFile "/dev/null" oRdonly))
+    (let alias f)
+    0
+  })
 
 (:: matched (-> Int Int))
 ;@axiom:effect(io)
@@ -56,34 +58,42 @@
 ;@axiom:effect(io)
 (fn (inRegion x)
   (region r
-    (let ((f (requireFile "/dev/null" oRdonly)))
-      0)))
+    {
+      (let f (requireFile "/dev/null" oRdonly))
+      0
+    }))
 
 (:: earlyClose (-> Int Int))
 ;@axiom:effect(io)
 (fn (earlyClose x)
-  (let ((f (requireFile "/dev/null" oRdonly)))
-    (let (
-      (_ (fileClose f))
-      (_ (fileClose f))
-    )
-      0)))
+  {
+    (let f (requireFile "/dev/null" oRdonly))
+    {
+      (let _ (fileClose f))
+      (let _ (fileClose f))
+      0
+    }
+  })
 
 (:: capturedFile (-> Int Int Int))
 ;@axiom:effect(io)
 (fn (capturedFile x)
-  (let ((f (requireFile "/dev/null" oRdonly)))
+  {
+    (let f (requireFile "/dev/null" oRdonly))
     (lambda (_)
       (match (readAll f)
         ((Ok s) (strLen s))
         ((Err e) -1))
-    )))
+    )
+  })
 
 (:: captured (-> Int Int))
 ;@axiom:effect(io)
 (fn (captured x)
-  (let ((readIt (capturedFile 0)))
-    (readIt 0)))
+  {
+    (let readIt (capturedFile 0))
+    (readIt 0)
+  })
 
 (:: combined (-> Int Int))
 ;@axiom:effect(io)
@@ -95,19 +105,27 @@
 (:: mapped (-> Int Int))
 ;@axiom:effect(io)
 (fn (mapped x)
-  (let ((opened (openPath "/dev/null" oRdonly)))
+  {
+    (let opened (openPath "/dev/null" oRdonly))
     (match (mapOk opened (lambda (f) f))
       ((Ok f) 0)
-      ((Err e) (die (errorText e) 1)))))
+      ((Err e) (die (errorText e) 1)))
+  })
 
 ; A returned owner keeps its descriptor until the caller drops it.
 (:: held Bool)
 ;@axiom:effect(io)
 (fn (held)
-  (let ((before openCount))
-    (let ((f (requireFile "/dev/null" oRdonly)))
-      (let ((n openCount))
-        (&& (== n (+ before 1)) (! (isTerminal f)))))))
+  {
+    (let before openCount)
+    {
+      (let f (requireFile "/dev/null" oRdonly))
+      {
+        (let n openCount)
+        (&& (== n (+ before 1)) (! (isTerminal f)))
+      }
+    }
+  })
 
 (:: main ())
 ;@axiom:effect(io)
@@ -123,7 +141,9 @@
     (println held)
     ; Closing a standard stream retires that value only: the next line
     ; still reaches fd 1.
-    (let ((out stdout))
-      (println (isOk (fileClose out))))
+    {
+      (let out stdout)
+      (println (isOk (fileClose out)))
+    }
     (println (closes scope))
   })

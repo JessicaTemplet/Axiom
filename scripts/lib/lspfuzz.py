@@ -1085,12 +1085,11 @@ def cmd_planted(args):
 # must accept or refuse, and the generator's own determinism.
 
 PINNED_CORPUS = {
-    "a.ax": '(import IO)\n\n(:: main Int)\n;@axiom:effect(io)\n(fn (main)\n'
-            '  {\n    (println "h\u00e9 \\n")\n    (let ((x 42)) x)\n  })\n',
+    "a.ax": '(import IO)\n\n(:: main Int)\n;@axiom:effect(io)\n(fn (main)\n  {\n    (println "hé \\n")\n    { (let x 42) x}\n  })\n',
     "b.ax": '(data Shape (Circle Int) (Sq Int))\n(:: area (-> Shape Int))\n'
             '(fn (area s)\n  (match s\n    ((Circle r) (* 3 (* r r)))\n    ((Sq w) (* w w))))\n',
 }
-PINNED_DIGEST = "2e039589c81471bee8e4591b23200a9502bf1aac93ffafed7d9dd42c4ced71b2"
+PINNED_DIGEST = "b85fb612a3d02074d0bc7421a63ee17028272d346b06aead5c61f987f475dc30"
 
 
 def pinned_digest():

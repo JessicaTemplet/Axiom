@@ -56,12 +56,11 @@
 ; Counts of the answers: Ok, 1012 and 1002, then the rest.
 (:: tally (-> (Vec (Result String Error)) String))
 (fn (tally rs)
-  (let (
-    (mut ok 0)
-    (mut over 0)
-    (mut cancelled 0)
-    (mut other 0)
-  )
+  {
+    (let mut ok 0)
+    (let mut over 0)
+    (let mut cancelled 0)
+    (let mut other 0)
     {
       (for i in 0..(vecLen rs)
         (match (vecGet rs i)
@@ -77,17 +76,20 @@
           )))
       (concat (concat (concat "ok " (fmtInt ok)) (concat " over " (fmtInt over)))
         (concat (concat " cancelled " (fmtInt cancelled)) (concat " other " (fmtInt other))))
-    }))
+    }
+  })
 
 ; 4096 bytes of `x`: an answer whose pages the copy must touch.
 (:: page4k String)
 (fn (page4k)
-  (let ((mut s "xxxxxxxxxxxxxxxx"))
+  {
+    (let mut s "xxxxxxxxxxxxxxxx")
     {
       (for i in 0..8
         (set s (concat s s)))
       s
-    }))
+    }
+  })
 
 (:: answers (-> Int Int Int (Vec (Result String Error))))
 ;@axiom:effect(io)
@@ -101,10 +103,9 @@
 ; is negative. Answers how many MiB it allocated.
 (:: hog (-> Int Int))
 (fn (hog mib)
-  (let (
-    (keep vecNew)
-    (mut i 0)
-  )
+  {
+    (let keep vecNew)
+    (let mut i 0)
     {
       (while (|| (< mib 0) (< i (* mib 256)))
         {
@@ -112,7 +113,8 @@
           (set i (+ i 1))
         })
       (/ (vecLen keep) 256)
-    }))
+    }
+  })
 
 (:: show (-> (Result String Error) String))
 (fn (show r)
@@ -125,26 +127,28 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (hogs mib cap endless)
-  (let ((rs
-    (taskMapWith
-      (lambda (i)
-        (fmtInt
-          (hog
-            (if (== i 0)
-              1
-              (if (== i 1)
-                mib
-                (- 0 1)))))
-      )
-      (if endless
-        3
-        2)
-      (taskWithMemory (taskOpts 3 64) cap))))
+  {
+    (let rs
+      (taskMapWith
+        (lambda (i)
+          (fmtInt
+            (hog
+              (if (== i 0)
+                1
+                (if (== i 1)
+                  mib
+                  (- 0 1)))))
+        )
+        (if endless
+          3
+          2)
+        (taskWithMemory (taskOpts 3 64) cap)))
     {
       (for i in 0..(vecLen rs)
         (println (concat (concat "task " (fmtInt i)) (concat ": " (show (vecGet rs i))))))
       0
-    }))
+    }
+  })
 
 ; Shutdown with work queued and running: every task records its pid in
 ; the page and sleeps 200 ms; a sibling binding cancels at 300 ms.
@@ -157,27 +161,32 @@
     ((Ok tok)
       (match (sysMapShared 4096)
         ((Ok page)
-          (let ((before memStats))
-            (let ((pair
-              (parallel p (
-                (a (let ((rs
-                  (taskMapWith
-                    (lambda (i)
-                      {
-                        (memSetWord page (+ i 1) sysPid)
-                        (nap 200)
-                        "done"
-                      }
-                    )
-                    40 (taskWithGrace (taskWithToken (taskOpts 4 64) tok) 50000000))))
-                  (println (tally rs))))
-                (b {
-                  (nap 300)
-                  (taskCancel tok)
-                })
-              )
-                (+ a b))))
-              (let ((after memStats))
+          {
+            (let before memStats)
+            {
+              (let pair
+                (parallel p (
+                  (a {
+                    (let rs
+                      (taskMapWith
+                        (lambda (i)
+                          {
+                            (memSetWord page (+ i 1) sysPid)
+                            (nap 200)
+                            "done"
+                          }
+                        )
+                        40 (taskWithGrace (taskWithToken (taskOpts 4 64) tok) 50000000)))
+                    (println (tally rs))
+                  })
+                  (b {
+                    (nap 300)
+                    (taskCancel tok)
+                  })
+                )
+                  (+ a b)))
+              {
+                (let after memStats)
                 {
                   (println
                     (concat "ms "
@@ -188,13 +197,18 @@
                             ((Err e) 0))
                           1000000))))
                   (for i in 0..40
-                    (let ((pid (memGetWord page (+ i 1))))
+                    {
+                      (let pid (memGetWord page (+ i 1)))
                       (if (> pid 0)
-                        (println (concat "pid " (fmtInt pid))))))
+                        (println (concat "pid " (fmtInt pid))))
+                    })
                   (println
                     (concat "backlog-grew " (fmtInt (- after.backlogBytes before.backlogBytes))))
                   0
-                })))
+                }
+              }
+            }
+          }
         )
         ((Err e) 1))
     )
@@ -206,10 +220,12 @@
 (fn (deep n)
   (if (== n 0)
     0
-    (let ((r (deep (- n 1))))
+    {
+      (let r (deep (- n 1)))
       (if (> r n)
         r
-        (+ r 1)))))
+        (+ r 1))
+    }))
 
 ; The stack pool: each task records its pid in the page.
 (:: stackPool (-> Int Int))
@@ -217,23 +233,23 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (stackPool page)
-  (let (
-    (rs (taskMapWith
-          (lambda (i)
-            {
-              (memSetWord page (+ i 1) sysPid)
-              (fmtInt
-                (deep
-                  (if (== (% i 2) 0)
-                    50000
-                    100)))
-            }
-          )
-          8 (taskWithStack (taskOpts 4 64) 262144)))
-    (mut ok 0)
-    (mut over 0)
-    (mut other 0)
-  )
+  {
+    (let rs
+      (taskMapWith
+        (lambda (i)
+          {
+            (memSetWord page (+ i 1) sysPid)
+            (fmtInt
+              (deep
+                (if (== (% i 2) 0)
+                  50000
+                  100)))
+          }
+        )
+        8 (taskWithStack (taskOpts 4 64) 262144)))
+    (let mut ok 0)
+    (let mut over 0)
+    (let mut other 0)
     {
       (for i in 0..(vecLen rs)
         (match (vecGet rs i)
@@ -249,7 +265,8 @@
         (concat (concat (concat "ok " (fmtInt ok)) (concat " overflow " (fmtInt over)))
           (concat " other " (fmtInt other))))
       0
-    }))
+    }
+  })
 
 (:: stacks Int)
 ;@axiom:effect(io)
@@ -258,19 +275,25 @@
 (fn (stacks)
   (match (sysMapShared 4096)
     ((Ok page)
-      (let ((before memStats))
+      {
+        (let before memStats)
         {
           (stackPool page)
-          (let ((after memStats))
+          {
+            (let after memStats)
             {
               (for i in 0..8
-                (let ((pid (memGetWord page (+ i 1))))
+                {
+                  (let pid (memGetWord page (+ i 1)))
                   (if (> pid 0)
-                    (println (concat "pid " (fmtInt pid))))))
+                    (println (concat "pid " (fmtInt pid))))
+                })
               (println (concat "backlog-grew " (fmtInt (- after.backlogBytes before.backlogBytes))))
               0
-            })
-        })
+            }
+          }
+        }
+      }
     )
     ((Err e) 1)))
 
@@ -279,13 +302,13 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (soak rounds keepAll)
-  (let (
-    (held vecNew)
-    (mut ok 0)
-  )
+  {
+    (let held vecNew)
+    (let mut ok 0)
     {
       (for r in 0..rounds
-        (let ((rs (answers 16 4 49152)))
+        {
+          (let rs (answers 16 4 49152))
           {
             (for i in 0..(vecLen rs)
               (match (vecGet rs i)
@@ -295,26 +318,32 @@
                 ((Err e) ())))
             (if keepAll
               (vecPush held rs))
-          }))
-      (let ((st memStats))
-        (let ((live st.backlogBytes))
+          }
+        })
+      {
+        (let st memStats)
+        {
+          (let live st.backlogBytes)
           (println
             (concat (concat (concat "rounds " (fmtInt rounds)) (concat " ok " (fmtInt ok)))
-              (concat " live " (fmtInt live))))))
+              (concat " live " (fmtInt live))))
+        }
+      }
       (vecLen held)
-    }))
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (mode (sysArg 1))
-    (n (match (strParseInt (sysArg 2))
-      ((Some v) v)
-      ((None) 100)))
-  )
+  {
+    (let mode (sysArg 1))
+    (let n
+      (match (strParseInt (sysArg 2))
+        ((Some v) v)
+        ((None) 100)))
     (if (strEq mode "keep")
       {
         (println (tally (answers n 4 65536)))
@@ -345,4 +374,5 @@
                     {
                       (soak n true)
                       0
-                    }))))))))))
+                    }))))))))
+  })

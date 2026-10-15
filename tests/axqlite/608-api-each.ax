@@ -15,13 +15,15 @@
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((db (kitOpen "each.db")))
+  {
+    (let db (kitOpen "each.db"))
     {
       (kitRun "create" (axqExec db "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)"))
       (kitRun "seed" (axqExec db "INSERT INTO t (v) VALUES (10), (20), (30), (40), (50)"))
       (match (axqPrepare db "SELECT id, v FROM t WHERE v >= ? ORDER BY id")
         ((Ok q)
-          (let ((seen (Seen 0 0)))
+          {
+            (let seen (Seen :n 0 :sum 0))
             {
               (kitRun "all"
                 (axqQueryEach q (vec1 (VInt 0))
@@ -32,11 +34,11 @@
                       (Ok true)
                     }
                   )))
-              (let (
-                (n seen.n)
-                (sum seen.sum)
-              )
-                (println "seen {n} rows summing to {sum}"))
+              {
+                (let n seen.n)
+                (let sum seen.sum)
+                (println "seen {n} rows summing to {sum}")
+              }
               (kitRun "stop after two"
                 (axqQueryEach q (vec1 (VInt 0)) (lambda (r) (Ok (< (unwrapOr (rowInt r 0) 0) 2)))))
               (kitRun "callback fails"
@@ -46,8 +48,9 @@
                 (axqQueryEach q (vec1 (VInt 40))
                   (lambda (r)
                     (match (axqQueryOn db
-                             (Query "SELECT v FROM t WHERE id = ?"
-                               (vec1 (VInt (unwrapOr (rowInt r 0) 0)))))
+                             (Query
+                               :text "SELECT v FROM t WHERE id = ?"
+                               :params (vec1 (VInt (unwrapOr (rowInt r 0) 0)))))
                       ((Ok rs)
                         {
                           (kitRows "  inner" (Ok rs))
@@ -59,40 +62,53 @@
               (kitRun "write inside"
                 (axqQueryEach q (vec1 (VInt 50))
                   (lambda (r)
-                    (let ((_ (axqExec db "UPDATE t SET v = v + 1")?))
-                      (Ok true))
+                    {
+                      (let _ (axqExec db "UPDATE t SET v = v + 1")?)
+                      (Ok true)
+                    }
                   )))
               (kitRun "BEGIN inside"
                 (axqQueryEach q (vec1 (VInt 50))
                   (lambda (r)
-                    (let ((_ (axqExec db "BEGIN")?))
-                      (Ok true))
+                    {
+                      (let _ (axqExec db "BEGIN")?)
+                      (Ok true)
+                    }
                   )))
               (kitRun "close inside"
                 (axqQueryEach q (vec1 (VInt 50))
                   (lambda (r)
-                    (let ((_ (axqClose db)?))
-                      (Ok true))
+                    {
+                      (let _ (axqClose db)?)
+                      (Ok true)
+                    }
                   )))
               (kitRun "begin" (axqExec db "BEGIN"))
               (kitRun "write inside a transaction"
                 (axqQueryEach q (vec1 (VInt 30))
                   (lambda (r)
-                    (let ((_ (axqRunOn db
-                               (Query "UPDATE t SET v = v * 10 WHERE id = ?"
-                                 (vec1 (VInt (unwrapOr (rowInt r 0) 0)))))?))
-                      (Ok true))
+                    {
+                      (let _
+                        (axqRunOn db
+                          (Query
+                            :text "UPDATE t SET v = v * 10 WHERE id = ?"
+                            :params (vec1 (VInt (unwrapOr (rowInt r 0) 0)))))?)
+                      (Ok true)
+                    }
                   )))
               (kitRun "DDL inside a transaction"
                 (axqQueryEach q (vec1 (VInt 0))
                   (lambda (r)
-                    (let ((_ (axqExec db "CREATE TABLE u (x INTEGER)")?))
-                      (Ok true))
+                    {
+                      (let _ (axqExec db "CREATE TABLE u (x INTEGER)")?)
+                      (Ok true)
+                    }
                   )))
               (kitRun "commit" (axqExec db "COMMIT"))
               (kitRun "after the commit" (axqQueryEach q (vec1 (VInt 0)) (lambda (r) (Ok true))))
               (kitRun "finalize" (axqFinalize q))
-            })
+            }
+          }
         )
         ((Err e) (println (kitErrText e))))
       (match (axqPrepare db "INSERT INTO t (v) VALUES (1)")
@@ -104,7 +120,7 @@
         )
         ((Err e) (println (kitErrText e))))
       (kitRun "each on a query value"
-        (axqQueryEachOn db (Query "SELECT v FROM t ORDER BY v DESC LIMIT 2" vec0)
+        (axqQueryEachOn db (Query :text "SELECT v FROM t ORDER BY v DESC LIMIT 2" :params vec0)
           (lambda (r)
             {
               (println (axqValueText (unwrapOr (rowValue r 0) VNull)))
@@ -113,4 +129,5 @@
           )))
       (kitDump db "SELECT id, v FROM t")
       (kitRun "close" (axqClose db))
-    }))
+    }
+  })

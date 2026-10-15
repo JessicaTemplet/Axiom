@@ -15,7 +15,8 @@
 
 (:: paramText (-> (Vec Value) String))
 (fn (paramText ps)
-  (let ((mut out "["))
+  {
+    (let mut out "[")
     {
       (for (v i) in ps
         (set out (concat out
@@ -25,32 +26,34 @@
                        ", ")
                      (axqValueText v)))))
       (concat out "]")
-    }))
+    }
+  })
 
 (:: same (-> Query String Int))
 ;@axiom:effect(io)
 (fn (same q want)
-  (let (
-    (got q.text)
-    (ps (paramText q.params))
-  )
+  {
+    (let got q.text)
+    (let ps (paramText q.params))
     (if (strEq got want)
       (println "same  {got}  {ps}")
-      (println "DIFF  got {got}\n      want {want}"))))
+      (println "DIFF  got {got}\n      want {want}"))
+  })
 
 (:: showBook (-> String (Result (Option Book) Error) Int))
 ;@axiom:effect(io)
 (fn (showBook label r)
   (match r
     ((Ok (Some b))
-      (let (
-        (i b.id)
-        (t b.title)
-        (p (match b.pages
-          ((Some n) (fmtInt n))
-          ((None) "none")))
-      )
-        (println "{label}: {i} {t} {p}"))
+      {
+        (let i b.id)
+        (let t b.title)
+        (let p
+          (match b.pages
+            ((Some n) (fmtInt n))
+            ((None) "none")))
+        (println "{label}: {i} {t} {p}")
+      }
     )
     ((Ok (None)) (println "{label}: no book"))
     ((Err e) (println (kitErrText e)))))
@@ -58,11 +61,10 @@
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (who "Le Guin")
-    (low 100)
-    (high 400)
-  )
+  {
+    (let who "Le Guin")
+    (let low 100)
+    (let high 400)
     {
       (same
         (axqlSelect books (author (alias (count *) n) (alias (sum pages) total)) (groupBy author)
@@ -103,14 +105,15 @@
         (axqlCreateTable people (id INTEGER PRIMARY KEY) (boss LINK people)
           (team LINK teams NOT NULL))
         "CREATE TABLE people (id INTEGER PRIMARY KEY, boss LINK people, team LINK teams NOT NULL)")
-      (let ((db (kitOpen "forms.db")))
+      {
+        (let db (kitOpen "forms.db"))
         {
           (kitRun "create" (axqRunOn db createBookTable))
-          (kitRun "insert 1" (insertBook db (Book 1 "Dune" (Some 412))))
-          (kitRun "insert 2" (insertBook db (Book 2 "Earthsea" None)))
+          (kitRun "insert 1" (insertBook db (Book :id 1 :title "Dune" :pages (Some 412))))
+          (kitRun "insert 2" (insertBook db (Book :id 2 :title "Earthsea" :pages None)))
           (showBook "get 2" (getBook db 2))
-          (kitRun "upsert 2" (upsertBook db (Book 2 "Earthsea" (Some 183))))
-          (kitRun "upsert 3" (upsertBook db (Book 3 "Lathe" (Some 184))))
+          (kitRun "upsert 2" (upsertBook db (Book :id 2 :title "Earthsea" :pages (Some 183))))
+          (kitRun "upsert 3" (upsertBook db (Book :id 3 :title "Lathe" :pages (Some 184))))
           (showBook "get 2" (getBook db 2))
           (showBook "get 3" (getBook db 3))
           (showBook "get 9" (getBook db 9))
@@ -122,5 +125,7 @@
             (axqQueryInt db
               (axqlSelect books (alias (sum pages) total) (where (like title (text "%a%"))))))
           (kitRun "close" (axqClose db))
-        })
-    }))
+        }
+      }
+    }
+  })

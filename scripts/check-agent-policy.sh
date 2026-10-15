@@ -582,7 +582,7 @@ cat > "$work/partial.ax" <<'PARTIAL'
 (struct Box (f : (-> Int Int)))
 
 (:: boxOf (-> (-> Int Int) Box))
-(fn (boxOf k) (Box k))
+(fn (boxOf k) (Box :f k))
 
 (:: direct (-> Int Int))
 

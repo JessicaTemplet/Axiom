@@ -90,16 +90,16 @@ cat > "$work/recover.ax" <<'AX'
 
 ;@axiom:effect(io)
 (fn (main)
-  (let ((inside
+  { (let inside
     (__axiom_recover
       __axiom_arena_mark      (lambda (x) (half x))
     )
-  ))
+  )
     {
       (println "recovered {inside}")
       (half 0)
     }
-  )
+  }
 )
 AX
 
@@ -341,7 +341,7 @@ cat > "$work/forge-post.ax" <<'AX'
 ;@axiom:post((> result 0))
 (:: dec (-> Int Int))
 
-(fn (dec n) (let ((result (- n 1))) { (__contract true "never\n") result }))
+(fn (dec n) { (let result (- n 1)) { (__contract true "never\n") result }})
 
 (:: main Int)
 
@@ -462,7 +462,8 @@ ablate "guard-restored" expand.ax \
 (pub fn (expHeadIsContract v)
   (if (== (vecLen v) 0)
     0
-    (let ((h (spineHead (vecGet v 0))))
+    {
+      (let h (spineHead (vecGet v 0)))
       (if (== (nodeTag h) TAG_E_VAR)
         (if (strEq (nodeAName h) \"__contract\")
           1
@@ -470,7 +471,7 @@ ablate "guard-restored" expand.ax \
         )
         0
       )
-    )
+    }
   )
 )
 

@@ -407,7 +407,7 @@ SENTINEL_NO_OBSERVER = ("platformExitWith",)
 # `(r (__syscall3 ...))` - a binder whose value is a raw syscall call, so
 # that returning `r` counts as returning the syscall's result.
 SENTINEL_SYSCALL_BOUND = re.compile(
-    r'\(([a-z][A-Za-z0-9_]*) \((?:__syscall\d|platform[A-Z]\w*|__winapi)')
+    r'\(let (?:mut )?([a-z][A-Za-z0-9_]*) \((?:__syscall\d|platform[A-Z]\w*|__winapi)')
 
 
 def sentinel_return_type(ty):
@@ -542,8 +542,8 @@ def sentinel_syscall_returns(body):
     can be bound and the BINDING returned - which is how
     `sysNowMonotonic` forwards `clock_gettime`'s errno:
 
-        (let ((r (__syscall3 sysClockNum clockMonotonicId buf 0)))
-          (if (< r 0) r (+ ...)))
+        { (let r (__syscall3 sysClockNum clockMonotonicId buf 0))
+          (if (< r 0) r (+ ...)) }
 
     Measured while writing this: following only the first route moved
     `sysNowMonotonic` to `absence` along with `netPollSignalAt`, and it

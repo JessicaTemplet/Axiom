@@ -165,7 +165,7 @@ def select_macro():
                 body += dict(calls, **{o: order_call, lim: limit_call, off: offset_call})[part]
             body.append("(axqlFinish axqlArgQb)")
             inner = block(body, 8)
-            rules.append(f"  (({pat})\n    (let ((axqlArgQb axqlBuilder))\n      {{\n{inner}\n      }}))")
+            rules.append(f"  (({pat})\n    {{ (let axqlArgQb axqlBuilder)\n{inner}\n    }})")
     doc = """;; A SELECT from table `t`: its select list (`*`, one column, or a list
 ;; of columns and `(alias e name)` items), then its clauses in this order,
 ;; each optional: `(where e)`, `(groupBy e ...)` with up to three
@@ -246,8 +246,8 @@ def table_macro():
    (pub struct axqlArgS {fields})
    (pub :: (syntax/join rowTo axqlArgS) (-> Row (Result axqlArgS Error)))
    (pub fn ((syntax/join rowTo axqlArgS) axqlArgRow)
-     (let ((axqlArgRd (axqlReader axqlArgRow)))
-       (axqlReaderDone axqlArgRd (axqlArgS {reads}))))
+     {{ (let axqlArgRd (axqlReader axqlArgRow))
+       (axqlReaderDone axqlArgRd (axqlArgS {reads}))}})
    (axqlTableRest axqlArgS axqlArgTbl (names {" ".join(fs)}) (types {" ".join(ts)}) (fields {pairs})))""")
     doc = """;; A table of typed rows. `(axqlTable User users (id RowId) (name String)
 ;; (age OptInt))` declares, for table `users`:

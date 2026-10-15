@@ -177,7 +177,7 @@ and did not find the closing one where the rule puts it:
 
     (:: main ())
 
-    (fn (main) (let ((c 'ab)) c))
+    (fn (main) { (let c 'ab) c })
 
 Two characters between the quotes, a quote with nothing after it, and
 a quote followed by the end of the line all land here; the span is
@@ -619,7 +619,7 @@ The other shapes it is drawn for most, each pinned in the diagnostics
 corpus: an `if` whose condition is not `Bool` (`(if 1 2 3)`); an
 argument against its parameter (`(twice true)` on `(-> Int Int)`); a
 body against its declared result (`(:: name String)` over `42`); a
-value stored in a struct field of another type (`(Point 1 true)`); a
+value stored in a struct field of another type (`(Point :x 1 :y true)`); a
 `String` where an `Int` is due, which are both one machine word and
 are distinct types all the same; and a pattern whose constructor
 belongs to a different `data` type than the scrutinee.
@@ -744,8 +744,10 @@ AX3007 - field not found
     (:: main ())
 
     (fn (main)
-      (let ((p (Point 1 2)))
-        p.z))
+      {
+        (let p (Point :x 1 :y 2))
+        p.z
+      })
 
 The span is the field name after the dot, and the message names the
 type the compiler resolved for the value - which is the thing to
@@ -864,12 +866,12 @@ above also draws, since nothing in it handles `Ask`.
 AX3012 - cannot assign to an immutable binding
 
 `set` stores into a local, and a local is assignable only if it was
-introduced as `(let ((mut x ...)) ...)`. Immutable is the default, so
+declared as `(let mut x value)` inside a brace block. Immutable is the default, so
 a binding that is never reassigned needs no annotation and cannot be
 changed by accident.
 
 Add `mut` at the declaration, or - usually better - compute the value
-you want with a `let` rather than mutating one you already have.
+you want with a new local rather than mutating one you already have.
 
 Function parameters, pattern bindings and top-level declarations are
 never mutable, and no marker makes them so.
@@ -1825,54 +1827,29 @@ The release walk follows DECLARED types, so a reference word in an `Int` slot is
 This is an ERROR. The program is well-typed, but the leak is certain, and a cast written on purpose leaks just the same. What is reported is only what the checker can see: a variable it resolves, or a literal, read through any nesting of casts, whose class is a reference - the same rule `AX3071` follows for `__store64`. A call result, a field, or a poisoned operand is skipped, and a direct mismatch is owned by the error beside it.
 
     (struct Box (v : Int))
-    (Box (as name Int))         ; refused: `name` is a String
+    (Box :v (as name Int))         ; refused: `name` is a String
 
 Declare the field's real type, `(struct Box (v : String))`, and drop the cast. To compare or hash a value by identity, store its `Addr` from `addrOf` instead.
 
 ### explain AX3044
 AX3044 - a bare type name is declared in more than one imported module
 
-Two modules the program imports each declare a type of this name, no
-module-less declaration outranks them, and the reference is not inside
-either of them - so nothing decides which one it means.
+More than one imported module declares this type name, and the bare
+name does not identify one declaration. A declaration in its own
+module keeps that module's identity; an entry-file declaration keeps
+its own identity too.
 
-Until 2026-08-24 it was decided by ACCIDENT. Type names are not
-rewritten to `Mod$Name` the way `fn` and `::` declarations are, and
-the lookup returned the first match in the merged declaration list,
-which is import order:
+Qualify the name in a type and in a named construction:
 
-    TeamA.ax  (pub struct Config (port : Int) (retries : Int))
-    TeamB.ax  (pub struct Config (retries : Int) (port : Int))
-              (pub fn (bPort) (let ((c (Config 3 99))) c.port))
-    app.ax    (import TeamA) (import TeamB) (fn (main) (bPort))
+    (:: get (-> TeamA::Config Int))
+    (TeamA::Config :port 42 :retries 3)
 
-`check` said OK and the program answered 3 - TeamA's slot 0 - where
-TeamB's own declaration says 99. Swapping the two imports answered 99.
-A module's own correct code was reading another module's field
-offsets, with no diagnostic from any pass.
+The fields and their types come from that module's declaration. Type
+aliases preserve the same identity. A selective import can also leave
+only one declaration visible: `(import TeamA (fromA))` keeps `fromA`
+without importing TeamA's `Config` into the bare-name view.
 
-That half is fixed and is not what this reports: a reference INSIDE
-the module that declares the type now reaches its own declaration,
-and so does a reference in the entry file to a type the entry file
-declares. This reports the case that is left, where the compiler
-genuinely cannot tell.
-
-WHAT TO DO depends on where the name stands. In a TYPE position -
-a signature, a field - qualify it: `(:: get (-> TeamA::Config Int))`
-names TeamA's declaration and checks. Where the program CONSTRUCTS
-the value, qualification is refused today - `(TeamA::Config 42 3)`
-draws this same code - so what works there is either
-
-  * narrowing the import so only one of the two types is carried:
-    an import name list decides what a module exports to this
-    program, so `(import TeamA (fromA))` leaves TeamA's `Config`
-    invisible outside TeamA and the reference resolves; or
-  * renaming one of the declarations.
-
-A struct in one module and a `data` or `type` of the same name in
-another are the same collision and are reported the same way: they
-share one namespace, which is what `(data Foo ...)` beside
-`(type Foo = Int)` in one file has always been refused for.
+Use `TeamA::Config` and `TeamB::Config` when both types are needed.
 
 ### explain AX3045
 AX3045 - a self-recursive call in the scrutinee of a `match`
@@ -1889,10 +1866,12 @@ Bind the scrutinee in a `let` and answer the recursive call from a match arm:
     (fn (total n acc)
       (if (== n 0)
         (Ok acc)
-        (let ((stepped (step n)))
+        {
+          (let stepped (step n))
           (match stepped
             ((Err e) (Err e))
-            ((Ok v) (total (- n 1) (+ acc v)))))))
+            ((Ok v) (total (- n 1) (+ acc v))))
+        }))
 
 THIS IS A WARNING, and a shallow recursion is why. A self-call that runs bounded is correct,
 and an error would refuse working programs to catch the ones that overflow. What is reported is
@@ -2234,7 +2213,10 @@ THIS IS AN ERROR, because the effect is followed to where the
 operation RUNS. A lambda's custom effects count where it is called,
 not where it is written:
 
-  (let ((g (lambda (x) (ask x)))) (handle (g 2) (Ask) h))
+  {
+    (let g (lambda (x) (ask x)))
+    (handle (g 2) (Ask) h)
+  }
 
 runs and is not reported, and a closure built inside a `handle` and
 called after the handler pops traps 71 and is reported, since the
@@ -2418,8 +2400,8 @@ without region TYPES:
     owner outside.
 
   - a `set` inside the region on a binding that was bound OUTSIDE it,
-    when the stored value is not a scalar: `(let ((mut out "")) (region
-    r (set out (concat a b))))` would leave `out` pointing into the
+    when the stored value is not a scalar: `{ (let mut out "") (region
+    r (set out (concat a b))) }` would leave `out` pointing into the
 reclaimed extent. `(set i (+ i 1))` on an outer counter is fine, which
     is what makes a region per loop iteration writable. A field store
     `(set o.f v)` is a store into `o` and follows the same rule.
@@ -2530,19 +2512,22 @@ Spell it in a pattern, or drop it from the header.
 ### explain AX3067
 AX3067 - a `struct` built with the wrong number of fields
 
-A `struct` construction answers one value per field the declaration gives it, so writing fewer or more is refused where the value is built:
+A struct value supplies one value for every declared field. Generated
+constructor applications must have that arity, including applications
+a macro builds by splicing arguments.
+
+In source, supply each field by name:
 
     (struct Point
       (x : Int)
       (y : Int))
 
-    (:: main ())
+    (Point :x 1 :y 2)
 
-    (fn (main) (Point 1))
-
-The message states both counts - `expects 2 field(s), found 1` - and the span is the constructor.
-
-Count the declaration's fields and write one argument each. A `data` constructor written with the wrong number of fields is AX3009; a field that does not exist is AX3007; a value of the wrong type in a field is AX3004.
+Unknown, repeated or missing labels are refused with AX3132. A data
+constructor with the wrong number of arguments is AX3009; reading a
+field that does not exist is AX3007; a value of the wrong type in a
+field is AX3004.
 
 ### explain AX3068
 AX3068 - a `lambda` with no parameters, which can never be called
@@ -2589,7 +2574,7 @@ The body performs an unsafe operation, and its declaration does not say `;@axiom
 - a forging cast: `(as x T)` where `T` is a reference - a `String`, a `Vec`, a `Handle`, a struct, a `data` type with a field, a function, a tuple or a type variable - or a spawn handle, `Spawn`, and `x` is not already a `T`.
 
     (struct Hid (name : String) (n : Int))
-    (fn (peek k) (let ((h (as k Hid))) h.n))
+    (fn (peek k) { (let h (as k Hid)) h.n })
 
 Here `peek` makes a `Hid` out of an `Int`, and reading `h.n` reads whatever that word points at.
 
@@ -2712,37 +2697,35 @@ written twice.
 ### explain AX3085
 AX3085 - a word struct built outside its module
 
-A struct declared `word` is sealed. Only the module that declares it
-can build one, with `(Chan w)`, whether or not the
-struct is `pub`:
+A struct declared `word` is sealed. Only its declaring module can
+construct it, even when the type is public. For example, `Mem` declares
+`Addr` with a private `slot` field:
 
-    (import Chan)
-    (fn (main) (chanSend (Chan 5) 1))   ; refused
+    (import Mem)
+    (fn (main) (Addr :slot 5))   ; refused
 
-`pub` exports the name, so your signatures can mention the type, and
-the values come from the functions the module provides, such as
-`chanNew`. That is what makes the handle unforgeable: every `Chan` a
-program holds is one `chanNew` made. It names a live slot in the
-runtime's handle table, or a freed one, which traps with status 85
-when it is used (MM-PAR-8).
+Use the operations its module provides, such as `addrOf`, to obtain a
+value. `pub` exports the type for signatures; it does not expose its
+constructor or representation.
 
-A `as` to a sealed type forges a handle. That belongs to the unsafe
-layer (MM-VAL-22), not to ordinary code.
+An `as` conversion from a raw word to a sealed type forges a handle.
+It belongs to the unsafe layer (MM-VAL-22), whose obligations include
+establishing that the word represents a valid value of that type.
 
 ### explain AX3086
 AX3086 - a word struct's field read outside its module
 
-A struct declared `word` is sealed, and only its module can read its
-field:
+A struct declared `word` is sealed. Only its declaring module can
+read its field:
 
-    (import Chan)
-    (fn (peek c) c.slot)   ; refused
+    (import Mem)
+    (:: peek (-> Addr Int))
+    (fn (peek address) address.slot)   ; refused
 
-What the word means is the module's business. A channel's word is a
-slot in the runtime's handle table, and code that read it could hand
-the same word to something else. Use the functions the module
-provides. A function declared to answer `Int` can't answer the handle
-itself either: that is AX3004.
+What the word means is the module's business. Use the operations it
+provides, such as `addrEq` and `addrHash`, rather than reading `Addr`'s
+private representation. A function declared to answer `Int` cannot
+answer an `Addr` instead; that is AX3004.
 
 ### explain AX3089
 AX3089 - a function with no signature, called before its type is known
@@ -2854,7 +2837,7 @@ them before it consults scope: a reference to `true` has type
 `Bool` no matter what is bound under that name. The emitter reads
 the other way around - a binding in scope wins over the literal -
 so a program that binds `true` checks one thing and runs another.
-Before this refusal, `(let ((true 0)) (while true ...))` said OK
+Before this refusal, `{ (let true 0) (while true ...) }` said OK
 and the loop terminated at once, at exit 0.
 
 So the names are reserved: literals everywhere, bindable nowhere.
@@ -2971,21 +2954,23 @@ AX3123 - a `?` with no tail to propagate to
 `Err`, the enclosing function or lambda answers that `Err` instead.
 Axiom has no early return, so the compiler makes the rest of the body
 the `Ok` arm of a `match` on `e`. That works for a `?` in the body's
-tail - a `let`'s body, a block's last expression, an `if` branch or a
+tail - a block's last expression, an `if` branch or a
 `match` arm that is itself in the tail - and for a `?` in anything
-evaluated on the way there, such as an argument or a `let`'s value.
-It does not work from inside a branch, a `let` body, a loop, a
+evaluated on the way there, such as an argument or a local's initialiser.
+It does not work from inside a branch, a nested block, a loop, a
 region or a handler whose value an expression around it still uses,
 because there is no rest-of-the-body to move into the arm:
 
     (Ok (+ 1 (if ok (get n)? 0)))     ; refused: inside a branch
 
-    (let ((v (if ok (get n)? (Ok 0))))  ; refused: the same branch
+    { (let v (if ok (get n)? 0)) (Ok v) }  ; refused: the same branch
 
 Bind the value first so the `?` sits on the way to the tail:
 
-    (let ((v (if ok (get n) (Ok 0))?))
-      (Ok (+ 1 v)))
+    {
+      (let v (if ok (get n) (Ok 0))?)
+      (Ok (+ 1 v))
+    }
 
 or take the `Result` apart with `match`. A loop has no tail of its
 own: write the loop as a recursive function that answers a `Result`,

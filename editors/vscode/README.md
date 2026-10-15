@@ -54,7 +54,9 @@ the server.
 | Axiom: Restart the language server | Stops and restarts `axiom lsp`. |
 
 Snippets cover the shapes you write most: type `fn`, `main`, `let`,
-`match`, `data` or `import` in a `.ax` file and press Tab.
+`letmut`, `match`, `data`, `struct`, `record` or `import` in a `.ax` file
+and press Tab. Local snippets belong inside a brace block; `record`
+inserts construction with named fields.
 
 ## Format a document
 

@@ -344,12 +344,12 @@ cat > "$work/fit.ax" <<'AX'
 (pub fn (chain n acc)
   (if (<= n 0)
     acc
-    (let ((p (memAlloc 512)))
+    { (let p (memAlloc 512))
       {
         (memSetWord p 0 n)
         (chain (- n 1) (+ acc (memGetWord p 0)))
       }
-    )
+    }
   )
 )
 
@@ -1182,10 +1182,10 @@ cat > "$work/vol.ax" <<'AX'
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((p (memAlloc 16)))
+  { (let p (memAlloc 16))
     {
       (println (twice p))
-    }))
+    }})
 AX
 # The control: the same double write, through the ordinary primitives.
 cat > "$work/plain.ax" <<'AX'
@@ -1206,10 +1206,10 @@ cat > "$work/plain.ax" <<'AX'
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((p (memAlloc 16)))
+  { (let p (memAlloc 16))
     {
       (println (twice p))
-    }))
+    }})
 AX
 # Every `__arm_*`, each once, in one function `main` calls.
 cat > "$work/arm.ax" <<'AX'

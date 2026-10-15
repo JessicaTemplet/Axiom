@@ -142,18 +142,18 @@
 ;@axiom:effect(unsafe)
 (pub fn (x25519ScalarMultAddr out k u)
   (region scratch
-    (let ((w (memAlloc 592)))
-      (let (
-        (x1 w)
-        (x2 (+ w 80))
-        (z2 (+ w 160))
-        (x3 (+ w 240))
-        (z3 (+ w 320))
-        (t0 (+ w 400))
-        (t1 (+ w 480))
-        (e (+ w 560))
-        (mut swap 0)
-      )
+    {
+      (let w (memAlloc 592))
+      {
+        (let x1 w)
+        (let x2 (+ w 80))
+        (let z2 (+ w 160))
+        (let x3 (+ w 240))
+        (let z3 (+ w 320))
+        (let t0 (+ w 400))
+        (let t1 (+ w 480))
+        (let e (+ w 560))
+        (let mut swap 0)
         {
           (x25519Clamp e k)
           (fe25519FromBytes x1 u)
@@ -163,19 +163,23 @@
           (fe25519One z3)
           ; bits 254 down to 0 of the clamped scalar
           (for pos in 254..-1 by -1
-            (let ((b (& (>> (__load8 e (>> pos 3)) (& pos 7)) 1)))
+            {
+              (let b (& (>> (__load8 e (>> pos 3)) (& pos 7)) 1))
               {
                 (set swap (^ swap b))
                 (x25519CSwap (ctMaskFromBit swap) x2 z2 x3 z3)
                 (set swap b)
                 (x25519LadderStep x1 x2 z2 x3 z3 t0 t1)
-              }))
+              }
+            })
           (x25519CSwap (ctMaskFromBit swap) x2 z2 x3 z3)
           (fe25519Invert z2 z2)
           (fe25519Mul x2 x2 z2)
           (fe25519ToBytes out x2)
           (ctWipe w 592)
-        }))))
+        }
+      }
+    }))
 
 ;; X25519(k, u) on byte strings: the raw function of RFC 7748, section
 ;; 5, with no all-zero check. `Err` with `cryptoInvalidLength` unless
@@ -185,21 +189,25 @@
 (pub fn (x25519ScalarMult k u)
   (if (|| (!= (strLen k) 32) (!= (strLen u) 32))
     (cryptoLengthErr "X25519 takes a 32-byte scalar and a 32-byte u-coordinate" "x25519ScalarMult")
-    (let ((out (bytesNew 32)))
+    {
+      (let out (bytesNew 32))
       {
         (x25519ScalarMultAddr (strData out) (strData k) (strData u))
         (Ok out)
-      })))
+      }
+    }))
 
 ;; The u-coordinate of the base point, 9, as 32 bytes.
 (pub :: x25519BasePoint String)
 ;@axiom:effect(unsafe)
 (pub fn (x25519BasePoint)
-  (let ((s (bytesNew 32)))
+  {
+    (let s (bytesNew 32))
     {
       (__store8 (strData s) 0 9)
       s
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Keys.
@@ -209,8 +217,10 @@
 ;@axiom:restrict(no-io,no-foreign)
 (:: x25519BlockFinish (-> Int Int))
 (fn (x25519BlockFinish h)
-  (let ((p (secretBlockAddr x25519Kind h)))
-    (x25519ScalarMultAddr (+ p 32) p (strData x25519BasePoint))))
+  {
+    (let p (secretBlockAddr x25519Kind h))
+    (x25519ScalarMultAddr (+ p 32) p (strData x25519BasePoint))
+  })
 
 ;; A fresh random private key and its public key.
 (pub :: x25519KeyGenerate (Result X25519SecretKey Error))
@@ -230,7 +240,7 @@
         ((Ok _)
           {
             (x25519BlockFinish h)
-            (Ok (X25519SecretKey h))
+            (Ok (X25519SecretKey :slot h))
           }
         ))
     )))
@@ -251,7 +261,7 @@
         {
           (ctCopy (secretBlockAddr x25519Kind h) (secretAddr s) 32)
           (x25519BlockFinish h)
-          (Ok (X25519SecretKey h))
+          (Ok (X25519SecretKey :slot h))
         }
       ))))
 
@@ -273,7 +283,7 @@
 ;; The public key of `k`.
 (pub :: x25519PublicKey (-> X25519SecretKey X25519PublicKey))
 (pub fn (x25519PublicKey k)
-  (X25519PublicKey (bytesFromAddr (+ (secretBlockAddr x25519Kind k.slot) 32) 32)))
+  (X25519PublicKey :bytes (bytesFromAddr (+ (secretBlockAddr x25519Kind k.slot) 32) 32)))
 
 ;; A public key from its 32 bytes. Every 32-byte string is accepted
 ;; (RFC 7748, section 5); any other length is `cryptoInvalidLength`.
@@ -281,7 +291,7 @@
 (pub fn (x25519PublicKeyFromBytes s)
   (if (!= (strLen s) 32)
     (cryptoLengthErr "an X25519 public key is 32 bytes" "x25519PublicKeyFromBytes")
-    (Ok (X25519PublicKey s))))
+    (Ok (X25519PublicKey :bytes s))))
 
 ;; The 32 bytes of a public key.
 (pub :: x25519PublicKeyBytes (-> X25519PublicKey String))
@@ -302,26 +312,30 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (x25519 k pk)
-  (let ((u pk.bytes))
+  {
+    (let u pk.bytes)
     (if (!= (strLen u) 32)
       (cryptoLengthErr "an X25519 public key is 32 bytes" "x25519")
-      (let (
-        (out (memAlloc 32))
-        (mut acc 0)
-      )
+      {
+        (let out (memAlloc 32))
+        (let mut acc 0)
         {
           (x25519ScalarMultAddr out (secretBlockAddr x25519Kind k.slot) (strData u))
           (for i in 0..32
             (set acc (| acc (__load8 out i))))
           (if (== (ctMaskZero acc) 0)
-            (let ((r (secretFromAddr out 32)))
+            {
+              (let r (secretFromAddr out 32))
               {
                 (ctWipe out 32)
                 r
-              })
+              }
+            }
             {
               (ctWipe out 32)
               (cryptoErr cryptoInvalidKey "the peer's public key gives the all-zero shared secret"
                 "x25519")
             })
-        }))))
+        }
+      })
+  })

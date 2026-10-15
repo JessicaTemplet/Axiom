@@ -25,12 +25,12 @@ def run(compiler):
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((saved (vecWithCapacity 4)))
-    (taskFold (lambda (i) "answer") 1 (taskOpts 1 32) 0
+  { (let saved (vecWithCapacity 4))
+    (taskFold (lambda (i) \"answer\") 1 (taskOpts 1 32) 0
       (lambda (acc i result)
         (match result
           ((Ok text) { (vecPush saved text) acc })
-          ((Err error) acc))))))
+          ((Err error) acc))))})
 """
         path.write_text(source)
         checked = boundaries.terminal(compiler, path)

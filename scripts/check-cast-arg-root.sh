@@ -170,20 +170,20 @@ cat > "$work/cast3.ax" <<'EOF'
 (import Str)
 (:: main ())
 (fn (main)
-  (let ((p (memAlloc 8)))
+  { (let p (memAlloc 8))
     {
       (memSetWord p 0 (strDup "hi"))
-    }))
+    }})
 EOF
 cat > "$work/cast4.ax" <<'EOF'
 (import Mem)
 (import Str)
 (:: main ())
 (fn (main)
-  (let ((p (memAlloc 8)))
+  { (let p (memAlloc 8))
     {
       (memSetWord p 0 (as (strDup "hi") String))
-    }))
+    }})
 EOF
 if "$axc" --diagnostic-format=ai check "$work/cast3.ax" >/dev/null 2>&1 \
   && "$axc" --diagnostic-format=ai check "$work/cast4.ax" >/dev/null 2>&1; then
@@ -214,8 +214,8 @@ cat > "$work/scalar.ax" <<'EOF'
 (import Mem)
 (:: main ())
 (fn (main)
-  (let ((p (memAlloc 8)))
-    { (memSetWord p 0 (as 7 Int)) }))
+  { (let p (memAlloc 8))
+    { (memSetWord p 0 (as 7 Int)) }})
 EOF
 if "$axc" --diagnostic-format=ai emit-llvm "$work/scalar.ax" -o "$work/scalar.ll" \
      > /dev/null 2> "$work/scalar.err"; then

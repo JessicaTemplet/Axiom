@@ -123,62 +123,56 @@ if [[ -n "${AXIOM_ABLATE:-}" ]]; then
 import sys
 name, path = sys.argv[1], sys.argv[2]
 s = open(path).read()
-subs = {
- # the prefix filter, the dedupe and the cap all stop applying
- "matcher": ("(pub fn (replComplOffer out seen label origin tag detail prefix)\n  (if (lspComplWants seen label prefix)",
-             "(pub fn (replComplOffer out seen label origin tag detail prefix)\n  (if true"),
- # this session's own declarations are never walked
- "session": ("            (if (== decls 0)\n              0\n              (replComplDecls\n                out                seen                (memGetWordStr e 0)                decls                prefix\n              )\n            )",
-             "            (if (== decls 0)\n              0\n              0\n            )"),
- # a signature with no `fn` stops being a session binding
- "sig":     ("(pub fn (replComplWantsDecl tag) (|| (lspWantsSymbol tag) (== tag TAG_D_SIG)))",
-             "(pub fn (replComplWantsDecl tag) (lspWantsSymbol tag))"),
- # the inline step inserts a whole candidate instead of the shared prefix
- "lcp":     ("        (strSlice first 0 n)", "        first"),
- # a command prefix loses the colon that makes it one
- "colon":   ('            (memSetWord\n              r              1              (if atCmd\n                (concat ":" word)\n                word\n              )\n            )',
-             '            (memSetWord r 1 word)'),
- # the height the editor erases stops counting the detail line
- # a menu wider than its terminal is printed anyway
- "fits":    ("(pub fn (replComplFits cands sel width) (<= (replComplMaxLine cands sel width) (replComplWidthOf width)))",
-             "(pub fn (replComplFits cands sel width) true)"),
- # an index past the end of the vector is handed to vecGet
- "selrange": ("(pub fn (replComplSelOf cands sel)\n  (if (>= sel (vecLen cands))",
-              "(pub fn (replComplSelOf cands sel)\n  (if false"),
- # the layout stops following the terminal
- "width":   ("    (menu (replComplMenu cands sel width))\n    (rows (replComplRows cands sel width))",
-             "    (menu (replComplMenu cands sel 80))\n    (rows (replComplRows cands sel 80))"),
- "rows":    ("        (+\n          (+\n            grid            (if (> (vecLen cands) shown)\n              1\n              0\n            )\n          )          (if (>= sel 0)\n            1\n            0\n          )\n        )",
-             "        (+\n            grid            (if (> (vecLen cands) shown)\n              1\n              0\n            )\n          )"),
-}
+subs = {'matcher': ('(pub fn (replComplOffer out seen label origin tag detail prefix)\n'
+             '  (if (lspComplWants seen label prefix)',
+             '(pub fn (replComplOffer out seen label origin tag detail prefix)\n  (if true'),
+ 'session': ('            (if (! (== (as decls Int) 0))\n'
+             '              (replComplDecls out seen (memGetWordStr e 0) decls prefix))',
+             '            0'),
+ 'sig': ('(pub fn (replComplWantsDecl tag)\n  (|| (lspWantsSymbol tag) (== tag TAG_D_SIG)))',
+         '(pub fn (replComplWantsDecl tag)\n  (lspWantsSymbol tag))'),
+ 'lcp': ('        (strSlice first 0 n)', '        first'),
+ 'colon': ('            (memSetWord r 1\n'
+           '              (if atCmd\n'
+           '                (concat ":" word)\n'
+           '                word))',
+           '            (memSetWord r 1 word)'),
+ 'fits': ('(pub fn (replComplFits cands sel width)\n'
+          '  (<= (replComplMaxLine cands sel width) (replComplWidthOf width)))',
+          '(pub fn (replComplFits cands sel width)\n  true)'),
+ 'selrange': ('(pub fn (replComplSelOf cands sel)\n  (if (>= sel (vecLen cands))',
+              '(pub fn (replComplSelOf cands sel)\n  (if false'),
+ 'width': ('    (let menu (replComplMenu cands sel width))\n'
+           '    (let rows (replComplRows cands sel width))',
+           '    (let menu (replComplMenu cands sel 80))\n'
+           '    (let rows (replComplRows cands sel 80))')}
 # A WHOLE-FUNCTION drill, for the one whose body the formatter keeps
 # reflowing out from under a string anchor. Anchored on the header
-# line and the closing paren at column 0, which `axiom fmt` does not
-# move - the string-anchored version of this drill silently stopped
+# line and its canonical closing brace line - the string-anchored version of this drill silently stopped
 # applying twice, which is why the runner now treats a drill that did
 # not apply as a failure rather than a red.
 funcs = {
  # the height the editor erases stops counting the detail line
  "rows": ("(pub fn (replComplRows cands sel0 width)", """(pub fn (replComplRows cands sel0 width)
-  (let ((sel (replComplSelOf cands sel0)))
+  { (let sel (replComplSelOf cands sel0))
     (if (|| (== (vecLen cands) 0) (if (replComplFits cands sel width)
       false
       true
     ))
       0
-      (let (
-        (cols (replComplCols width (replComplWidest cands)))
-        (shown (replComplPageCount cands sel width))
-      )
-        (let ((grid (/ (+ shown (- cols 1)) cols)))
+      {
+        (let cols (replComplCols width (replComplWidest cands)))
+        (let shown (replComplPageCount cands sel width))
+
+        { (let grid (/ (+ shown (- cols 1)) cols))
           (+ grid (if (> (vecLen cands) shown)
             1
             0
           ))
-        )
-      )
+        }
+      }
     )
-  )
+  }
 )"""),
 }
 if name in funcs:
@@ -189,8 +183,10 @@ if name in funcs:
         sys.exit(1)
     i = lines.index(hdr)
     j = i + 1
-    while lines[j] != ")":
+    while j < len(lines) and lines[j] != "  })":
         j += 1
+    if j == len(lines):
+        sys.exit("ABORT: whole-function ablation did not find its closing brace")
     open(path, "w").write("\n".join(lines[:i] + body.split("\n") + lines[j+1:]))
     print("     ablated: %s (whole function)" % name)
     sys.exit(0)

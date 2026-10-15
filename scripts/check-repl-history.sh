@@ -135,7 +135,7 @@ want = ["(+ 1 2)",
         "(* 3 4)",
         "(tabbed)\n\t(inner)",
         "(+ 1 2)",
-        "(let ((a 1))\n  a)",
+        "{ (let a 1)\n  a }",
         ":type foo",
         "(- 9 5)"]
 if len(entries) != len(want):

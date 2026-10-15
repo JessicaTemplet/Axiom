@@ -29,10 +29,9 @@
 (fn (isPrime k)
   (if (< k 2)
     false
-    (let (
-      (mut d 2)
-      (mut prime true)
-    )
+    {
+      (let mut d 2)
+      (let mut prime true)
       {
         (while (&& prime (<= (* d d) k))
           {
@@ -40,16 +39,16 @@
             (set d (+ d 1))
           })
         prime
-      })))
+      }
+    }))
 
 ; The record for block `i`: the numbers i*100 .. i*100+99.
 (:: compute (-> Int Block))
 (fn (compute i)
-  (let (
-    (lo (* i 100))
-    (ps vecNew)
-    (mut sum 0)
-  )
+  {
+    (let lo (* i 100))
+    (let ps vecNew)
+    (let mut sum 0)
     {
       (for k in lo..(+ lo 100)
         {
@@ -58,44 +57,45 @@
             (vecPush ps k)
             ps)
         })
-      (Block lo (+ lo 99) sum ps)
-    }))
+      (Block :lo lo :hi (+ lo 99) :sum sum :primes ps)
+    }
+  })
 
 (:: encode (-> Block String))
 (fn (encode b)
-  (let (
-    (primes vecNew)
-    (members vecNew)
-  )
+  {
+    (let primes vecNew)
+    (let members vecNew)
     {
       (for k in 0..(vecLen b.primes)
         (vecPush primes (CInt (vecGet b.primes k))))
-      (vecPush members (CerealMember "lo" (CInt b.lo)))
-      (vecPush members (CerealMember "hi" (CInt b.hi)))
-      (vecPush members (CerealMember "sum" (CInt b.sum)))
-      (vecPush members (CerealMember "primes" (CArray primes)))
+      (vecPush members (CerealMember :key "lo" :value (CInt b.lo)))
+      (vecPush members (CerealMember :key "hi" :value (CInt b.hi)))
+      (vecPush members (CerealMember :key "sum" :value (CInt b.sum)))
+      (vecPush members (CerealMember :key "primes" :value (CArray primes)))
       (match (cerealEncode CerealJson (CObject members))
         ((Ok text) text)
         ((Err e) ""))
-    }))
+    }
+  })
 
 ; The record a document describes, or the error that stopped it.
 (:: decodeBlock (-> String (Result Block Error)))
 (fn (decodeBlock s)
-  (let (
-    (v (cerealDecode CerealJson s)?)
-    (lo (cerealField cerealIntCodec v "lo")?)
-    (hi (cerealField cerealIntCodec v "hi")?)
-    (sum (cerealField cerealIntCodec v "sum")?)
-    (ps (cerealField (cerealVecCodec cerealIntCodec) v "primes")?)
-  )
-    (Ok (Block lo hi sum ps))))
+  {
+    (let v (cerealDecode CerealJson s)?)
+    (let lo (cerealField cerealIntCodec v "lo")?)
+    (let hi (cerealField cerealIntCodec v "hi")?)
+    (let sum (cerealField cerealIntCodec v "sum")?)
+    (let ps (cerealField (cerealVecCodec cerealIntCodec) v "primes")?)
+    (Ok (Block :lo lo :hi hi :sum sum :primes ps))
+  })
 
 (:: decode (-> String Block))
 (fn (decode s)
   (match (decodeBlock s)
     ((Ok b) b)
-    ((Err e) (Block 0 0 0 vecNew))))
+    ((Err e) (Block :lo 0 :hi 0 :sum 0 :primes vecNew))))
 
 (:: sameBlock (-> Block Block Bool))
 (fn (sameBlock a b)
@@ -103,26 +103,28 @@
     false
     (if (!= (vecLen a.primes) (vecLen b.primes))
       false
-      (let ((mut same true))
+      {
+        (let mut same true)
         {
           (for k in 0..(vecLen a.primes)
             (set same (&& same (== (vecGet a.primes k) (vecGet b.primes k)))))
           same
-        }))))
+        }
+      })))
 
 (:: showBlock (-> Int Block Int))
 ;@axiom:effect(io)
 (fn (showBlock i b)
-  (let (
-    (lo b.lo)
-    (hi b.hi)
-    (sum b.sum)
-    (np (vecLen b.primes))
-  )
+  {
+    (let lo b.lo)
+    (let hi b.hi)
+    (let sum b.sum)
+    (let np (vecLen b.primes))
     {
       (println "{i} {lo}..{hi} sum {sum} primes {np}")
       0
-    }))
+    }
+  })
 
 ; Blocks 0 .. n-1, each encoded in its own task, at most `limit` bytes.
 (:: encoded (-> Int Int (Vec (Result String Error))))
@@ -137,34 +139,42 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (rs (encoded 12 512))
-    (mut equal 0)
-  )
+  {
+    (let rs (encoded 12 512))
+    (let mut equal 0)
     {
       (for i in 0..(vecLen rs)
         (match (vecGet rs i)
           ((Ok s)
-            (let ((b (decode s)))
+            {
+              (let b (decode s))
               {
                 (showBlock i b)
                 (if (sameBlock b (compute i))
                   (set equal (+ equal 1)))
-              })
+              }
+            }
           )
           ((Err e)
-            (let ((c (errCode e)))
-              (println "{i} err {c}"))
+            {
+              (let c (errCode e))
+              (println "{i} err {c}")
+            }
           )))
       (println "equal {equal}")
       ; The same encoding under a 16-byte limit: refused whole.
-      (let ((small (encoded 2 16)))
+      {
+        (let small (encoded 2 16))
         (for i in 0..(vecLen small)
           (match (vecGet small i)
             ((Ok s) (println "{i} crossed"))
             ((Err e)
-              (let ((c (errCode e)))
-                (println "{i} err {c}"))
-            ))))
+              {
+                (let c (errCode e))
+                (println "{i} err {c}")
+              }
+            )))
+      }
       (println taskTooLargeCode)
-    }))
+    }
+  })

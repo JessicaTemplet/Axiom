@@ -11,7 +11,7 @@
 #
 #     TeamA.ax  (pub struct Config (port : Int) (retries : Int))
 #     TeamB.ax  (pub struct Config (retries : Int) (port : Int))
-#               (pub fn (bPort) (let ((c (Config 3 99))) c.port))
+#               (pub fn (bPort) { (let c (Config :retries 3 :port 99)) c.port })
 #     app.ax    (import TeamA) (import TeamB) (fn (main) (bPort))
 #
 # The right answer is 99. A first-match lookup compiles TeamB's own
@@ -166,7 +166,7 @@ cat > "$work/two/TeamA.ax" <<'EOF'
 
 (pub :: aPort Int)
 
-(pub fn (aPort) (let ((c (Config 7 1))) c.port))
+(pub fn (aPort) { (let c (Config :port 7 :retries 1)) c.port})
 EOF
 cat > "$work/two/TeamB.ax" <<'EOF'
 (pub struct Config
@@ -175,7 +175,7 @@ cat > "$work/two/TeamB.ax" <<'EOF'
 
 (pub :: bPort Int)
 
-(pub fn (bPort) (let ((c (Config 3 99))) c.port))
+(pub fn (bPort) { (let c (Config :retries 3 :port 99)) c.port})
 EOF
 # The mutant: TeamB's own code reading its other field. The right answer
 # is 3, so a harness that ignores exit statuses, or a probe that answers
@@ -187,7 +187,7 @@ cat > "$work/two/TeamMut.ax" <<'EOF'
 
 (pub :: mPort Int)
 
-(pub fn (mPort) (let ((c (Config 3 99))) c.retries))
+(pub fn (mPort) { (let c (Config :retries 3 :port 99)) c.retries})
 EOF
 printf '(import TeamA)\n(import TeamB)\n(:: main Int)\n(fn (main) (bPort))\n'  > "$work/two/ab.ax"
 printf '(import TeamB)\n(import TeamA)\n(:: main Int)\n(fn (main) (bPort))\n'  > "$work/two/ba.ax"
@@ -222,7 +222,7 @@ cat > "$work/arity/NarrowB.ax" <<'EOF'
 
 (pub :: bPort Int)
 
-(pub fn (bPort) (let ((c (Config 3 99))) c.port))
+(pub fn (bPort) { (let c (Config :retries 3 :port 99)) c.port})
 EOF
 printf '(import WideA)\n(import NarrowB)\n(:: main Int)\n(fn (main) (bPort))\n' > "$work/arity/run.ax"
 printf '(import WideA)\n(import NarrowB)\n(:: pick (-> Config Int))\n(fn (pick c) c.port)\n(:: main Int)\n(fn (main) 0)\n' > "$work/arity/ref.ax"
@@ -312,7 +312,7 @@ cat > "$work/qual/TeamC.ax" <<'EOF'
 
 (pub :: mkC (-> Int Int Cfg))
 
-(pub fn (mkC a b) (Cfg a b))
+(pub fn (mkC a b) (Cfg :port a :tag b))
 EOF
 cat > "$work/qual/TeamD.ax" <<'EOF'
 (pub struct Cfg
@@ -321,7 +321,7 @@ cat > "$work/qual/TeamD.ax" <<'EOF'
 
 (pub :: mkD (-> Int Int Cfg))
 
-(pub fn (mkD a b) (Cfg a b))
+(pub fn (mkD a b) (Cfg :tag a :port b))
 EOF
 printf '(import TeamC)\n(import TeamD)\n(:: pick (-> TeamC::Cfg Int))\n(fn (pick c) c.port)\n(:: main Int)\n(fn (main) (pick (TeamC::mkC 3 99)))\n' > "$work/qual/qual.ax"
 ok_exit qual qual.ax 3 "\`TeamC::Cfg\` resolves the reference to TeamC"

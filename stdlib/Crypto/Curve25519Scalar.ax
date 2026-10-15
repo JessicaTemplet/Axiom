@@ -88,12 +88,14 @@
 ;@axiom:ct(*x)
 ;@axiom:effect(unsafe)
 (fn (scAboveL x)
-  (let ((mut carry 1))
+  {
+    (let mut carry 1)
     {
       (for i in 0..8
         (set carry (shrU (+ carry (+ (__load64 x i) (^ (scL i) mask32))) 32)))
       carry
-    }))
+    }
+  })
 
 ; r = x - L when x >= L, else x, over eight words (Monocypher's
 ; remove_l). Right only for x below 2L. `r` may be `x`.
@@ -102,20 +104,24 @@
 ;@axiom:ct(*r, *x)
 ;@axiom:effect(unsafe)
 (fn (scRemoveL r x)
-  (let ((above (scAboveL x)))
-    (let (
-      (mask (& (ctMaskFromBit above) mask32))
-      (mut carry above)
-    )
+  {
+    (let above (scAboveL x))
+    {
+      (let mask (& (ctMaskFromBit above) mask32))
+      (let mut carry above)
       {
         (for i in 0..8
-          (let ((c (+ carry (+ (__load64 x i) (& (^ (scL i) mask32) mask)))))
+          {
+            (let c (+ carry (+ (__load64 x i) (& (^ (scL i) mask32) mask))))
             {
               (__store64 r i (& c mask32))
               (set carry (shrU c 32))
-            }))
+            }
+          })
         0
-      })))
+      }
+    }
+  })
 
 ; Write x mod L at the 32 bytes at `out`, for x in the sixteen words at
 ; `x` (below 2^512). Monocypher's mod_l: q = floor(x floor(2^512/L) /
@@ -126,50 +132,60 @@
 ;@axiom:ct(*out, *x)
 ;@axiom:effect(unsafe)
 (fn (scModL out x)
-  (let ((xr (memAlloc 200)))
+  {
+    (let xr (memAlloc 200))
     {
       ; xr = x * floor(2^512 / L), 25 words
       (for i in 0..9
-        (let (
-          (ri (scBarrett i))
-          (mut carry 0)
-        )
+        {
+          (let ri (scBarrett i))
+          (let mut carry 0)
           {
             (for j in 0..16
-              (let ((c (+ carry (+ (__load64 xr (+ i j)) (* ri (__load64 x j))))))
+              {
+                (let c (+ carry (+ (__load64 xr (+ i j)) (* ri (__load64 x j)))))
                 {
                   (__store64 xr (+ i j) (& c mask32))
                   (set carry (shrU c 32))
-                }))
+                }
+              })
             (__store64 xr (+ i 16) carry)
-          }))
+          }
+        })
       ; xr = (xr / 2^512) * L, only the low 256 bits
       (for i in 0..8
         (__store64 xr i 0))
       (for i in 0..8
-        (let (
-          (qi (__load64 xr (+ i 16)))
-          (mut carry 0)
-        )
+        {
+          (let qi (__load64 xr (+ i 16)))
+          (let mut carry 0)
           (for j in 0..(- 8 i)
-            (let ((c (+ carry (+ (__load64 xr (+ i j)) (* qi (scL j))))))
+            {
+              (let c (+ carry (+ (__load64 xr (+ i j)) (* qi (scL j)))))
               {
                 (__store64 xr (+ i j) (& c mask32))
                 (set carry (shrU c 32))
-              }))))
+              }
+            })
+        })
       ; xr = x - xr
-      (let ((mut carry 1))
+      {
+        (let mut carry 1)
         (for i in 0..8
-          (let ((c (+ carry (+ (__load64 x i) (^ (__load64 xr i) mask32)))))
+          {
+            (let c (+ carry (+ (__load64 x i) (^ (__load64 xr i) mask32))))
             {
               (__store64 xr i (& c mask32))
               (set carry (shrU c 32))
-            })))
+            }
+          })
+      }
       (scRemoveL xr xr)
       (for i in 0..8
         (st32le out (* 4 i) (__load64 xr i)))
       (ctWipe xr 200)
-    }))
+    }
+  })
 
 ;; Write the 64 little-endian bytes at `in` reduced modulo L as 32
 ;; bytes at `out`.
@@ -177,12 +193,14 @@
 (pub :: sc25519Reduce (-> Int Int Int))
 ;@axiom:ct(*out, *in)
 (pub fn (sc25519Reduce out in)
-  (let ((x (memAlloc 128)))
+  {
+    (let x (memAlloc 128))
     {
       (scLoad x in 16)
       (scModL out x)
       (ctWipe x 128)
-    }))
+    }
+  })
 
 ;; Write (a b + c) mod L as 32 bytes at `out`, for 32-byte scalars `a`,
 ;; `b` and `c` of any value below 2^256.
@@ -191,12 +209,12 @@
 ;@axiom:ct(*out, *a, *b, *c)
 ;@axiom:effect(unsafe)
 (pub fn (sc25519MulAdd out a b c)
-  (let ((w (memAlloc 256)))
-    (let (
-      (p w)
-      (wa (+ w 128))
-      (wb (+ w 192))
-    )
+  {
+    (let w (memAlloc 256))
+    {
+      (let p w)
+      (let wa (+ w 128))
+      (let wb (+ w 192))
       {
         (scLoad wa a 8)
         (scLoad wb b 8)
@@ -205,22 +223,26 @@
           (__store64 p i 0))
         ; p = p + a b (Monocypher's multiply)
         (for i in 0..8
-          (let (
-            (ai (__load64 wa i))
-            (mut carry 0)
-          )
+          {
+            (let ai (__load64 wa i))
+            (let mut carry 0)
             {
               (for j in 0..8
-                (let ((t (+ carry (+ (__load64 p (+ i j)) (* ai (__load64 wb j))))))
+                {
+                  (let t (+ carry (+ (__load64 p (+ i j)) (* ai (__load64 wb j)))))
                   {
                     (__store64 p (+ i j) (& t mask32))
                     (set carry (shrU t 32))
-                  }))
+                  }
+                })
               (__store64 p (+ i 8) carry)
-            }))
+            }
+          })
         (scModL out p)
         (ctWipe w 256)
-      })))
+      }
+    }
+  })
 
 ;; 1 when the 32-byte scalar at `s` is below L - the canonical range RFC
 ;; 8032, section 5.1.7, requires of a signature's S - and 0 otherwise.
@@ -228,12 +250,16 @@
 (pub :: sc25519IsCanonical (-> Int Int))
 ;@axiom:ct(*s)
 (pub fn (sc25519IsCanonical s)
-  (let ((x (memAlloc 64)))
+  {
+    (let x (memAlloc 64))
     {
       (scLoad x s 8)
-      (let ((above (scAboveL x)))
+      {
+        (let above (scAboveL x))
         {
           (ctWipe x 64)
           (- 1 above)
-        })
-    }))
+        }
+      }
+    }
+  })

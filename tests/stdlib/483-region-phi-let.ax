@@ -80,11 +80,13 @@
   (if (<= i 0)
     acc
     (region r
-      (let ((b
-        (if (== (% i 2) 0)
-          (mkBox i)
-          (mkBox (- 0 i)))))
-        (spinPhiLet (- i 1) (+ acc (usePhi b 0)))))))
+      {
+        (let b
+          (if (== (% i 2) 0)
+            (mkBox i)
+            (mkBox (- 0 i))))
+        (spinPhiLet (- i 1) (+ acc (usePhi b 0)))
+      })))
 
 (:: main ())
 ;@axiom:effect(io)
@@ -93,83 +95,106 @@
     ; --- 1. let-bound join in a region ---
     (println
       (region r
-        (let ((b
-          (if (== 1 0)
-            (mkBox 40)
-            (mkBox 41))))
-          (usePhi b 2))))
+        {
+          (let b
+            (if (== 1 0)
+              (mkBox 40)
+              (mkBox 41)))
+          (usePhi b 2)
+        }))
     ; --- 2. two nested let-bound joins: an if and a match ---
     (println
       (region r
-        (let ((b
-          (if (== 1 1)
-            (mkBox 5)
-            (mkBox 6))))
-          (let ((c
-            (match No
-              ((Yes) (mkBox 1))
-              ((No) (mkBox 2)))))
-            (+ (usePhi b 0) (usePhi c 0))))))
+        {
+          (let b
+            (if (== 1 1)
+              (mkBox 5)
+              (mkBox 6)))
+          {
+            (let c
+              (match No
+                ((Yes) (mkBox 1))
+                ((No) (mkBox 2))))
+            (+ (usePhi b 0) (usePhi c 0))
+          }
+        }))
     ; --- 3. let-bound join with a reader arm: the release stays ---
     (println
       (region r
-        (let ((b
-          (if (== 1 1)
-            (mkBox 9)
-            (idBox (MkBox 1)))))
-          (usePhi b 0))))
+        {
+          (let b
+            (if (== 1 1)
+              (mkBox 9)
+              (idBox (MkBox 1))))
+          (usePhi b 0)
+        }))
     ; --- 4. no region, no elision, same answer ---
     (println
-      (let ((b
-        (if (== 1 0)
-          (mkBox 40)
-          (mkBox 41))))
-        (usePhi b 2)))
+      {
+        (let b
+          (if (== 1 0)
+            (mkBox 40)
+            (mkBox 41)))
+        (usePhi b 2)
+      })
     ; --- 5. let-bound join with a closure-call arm: the release stays ---
     (println
       (region r
-        (let ((k
-          (lambda (q) (mkBox q))))
-          (let ((b
-            (if (== 1 1)
-              (mkBox 10)
-              (k 40))))
-            (usePhi b 0)))))
+        {
+          (let k (lambda (q) (mkBox q)))
+          {
+            (let b
+              (if (== 1 1)
+                (mkBox 10)
+                (k 40)))
+            (usePhi b 0)
+          }
+        }))
     ; --- 6. one binding borrowed twice: one share elided ---
     (println
       (region r
-        (let ((b
-          (if (== 1 0)
-            (mkBox 21)
-            (mkBox 22))))
-          (+ (usePhi b 0) (usePhi b 0)))))
+        {
+          (let b
+            (if (== 1 0)
+              (mkBox 21)
+              (mkBox 22)))
+          (+ (usePhi b 0) (usePhi b 0))
+        }))
     ; --- 7. the waterline comes back, releases elided ---
-    (let ((m1 __axiom_arena_mark))
+    {
+      (let m1 __axiom_arena_mark)
       {
         (region r
           {
-            (let ((b
-              (if (== 1 0)
-                (mkBox 1)
-                (mkBox 2))))
-              (usePhi b 0))
-            (let ((b
-              (match No
-                ((Yes) (mkBox 3))
-                ((No) (mkBox 4)))))
-              (usePhi b 0))
-            (let ((b
-              (if (== 1 0)
-                (mkBox 5)
-                (mkBox 6))))
-              (usePhi b 0))
+            {
+              (let b
+                (if (== 1 0)
+                  (mkBox 1)
+                  (mkBox 2)))
+              (usePhi b 0)
+            }
+            {
+              (let b
+                (match No
+                  ((Yes) (mkBox 3))
+                  ((No) (mkBox 4))))
+              (usePhi b 0)
+            }
+            {
+              (let b
+                (if (== 1 0)
+                  (mkBox 5)
+                  (mkBox 6)))
+              (usePhi b 0)
+            }
             0
           })
         (println
           (if (<= (- (memGetWord __axiom_arena_mark 0) (memGetWord m1 0)) 48)
             1
             0))
-      })
+      }
+    }
     ; --- 8. fifty thousand regions, one alternating sum ---
     (println (spinPhiLet 50000 0))
   })

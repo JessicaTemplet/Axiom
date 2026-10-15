@@ -40,13 +40,17 @@ and a line break<br> here.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut n 1) (s "text \"quoted\"") (c 'x') (f 1.5))
+  {
+    (let mut n 1)
+    (let s "text \"quoted\"")
+    (let c 'x')
+    (let f 1.5)
     {
       (set n (+ n 2))
       (if (&& true (!= n 0)) (println "{n}") 0)
       (match (Some n) ((Some v) v) ((None) 0))
       (fn data data)
-    }))
+    }})
 ```
 
 ```scheme fragment

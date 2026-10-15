@@ -40,8 +40,10 @@
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (emitBinaryIr decls bares fulls target)
-  (let ((obscure (hasFlagAnywhere subcommandName "--obfuscate")))
-    (let ((ir (emitResolvedMode decls bares fulls target obscure)))
+  {
+    (let obscure (hasFlagAnywhere subcommandName "--obfuscate"))
+    {
+      (let ir (emitResolvedMode decls bares fulls target obscure))
       (if obscure
         (match (obfuscateIr ir)
           ((Ok masked) masked)
@@ -53,7 +55,9 @@
               ""
             }
           ))
-        ir))))
+        ir)
+    }
+  })
 
 ; Which diagnostic renderer this invocation wants: the one the flag
 ; names, and `human` when there is no flag. `checkArgs` has already
@@ -62,10 +66,12 @@
 (pub :: diagFormatArg Int)
 ;@axiom:effect(io)
 (pub fn (diagFormatArg)
-  (let ((c (parseDiagFormatName (flagValue "--diagnostic-format" 1))))
+  {
+    (let c (parseDiagFormatName (flagValue "--diagnostic-format" 1)))
     (if (>= c 0)
       c
-      FMT_HUMAN)))
+      FMT_HUMAN)
+  })
 
 ; `symbols` emits AXSYM and nothing else, and this says so out loud
 ; when asked for something else.
@@ -121,26 +127,30 @@
 ;@axiom:effect(io)
 (pub fn (symbolsEmit tc gens cmd dfmt)
   {
-    (let (
-      (bi (if (hasFlagAnywhere cmd "--builtins")
-        1
-        0))
-      (mir (if (hasFlagAnywhere cmd "--mir")
-        1
-        0))
-    )
+    {
+      (let bi
+        (if (hasFlagAnywhere cmd "--builtins")
+          1
+          0))
+      (let mir
+        (if (hasFlagAnywhere cmd "--mir")
+          1
+          0))
       (if (hasFlagAnywhere cmd "--axir")
         (replOut (axirRender tc bi mir (targetArg hostTarget)))
-        (let ((axsym
-          (symbolsRenderGens tc bi gens
-            (if (hasFlagAnywhere cmd "--calls")
-              1
-              0)
-            mir)))
+        {
+          (let axsym
+            (symbolsRenderGens tc bi gens
+              (if (hasFlagAnywhere cmd "--calls")
+                1
+                0)
+              mir))
           (replOut
             (if (== dfmt FMT_HUMAN)
               (symbolsHumanTable axsym)
-              axsym)))))
+              axsym))
+        })
+    }
     0
   })
 
@@ -168,17 +178,17 @@
 ;@axiom:effect(io)
 (pub fn (symbolsAxirReadBack src)
   (if (axirLooksLikeFile src)
-    (let (
-      (msg vecNew)
-      (out (axirReemit src msg))
-    )
+    {
+      (let msg vecNew)
+      (let out (axirReemit src msg))
       (if (> (vecLen msg) 0)
         (die (concat "error: " (concat (vecGetStr msg 0) "\n")) 1)
         {
           (replOut out)
           (sysExitWith 0)
           0
-        }))
+        })
+    }
     0))
 
 (pub :: symbolsCheckFormat Int)
@@ -240,29 +250,39 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (dieParseErr file src pr dfmt)
-  (let ((toks (lex src)))
-    (let ((lexD (lexErrDiag toks src)))
-      (let (
-        (ds (let ((v vecNew))
+  {
+    (let toks (lex src))
+    {
+      (let lexD (lexErrDiag toks src))
+      {
+        (let ds
           {
-            (vecPush v
-              (if (== lexD 0)
-                (parseErrDiag toks pr src)
-                lexD))
-            v
-          }))
-        (units (let ((v vecNew))
+            (let v vecNew)
+            {
+              (vecPush v
+                (if (== lexD 0)
+                  (parseErrDiag toks pr src)
+                  lexD))
+              v
+            }
+          })
+        (let units
           {
-            (vecPush v (as (CUnit2 file src (as 0 String)) Int))
-            v
-          }))
-      )
+            (let v vecNew)
+            {
+              (vecPush v (as (CUnit2 :file file :src src :name (as 0 String)) Int))
+              v
+            }
+          })
         {
           (writeStderrStr (renderDiagsFormat dfmt ds units))
           (writeStderrStr (renderFailTrailer 1))
           (sysExitWith 1)
           1
-        }))))
+        }
+      }
+    }
+  })
 
 ; Does this declaration list define a `main` function?
 ;
@@ -289,11 +309,13 @@
   ; A warning a `;@axiom:nolint(...)` tag quiets is dropped here, for
   ; `check`, `build` and `run` alike (`nolintQuietDiags`); the
   ; language server drops the same ones, so the two agree.
-  (let ((cds (nolintQuietDiags decls (checkModule decls allDecls units))))
+  {
+    (let cds (nolintQuietDiags decls (checkModule decls allDecls units)))
     {
       (expAttachFrames cds ftbl units)
       cds
-    }))
+    }
+  })
 
 ; Binding accessors are generated from checked nominal types, then
 ; checked with the module. This preserves aliases and module identities
@@ -303,33 +325,45 @@
 (fn (checkWithBindingShims decls allDecls units ftbl pubNames)
   (if (== (strLen (flagValue "--emit-rust-binding" 1)) 0)
     (checkWithFrames decls allDecls units ftbl)
-    (let ((tc (checkModuleTcTyped decls allDecls units)))
-      (let ((ds (nolintQuietDiags decls (tcOutVec tc))))
+    {
+      (let tc (checkModuleTcTyped decls allDecls units))
+      {
+        (let ds (nolintQuietDiags decls (tcOutVec tc)))
         {
           (expAttachFrames ds ftbl units)
           (if (> (countErrorDiags ds) 0)
             ds
-            (let ((collision (rbCollisionName decls pubNames)))
+            {
+              (let collision (rbCollisionName decls pubNames))
               (if (> (strLen collision) 0)
                 (vecPush ds
                   (mkDiag SEV_ERROR "AX3006" "duplicate-definition" 0
                     (concat "generated Rust accessor names collide for `" (concat collision "`")) 0
                     0
                     "rename one of the source types so its generated accessor names are distinct"))
-                (let ((first (vecLen decls)))
+                {
+                  (let first (vecLen decls))
                   {
                     (rbAppendShims decls pubNames)
-                    (let ((mut i first))
+                    {
+                      (let mut i first)
                       (while (< i (vecLen decls))
                         {
-                          (let ((d (vecGet decls i)))
+                          {
+                            (let d (vecGet decls i))
                             (if (!= (nodeTag d) TAG_D_IMPORT)
-                              (vecPush allDecls d)))
+                              (vecPush allDecls d))
+                          }
                           (set i (+ i 1))
-                        }))
+                        })
+                    }
                     (checkWithFrames decls allDecls units ftbl)
-                  }))))
-        }))))
+                  }
+                })
+            })
+        }
+      }
+    }))
 
 (:: attachTcFrames (-> (Vec Int) Int (Vec Int) (Vec Int) (Vec Int)))
 (fn (attachTcFrames decls tc ftbl units)
@@ -342,10 +376,12 @@
 (pub fn (declsHaveMainFrom ds i)
   (if (>= i (vecLen ds))
     false
-    (let ((d (vecGet ds i)))
+    {
+      (let d (vecGet ds i))
       (if (&& (== (nodeTag d) TAG_D_FN) (strEq (nodeAName d) "main"))
         true
-        (declsHaveMainFrom ds (+ i 1))))))
+        (declsHaveMainFrom ds (+ i 1)))
+    }))
 
 ; AX4008: a device primitive, or an interrupt-vector binding, that the
 ; target cannot execute. Codegen does not lower one - it writes a
@@ -360,7 +396,8 @@
 (pub :: refuseDeviceIr (-> String Int (Vec Int) String))
 ;@axiom:effect(io)
 (pub fn (refuseDeviceIr ir dfmt units)
-  (let ((mds (deviceRefusals ir vecNew vecNew 0)))
+  {
+    (let mds (deviceRefusals ir vecNew vecNew 0))
     (if (== (vecLen mds) 0)
       ir
       {
@@ -368,32 +405,37 @@
         (writeStderrStr (renderFailTrailer (vecLen mds)))
         (sysExitWith 1)
         ""
-      })))
+      })
+  })
 
 ; Every marker from `from` on, one diagnostic per DISTINCT sentence: a
 ; primitive called in three places is one refusal, not three.
 (pub :: deviceRefusals (-> String (Vec Int) (Vec String) Int (Vec Int)))
 (pub fn (deviceRefusals ir mds seen from)
-  (let ((k (strFindSub ir "; axiom-device-refused " from)))
+  {
+    (let k (strFindSub ir "; axiom-device-refused " from))
     (if (< k 0)
       mds
-      (let (
-        (s (+ k 23))
-        (mut e (+ k 23))
-      )
+      {
+        (let s (+ k 23))
+        (let mut e (+ k 23))
         {
           (while (&& (< e (strLen ir)) (!= (strByte ir e) 10))
             (set e (+ e 1)))
-          (let ((msg (strSlice ir s (- e s))))
+          {
+            (let msg (strSlice ir s (- e s)))
             (if (! (strInVecStr seen msg 0))
               {
                 (vecPush seen msg)
                 (vecPush mds
                   (mkDiag SEV_ERROR "AX4008" "target-device-unsupported" 0 msg 0 0
                     "the volatile accesses (`__vload8`..`__vstore64`) lower on every target; the barriers and the two counter reads (`__arm_dmb`, `__arm_dsb`, `__arm_isb`, `__arm_cntvct`, `__arm_cntfrq`) on any AArch64 target; everything else in the `__arm_` family, an `isr(irq)` binding to the IRQ vector and an `isr(fault)` binding to the fault hook, only on baremetal-aarch64. Build for a target that has it, or keep the call off every path `main` reaches - a function nothing calls is pruned before this check"))
-              }))
+              })
+          }
           (deviceRefusals ir mds seen e)
-        }))))
+        }
+      })
+  })
 
 (pub :: strInVecStr (-> (Vec String) String Int Bool))
 (pub fn (strInVecStr v s i)
@@ -453,18 +495,18 @@
   ; `codegen` knows - and running here, in the same `let`, keeps it
   ; before any module is read, which is the property every refusal
   ; in this group shares.
-  (let (
-    (got (readFile fileName))
-    (src (unwrapOr got ""))
-    (rerr (sourceReadErrno got))
-    (_gone (if (== transient 1)
-      (unwrapOr (removeFile fileName) 0)
-      0))
-    (dfmt diagFormatArg)
-    (_crates prepareCrates)
-    (_pkg (pkgVerify (pathDir fileName)))
-    (_shadow (pkgCheckStdlibShadow (pathDir fileName)))
-  )
+  {
+    (let got (readFile fileName))
+    (let src (unwrapOr got ""))
+    (let rerr (sourceReadErrno got))
+    (let _gone
+      (if (== transient 1)
+        (unwrapOr (removeFile fileName) 0)
+        0))
+    (let dfmt diagFormatArg)
+    (let _crates prepareCrates)
+    (let _pkg (pkgVerify (pathDir fileName)))
+    (let _shadow (pkgCheckStdlibShadow (pathDir fileName)))
     (if (!= rerr 0)
       {
         (die (readFailMsg fileName rerr) 1)
@@ -477,38 +519,47 @@
       ; Lexical errors come first, because lexing does - and because
       ; a file with a bad escape in it has not got a token stream
       ; worth parsing. stage0 reports them the same way round.
-      (let ((toks (lex src)))
-        (let ((lexD (lexErrDiag toks src)))
-          (let ((pr
-            (if (== lexD 0)
-              (parseModuleWith toks (scanAxtags src))
-              (pErr 0))))
+      {
+        (let toks (lex src))
+        {
+          (let lexD (lexErrDiag toks src))
+          {
+            (let pr
+              (if (== lexD 0)
+                (parseModuleWith toks (scanAxtags src))
+                (pErr 0)))
             (if (|| (> lexD 0) (== (memGetWord pr 0) 0))
               ; A parse failure is a DIAGNOSTIC, through the same
               ; renderer and the same exit status as every other one.
               ; It used to be a bare `parse failed` on stderr with exit
               ; 2, against stage0's coded, spanned report and exit 1.
-              (let (
-                (ds (let ((v vecNew))
+              {
+                (let ds
                   {
-                    (vecPush v
-                      (if (== lexD 0)
-                        (parseErrDiag toks pr src)
-                        lexD))
-                    v
-                  }))
-                (units (let ((v vecNew))
+                    (let v vecNew)
+                    {
+                      (vecPush v
+                        (if (== lexD 0)
+                          (parseErrDiag toks pr src)
+                          lexD))
+                      v
+                    }
+                  })
+                (let units
                   {
-                    (vecPush v (as (CUnit2 fileName src (as 0 String)) Int))
-                    v
-                  }))
-              )
+                    (let v vecNew)
+                    {
+                      (vecPush v (as (CUnit2 :file fileName :src src :name (as 0 String)) Int))
+                      v
+                    }
+                  })
                 {
                   (writeStderrStr (renderDiagsFormat dfmt ds units))
                   (writeStderrStr (renderFailTrailer 1))
                   (sysExitWith 1)
                   ""
-                })
+                }
+              }
               ; The target is the second argument, by the same names
               ; stage0's --target takes; this compiler's OWN host when
               ; absent.
@@ -535,29 +586,33 @@
               ; `check` never saw an expansion at all and accepted
               ; programs `build` could not compile - see the header
               ; of `self_host/expand.ax` for what that cost.
-              (let ((decls (memGetWordVec pr 1)))
-                (let (
-                  (tcode (checkedTargetCode tname))
-                  (pubFns (rbPubNames (memGetWordVec pr 1)))
-                  (_bindingVec (if (> (strLen (flagValue "--emit-rust-binding" 1)) 0)
-                    (vecPush decls (mkDImportAt "Vec" vecNew 0))
-                    (as 0 (Vec Int))))
-                  (bares vecNew)
-                  (fulls vecNew)
-                  (mods vecNew)
-                )
-                  (let ((units
-                    (let ((v vecNew))
+              {
+                (let decls (memGetWordVec pr 1))
+                {
+                  (let tcode (checkedTargetCode tname))
+                  (let pubFns (rbPubNames (memGetWordVec pr 1)))
+                  (let _bindingVec
+                    (if (> (strLen (flagValue "--emit-rust-binding" 1)) 0)
+                      (vecPush decls (mkDImportAt "Vec" vecNew 0))
+                      (as 0 (Vec Int))))
+                  (let bares vecNew)
+                  (let fulls vecNew)
+                  (let mods vecNew)
+                  {
+                    (let units
                       {
-                        (vecPush v (as (CUnit2 fileName src (as 0 String)) Int))
-                        v
-                      })))
-                    (let ((allDecls (resolveImports decls bares fulls mods tcode (pathDir fileName)
-                                      units)))
-                      (let (
-                        (eds vecNew)
-                        (ftbl vecNew)
-                      )
+                        (let v vecNew)
+                        {
+                          (vecPush v (as (CUnit2 :file fileName :src src :name (as 0 String)) Int))
+                          v
+                        }
+                      })
+                    {
+                      (let allDecls
+                        (resolveImports decls bares fulls mods tcode (pathDir fileName) units))
+                      {
+                        (let eds vecNew)
+                        (let ftbl vecNew)
                         {
                           (expandProgram decls allDecls eds ftbl units bares fulls mods)
                           ; The expander's OWN refusals get the frames too.
@@ -596,9 +651,11 @@
                           ; trailer prints in every format because stage0's
                           ; does; the AXDL gate never saw it because its
                           ; grep keeps only `^[EWNH] ` lines.
-                          (let ((ds (orderDiags
-                                      (expMergeInto eds
-                                        (checkWithBindingShims decls allDecls units ftbl pubFns)))))
+                          {
+                            (let ds
+                              (orderDiags
+                                (expMergeInto eds
+                                  (checkWithBindingShims decls allDecls units ftbl pubFns))))
                             {
                               (if (> (vecLen ds) 0)
                                 (writeStderrStr (renderDiagsFormat dfmt ds units)))
@@ -632,21 +689,25 @@
                                         (if (declsHaveMain allDecls)
                                           false
                                           true))
-                                    (let ((mds
-                                      (let ((v vecNew))
+                                    {
+                                      (let mds
                                         {
-                                          (vecPush v
-                                            (mkDiag SEV_ERROR "AX4001" "missing-main" 0
-                                              "no `main` function found" 0 0
-                                              "add `(:: main ())` and `(fn (main) ...)` as the program entry point"))
-                                          v
-                                        })))
+                                          (let v vecNew)
+                                          {
+                                            (vecPush v
+                                              (mkDiag SEV_ERROR "AX4001" "missing-main" 0
+                                                "no `main` function found" 0 0
+                                                "add `(:: main ())` and `(fn (main) ...)` as the program entry point"))
+                                            v
+                                          }
+                                        })
                                       {
                                         (writeStderrStr (renderDiagsFormat dfmt mds units))
                                         (writeStderrStr (renderFailTrailer 1))
                                         (sysExitWith 1)
                                         ""
-                                      })
+                                      }
+                                    }
                                     ; the IR, and - for a build - every
                                     ; `extern` symbol it calls grounded
                                     ; against the link line, reported at
@@ -663,30 +724,35 @@
                                     ; emitter cannot report a diagnostic and the driver
                                     ; can.
                                     (if (parThreadsRefused allDecls tcode)
-                                      (let ((mds
-                                        (let ((v vecNew))
+                                      {
+                                        (let mds
                                           {
-                                            (vecPush v
-                                              (mkDiag SEV_ERROR "AX4006" "threads-unsupported" 0
-                                                (concat
-                                                  (if (==
-                                                        (declsNamePrim allDecls "__thread_spawn" 0)
-                                                        1)
-                                                    "`__thread_spawn` is named"
-                                                    "`--threads` asks for the thread lowering")
-                                                  (concat ", and "
-                                                    (concat (targetSpelling tcode)
-                                                      " has no thread runtime")))
-                                                0 0
-                                                "threads exist on darwin and linux, where a thread is the platform's `pthread_create` and the runtime's globals go thread-local; freebsd links no `libthr` here and windows has no `fork` either. Drop `--threads` to lower `parallel` to processes - which freebsd runs and CI executes there - or build for a target that has threads"))
-                                            v
-                                          })))
+                                            (let v vecNew)
+                                            {
+                                              (vecPush v
+                                                (mkDiag SEV_ERROR "AX4006" "threads-unsupported" 0
+                                                  (concat
+                                                    (if (==
+                                                          (declsNamePrim allDecls "__thread_spawn"
+                                                            0)
+                                                          1)
+                                                      "`__thread_spawn` is named"
+                                                      "`--threads` asks for the thread lowering")
+                                                    (concat ", and "
+                                                      (concat (targetSpelling tcode)
+                                                        " has no thread runtime")))
+                                                  0 0
+                                                  "threads exist on darwin and linux, where a thread is the platform's `pthread_create` and the runtime's globals go thread-local; freebsd links no `libthr` here and windows has no `fork` either. Drop `--threads` to lower `parallel` to processes - which freebsd runs and CI executes there - or build for a target that has threads"))
+                                              v
+                                            }
+                                          })
                                         {
                                           (writeStderrStr (renderDiagsFormat dfmt mds units))
                                           (writeStderrStr (renderFailTrailer 1))
                                           (sysExitWith 1)
                                           ""
-                                        })
+                                        }
+                                      }
                                       ; A spawn on a target with NEITHER lowering -
                                       ; Windows, no `fork` and no pthread - is a
                                       ; WARNING and not a refusal, AX4007. The module still
@@ -700,30 +766,34 @@
                                       ; is codegen's own predicate, asked here for AX4006's
                                       ; reason: the emitter cannot report a diagnostic and the
                                       ; driver can.
-                                      (let ((ir
-                                        {
-                                          (if (parSpawnUnsupported allDecls tcode)
-                                            (writeStderrStr
-                                              (renderDiagsFormat dfmt
-                                                (let ((wv vecNew))
+                                      {
+                                        (let ir
+                                          {
+                                            (if (parSpawnUnsupported allDecls tcode)
+                                              (writeStderrStr
+                                                (renderDiagsFormat dfmt
                                                   {
-                                                    (vecPush wv
-                                                      (mkDiag SEV_WARNING "AX4007"
-                                                        "parallel-unsupported" 0
-                                                        (concat (targetSpelling tcode)
-                                                          " has neither `parallel` lowering: no `fork` and no pthread")
-                                                        0 0
-                                                        "the program still builds, with every spawn and join lowered to a trap that prints `axiom: parallel is not available on this target` and exits 79 - so this matters only if the program actually reaches one. Build for a target that can spawn, or keep the `parallel` off the path this target takes"))
-                                                    wv
-                                                  })
-                                                units)))
-                                          (refuseDeviceIr (emitBinaryIr allDecls bares fulls tcode)
-                                            dfmt units)
-                                        }))
+                                                    (let wv vecNew)
+                                                    {
+                                                      (vecPush wv
+                                                        (mkDiag SEV_WARNING "AX4007"
+                                                          "parallel-unsupported" 0
+                                                          (concat (targetSpelling tcode)
+                                                            " has neither `parallel` lowering: no `fork` and no pthread")
+                                                          0 0
+                                                          "the program still builds, with every spawn and join lowered to a trap that prints `axiom: parallel is not available on this target` and exits 79 - so this matters only if the program actually reaches one. Build for a target that can spawn, or keep the `parallel` off the path this target takes"))
+                                                      wv
+                                                    }
+                                                  }
+                                                  units)))
+                                            (refuseDeviceIr
+                                              (emitBinaryIr allDecls bares fulls tcode) dfmt units)
+                                          })
                                         {
                                           (if (&& (== needMain 0)
                                                 (> (strLen (flagValue "--emit-rust-binding" 1)) 0))
-                                            (let ((bp (flagValue "--emit-rust-binding" 1)))
+                                            {
+                                              (let bp (flagValue "--emit-rust-binding" 1))
                                               (if (isErr
                                                     (writeFile bp
                                                       (rustBindingOf decls pubFns fileName)))
@@ -737,32 +807,49 @@
                                                 ; as generated, and still compiles
                                                 {
                                                   (runToolQuiet "rustfmt"
-                                                    (let ((v vecNew))
+                                                    {
+                                                      (let v vecNew)
                                                       {
                                                         (vecPush v (as "--edition" Int))
                                                         (vecPush v (as "2021" Int))
                                                         (vecPush v (as "--quiet" Int))
                                                         (vecPush v (as bp Int))
                                                         v
-                                                      }))
+                                                      }
+                                                    })
                                                   (replOut
                                                     (concat "Rust binding written to "
                                                       (concat bp "\n")))
-                                                })))
+                                                })
+                                            })
                                           (if (== needMain 1)
-                                            (let ((grc (groundExternsSpanned ir allDecls units dfmt
-                                                         (effectiveLinkArgs ir (pathDir fileName)
-                                                           linkArgsOf))))
+                                            {
+                                              (let grc
+                                                (groundExternsSpanned ir allDecls units dfmt
+                                                  (effectiveLinkArgs ir (pathDir fileName)
+                                                    linkArgsOf)))
                                               (if (!= grc 0)
                                                 {
                                                   (sysExitWith grc)
                                                   ""
                                                 }
-                                                ir))
+                                                ir)
+                                            }
                                             ir)
-                                        })))))
-                            })
-                        }))))))))))))
+                                        }
+                                      }))))
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              })
+          }
+        }
+      })
+  })
 
 ; The entry point: the subcommand the first operand names. A first
 ; operand that names none is an unknown command (`rejectUnknownCommand`),
@@ -778,7 +865,8 @@
   ; `axiom fmt FILE --help` from rewriting the file: both used to
   ; reach fmt's write path, because `hasFlag` matched exactly and
   ; `--help` was recognised only at argv[1].
-  (let ((first subcommandName))
+  {
+    (let first subcommandName)
     {
       (checkArgs first)
       ; Help the user ASKED for: stdout, exit 0, from anywhere in argv.
@@ -804,7 +892,8 @@
         (if (< (positionalIndex 1) 0)
           (die usageText 1)
           rejectUnknownCommand))
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; `axiom test`
@@ -870,20 +959,18 @@
 ; a standard-library surface three documents would have to describe.
 (pub :: testContains (-> String String Bool))
 (pub fn (testContains hay needle)
-  (let (
-    (n (strLen hay))
-    (m (strLen needle))
-  )
+  {
+    (let n (strLen hay))
+    (let m (strLen needle))
     (if (== m 0)
       true
       ; The match ends the loop by moving the index past its own
       ; bound rather than by negating `found`: Axiom has no `!`,
       ; and `(== found false)` is a comparison of `Bool` against
       ; `Bool` where `==` wants `Int`.
-      (let (
-        (mut i 0)
-        (mut found false)
-      )
+      {
+        (let mut i 0)
+        (let mut found false)
         {
           (while (<= (+ i m) n)
             {
@@ -895,16 +982,20 @@
               (set i (+ i 1))
             })
           found
-        }))))
+        }
+      })
+  })
 
 ; How many parameters a declaration takes, where a `fn` with none has
 ; an empty list and a node that is not a `fn` has no list at all.
 (pub :: testArity (-> Int Int))
 (pub fn (testArity d)
-  (let ((p (nodeBVec d)))
+  {
+    (let p (nodeBVec d))
     (if (== (as p Int) 0)
       0
-      (vecLen p))))
+      (vecLen p))
+  })
 
 ; Does the `::` signature declared alongside `d` carry `;@axiom:expect`?
 ; A linear scan over `decls` by name, the same shape `findFnDecl` scans
@@ -915,10 +1006,12 @@
 (pub fn (testExpectFailSig decls name i)
   (if (>= i (vecLen decls))
     0
-    (let ((d (vecGet decls i)))
+    {
+      (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_SIG) (strEq (bareOf (nodeAName d)) name))
         (declHasAxtag d "expect")
-        (testExpectFailSig decls name (+ i 1))))))
+        (testExpectFailSig decls name (+ i 1)))
+    }))
 
 ; Is this test tagged `;@axiom:expect`, on either half of its
 ; declaration? Every fixture in this tree writes the tag directly
@@ -942,12 +1035,14 @@
 ; is about to exec or exit.
 (pub :: testMkRec (-> String Int Int))
 (pub fn (testMkRec name xfail)
-  (let ((v (memAlloc (* 2 8))))
+  {
+    (let v (memAlloc (* 2 8)))
     {
       (memSetWord v 0 (as name Int))
       (memSetWord v 1 xfail)
       v
-    }))
+    }
+  })
 
 ; The tests in `decls`, in declaration order, refusing a `test`-named
 ; function that takes parameters. Each answer is a `testMkRec` block,
@@ -960,14 +1055,14 @@
 (pub :: testCollect (-> (Vec Int) String String (Vec Int)))
 ;@axiom:effect(io)
 (pub fn (testCollect decls file filter)
-  (let (
-    (out vecNew)
-    (n (vecLen decls))
-    (mut i 0)
-  )
+  {
+    (let out vecNew)
+    (let n (vecLen decls))
+    (let mut i 0)
     {
       (while (< i n)
-        (let ((d (vecGet decls i)))
+        {
+          (let d (vecGet decls i))
           {
             (if (&& (== (nodeTag d) TAG_D_FN) (strStartsWith (nodeAName d) "test"))
               (if (> (testArity d) 0)
@@ -982,9 +1077,11 @@
                 (if (testContains (nodeAName d) filter)
                   (vecPush out (testMkRec (nodeAName d) (testExpectFail decls d))))))
             (set i (+ i 1))
-          }))
+          }
+        })
       out
-    }))
+    }
+  })
 
 ; A `setup`/`teardown` hook in `decls`, by exact name. Answers 0
 ; when no `fn` of that name exists, 1 when one exists and takes no
@@ -997,12 +1094,14 @@
 (pub fn (testHookKind decls want i)
   (if (>= i (vecLen decls))
     0
-    (let ((d (vecGet decls i)))
+    {
+      (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_FN) (strEq (nodeAName d) want))
         (if (> (testArity d) 0)
           (+ (testArity d) 1)
           1)
-        (testHookKind decls want (+ i 1))))))
+        (testHookKind decls want (+ i 1)))
+    }))
 
 ; One `set failed ...` line per test: the report of running it inside
 ; its own recovery point. A test tagged `expect` calls the
@@ -1036,28 +1135,28 @@
 ; interpolating it.
 (pub :: testCallLines (-> (Vec Int) Int Int String))
 (pub fn (testCallLines names hasSetup hasTeardown)
-  (let (
-    (n (vecLen names))
-    (mut out "")
-    (mut i 0)
-  )
+  {
+    (let n (vecLen names))
+    (let mut out "")
+    (let mut i 0)
     {
       (while (< i n)
-        (let (
-          (rec (vecGet names i))
-          (name (memGetWordStr rec 0))
-          (reporter (if (== (memGetWord rec 1) 1)
-            "axiomTestReportXFail"
-            "axiomTestReport"))
-          (head (concat "    (set failed (+ failed (" (concat reporter "\"")))
-          (body (if (== hasSetup 1)
-            (if (== hasTeardown 1)
-              (concat "{ setup " (concat name (concat " " "teardown 0 }")))
-              (concat "{ setup " (concat name " 0 }")))
-            (if (== hasTeardown 1)
-              (concat "{ " (concat name " teardown 0 }"))
-              (concat "{ " (concat name " 0 }")))))
-        )
+        {
+          (let rec (vecGet names i))
+          (let name (memGetWordStr rec 0))
+          (let reporter
+            (if (== (memGetWord rec 1) 1)
+              "axiomTestReportXFail"
+              "axiomTestReport"))
+          (let head (concat "    (set failed (+ failed (" (concat reporter "\"")))
+          (let body
+            (if (== hasSetup 1)
+              (if (== hasTeardown 1)
+                (concat "{ setup " (concat name (concat " " "teardown 0 }")))
+                (concat "{ setup " (concat name " 0 }")))
+              (if (== hasTeardown 1)
+                (concat "{ " (concat name " teardown 0 }"))
+                (concat "{ " (concat name " 0 }")))))
           {
             (set out (concat out
                        (concat head
@@ -1066,9 +1165,11 @@
                              "\" (__axiom_recover __axiom_arena_mark (lambda (__axiomTestArg) "
                              (concat body ")))))\n"))))))
             (set i (+ i 1))
-          }))
+          }
+        })
       out
-    }))
+    }
+  })
 
 ; The source `axiom test` compiles: an IO import, the original source, then a
 ; `main` that runs each test inside its own recovery point, with the
@@ -1110,12 +1211,14 @@
 ; `runArgv` beside it has the shape this must have.
 (pub :: testArgv (-> String Int))
 (pub fn (testArgv name)
-  (let ((v (memAlloc (* 2 8))))
+  {
+    (let v (memAlloc (* 2 8)))
     {
       (memSetWord v 0 (strCStr (strDup name)))
       (memSetWord v 1 0)
       v
-    }))
+    }
+  })
 
 ; Run one file's tests, answering the number of failures - or 1 for a
 ; file that declares none, which is a failure and not an empty pass.
@@ -1134,11 +1237,10 @@
 ;@axiom:effect(block)
 ;@axiom:effect(entropy)
 (pub fn (testRunFile file filter)
-  (let (
-    (got (readFile file))
-    (src (unwrapOr got ""))
-    (rerr (sourceReadErrno got))
-  )
+  {
+    (let got (readFile file))
+    (let src (unwrapOr got ""))
+    (let rerr (sourceReadErrno got))
     (if (!= rerr 0)
       {
         (die (readFailMsg file rerr) 1)
@@ -1146,15 +1248,19 @@
       }
       ; The check comes first so a diagnostic names the file the
       ; author wrote. It exits on any error, exactly as `check` does.
-      (let ((_chk (compileFile file (targetArg hostTarget) 0 0)))
-        (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+      {
+        (let _chk (compileFile file (targetArg hostTarget) 0 0))
+        {
+          (let pr (parseModuleWith (lex src) (scanAxtags src)))
           (if (== (memGetWord pr 0) 0)
             {
               (dieParseErr file src pr diagFormatArg)
               1
             }
-            (let ((decls (memGetWordVec pr 1)))
-              (let ((names (testCollect decls file filter)))
+            {
+              (let decls (memGetWordVec pr 1))
+              {
+                (let names (testCollect decls file filter))
                 (if (== (vecLen names) 0)
                   {
                     (writeStderrStr (concat "axiom test: " (concat file " declares no test\n")))
@@ -1164,8 +1270,10 @@
                   ; refused by name, exactly as a `test` that takes
                   ; parameters is: it would never be run correctly, so
                   ; running the suite without it would be a silent skip.
-                  (let ((setupKind (testHookKind decls "setup" 0)))
-                    (let ((teardownKind (testHookKind decls "teardown" 0)))
+                  {
+                    (let setupKind (testHookKind decls "setup" 0))
+                    {
+                      (let teardownKind (testHookKind decls "teardown" 0))
                       (if (> setupKind 1)
                         {
                           (die
@@ -1192,11 +1300,11 @@
                               1)
                             1
                           }
-                          (let (
-                            (gen (pathJoin (pathDir file)
-                                   (concat ".axiom-test." (concat (fmtInt sysPid) ".ax"))))
-                            (text (testDriverText src names setupKind teardownKind))
-                          )
+                          {
+                            (let gen
+                              (pathJoin (pathDir file)
+                                (concat ".axiom-test." (concat (fmtInt sysPid) ".ax"))))
+                            (let text (testDriverText src names setupKind teardownKind))
                             (if (isErr (writeFile gen text))
                               {
                                 (die
@@ -1205,18 +1313,23 @@
                                   4)
                                 1
                               }
-                              (let ((ir (compileFileFrom gen hostTarget 1 1 1)))
-                                (let ((base (concat "axiom_test_output." (fmtInt sysPid))))
-                                  (let ((exe (concat "./" base)))
-                                    (let ((rc (buildToExecutable ir base
-                                                (optLevelArg (pathDir file)) 0
-                                                (effectiveLinkArgs ir (pathDir file) linkArgsOf))))
+                              {
+                                (let ir (compileFileFrom gen hostTarget 1 1 1))
+                                {
+                                  (let base (concat "axiom_test_output." (fmtInt sysPid)))
+                                  {
+                                    (let exe (concat "./" base))
+                                    {
+                                      (let rc
+                                        (buildToExecutable ir base (optLevelArg (pathDir file)) 0
+                                          (effectiveLinkArgs ir (pathDir file) linkArgsOf)))
                                       (if (!= rc 0)
                                         {
                                           (die "" rc)
                                           1
                                         }
-                                        (let ((code (sysRunPath exe (testArgv exe) sysEnvp)))
+                                        {
+                                          (let code (sysRunPath exe (testArgv exe) sysEnvp))
                                           {
                                             (unwrapOr (removeFile exe) 0)
                                             ; `Err` is the spawn failing - the
@@ -1224,14 +1337,28 @@
                                             ; the toolchain code. `Ok` carries
                                             ; whatever the child answered.
                                             (unwrapOr code 4)
-                                          })))))))))))))))))))))
+                                          }
+                                        })
+                                    }
+                                  }
+                                }
+                              })
+                          }))
+                    }
+                  })
+              }
+            })
+        }
+      })
+  })
 
 ; The value of `--jobs`: how many files a directory run may test at
 ; once. 1, the sequential run, when the flag is absent.
 (pub :: testJobs Int)
 ;@axiom:effect(io)
 (pub fn (testJobs)
-  (let ((v (flagValue "--jobs" 1)))
+  {
+    (let v (flagValue "--jobs" 1))
     (if (== (strLen v) 0)
       1
       (match (strParseInt v)
@@ -1248,7 +1375,8 @@
             (die "error: --jobs needs a positive number\n" 2)
             1
           }
-        )))))
+        )))
+  })
 
 ; Where one file's captured output waits while a parallel run finishes
 ; the others: beside the file, named with this process's pid, so two
@@ -1256,9 +1384,12 @@
 (pub :: testCapName (-> String String Int String))
 ;@axiom:effect(io)
 (pub fn (testCapName file kind i)
-  (let ((base (concat ".axiom-test-cap."
-                (concat (fmtInt sysPid) (concat "." (concat (fmtInt i) (concat "." kind)))))))
-    (pathJoin (pathDir file) base)))
+  {
+    (let base
+      (concat ".axiom-test-cap."
+        (concat (fmtInt sysPid) (concat "." (concat (fmtInt i) (concat "." kind))))))
+    (pathJoin (pathDir file) base)
+  })
 
 ; argv for one child of a parallel run: this executable, `test`, the
 ; file, and the flags that change what a file's run means. `--jobs`
@@ -1267,7 +1398,8 @@
 (pub :: testChildArgv (-> String String String Int))
 ;@axiom:effect(io)
 (pub fn (testChildArgv self file filter)
-  (let ((words vecNew))
+  {
+    (let words vecNew)
     {
       (vecPushStr words self)
       (vecPushStr words "test")
@@ -1277,22 +1409,25 @@
           (vecPushStr words "--filter")
           (vecPushStr words filter)
         })
-      (let ((opt (flagValue "--opt" 1)))
+      {
+        (let opt (flagValue "--opt" 1))
         (if (> (strLen opt) 0)
           {
             (vecPushStr words "--opt")
             (vecPushStr words opt)
-          }))
-      (let ((fmt (flagValue "--diagnostic-format" 1)))
+          })
+      }
+      {
+        (let fmt (flagValue "--diagnostic-format" 1))
         (if (> (strLen fmt) 0)
           {
             (vecPushStr words "--diagnostic-format")
             (vecPushStr words fmt)
-          }))
-      (let (
-        (v (memAlloc (* (+ (vecLen words) 1) 8)))
-        (mut i 0)
-      )
+          })
+      }
+      {
+        (let v (memAlloc (* (+ (vecLen words) 1) 8)))
+        (let mut i 0)
         {
           (while (< i (vecLen words))
             {
@@ -1301,8 +1436,10 @@
             })
           (memSetWord v (vecLen words) 0)
           v
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; Wait for `pid` and answer 0 when it exited 0, 1 otherwise, as
 ; `sysRun` reads a status.
@@ -1327,15 +1464,19 @@
 (pub :: testSelfPath String)
 ;@axiom:effect(io)
 (pub fn (testSelfPath)
-  (let ((a0 (sysArg 0)))
+  {
+    (let a0 (sysArg 0))
     (match (strFindByte a0 47 0)
       ((Some _) a0)
       ((None)
-        (let ((dir (pathOfCommand a0)))
+        {
+          (let dir (pathOfCommand a0))
           (if (> (strLen dir) 0)
             (concat dir a0)
-            a0))
-      ))))
+            a0)
+        }
+      ))
+  })
 
 ; Run every file in `files` with at most `jobs` children at once, and
 ; answer how many files failed. Each file is run by a child of this
@@ -1349,23 +1490,23 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (testRunFilesParallel files filter jobs)
-  (let (
-    (n (vecLen files))
-    (self (testSelfPath))
-    (results vecNew)
-    (pids vecNew)
-    (idxs vecNew)
-    (mut next 0)
-    (mut head 0)
-    (mut done 0)
-  )
+  {
+    (let n (vecLen files))
+    (let self (testSelfPath))
+    (let results vecNew)
+    (let pids vecNew)
+    (let idxs vecNew)
+    (let mut next 0)
+    (let mut head 0)
+    (let mut done 0)
     {
       (while (< (vecLen results) n)
         (vecPush results 1))
       (while (< done n)
         {
           (while (&& (< next n) (< (- next head) jobs))
-            (let ((f (vecGetStr files next)))
+            {
+              (let f (vecGetStr files next))
               {
                 (match (sysSpawnOutErrTo (strCStr (strDup self)) (testChildArgv self f filter)
                          sysEnvp (testCapName f "out" next) (testCapName f "err" next))
@@ -1379,7 +1520,8 @@
                     (set done (+ done 1))
                   ))
                 (set next (+ next 1))
-              }))
+              }
+            })
           (if (< head (vecLen pids))
             {
               (vecSet results (vecGet idxs head) (testWaitOne (vecGet pids head)))
@@ -1387,13 +1529,13 @@
               (set done (+ done 1))
             })
         })
-      (let (
-        (mut i 0)
-        (mut bad 0)
-      )
+      {
+        (let mut i 0)
+        (let mut bad 0)
         {
           (while (< i n)
-            (let ((f (vecGetStr files i)))
+            {
+              (let f (vecGetStr files i))
               {
                 (replOut (concat "== " (concat f " ==\n")))
                 (replOut (unwrapOr (readFile (testCapName f "out" i)) ""))
@@ -1403,10 +1545,13 @@
                 (if (!= (vecGet results i) 0)
                   (set bad (+ bad 1)))
                 (set i (+ i 1))
-              }))
+              }
+            })
           bad
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; Every `.ax` file directly inside `dir`, in `listDir`'s order, which
 ; is sorted - so a directory run reports the same order everywhere,
@@ -1416,15 +1561,15 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (testFilesIn dir)
-  (let (
-    (entries (unwrapOr (listDir dir) vecNew))
-    (out vecNew)
-    (n (vecLen entries))
-    (mut i 0)
-  )
+  {
+    (let entries (unwrapOr (listDir dir) vecNew))
+    (let out vecNew)
+    (let n (vecLen entries))
+    (let mut i 0)
     {
       (while (< i n)
-        (let ((name (vecGetStr entries i)))
+        {
+          (let name (vecGetStr entries i))
           {
             (if (&& (strEq (pathExt name) ".ax")
                   (if (strStartsWith name ".axiom-test.")
@@ -1433,9 +1578,11 @@
               (vecPush out (as (pathJoin dir name) Int))
               (as 0 (Vec Int)))
             (set i (+ i 1))
-          }))
+          }
+        })
       out
-    }))
+    }
+  })
 
 ; The subcommand: one file, or every `.ax` file directly inside one
 ; directory.
@@ -1445,32 +1592,33 @@
 ;@axiom:effect(block)
 ;@axiom:effect(entropy)
 (pub fn (testMain)
-  (let (
-    (target (positionalFrom operandStart))
-    (filter (flagValue "--filter" 1))
-  )
+  {
+    (let target (positionalFrom operandStart))
+    (let filter (flagValue "--filter" 1))
     (if (== (strLen target) 0)
       (die "error: test needs a file or a directory\n" 1)
       (if (isDir target)
-        (let ((files (testFilesIn target)))
+        {
+          (let files (testFilesIn target))
           (if (== (vecLen files) 0)
             (die (concat "error: no `.ax` file in " (concat target "\n")) 1)
-            (let (
-              (n (vecLen files))
-              (jobs (testJobs))
-              (mut i 0)
-              (mut bad 0)
-            )
+            {
+              (let n (vecLen files))
+              (let jobs (testJobs))
+              (let mut i 0)
+              (let mut bad 0)
               {
                 (if (|| (<= jobs 1) (== n 1))
                   (while (< i n)
-                    (let ((f (vecGetStr files i)))
+                    {
+                      (let f (vecGetStr files i))
                       {
                         (replOut (concat "== " (concat f " ==\n")))
                         (if (!= (testRunFile f filter) 0)
                           (set bad (+ bad 1)))
                         (set i (+ i 1))
-                      }))
+                      }
+                    })
                   (set bad (testRunFilesParallel files filter jobs)))
                 (replOut
                   (concat "\n"
@@ -1480,8 +1628,11 @@
                 (if (> bad 0)
                   1
                   0)
-              })))
-        (testRunFile target filter)))))
+              }
+            })
+        }
+        (testRunFile target filter)))
+  })
 
 ; A first operand that is no subcommand is an unknown command: exit 2,
 ; named, whether or not it names a file. The refusal suggests the
@@ -1490,18 +1641,20 @@
 (pub :: rejectUnknownCommand Int)
 ;@axiom:effect(io)
 (pub fn (rejectUnknownCommand)
-  (let ((i (positionalIndex 1)))
+  {
+    (let i (positionalIndex 1))
     (if (< i 0)
       0
-      (let (
-        (w (sysArg i))
-        (near (nearestSubcommand (sysArg i)))
-      )
+      {
+        (let w (sysArg i))
+        (let near (nearestSubcommand (sysArg i)))
         (usageError
           (concat (concat "error: unknown command `" (concat w "`\n"))
             (if (== (strLen near) 0)
               "       to compile a file, use `axiom emit-llvm FILE [--target TARGET]`, `axiom run FILE` or `axiom build FILE`\n"
-              (concat "       did you mean `" (concat near "`?\n")))))))))
+              (concat "       did you mean `" (concat near "`?\n")))))
+      })
+  })
 
 ; `axiom new NAME`: start a project.
 ;
@@ -1514,27 +1667,35 @@
 (pub :: newProjectCmd Int)
 ;@axiom:effect(io)
 (pub fn (newProjectCmd)
-  (let ((p1 (positionalIndex operandStart)))
+  {
+    (let p1 (positionalIndex operandStart))
     (if (< p1 0)
       (usageError "error: `axiom new` needs a project name\n")
-      (let ((p2 (positionalIndex (+ p1 1))))
+      {
+        (let p2 (positionalIndex (+ p1 1)))
         (if (>= p2 0)
           (usageError
             (concat "error: `axiom new` takes one project name, but `"
               (concat (sysArg p2) "` was also given\n")))
-          (let ((name (sysArg p1)))
+          {
+            (let name (sysArg p1))
             (if (pkgNameOk name)
               (newProject name)
               (usageError
                 (concat "error: `"
                   (concat name
-                    "` is not a package name\n       A package name is letters, digits, `.`, `-` and `_`, and is neither `.` nor `..`.\n"))))))))))
+                    "` is not a package name\n       A package name is letters, digits, `.`, `-` and `_`, and is neither `.` nor `..`.\n"))))
+          })
+      })
+  })
 
 (pub :: newProject (-> String Int))
 ;@axiom:effect(io)
 (pub fn (newProject name)
-  (let ((mf (pathJoin name "axiom.pkg")))
-    (let ((mainf (pathJoin name "Main.ax")))
+  {
+    (let mf (pathJoin name "axiom.pkg"))
+    {
+      (let mainf (pathJoin name "Main.ax"))
       (if (fileExists mf)
         (die
           (concat (concat "error: `" name)
@@ -1546,7 +1707,9 @@
             (newProjectWrite name mf mainf))
           (if (isErr (makeDir name))
             (die (concat (concat "error: could not create directory `" name) "`\n") 4)
-            (newProjectWrite name mf mainf)))))))
+            (newProjectWrite name mf mainf))))
+    }
+  })
 
 (pub :: newProjectWrite (-> String String String Int))
 ;@axiom:effect(io)
@@ -1579,10 +1742,12 @@
 (pub :: manifestEntryOrEmpty String)
 ;@axiom:effect(io)
 (pub fn (manifestEntryOrEmpty)
-  (let ((mf (pkgFindManifest "")))
+  {
+    (let mf (pkgFindManifest ""))
     (if (== (strLen mf) 0)
       ""
-      (let ((f (pkgEntryFile "")))
+      {
+        (let f (pkgEntryFile ""))
         (if (fileExists f)
           f
           ; `die` answers `Int` and the entry answers `String`: an
@@ -1597,7 +1762,9 @@
                   "\n       Set `main` to move it, or write `Main.ax` beside the manifest.\n"))
               1)
             ""
-          })))))
+          })
+      })
+  })
 
 ; `axiom fetch`: check out the manifest's registry dependencies.
 ;
@@ -1615,19 +1782,25 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (fetchCmd)
-  (let ((p (positionalIndex operandStart)))
+  {
+    (let p (positionalIndex operandStart))
     (if (>= p 0)
       (usageError
         (concat "error: `axiom fetch` takes no operands, but `"
           (concat (sysArg p) "` was given\n")))
-      (let ((mf (pkgFindManifest "")))
+      {
+        (let mf (pkgFindManifest ""))
         (if (== (strLen mf) 0)
           (die "error: no axiom.pkg at or above the working directory\n" 1)
-          (let ((text (unwrapOr (readFile mf) "")))
+          {
+            (let text (unwrapOr (readFile mf) ""))
             {
               (pkgCheckLines text mf)
               (fetchUrls (pkgFetchUrls text) (pathDir mf) 0)
-            }))))))
+            }
+          })
+      })
+  })
 
 ; THE CLONE IS TRANSACTIONAL. This created the checkout directory
 ; first and cloned into it, so a clone that failed left the directory
@@ -1653,10 +1826,13 @@
         0
       }
       0)
-    (let ((url (vecGetStr urls i)))
-      (let ((dest (pkgDepCheckout base url)))
+    {
+      (let url (vecGetStr urls i))
+      {
+        (let dest (pkgDepCheckout base url))
         (if (isDir dest)
-          (let ((origin (pkgOrigin dest)))
+          {
+            (let origin (pkgOrigin dest))
             (if (strEq origin url)
               {
                 (replOut (concat "present " (concat dest "\n")))
@@ -1667,17 +1843,19 @@
                   (concat url
                     (concat (concat "`: " (concat (pkgOriginWhy origin url) ".\n"))
                       "       Remove it and run `axiom fetch` again.\n")))
-                4)))
-          (let (
-            (deps (concat (pathWithSlash base) ".axiom/deps"))
-            (tmp (concat (concat (pathWithSlash base) ".axiom/deps/.fetch-")
-                   (concat (pkgDepKey url) (concat "-" (fmtInt sysPid)))))
-          )
+                4))
+          }
+          {
+            (let deps (concat (pathWithSlash base) ".axiom/deps"))
+            (let tmp
+              (concat (concat (pathWithSlash base) ".axiom/deps/.fetch-")
+                (concat (pkgDepKey url) (concat "-" (fmtInt sysPid)))))
             {
               (replOut (concat "fetching " (concat dest "\n")))
               (if (!= (mkdirParents deps) 0)
                 (die (concat (concat "error: could not create directory `" deps) "`\n") 4)
-                (let ((rc (fetchClone url tmp)))
+                {
+                  (let rc (fetchClone url tmp))
                   (if (< rc 0)
                     (die "error: `git` was not found on PATH; install git and try again\n" 4)
                     (if (!= rc 0)
@@ -1697,8 +1875,12 @@
                               (concat dest "`\n"))
                             4)
                         }
-                        (fetchUrls urls base (+ i 1)))))))
-            }))))))
+                        (fetchUrls urls base (+ i 1)))))
+                })
+            }
+          })
+      }
+    }))
 
 ; Remove this fetch's own temporary clone, if git left one. Only ever
 ; called with the `.fetch-<key>-<pid>` path this process chose, so it
@@ -1709,12 +1891,14 @@
 ;@axiom:effect(block)
 (pub fn (fetchDiscard tmp)
   (if (isDir tmp)
-    (let ((args vecNew))
+    {
+      (let args vecNew)
       {
         (vecPush args (as "-rf" Int))
         (vecPush args (as tmp Int))
         (runTool "rm" args)
-      })
+      }
+    }
     0))
 
 ; `git clone URL DEST`, answering git's exit code, or a negative
@@ -1725,13 +1909,15 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (fetchClone url dest)
-  (let ((args vecNew))
+  {
+    (let args vecNew)
     {
       (vecPush args (as "clone" Int))
       (vecPush args (as url Int))
       (vecPush args (as dest Int))
       (runTool "git" args)
-    }))
+    }
+  })
 
 ; Every directory on the way to `path`, itself included: `git clone`
 ; needs the parent to exist and the manifest's `.axiom/deps/` rarely
@@ -1748,10 +1934,12 @@
   (if (>= i (strLen path))
     (mkdirOne path)
     (if (== (strByte path i) 47)
-      (let ((rc (mkdirOne (strSlice path 0 i))))
+      {
+        (let rc (mkdirOne (strSlice path 0 i)))
         (if (!= rc 0)
           rc
-          (mkdirPrefixes path (+ i 1))))
+          (mkdirPrefixes path (+ i 1)))
+      }
       (mkdirPrefixes path (+ i 1)))))
 
 (pub :: mkdirOne (-> String Int))
@@ -1791,14 +1979,16 @@
       ; An operand that names no command falls back to the general
       ; usage rather than failing: `help` is where someone goes when
       ; they are already lost, and refusing them there is unkind.
-      (let ((topic (positionalFrom operandStart)))
+      {
+        (let topic (positionalFrom operandStart))
         {
           (replOut
             (if (isSubcommand topic)
               (helpForCommand topic)
               usageText))
           0
-        })
+        }
+      }
       (if (|| (strEq cmd "version") (|| (strEq cmd "--version") (strEq cmd "-V")))
         ; The version says what was PROMISED; the build id says what
         ; was built. Two builds of two different trees at one version
@@ -1811,7 +2001,8 @@
           0
         }
         (if (strEq cmd "check")
-          (let ((f inputOperand))
+          {
+            (let f inputOperand)
             (if (== (strLen f) 0)
               (die "error: check needs an input file\n" 1)
               {
@@ -1822,22 +2013,26 @@
                 ; exits on errors, so reaching here IS the OK path.
                 (replOut "OK\n")
                 0
-              }))
+              })
+          }
           (if (strEq cmd "emit-llvm")
-            (let ((f inputOperand))
+            {
+              (let f inputOperand)
               (if (== (strLen f) 0)
                 (die "error: emit-llvm needs an input file\n" 1)
                 ; `--output` is read as well as `-o`. Only `-o` used to be,
                 ; so `axiom emit-llvm f.ax --output out.ll` silently ignored
                 ; the flag, put 57 KB of IR on the terminal, and exited 0 -
                 ; a build script cannot detect that, because nothing failed.
-                (let (
-                  (ir (compileFile f (targetArg hostTarget) 1 0))
-                  (out (let ((v (flagValue "-o" 1)))
-                    (if (> (strLen v) 0)
-                      v
-                      (flagValue "--output" 1))))
-                )
+                {
+                  (let ir (compileFile f (targetArg hostTarget) 1 0))
+                  (let out
+                    {
+                      (let v (flagValue "-o" 1))
+                      (if (> (strLen v) 0)
+                        v
+                        (flagValue "--output" 1))
+                    })
                   (if (== (strLen out) 0)
                     {
                       (replOut ir)
@@ -1848,7 +2043,9 @@
                       {
                         (replOut (concat "LLVM IR written to " (concat out "\n")))
                         0
-                      })))))
+                      }))
+                })
+            }
             (if (strEq cmd "build")
               ; `--input`/`--output` are stage0's spelling. A bare positional is
               ; accepted for `--input` too, because a compiler that insists on a
@@ -1859,11 +2056,14 @@
               ; `axiom.pkg` - and the executable takes the manifest's
               ; `name` through the default below, so `axiom build` with
               ; nothing else writes `<name>` in the working directory.
-              (let ((inp
-                (let ((v inputOperand))
-                  (if (> (strLen v) 0)
-                    v
-                    manifestEntryOrEmpty))))
+              {
+                (let inp
+                  {
+                    (let v inputOperand)
+                    (if (> (strLen v) 0)
+                      v
+                      manifestEntryOrEmpty)
+                  })
                 (if (== (strLen inp) 0)
                   (die "error: build needs an input file\n" 1)
                   ; `-o` is the short form of `--output` here as well as under
@@ -1899,28 +2099,37 @@
                   ; and `pkgNameOk` admits no `/` and no `..`, so the
                   ; string bound here could not name another directory
                   ; even if the verification were removed.
-                  (let ((outp
-                    (let ((v (flagValue "--output" 1)))
-                      (if (> (strLen v) 0)
-                        v
-                        (let ((sh (flagValue "-o" 1)))
-                          (if (> (strLen sh) 0)
-                            sh
-                            (let ((nm (pkgName (pathDir inp))))
-                              (if (> (strLen nm) 0)
-                                nm
-                                "output"))))))))
-                    (let ((ir
-                      (compileFile inp (targetArg hostTarget) 1
-                        (if (hasFlagAnywhere cmd "--emit-staticlib")
-                          0
-                          1))))
-                      (let ((rc
-                        (buildToExecutable ir outp (optLevelArg (pathDir inp))
-                          (if (hasFlagAnywhere cmd "--emit-llvm")
-                            1
-                            0)
-                          (effectiveLinkArgs ir (pathDir inp) linkArgsOf))))
+                  {
+                    (let outp
+                      {
+                        (let v (flagValue "--output" 1))
+                        (if (> (strLen v) 0)
+                          v
+                          {
+                            (let sh (flagValue "-o" 1))
+                            (if (> (strLen sh) 0)
+                              sh
+                              {
+                                (let nm (pkgName (pathDir inp)))
+                                (if (> (strLen nm) 0)
+                                  nm
+                                  "output")
+                              })
+                          })
+                      })
+                    {
+                      (let ir
+                        (compileFile inp (targetArg hostTarget) 1
+                          (if (hasFlagAnywhere cmd "--emit-staticlib")
+                            0
+                            1)))
+                      {
+                        (let rc
+                          (buildToExecutable ir outp (optLevelArg (pathDir inp))
+                            (if (hasFlagAnywhere cmd "--emit-llvm")
+                              1
+                              0)
+                            (effectiveLinkArgs ir (pathDir inp) linkArgsOf)))
                         (if (!= rc 0)
                           (die "" rc)
                           ; A successful build used to print NOTHING, so a
@@ -1937,7 +2146,11 @@
                               (replOut (concat "LLVM IR written to " (concat outp ".ll\n"))))
                             (replOut (concat "Build successful: " (concat outp "\n")))
                             0
-                          }))))))
+                          })
+                      }
+                    }
+                  })
+              }
               (if (strEq cmd "fmt")
                 runFormatter
                 (if (strEq cmd "symbols")
@@ -1946,17 +2159,16 @@
                   ; stage0's rule for this subcommand, where `check` distinguishes
                   ; parse (2) from semantic (1) failures. `dieImport` applies the
                   ; same folding for unresolvable imports by inspecting argv.
-                  (let (
-                    (f (inputArgSkipping "--builtins"))
-                    (dfmt diagFormatArg)
-                  )
+                  {
+                    (let f (inputArgSkipping "--builtins"))
+                    (let dfmt diagFormatArg)
                     (if (== (strLen f) 0)
                       (die "error: symbols needs an input file\n" 1)
-                      (let ((got (readFile f)))
-                        (let (
-                          (src (unwrapOr got ""))
-                          (rerr (sourceReadErrno got))
-                        )
+                      {
+                        (let got (readFile f))
+                        {
+                          (let src (unwrapOr got ""))
+                          (let rerr (sourceReadErrno got))
                           (if (!= rerr 0)
                             (die (readFailMsg f rerr) 1)
                             ; An AXIR record file re-emits and exits here;
@@ -1964,10 +2176,9 @@
                             ; binding is in the same list rather than a
                             ; wrapping `let` so that this arm's paren
                             ; depth does not move.
-                            (let (
-                              (_ax (symbolsAxirReadBack src))
-                              (pr (parseModuleWith (lex src) (scanAxtags src)))
-                            )
+                            {
+                              (let _ax (symbolsAxirReadBack src))
+                              (let pr (parseModuleWith (lex src) (scanAxtags src)))
                               (if (== (memGetWord pr 0) 0)
                                 (dieParseErr f src pr dfmt)
                                 ; `symbols` type-checks to get the types it
@@ -1985,40 +2196,50 @@
                                 ; them to stderr and emits the full
                                 ; list with exit 0. Only an E line
                                 ; empties stdout and fails.
-                                (let (
-                                  (decls (memGetWordVec pr 1))
-                                  (tcode (checkedTargetCode (targetArg hostTarget)))
-                                  (bares vecNew)
-                                  (fulls vecNew)
-                                  (mods vecNew)
-                                )
-                                  (let ((units
-                                    (let ((v vecNew))
+                                {
+                                  (let decls (memGetWordVec pr 1))
+                                  (let tcode (checkedTargetCode (targetArg hostTarget)))
+                                  (let bares vecNew)
+                                  (let fulls vecNew)
+                                  (let mods vecNew)
+                                  {
+                                    (let units
                                       {
-                                        (vecPush v (as (CUnit2 f src (as 0 String)) Int))
-                                        v
-                                      })))
-                                    (let ((allDecls (resolveImports decls bares fulls mods tcode
-                                                      (pathDir f) units)))
-                                      (let (
-                                        (ftbl vecNew)
-                                        (eds vecNew)
-                                      )
-                                        (let ((gens (expandProgram decls allDecls eds ftbl units
-                                                      bares fulls mods)))
-                                          (let ((_stop
-                                            (if (> (countErrorDiags eds) 0)
+                                        (let v vecNew)
+                                        {
+                                          (vecPush v
+                                            (as (CUnit2 :file f :src src :name (as 0 String)) Int))
+                                          v
+                                        }
+                                      })
+                                    {
+                                      (let allDecls
+                                        (resolveImports decls bares fulls mods tcode (pathDir f)
+                                          units))
+                                      {
+                                        (let ftbl vecNew)
+                                        (let eds vecNew)
+                                        {
+                                          (let gens
+                                            (expandProgram decls allDecls eds ftbl units bares
+                                              fulls mods))
+                                          {
+                                            (let _stop
+                                              (if (> (countErrorDiags eds) 0)
+                                                {
+                                                  (writeStderrStr
+                                                    (renderDiagsFormat dfmt (orderDiags eds) units))
+                                                  (sysExitWith 1)
+                                                  0
+                                                }
+                                                0))
+                                            {
+                                              (let tc (checkModuleTc decls allDecls units))
                                               {
-                                                (writeStderrStr
-                                                  (renderDiagsFormat dfmt (orderDiags eds) units))
-                                                (sysExitWith 1)
-                                                0
-                                              }
-                                              0)))
-                                            (let ((tc (checkModuleTc decls allDecls units)))
-                                              (let ((ds (orderDiags
-                                                          (expMergeInto eds
-                                                            (attachTcFrames decls tc ftbl units)))))
+                                                (let ds
+                                                  (orderDiags
+                                                    (expMergeInto eds
+                                                      (attachTcFrames decls tc ftbl units))))
                                                 (if (> (countErrorDiags ds) 0)
                                                   ; A SYMBOL TABLE IS A FACT ABOUT THE
                                                   ; SOURCE, so it is printed here too.
@@ -2062,14 +2283,27 @@
                                                         (renderDiagsFormat dfmt ds units)))
                                                     (symbolsEmit tc gens cmd dfmt)
                                                     0
-                                                  }))))))))))))))))
+                                                  })
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                })
+                            })
+                        }
+                      })
+                  }
                   (if (strEq cmd "explain")
                     ; `explain [CODE] [--list]`: the texts live in explain.ax,
                     ; generated byte-for-byte from stage0's own output. `--list`
                     ; wins over a code; a bare `explain` adds the usage trailer;
                     ; an unknown code is two stderr lines and exit 1, echoing the
                     ; code AS TYPED, before normalisation.
-                    (let ((code (positionalFrom operandStart)))
+                    {
+                      (let code (positionalFrom operandStart))
                       (if (|| (hasFlagAnywhere cmd "--list") (== (strLen code) 0))
                         {
                           (replOut explainListColored)
@@ -2084,9 +2318,11 @@
                         ; lexicon when no diagnostic code matches:
                         ; `axiom explain let`, and `axiom explain
                         ; @restrict` for an AXTAG key.
-                        (let ((text (explainText (explainNormalize code))))
+                        {
+                          (let text (explainText (explainNormalize code)))
                           (if (== (strLen text) 0)
-                            (let ((lex (explainLexicon code)))
+                            {
+                              (let lex (explainLexicon code))
                               (if (== (strLen lex) 0)
                                 {
                                   (writeStderrStr
@@ -2100,11 +2336,14 @@
                                 {
                                   (replOut lex)
                                   0
-                                }))
+                                })
+                            }
                             {
                               (replOut text)
                               0
-                            }))))
+                            })
+                        })
+                    }
                     (if (strEq cmd "repl")
                       (replMain
                         (if (hasFlagAnywhere cmd "--no-banner")
@@ -2120,7 +2359,8 @@
                           ; and a bare operand is always a FILE, never an
                           ; argument, so program arguments follow `--` in
                           ; manifest mode (`axiom run -- --port 8080`).
-                          (let ((f runInputOperand))
+                          {
+                            (let f runInputOperand)
                             (if (== (strLen f) 0)
                               (die "error: run needs an input file\n" 1)
                               ; Unlike stage0, `run` optimises. stage0 pins its `run` at
@@ -2175,14 +2415,20 @@
                               ; next thing this command does is execute what it built,
                               ; and a foreign binary does not run here. `build` is where
                               ; a cross-target artefact is asked for.
-                              (let ((ir (compileFile f hostTarget 1 1)))
-                                (let ((base (concat "axiom_temp_output." (fmtInt sysPid))))
-                                  (let ((exe (concat "./" base)))
-                                    (let ((rc (buildToExecutable ir base (optLevelArg (pathDir f))
-                                                0 (effectiveLinkArgs ir (pathDir f) linkArgsOf))))
+                              {
+                                (let ir (compileFile f hostTarget 1 1))
+                                {
+                                  (let base (concat "axiom_temp_output." (fmtInt sysPid)))
+                                  {
+                                    (let exe (concat "./" base))
+                                    {
+                                      (let rc
+                                        (buildToExecutable ir base (optLevelArg (pathDir f)) 0
+                                          (effectiveLinkArgs ir (pathDir f) linkArgsOf)))
                                       (if (!= rc 0)
                                         (die "" rc)
-                                        (let ((code (sysRunPath exe (runArgv exe) sysEnvp)))
+                                        {
+                                          (let code (sysRunPath exe (runArgv exe) sysEnvp))
                                           {
                                             (unwrapOr (removeFile exe) 0)
                                             ; `Err` means the child never
@@ -2190,7 +2436,13 @@
                                             ; code. `Ok` is its answer.
                                             (sysExitWith (unwrapOr code 4))
                                             0
-                                          }))))))))
+                                          }
+                                        })
+                                    }
+                                  }
+                                }
+                              })
+                          }
                           (if (strEq cmd "test")
                             ; `test` sits beside `run` because it is one:
                             ; it compiles a program and executes it. What
@@ -2220,16 +2472,17 @@
 (pub :: explainListColored String)
 ;@axiom:effect(unsafe)
 (pub fn (explainListColored)
-  (let (
-    (n (strLen explainListText))
-    (parts vecNew)
-    (mut i 0)
-    (mut first true)
-  )
+  {
+    (let n (strLen explainListText))
+    (let parts vecNew)
+    (let mut i 0)
+    (let mut first true)
     {
       (while (< i n)
-        (let ((e (lineEndFrom explainListText i)))
-          (let ((line (strSlice explainListText i (- e i))))
+        {
+          (let e (lineEndFrom explainListText i))
+          {
+            (let line (strSlice explainListText i (- e i)))
             {
               (if first
                 (vecPush parts (paint SGR_LIST line))
@@ -2247,9 +2500,12 @@
                 (vecPush parts "\n")
                 (as 0 (Vec String)))
               (set i (+ e 1))
-            })))
+            }
+          }
+        })
       (catStrs parts)
-    }))
+    }
+  })
 
 ; The input file for `fmt`: the first operand that is not `--check`
 ; and does not look like a flag. `positionalFrom` cannot be used here
@@ -2276,10 +2532,12 @@
 (pub :: inputOperand String)
 ;@axiom:effect(io)
 (pub fn (inputOperand)
-  (let ((v (flagValue "--input" 1)))
+  {
+    (let v (flagValue "--input" 1))
     (if (> (strLen v) 0)
       v
-      (positionalFrom operandStart))))
+      (positionalFrom operandStart))
+  })
 
 ; `run`'s input file, which is deliberately NOT `inputOperand`.
 ;
@@ -2316,10 +2574,12 @@
 (pub fn (runInputOperand)
   (if (runManifestMode)
     manifestEntryOrEmpty
-    (let ((p (positionalIndex operandStart)))
+    {
+      (let p (positionalIndex operandStart))
       (if (< p 0)
         (flagValue "--input" 1)
-        (sysArg p)))))
+        (sysArg p))
+    }))
 
 ; Manifest mode: no `--input`, and no bare operand outside `--`'s
 ; reach. A bare operand anywhere before `--` - or with no `--` at
@@ -2330,23 +2590,27 @@
 (pub fn (runManifestMode)
   (if (> (strLen (flagValue "--input" 1)) 0)
     false
-    (let ((p (positionalIndex operandStart)))
+    {
+      (let p (positionalIndex operandStart))
       (if (< p 0)
         true
-        (let ((dd (dashDashIndex operandStart)))
-          (&& (>= dd 0) (> p dd)))))))
+        {
+          (let dd (dashDashIndex operandStart))
+          (&& (>= dd 0) (> p dd))
+        })
+    }))
 
 ;@axiom:effect(io)
 (pub fn (inputArgSkipping bare)
-  (let (
-    (n sysArgc)
-    (mut i operandStart)
-    (mut f "")
-    (mut endOpts 0)
-  )
+  {
+    (let n sysArgc)
+    (let mut i operandStart)
+    (let mut f "")
+    (let mut endOpts 0)
     {
       (while (< i n)
-        (let ((a (sysArg i)))
+        {
+          (let a (sysArg i))
           {
             ; `--` ends option parsing here too. `fmt` and `symbols` do
             ; not use the general positional walk - its flag-skipping
@@ -2365,9 +2629,11 @@
                           true))))
                 (set f a)))
             (set i (+ i 1))
-          }))
+          }
+        })
       f
-    }))
+    }
+  })
 
 ; argv for the program `run` spawns: its own name, then every argument
 ; that followed the source file.
@@ -2390,24 +2656,28 @@
   ; `runInputOperand` read the first of them as nothing, so starting
   ; past the file operand would drop it. Everything from `--` onward
   ; is forwarded instead (`fillRunArgv` drops the marker itself).
-  (let (
-    (dd (dashDashIndex operandStart))
-    (p (positionalIndex operandStart))
-    (first (+ (positionalIndex operandStart) 1))
-    (n sysArgc)
-  )
-    (let ((extra
-      (if (< p 0)
-        n
-        (if (&& (>= dd 0) (> p dd))
-          (+ dd 1)
-          first))))
-      (let ((v (memAlloc (* (+ (- n extra) 2) 8))))
+  {
+    (let dd (dashDashIndex operandStart))
+    (let p (positionalIndex operandStart))
+    (let first (+ (positionalIndex operandStart) 1))
+    (let n sysArgc)
+    {
+      (let extra
+        (if (< p 0)
+          n
+          (if (&& (>= dd 0) (> p dd))
+            (+ dd 1)
+            first)))
+      {
+        (let v (memAlloc (* (+ (- n extra) 2) 8)))
         {
           (memSetWord v 0 (strCStr (strDup name)))
           (fillRunArgv v extra n 1)
           v
-        }))))
+        }
+      }
+    }
+  })
 
 ; Copy argv[from..to) into `v` starting at slot `slot`, NUL-terminated.
 ;
@@ -2421,13 +2691,15 @@
       (memSetWord v slot 0)
       0
     }
-    (let ((a (sysArg from)))
+    {
+      (let a (sysArg from))
       (if (strEq a "--")
         (fillRunArgv v (+ from 1) to slot)
         {
           (memSetWord v slot (strCStr (strDup a)))
           (fillRunArgv v (+ from 1) to (+ slot 1))
-        }))))
+        })
+    }))
 
 (pub :: die (-> String Int Int))
 ;@axiom:effect(io)

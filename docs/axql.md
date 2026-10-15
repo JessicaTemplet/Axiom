@@ -61,7 +61,9 @@ then with the same statements as text:
           }
           (show
             (axqQueryOn db
-              (Query "SELECT name FROM people WHERE age > ? ORDER BY name" (vec1 (VInt minAge)))))
+              (Query
+                :text "SELECT name FROM people WHERE age > ? ORDER BY name"
+                :params (vec1 (VInt minAge)))))
           {
             (let _ (axqClose db))
             0

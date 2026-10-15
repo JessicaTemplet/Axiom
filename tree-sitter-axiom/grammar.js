@@ -860,7 +860,6 @@ module.exports = grammar({
       $._literal,
       $.identifier,
       $.lambda,
-      $.let_expression,
       $.qualified_identifier,
       $.if_expression,
       $.while_expression,
@@ -900,23 +899,6 @@ module.exports = grammar({
       '(', 'lambda',
       '(', repeat(field('parameter', $._pattern)), ')',
       repeat(field('body', $._expression)),
-      ')',
-    ),
-
-    let_expression: $ => seq(
-      '(', 'let',
-      '(', repeat(field('binding', $.let_binding)), ')',
-      repeat(field('body', $._expression)),
-      ')',
-    ),
-
-    // `mut` marks the binding assignable by `set`. Optional, and
-    // absent means immutable, which is the default in the language.
-    let_binding: $ => seq(
-      '(',
-      optional(field('mutable', 'mut')),
-      field('pattern', $._pattern),
-      field('value', $._expression),
       ')',
     ),
 
@@ -992,7 +974,7 @@ module.exports = grammar({
     // `(parallel p ((a e1) (b e2) ...) body...)` - the region name, a
     // binding list of `(name expr)` pairs, one or more body expressions
     // (`self_host/parser.ax`'s `parseParallelExpr`). A binding is its own
-    // node rather than a `let_binding` because `mut` is refused here -
+    // node rather than a `local_binding` because `mut` is refused here -
     // the compiler makes it AX2001 (`tests/diagnostics/640-parallel-shape`)
     // and this grammar simply does not admit it.
     parallel_expression: $ => seq(

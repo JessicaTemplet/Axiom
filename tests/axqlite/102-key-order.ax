@@ -46,31 +46,34 @@
 ; fraction.
 (:: cmpIntReal (-> Int Float Int))
 (fn (cmpIntReal n x)
-  (let ((two63 (floatFromBits (<< (+ 1023 63) 52))))
+  {
+    (let two63 (floatFromBits (<< (+ 1023 63) 52)))
     (if (>= x two63)
       -1
       (if (< x (- 0.0 two63))
         1
-        (let ((t
-          (as x Int)))
+        {
+          (let t (as x Int))
           (if (< n t)
             -1
             (if (> n t)
               1
-              (let ((frac
-                (- x (as t Float))))
+              {
+                (let frac (- x (as t Float)))
                 (if (> frac 0.0)
                   -1
                   (if (< frac 0.0)
                     1
-                    0))))))))))
+                    0))
+              }))
+        }))
+  })
 
 (:: refCompare (-> Value Value Int))
 (fn (refCompare a b)
-  (let (
-    (ca (classOf a))
-    (cb (classOf b))
-  )
+  {
+    (let ca (classOf a))
+    (let cb (classOf b))
     (if (!= ca cb)
       (sign (- ca cb))
       (match a
@@ -102,7 +105,8 @@
           (match b
             ((VBlob y) (sign (strCmp x y)))
             (_ 0))
-        )))))
+        )))
+  })
 
 (:: keyOf (-> Value String))
 (fn (keyOf v)
@@ -114,40 +118,41 @@
 (:: checkPairs (-> Tally (Vec Value) String Int))
 ;@axiom:effect(io)
 (fn (checkPairs t vals label)
-  (let (
-    (keys vecNew)
-    (mut bad 0)
-    (mut pairs 0)
-  )
+  {
+    (let keys vecNew)
+    (let mut bad 0)
+    (let mut pairs 0)
     {
       (for v in vals
         (vecPush keys (keyOf v)))
       (for i in 0..(vecLen vals)
         (for j in 0..(vecLen vals)
-          (let (
-            (want (refCompare (vecGet vals i) (vecGet vals j)))
-            (got (sign (keyCompare (vecGet keys i) (vecGet keys j))))
-          )
+          {
+            (let want (refCompare (vecGet vals i) (vecGet vals j)))
+            (let got (sign (keyCompare (vecGet keys i) (vecGet keys j))))
             {
               (set pairs (+ pairs 1))
               (if (! (== want got))
                 {
                   (if (< bad 5)
-                    (let (
-                      (a (showValue (vecGet vals i)))
-                      (b (showValue (vecGet vals j)))
-                    )
-                      (println "  order differs: {a} vs {b}: want {want} got {got}")))
+                    {
+                      (let a (showValue (vecGet vals i)))
+                      (let b (showValue (vecGet vals j)))
+                      (println "  order differs: {a} vs {b}: want {want} got {got}")
+                    })
                   (set bad (+ bad 1))
                 })
-            })))
+            }
+          }))
       (check t (== bad 0) (concat label ": key order is value order"))
       (println "{label}: {pairs} pairs")
-    }))
+    }
+  })
 
 (:: randomValue (-> Rng Value))
 (fn (randomValue r)
-  (let ((kind (rngBelow r 7)))
+  {
+    (let kind (rngBelow r 7))
     (if (== kind 0)
       VNull
       (if (== kind 1)
@@ -156,17 +161,22 @@
           (VInt (- (rngBelow r 2001) 1000))
           (if (== kind 3)
             ; any bits but a NaN's
-            (let ((b (rngNext r)))
-              (let ((x (floatFromBits b)))
+            {
+              (let b (rngNext r))
+              {
+                (let x (floatFromBits b))
                 (if (floatIsNan x)
                   (VReal 0.5)
-                  (VReal x))))
+                  (VReal x))
+              }
+            }
             (if (== kind 4)
               ; small REALs, often integral, near the small integers
               (VReal (/ (as (- (rngBelow r 4001) 2000) Float) 2.0))
               (if (== kind 5)
                 (VText (rngBytes r (rngBelow r 4) 3))
-                (VBlob (rngBytes r (rngBelow r 4) 3))))))))))
+                (VBlob (rngBytes r (rngBelow r 4) 3))))))))
+  })
 
 ; Numbers come back as VInt when integral and in range, else VReal
 ; with the same bits (-0.0 comes back as the integer 0).
@@ -177,14 +187,14 @@
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (t tallyNew)
-    (r (rngNew 102))
-    (edges edgeValues)
-  )
+  {
+    (let t tallyNew)
+    (let r (rngNew 102))
+    (let edges edgeValues)
     {
       (checkPairs t edges "edge values")
-      (let ((rand vecNew))
+      {
+        (let rand vecNew)
         {
           (for i in 0..400
             (vecPush rand (randomValue r)))
@@ -192,7 +202,8 @@
           (for i in 0..60
             (vecPush rand (vecGet edges (rngBelow r (vecLen edges)))))
           (checkPairs t rand "random values")
-        })
+        }
+      }
       ; equal values, equal keys
       (check t (strEq (keyOf (VInt 2)) (keyOf (VReal 2.0))) "2 and 2.0 are one key")
       (check t (strEq (keyOf (VInt 0)) (keyOf (VReal (floatFromBits intMin))))
@@ -207,7 +218,8 @@
           0)
         "2^53 as REAL < 2^53 + 1")
       ; decoding gives the values back
-      (let ((mut bad 0))
+      {
+        (let mut bad 0)
         {
           (for v in edges
             (match (keyDecode (keyOf v))
@@ -240,46 +252,50 @@
             "an unterminated text is corrupt")
           (check t (== (codeOf (keyDecode (bytesStr (vecPush vecNew 9)))) axqCorrupt)
             "an unknown tag is corrupt")
-        })
+        }
+      }
       ; two-value keys order as tuples, first value first
-      (let (
-        (mut bad 0)
-        (tuples vecNew)
-        (keys vecNew)
-      )
+      {
+        (let mut bad 0)
+        (let tuples vecNew)
+        (let keys vecNew)
         {
           (for i in 0..150
-            (let (
-              (a (randomValue r))
-              (b (randomValue r))
-            )
+            {
+              (let a (randomValue r))
+              (let b (randomValue r))
               {
                 (vecPush tuples (vecPush (vecPush vecNew a) b))
                 (vecPush keys
                   (match (keyEncode (vecPush (vecPush vecNew a) b))
                     ((Ok k) k)
                     ((Err e) "")))
-              }))
+              }
+            })
           (for i in 0..150
             (for j in 0..150
-              (let (
-                (ta (vecGet tuples i))
-                (tb (vecGet tuples j))
-              )
-                (let ((first (refCompare (vecGet ta 0) (vecGet tb 0))))
-                  (let ((want
-                    (if (!= first 0)
-                      first
-                      (refCompare (vecGet ta 1) (vecGet tb 1)))))
+              {
+                (let ta (vecGet tuples i))
+                (let tb (vecGet tuples j))
+                {
+                  (let first (refCompare (vecGet ta 0) (vecGet tb 0)))
+                  {
+                    (let want
+                      (if (!= first 0)
+                        first
+                        (refCompare (vecGet ta 1) (vecGet tb 1))))
                     (if (! (== want (sign (keyCompare (vecGet keys i) (vecGet keys j)))))
-                      (set bad (+ bad 1))))))))
+                      (set bad (+ bad 1)))
+                  }
+                }
+              }))
           (check t (== bad 0) "two-value keys order as tuples")
-        })
+        }
+      }
       ; rowid keys: 8 bytes, numeric order, and back again
-      (let (
-        (mut bad 0)
-        (ids vecNew)
-      )
+      {
+        (let mut bad 0)
+        (let ids vecNew)
         {
           (for n in edgeInts
             (vecPush ids n))
@@ -298,48 +314,60 @@
                   (set bad (+ bad 1))
                 ))
               (for b in ids
-                (let ((want
-                  (if (< a b)
-                    -1
-                    (if (> a b)
-                      1
-                      0))))
+                {
+                  (let want
+                    (if (< a b)
+                      -1
+                      (if (> a b)
+                        1
+                        0)))
                   (if (! (== want (sign (keyCompare (keyRowid a) (keyRowid b)))))
-                    (set bad (+ bad 1)))))
+                    (set bad (+ bad 1)))
+                })
             })
           (check t (== bad 0) "rowid keys order as integers and round-trip")
           (check t (== (codeOf (keyRowidOf "abc")) axqCorrupt) "a 3-byte table key is corrupt")
           (match (keyIndexRowid (keyWithRowid (keyOf (VText "x")) -5))
             ((Ok n) (check t (== n -5) "an index key's rowid"))
             ((Err e) (check t false "an index key's rowid")))
-        })
+        }
+      }
       ; keyPrefixEnd: prefix <= k < end for every k starting with the prefix
-      (let ((mut bad 0))
+      {
+        (let mut bad 0)
         {
           (for i in 0..500
-            (let ((p
-              (rngBytes r (rngBelow r 5)
-                (if (== (% i 3) 0)
-                  256
-                  3))))
-              (let ((k (concat p (rngBytes r (rngBelow r 4) 256))))
+            {
+              (let p
+                (rngBytes r (rngBelow r 5)
+                  (if (== (% i 3) 0)
+                    256
+                    3)))
+              {
+                (let k (concat p (rngBytes r (rngBelow r 4) 256)))
                 (match (keyPrefixEnd p)
                   ; only the empty prefix, or one of all FF bytes, has no end
                   ((None)
-                    (let ((mut allFf true))
+                    {
+                      (let mut allFf true)
                       {
                         (for j in 0..(strLen p)
                           (if (! (== (strByte p j) 255))
                             (set allFf false)))
                         (if (! allFf)
                           (set bad (+ bad 1)))
-                      })
+                      }
+                    }
                   )
                   ((Some e)
                     (if (! (&& (<= (keyCompare p k) 0) (< (keyCompare k e) 0)))
                       (set bad (+ bad 1)))
-                  )))))
+                  ))
+              }
+            })
           (check t (== bad 0) "keyPrefixEnd bounds every key with its prefix")
-        })
+        }
+      }
       (tallyReport t "102-key-order")
-    }))
+    }
+  })

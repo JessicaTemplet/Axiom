@@ -1105,7 +1105,7 @@ row_n=0
 while IFS='|' read -r ty want; do
   [[ -z "$ty" ]] && continue
   row_n=$((row_n + 1))
-  printf '(:: g (-> %s Int))\n\n(fn (g x) 0)\n\n(:: main Int)\n\n(fn (main) (let ((h g)) 0))\n' "$ty" > "$tw/t.ax"
+  printf '(:: g (-> %s Int))\n\n(fn (g x) 0)\n\n(:: main Int)\n\n(fn (main) { (let h g) 0 })\n' "$ty" > "$tw/t.ax"
   if ! ( cd "$tw" && AXIOM_STDLIB="$repo_root/stdlib" "$axc" build \
            --input t.ax --output t.bin --emit-llvm ) >/dev/null 2>&1; then
     echo "FAIL types: the probe for \`$ty\` does not compile - docs/status.md names a type the compiler will not take"

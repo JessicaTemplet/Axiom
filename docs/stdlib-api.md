@@ -116,7 +116,7 @@ Axqlite - an embedded, single-file, transactional database.
 | `axqRun` | value | `(-> Statement (Vec Value) (Result Int Error))` | `Alloc,IO,Mut` |  | Run a statement that returns no rows with `params`, one per parameter. Answers the rows changed. A SELECT is `axqMisuse`: use `axqQuery` or `axqQueryEach`. |
 | `axqQuery` | value | `(-> Statement (Vec Value) (Result Rows Error))` | `Alloc,IO,Mut` |  | Run a SELECT with `params` and answer all its rows. |
 | `axqQueryEach` | value | `(-> Statement (Vec Value) (-> Row (Result Bool Error)) (Result Int Error))` | `Alloc,IO,Mut` |  | Run a SELECT with `params`, calling `f` with each row as it is produced. Stops when `f` answers `Ok false` or `Err`, and answers that `Err`, or else the number of rows `f` was called with. |
-| `axqSql` | value | `(-> String Query)` | `Alloc,Mut` |  | A statement's text with no parameters: `(axqSql "SELECT 1")` is `(Query "SELECT 1" vecNew)` without building the empty vector. Give the parameters with `(Query text params)`. |
+| `axqSql` | value | `(-> String Query)` | `Alloc,Mut` |  | A statement's text with no parameters: `(axqSql "SELECT 1")` is `(Query :text "SELECT 1" :params vecNew)` without building the empty vector. Give the parameters with `(Query :text text :params params)`. |
 | `axqRunOn` | value | `(-> Connection Query (Result Int Error))` | `Alloc,IO,Mut` |  | Run a query that returns no rows. Answers the rows changed. |
 | `axqQueryOn` | value | `(-> Connection Query (Result Rows Error))` | `Alloc,IO,Mut` |  | Run a query and answer all its rows. |
 | `axqAll` | value | `(-> Connection Query (Result (Vec Row) Error))` | `Alloc,IO,Mut` |  | Run a query and answer just its rows, without the `Rows` wrapper: the everyday form when the column names are not needed. |
@@ -273,8 +273,8 @@ Axqlite.AxqlExec - planning and running one AXQL statement.
 Axqlite.AxqlMacro - AXQL statements written as Axiom forms.
 
     (axqlSelect users (id name) (where (> age (int minAge))) (orderBy (age desc)) (limit 10))
-        ; (Query "SELECT id, name FROM users WHERE age > ? ORDER BY age DESC LIMIT ?"
-        ;        [(VInt minAge), (VInt 10)])
+        ; (Query :text "SELECT id, name FROM users WHERE age > ? ORDER BY age DESC LIMIT ?"
+        ;        :params [(VInt minAge) (VInt 10)])
     (axqlInsert users (name age) (values (text "Ada") (int 36)))
     (axqlUpdate users (assign (age (+ age (int 1)))) (where (= id (int uid))))
     (axqlDelete users (where (< age (int 18))))
@@ -390,17 +390,20 @@ Axqlite.AxqlSchema - the tables and indices a database holds.
 
 Axqlite.Btree - the one B+tree AXQLite stores tables and indices in.
 
-    {
-      (pagerBeginWrite p)?
-      (let ((root (btreeCreate p btreeTable)?))
         {
-          (btreePut p root (keyRowid 1) record)?
-          (pagerCommit p)
-        })
-    }
-    (btreeGet p root (keyRowid 1))        ; (Ok (Some record))
-    (btreeScan p root None None true
-      (lambda (key value) (Ok true)))     ; every entry, in key order
+          (pagerBeginWrite p)?
+          {
+            (let root (btreeCreate p btreeTable)?)
+            {
+              (btreePut p root (keyRowid 1) record)?
+              (pagerCommit p)
+            }
+          }
+        }
+        (btreeGet p root (keyRowid 1))  ; (Ok (Some record))
+        (btreeScan p root None None true (lambda (key value) (Ok true)))
+
+    ; every entry, in key order
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -434,10 +437,16 @@ and recovery.
       ((Ok p)
         {
           (pagerBeginWrite p)?
-          (let ((n (pagerAlloc p)?)          ; a fresh page number
-                (page (pagerWrite p n)?))    ; its bytes, journalled first
-            { (pagerPutBe page 0 1 5) (pagerCommit p) })
-        })
+          {
+            (let n (pagerAlloc p)?)  ; a fresh page number
+            (let page (pagerWrite p n)?)  ; its bytes, journalled first
+            {
+              (pagerPutBe page 0 1 5)
+              (pagerCommit p)
+            }
+          }
+        }
+      )
       ((Err e) ...))
 
 | Name | Kind | Type | Effects | Contracts | Summary |
@@ -682,15 +691,18 @@ Chrono - dates, times of day and durations, with no time zones.
 Crypto.Aead - nonces for authenticated encryption, and a sequence
 that never hands out the same one twice.
 
-    (let ((key (unwrapOr (aes256GcmKeyGenerate) ...))
-          (seq (unwrapOr (nonceSequenceNew "srv1") ...)))
+    {
+      (let key (unwrapOr (aes256GcmKeyGenerate) ...))
+      (let seq (unwrapOr (nonceSequenceNew "srv1") ...))
       (match (nonceSequenceNext seq)
         ((Ok nonce)
           {
-            (saveCounter (nonceSequencePosition seq))   ; persist first
-            (aes256GcmSeal key nonce aad message)       ; then seal
-          })
-        ((Err e) (Err e))))
+            (saveCounter (nonceSequencePosition seq))  ; persist first
+            (aes256GcmSeal key nonce aad message)  ; then seal
+          }
+        )
+        ((Err e) (Err e)))
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -713,17 +725,17 @@ that never hands out the same one twice.
 Crypto.Aes - the AES block cipher (FIPS 197), all three key sizes,
 as a constant-time bitsliced kernel. Hazardous layer.
 
-    (let (
-      (sched (strAlloc (aesScheduleBytes 32)))
-      (work (strAlloc aesKeyWorkBytes))
-      (q (strAlloc aesStateBytes))
-    )
+    {
+      (let sched (strAlloc (aesScheduleBytes 32)))
+      (let work (strAlloc aesKeyWorkBytes))
+      (let q (strAlloc aesStateBytes))
       {
         (aesKeyExpand (strData sched) (strData key) 32 (strData work))
         (aesEncryptBlocks (strData sched) 14 (strData pt) (strData ct) 1 (strData q))
         (ctWipe (strData sched) (aesScheduleBytes 32))
         (ctWipe (strData q) aesStateBytes)
-      })
+      }
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -744,12 +756,17 @@ as a constant-time bitsliced kernel. Hazardous layer.
 Crypto.AesGcm - AES-128-GCM and AES-256-GCM authenticated
 encryption (SP 800-38D), one message at a time.
 
-    (let ((key (unwrapOr (aes256GcmKeyGenerate) ...))
-          (nonce (unwrapOr (aeadNonceRandom) ...)))
+    {
+      (let key (unwrapOr (aes256GcmKeyGenerate) ...))
+      (let nonce (unwrapOr (aeadNonceRandom) ...))
       (match (aes256GcmSeal key nonce "header" "attack at dawn")
-        ((Ok sealed)                       ; ciphertext || 16-byte tag
-          (aes256GcmOpen key nonce "header" sealed))   ; (Ok "attack at dawn")
-        ((Err e) (Err e))))
+        ((Ok sealed)
+          ; ciphertext || 16-byte tag
+          (aes256GcmOpen key nonce "header" sealed)
+        )
+        ; (Ok "attack at dawn")
+        ((Err e) (Err e)))
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -834,9 +851,11 @@ Crypto.ChaCha20 - the ChaCha20 stream cipher of RFC 8439, with a
 256-bit key, a 96-bit nonce and a 32-bit block counter. Hazardous
 layer.
 
-    (let ((block (strAlloc chacha20BlockBytes)))
-      (chacha20Block (strData block) keyAddr 1 (strData nonce)))
-      ; block holds keystream block 1 for that key and nonce
+      {
+        (let block (strAlloc chacha20BlockBytes))
+        (chacha20Block (strData block) keyAddr 1 (strData nonce))
+      }
+    ; block holds keystream block 1 for that key and nonce
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -851,12 +870,17 @@ layer.
 Crypto.ChaCha20Poly1305 - the ChaCha20-Poly1305 AEAD of RFC 8439,
 one message at a time.
 
-    (let ((key (unwrapOr (chacha20Poly1305KeyGenerate) ...))
-          (nonce (unwrapOr (aeadNonceRandom) ...)))
+    {
+      (let key (unwrapOr (chacha20Poly1305KeyGenerate) ...))
+      (let nonce (unwrapOr (aeadNonceRandom) ...))
       (match (chacha20Poly1305Seal key nonce "header" "attack at dawn")
-        ((Ok sealed)                       ; ciphertext || 16-byte tag
-          (chacha20Poly1305Open key nonce "header" sealed))   ; (Ok "attack at dawn")
-        ((Err e) (Err e))))
+        ((Ok sealed)
+          ; ciphertext || 16-byte tag
+          (chacha20Poly1305Open key nonce "header" sealed)
+        )
+        ; (Ok "attack at dawn")
+        ((Err e) (Err e)))
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -913,12 +937,15 @@ Crypto.Curve25519 - the Ed25519 group: points of the twisted Edwards
 curve -x^2 + y^2 = 1 + d x^2 y^2 over GF(2^255 - 19), their
 arithmetic and their 32-byte encoding.
 
-    (let ((h (memAlloc ge25519P3Bytes)) (enc (strAlloc 32)))
+    {
+      (let h (memAlloc ge25519P3Bytes))
+      (let enc (strAlloc 32))
       {
-        (ge25519ScalarMultBase h (strData scalar))   ; h = [scalar]B
-        (ge25519ToBytes (strData enc) h)             ; RFC 8032 encoding
-        (ge25519FromBytesVartime h (strData enc))    ; 0: decoded again
-      })
+        (ge25519ScalarMultBase h (strData scalar))  ; h = [scalar]B
+        (ge25519ToBytes (strData enc) h)  ; RFC 8032 encoding
+        (ge25519FromBytesVartime h (strData enc))  ; 0: decoded again
+      }
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -1019,15 +1046,18 @@ Crypto.Errors - the error codes every Crypto module answers.
 Crypto.Field25519 - arithmetic modulo p = 2^255 - 19, the field
 under X25519 and Ed25519.
 
-    (let ((a (memAlloc fe25519Bytes)) (b (memAlloc fe25519Bytes)))
+    {
+      (let a (memAlloc fe25519Bytes))
+      (let b (memAlloc fe25519Bytes))
       {
-        (fe25519FromBytes a (strData u))   ; 32 little-endian bytes in
-        (fe25519Sq b a)                    ; b = a^2
-        (fe25519Invert b b)                ; b = a^-2
-        (fe25519ToBytes (strData out) b)   ; 32 canonical bytes out
+        (fe25519FromBytes a (strData u))  ; 32 little-endian bytes in
+        (fe25519Sq b a)  ; b = a^2
+        (fe25519Invert b b)  ; b = a^-2
+        (fe25519ToBytes (strData out) b)  ; 32 canonical bytes out
         (ctWipe a fe25519Bytes)
         (ctWipe b fe25519Bytes)
-      })
+      }
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -1060,13 +1090,15 @@ under X25519 and Ed25519.
 Crypto.Ghash - GHASH, GCM's universal hash (SP 800-38D 6.4), as a
 constant-time carry-less multiplication. Hazardous layer.
 
-    (let ((y (strAlloc 16)))
       {
-        (ghashUpdate (strData y) hAddr (strData aad) (strLen aad))
-        (ghashUpdate (strData y) hAddr (strData ct) (strLen ct))
-        (ghashUpdate (strData y) hAddr (strData lengths) 16)
-        ; y now holds GHASH_H(A || pad || C || pad || len(A) || len(C))
-      })
+        (let y (strAlloc 16))
+        {
+          (ghashUpdate (strData y) hAddr (strData aad) (strLen aad))
+          (ghashUpdate (strData y) hAddr (strData ct) (strLen ct))
+          (ghashUpdate (strData y) hAddr (strData lengths) 16)
+        }
+      }
+    ; y now holds GHASH_H(A || pad || C || pad || len(A) || len(C))
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -1106,18 +1138,24 @@ SHA-256 and SHA-512.
 
 Crypto.Hmac - HMAC-SHA-256 and HMAC-SHA-512.
 
-    (match (hmacSha256KeyFromSecret k)             ; k : SecretBytes
+    (match (hmacSha256KeyFromSecret k)
+      ; k : SecretBytes
       ((Ok key)
-        (let ((tag (hmacSha256 key "message")))      ; 32 bytes
-          (hmacSha256Verify key "message" tag)))     ; true
+        {
+          (let tag (hmacSha256 key "message"))  ; 32 bytes
+          (hmacSha256Verify key "message" tag)  ; true
+        }
+      )
       ((Err e) false))
 
-    (let ((m (hmacSha256New key)))                  ; streaming
+    {
+      (let m (hmacSha256New key))  ; streaming
       {
         (hmacSha256Update m "mess")
         (hmacSha256Update m "age")
-        (hmacSha256Final m)                          ; the same tag
-      })
+        (hmacSha256Final m)  ; the same tag
+      }
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -1184,8 +1222,11 @@ Crypto.Obfuscate - authenticated envelopes for embedded binary assets.
 Crypto.Poly1305 - the Poly1305 one-time authenticator of RFC 8439,
 in constant time with 26-bit limbs. Hazardous layer.
 
-    (let ((tag (strAlloc 16)) (st (strAlloc poly1305StateBytes)))
-      (poly1305Mac (strData tag) oneTimeKeyAddr (strData msg) (strLen msg) (strData st)))
+    {
+      (let tag (strAlloc 16))
+      (let st (strAlloc poly1305StateBytes))
+      (poly1305Mac (strData tag) oneTimeKeyAddr (strData msg) (strLen msg) (strData st))
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -1224,12 +1265,14 @@ Crypto.Random - cryptographically secure random values.
 
 Crypto.Secret - where key material lives.
 
-    (let ((k (unwrapOr (secretRandom 32) ...)))
+    {
+      (let k (unwrapOr (secretRandom 32) ...))
       {
-        (println "{k}")          ; prints <SecretBytes>, never the bytes
-        (secretLen k)            ; 32
-        (secretWipe k)           ; zeroed, unlocked, unmapped
-      })
+        (println "{k}")  ; prints <SecretBytes>, never the bytes
+        (secretLen k)  ; 32
+        (secretWipe k)  ; zeroed, unlocked, unmapped
+      }
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -1260,12 +1303,14 @@ Crypto.Sha2 - SHA-256, SHA-384 and SHA-512.
     (hexEncode (sha256 "abc"))
     ; "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 
-    (let ((h sha512New))
+    {
+      (let h sha512New)
       {
         (sha512Update h "a")
         (sha512Update h "bc")
-        (sha512Final h)          ; the same 64 bytes as (sha512 "abc")
-      })
+        (sha512Final h)  ; the same 64 bytes as (sha512 "abc")
+      }
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
@@ -1322,12 +1367,14 @@ under them.
     (hexEncode (shake128 "" 16))
     ; "7f9c2ba4e88f827d616045507605853e"
 
-    (let ((x shake256New))           ; an XOF, read in pieces
+    {
+      (let x shake256New)  ; an XOF, read in pieces
       {
         (shake256Absorb x "seed")
-        (shake256Squeeze x 32)       ; output bytes 0-31
-        (shake256Squeeze x 32)       ; output bytes 32-63
-      })
+        (shake256Squeeze x 32)  ; output bytes 0-31
+        (shake256Squeeze x 32)  ; output bytes 32-63
+      }
+    }
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|

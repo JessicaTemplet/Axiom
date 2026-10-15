@@ -29,14 +29,16 @@
 ; Returns `box`, so the caller can thread it through a tail call.
 (pub :: addCell (-> Int Int Int))
 (pub fn (addCell box i)
-  (let ((cell (memAlloc 16)))
+  {
+    (let cell (memAlloc 16))
     {
       (memSetWord cell 0 i)
       (memSetWord cell 1 (* i i))
       (vecPush (memGetWordVec box 0) cell)
       (memSetWord box 1 (+ (memGetWord box 1) 1))
       box
-    }))
+    }
+  })
 
 ; The loop under test: self tail call, allocating body, and the only
 ; path to the new memory runs through `box`'s first field.
@@ -55,19 +57,20 @@
 (pub fn (intactFrom cells i acc)
   (if (>= i (vecLen cells))
     acc
-    (let ((cell (vecGet cells i)))
+    {
+      (let cell (vecGet cells i))
       (intactFrom cells (+ i 1)
         (if (&& (== (memGetWord cell 0) i) (== (memGetWord cell 1) (* i i)))
           (+ acc 1)
-          acc)))))
+          acc))
+    }))
 
 (pub :: main Int)
 ;@axiom:effect(io)
 (pub fn (main)
-  (let (
-    (box (as (Box vecNew 0) Int))
-    (filled (fillCells box 0 40))
-  )
+  {
+    (let box (as (Box :cells vecNew :pushed 0) Int))
+    (let filled (fillCells box 0 40))
     {
       (println (as (memGetWord filled 1) Int))
       ; 40: pushes counted
@@ -79,4 +82,5 @@
       (println (as (memGetWord (vecGet (memGetWordVec filled 0) 39) 1) Int))
       ; 1521 = 39*39
       0
-    }))
+    }
+  })

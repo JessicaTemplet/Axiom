@@ -26,61 +26,64 @@
 
 (:: pieces256 (-> HmacSha256 String Int String))
 (fn (pieces256 m msg c)
-  (let (
-    (n (strLen msg))
-    (mut off 0)
-    (mut turn 0)
-  )
+  {
+    (let n (strLen msg))
+    (let mut off 0)
+    (let mut turn 0)
     {
       (hmacSha256Update m "throwaway")
       (hmacSha256Final m)
       (while (< off n)
-        (let ((k
-          (if (< c (- n off))
-            c
-            (- n off))))
+        {
+          (let k
+            (if (< c (- n off))
+              c
+              (- n off)))
           {
             (if (== (& turn 1) 0)
               (hmacSha256Update m (strSlice msg off k))
               (hmacSha256UpdateAddr m (+ (strData msg) off) k))
             (set off (+ off k))
             (set turn (+ turn 1))
-          }))
+          }
+        })
       (hmacSha256Final m)
-    }))
+    }
+  })
 
 (:: pieces512 (-> HmacSha512 String Int String))
 (fn (pieces512 m msg c)
-  (let (
-    (n (strLen msg))
-    (mut off 0)
-    (mut turn 0)
-  )
+  {
+    (let n (strLen msg))
+    (let mut off 0)
+    (let mut turn 0)
     {
       (hmacSha512Update m "throwaway")
       (hmacSha512Final m)
       (while (< off n)
-        (let ((k
-          (if (< c (- n off))
-            c
-            (- n off))))
+        {
+          (let k
+            (if (< c (- n off))
+              c
+              (- n off)))
           {
             (if (== (& turn 1) 0)
               (hmacSha512Update m (strSlice msg off k))
               (hmacSha512UpdateAddr m (+ (strData msg) off) k))
             (set off (+ off k))
             (set turn (+ turn 1))
-          }))
+          }
+        })
       (hmacSha512Final m)
-    }))
+    }
+  })
 
 (:: macs (-> Int String String Int Macs))
 ;@axiom:effect(io)
 (fn (macs alg key msg c)
-  (let (
-    (none (Macs "" "" "" "" false))
-    (n (strLen msg))
-  )
+  {
+    (let none (Macs :oneShot "" :streamed "" :copied "" :raw "" :verifies false))
+    (let n (strLen msg))
     (match (secretFromString key)
       ((Err _) none)
       ((Ok s)
@@ -88,85 +91,118 @@
           (match (hmacSha256KeyFromSecret s)
             ((Err _) none)
             ((Ok k)
-              (let (
-                (tag (hmacSha256 k msg))
-                (raw (bytesNew 32))
-                (m (hmacSha256New k))
-              )
-                (let ((streamed (pieces256 m msg c)))
+              {
+                (let tag (hmacSha256 k msg))
+                (let raw (bytesNew 32))
+                (let m (hmacSha256New k))
+                {
+                  (let streamed (pieces256 m msg c))
                   {
                     (hmacSha256Update m (strSlice msg 0 (/ n 2)))
-                    (let ((g (hmacSha256Copy m)))
-                      (let ((copied
-                        {
-                          (hmacSha256Update m "different")
-                          (hmacSha256Update g (strSlice msg (/ n 2) (- n (/ n 2))))
-                          (hmacSha256Final g)
-                        }))
+                    {
+                      (let g (hmacSha256Copy m))
+                      {
+                        (let copied
+                          {
+                            (hmacSha256Update m "different")
+                            (hmacSha256Update g (strSlice msg (/ n 2) (- n (/ n 2))))
+                            (hmacSha256Final g)
+                          })
                         {
                           (hmacSha256Raw (strData key) (strLen key) (strData msg) n (strData raw))
-                          (let ((ok (hmacSha256Verify k msg tag)))
+                          {
+                            (let ok (hmacSha256Verify k msg tag))
                             {
                               (hmacSha256Wipe m)
                               (hmacSha256Wipe g)
                               (hmacSha256KeyWipe k)
                               (secretWipe s)
-                              (Macs tag streamed copied raw ok)
-                            })
-                        }))
-                  }))
+                              (Macs
+                                :oneShot tag
+                                :streamed streamed
+                                :copied copied
+                                :raw raw
+                                :verifies ok)
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             ))
           (match (hmacSha512KeyFromSecret s)
             ((Err _) none)
             ((Ok k)
-              (let (
-                (tag (hmacSha512 k msg))
-                (raw (bytesNew 64))
-                (m (hmacSha512New k))
-              )
-                (let ((streamed (pieces512 m msg c)))
+              {
+                (let tag (hmacSha512 k msg))
+                (let raw (bytesNew 64))
+                (let m (hmacSha512New k))
+                {
+                  (let streamed (pieces512 m msg c))
                   {
                     (hmacSha512Update m (strSlice msg 0 (/ n 2)))
-                    (let ((g (hmacSha512Copy m)))
-                      (let ((copied
-                        {
-                          (hmacSha512Update m "different")
-                          (hmacSha512Update g (strSlice msg (/ n 2) (- n (/ n 2))))
-                          (hmacSha512Final g)
-                        }))
+                    {
+                      (let g (hmacSha512Copy m))
+                      {
+                        (let copied
+                          {
+                            (hmacSha512Update m "different")
+                            (hmacSha512Update g (strSlice msg (/ n 2) (- n (/ n 2))))
+                            (hmacSha512Final g)
+                          })
                         {
                           (hmacSha512Raw (strData key) (strLen key) (strData msg) n (strData raw))
-                          (let ((ok (hmacSha512Verify k msg tag)))
+                          {
+                            (let ok (hmacSha512Verify k msg tag))
                             {
                               (hmacSha512Wipe m)
                               (hmacSha512Wipe g)
                               (hmacSha512KeyWipe k)
                               (secretWipe s)
-                              (Macs tag streamed copied raw ok)
-                            })
-                        }))
-                  }))
+                              (Macs
+                                :oneShot tag
+                                :streamed streamed
+                                :copied copied
+                                :raw raw
+                                :verifies ok)
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             )))
-      ))))
+      ))
+  })
 
 ; The tag of `msg` from a streaming state keyed by address, fed in two
 ; pieces.
 (:: rawStreamed (-> Int String String String))
 (fn (rawStreamed alg key msg)
-  (let ((n (strLen msg)))
+  {
+    (let n (strLen msg))
     (if (== alg 256)
-      (let ((m (hmacSha256NewRaw (strData key) (strLen key))))
+      {
+        (let m (hmacSha256NewRaw (strData key) (strLen key)))
         {
           (hmacSha256Update m (strSlice msg 0 (/ n 3)))
           (hmacSha256Update m (strSlice msg (/ n 3) (- n (/ n 3))))
           (hmacSha256Final m)
-        })
-      (let ((m (hmacSha512NewRaw (strData key) (strLen key))))
+        }
+      }
+      {
+        (let m (hmacSha512NewRaw (strData key) (strLen key)))
         {
           (hmacSha512Update m (strSlice msg 0 (/ n 3)))
           (hmacSha512Update m (strSlice msg (/ n 3) (- n (/ n 3))))
           (hmacSha512Final m)
-        }))))
+        }
+      })
+  })
 
 ; Whether `verify` accepts `tag` for `msg` under a key made from `key`.
 (:: verifies (-> Int String String String Bool))
@@ -175,30 +211,36 @@
   (match (secretFromString key)
     ((Err _) false)
     ((Ok s)
-      (let ((r
-        (if (== alg 256)
-          (match (hmacSha256KeyFromSecret s)
-            ((Err _) false)
-            ((Ok k)
-              (let ((v (hmacSha256Verify k msg tag)))
+      {
+        (let r
+          (if (== alg 256)
+            (match (hmacSha256KeyFromSecret s)
+              ((Err _) false)
+              ((Ok k)
                 {
-                  (hmacSha256KeyWipe k)
-                  v
-                })
-            ))
-          (match (hmacSha512KeyFromSecret s)
-            ((Err _) false)
-            ((Ok k)
-              (let ((v (hmacSha512Verify k msg tag)))
+                  (let v (hmacSha256Verify k msg tag))
+                  {
+                    (hmacSha256KeyWipe k)
+                    v
+                  }
+                }
+              ))
+            (match (hmacSha512KeyFromSecret s)
+              ((Err _) false)
+              ((Ok k)
                 {
-                  (hmacSha512KeyWipe k)
-                  v
-                })
-            )))))
+                  (let v (hmacSha512Verify k msg tag))
+                  {
+                    (hmacSha512KeyWipe k)
+                    v
+                  }
+                }
+              ))))
         {
           (secretWipe s)
           r
-        })
+        }
+      }
     )))
 
 (:: isErrK (-> (Result HmacSha256Key Error) Bool))
@@ -211,60 +253,72 @@
 (:: forgedDead (-> HmacSha256 HmacSha256))
 ;@axiom:effect(unsafe)
 (fn (forgedDead m)
-  (let ((c (hmacSha256Copy m)))
-    (let ((s c.state))
+  {
+    (let c (hmacSha256Copy m))
+    {
+      (let s c.state)
       {
         (__store64 (strData s) (- (/ (strLen s) 8) 1) 0)
         c
-      })))
+      }
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (main)
-  (let (
-    (rfc (tallyNew "hmac-rfc4231"))
-    (wy (tallyNew "wycheproof-hmac"))
-    (diff (tallyNew "hmac-diff"))
-    (paths (tallyNew "hmac-paths"))
-    (api (tallyNew "hmac-api"))
-    (mut row 0)
-  )
+  {
+    (let rfc (tallyNew "hmac-rfc4231"))
+    (let wy (tallyNew "wycheproof-hmac"))
+    (let diff (tallyNew "hmac-diff"))
+    (let paths (tallyNew "hmac-paths"))
+    (let api (tallyNew "hmac-api"))
+    (let mut row 0)
     {
       (for line in (katLines "hmac-rfc4231.txt")
-        (let ((f (katFields line)))
-          (let (
-            (alg (katInt f 0))
-            (key (katBytes f 1))
-            (msg (katBytes f 2))
-            (tag (katBytes f 3))
-          )
-            (let ((r (macs alg key msg 7)))
+        {
+          (let f (katFields line))
+          {
+            (let alg (katInt f 0))
+            (let key (katBytes f 1))
+            (let msg (katBytes f 2))
+            (let tag (katBytes f 3))
+            {
+              (let r (macs alg key msg 7))
               {
                 (tallyBytes rfc tag (strSlice r.oneShot 0 (strLen tag))
                   (concat "HMAC-SHA-" (katText f 0)))
                 (tallyBytes rfc tag (strSlice r.raw 0 (strLen tag)) "by address")
-              }))))
-      (for name in (let ((v vecNew))
+              }
+            }
+          }
+        })
+      (for name in {
+        (let v vecNew)
         {
           (vecPush v "wycheproof-hmac-sha256.txt")
           (vecPush v "wycheproof-hmac-sha512.txt")
           v
-        })
+        }
+      }
         (for line in (katLines name)
-          (let ((f (katFields line)))
-            (let (
-              (alg (if (strEq name "wycheproof-hmac-sha256.txt")
-                256
-                512))
-              (bytes (/ (katInt f 0) 8))
-              (valid (strEq (katText f 1) "valid"))
-              (key (katBytes f 2))
-              (msg (katBytes f 3))
-              (tag (katBytes f 4))
-            )
-              (let ((r (macs alg key msg 13)))
-                (let ((prefix (strSlice r.oneShot 0 bytes)))
+          {
+            (let f (katFields line))
+            {
+              (let alg
+                (if (strEq name "wycheproof-hmac-sha256.txt")
+                  256
+                  512))
+              (let bytes (/ (katInt f 0) 8))
+              (let valid (strEq (katText f 1) "valid"))
+              (let key (katBytes f 2))
+              (let msg (katBytes f 3))
+              (let tag (katBytes f 4))
+              {
+                (let r (macs alg key msg 13))
+                {
+                  (let prefix (strSlice r.oneShot 0 bytes))
                   {
                     (if valid
                       (tallyBytes wy tag prefix "valid tag")
@@ -285,16 +339,21 @@
                           (verifies alg key msg tag)
                           (! (verifies alg key msg tag)))
                         "verify"))
-                  }))))))
+                  }
+                }
+              }
+            }
+          }))
       (for line in (katLines "hmac-diff.txt")
-        (let ((f (katFields line)))
-          (let (
-            (alg (katInt f 0))
-            (key (katBytes f 1))
-            (msg (katBytes f 2))
-            (tag (katBytes f 3))
-          )
-            (let ((r (macs alg key msg (+ 1 (% (* row 7) 150)))))
+        {
+          (let f (katFields line))
+          {
+            (let alg (katInt f 0))
+            (let key (katBytes f 1))
+            (let msg (katBytes f 2))
+            (let tag (katBytes f 3))
+            {
+              (let r (macs alg key msg (+ 1 (% (* row 7) 150))))
               {
                 (tallyBytes diff tag r.oneShot (concat "HMAC-SHA-" (katText f 0)))
                 (tallyBytes paths tag r.streamed "streamed")
@@ -303,7 +362,10 @@
                 (tallyBytes paths tag (rawStreamed alg key msg) "streamed, keyed by address")
                 (tallyCheck paths r.verifies "the tag verifies")
                 (set row (+ row 1))
-              }))))
+              }
+            }
+          }
+        })
       ; the refusals
       (tallyCheck api
         (isErrK
@@ -315,7 +377,8 @@
         ((Ok s)
           (match (hmacSha256KeyFromSecret s)
             ((Ok k)
-              (let ((tag (hmacSha256 k "message")))
+              {
+                (let tag (hmacSha256 k "message"))
                 {
                   (tallyCheck api (hmacSha256Verify k "message" tag) "a good tag verifies")
                   (tallyCheck api (! (hmacSha256Verify k "messagf" tag)) "another message does not")
@@ -333,43 +396,50 @@
                       }
                     )
                     ((Err _) (tallyCheck api false "export")))
-                  (let ((m (hmacSha256New k)))
+                  {
+                    (let m (hmacSha256New k))
                     {
                       (hmacSha256Update m "message")
-                      (let ((dead (forgedDead m)))
+                      {
+                        (let dead (forgedDead m))
                         {
                           (tallyCheck api (== (hmacSha256Update dead "x") -1)
                             "a state that is not live refuses input")
                           (tallyCheck api (strEq (hmacSha256Final dead) "") "and finishes empty")
-                        })
+                        }
+                      }
                       (tallyCheck api
                         (==
                           (hmacSha256Update
                             (HmacSha256
-                              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567")
+                              :state
+                                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567")
                             "x")
                           -1)
                         "a state over a string literal is refused")
-                      (tallyCheck api (== (hmacSha256Wipe (HmacSha256 "x")) -1)
+                      (tallyCheck api (== (hmacSha256Wipe (HmacSha256 :state "x")) -1)
                         "and a wipe writes nothing")
-                      (tallyCheck api (== (hmacSha256Update (HmacSha256 "short") "x") -1)
+                      (tallyCheck api (== (hmacSha256Update (HmacSha256 :state "short") "x") -1)
                         "a blob of the wrong size is refused")
                       (tallyCheck api (strEq (hmacSha256Final m) tag)
                         "the refusals changed nothing")
                       (hmacSha256Wipe m)
                       (tallyCheck api (== (hmacSha256Update m "x") -1)
                         "a wiped state refuses input")
-                    })
+                    }
+                  }
                   (hmacSha256KeyWipe k)
                   (secretWipe s)
-                })
+                }
+              }
             )
             ((Err _) (tallyCheck api false "key")))
         )
         ((Err _) (tallyCheck api false "secret")))
       (match hmacSha512KeyGenerate
         ((Ok k)
-          (let ((tag (hmacSha512 k "abc")))
+          {
+            (let tag (hmacSha512 k "abc"))
             {
               (tallyCheck api (== (strLen tag) 64) "a generated SHA-512 key gives 64-byte tags")
               (tallyCheck api (hmacSha512Verify k "abc" tag) "that verify")
@@ -382,7 +452,8 @@
                 )
                 ((Err _) (tallyCheck api false "export")))
               (hmacSha512KeyWipe k)
-            })
+            }
+          }
         )
         ((Err _) (tallyCheck api false "generate")))
       (match hmacSha256KeyGenerate
@@ -396,4 +467,5 @@
         ((Err _) (tallyCheck api false "generate")))
       (+ (+ (tallyReport rfc) (tallyReport wy))
         (+ (tallyReport diff) (+ (tallyReport paths) (tallyReport api))))
-    }))
+    }
+  })

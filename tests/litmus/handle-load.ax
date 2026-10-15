@@ -68,45 +68,55 @@
 (:: freedGet Int)
 ;@axiom:effect(io)
 (fn (freedGet)
-  (let ((h pageHandle))
+  {
+    (let h pageHandle)
     {
       (freeH 13 h)
       (println "freed")
       (getH 13 h)
       (println "UNREACHABLE: a get of a freed handle returned")
       1
-    }))
+    }
+  })
 
 (:: doubleFree Int)
 ;@axiom:effect(io)
 (fn (doubleFree)
-  (let ((h pageHandle))
+  {
+    (let h pageHandle)
     {
       (freeH 13 h)
       (println "freed")
       (freeH 13 h)
       (println "UNREACHABLE: a second free returned")
       1
-    }))
+    }
+  })
 
 ; ---- churn ----------------------------------------------------------------
 ; `n` handles of kind 11, each naming an address of its own, made,
 ; checked and freed; answers how many answered a wrong address.
 (:: churnOne (-> Int Int Int))
 (fn (churnOne who n)
-  (let ((mut wrong 0))
+  {
+    (let mut wrong 0)
     {
       (for i in 0..n
-        (let ((addr (+ (* who 1000000000) (* i 16))))
-          (let ((h (newH 11 addr)))
+        {
+          (let addr (+ (* who 1000000000) (* i 16)))
+          {
+            (let h (newH 11 addr))
             {
               (if (! (== (getH 11 h) addr))
                 (set wrong (+ wrong 1)))
               (if (! (== (freeH 11 h) addr))
                 (set wrong (+ wrong 1)))
-            })))
+            }
+          }
+        })
       wrong
-    }))
+    }
+  })
 
 (:: churn (-> Int Int))
 ;@axiom:effect(io)
@@ -119,14 +129,14 @@
     (c (churnOne 3 n))
     (d (churnOne 4 n))
   )
-    (let (
-      (checked (* 4 n))
-      (wrong (+ a (+ b (+ c d))))
-    )
+    {
+      (let checked (* 4 n))
+      (let wrong (+ a (+ b (+ c d))))
       {
         (println "churn {checked} checked, {wrong} wrong")
         0
-      })))
+      }
+    }))
 
 ; ---- race -----------------------------------------------------------------
 ; Wait at the word `bar` until both bindings of a round are there.
@@ -172,10 +182,12 @@
 (fn (race n)
   (match (sysMapShared 4096)
     ((Ok bar)
-      (let ((mut freed 0))
+      {
+        (let mut freed 0)
         {
           (for i in 0..n
-            (let ((h (newH 12 4096)))
+            {
+              (let h (newH 12 4096))
               {
                 (resetBar bar)
                 (parallel p (
@@ -183,10 +195,12 @@
                   (b (tryFree bar h))
                 )
                   (set freed (+ freed (+ a b))))
-              }))
+              }
+            })
           (println "race {freed} of {n} frees returned")
           0
-        })
+        }
+      }
     )
     ((Err e) 2)))
 
@@ -213,13 +227,17 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (sibling)
-  (let ((h (newH 14 4096)))
+  {
+    (let h (newH 14 4096))
     (parallel p ((a (freeIt h)))
-      (let ((st (getAfter h)))
+      {
+        (let st (getAfter h))
         {
           (println "sibling-free status {st}")
           0
-        }))))
+        }
+      })
+  })
 
 ; ---- the kinds of spawn handle --------------------------------------------
 (:: doubleJoin Int)
@@ -227,48 +245,52 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (doubleJoin)
-  (let ((h
-    (__par_spawn (lambda (x) (+ x 1)) 41)))
+  {
+    (let h (__par_spawn (lambda (x) (+ x 1)) 41))
     {
       (println (__par_join h))
       (println (__par_join h))
       (println "UNREACHABLE: a second join returned")
       1
-    }))
+    }
+  })
 
 (:: threadPid Int)
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 (fn (threadPid)
-  (let ((h
-    (__thread_spawn (lambda (x) (+ x 1)) 1)))
+  {
+    (let h (__thread_spawn (lambda (x) (+ x 1)) 1))
     {
       (println "spawned")
       (println (__spawn_pid h))
       (println "UNREACHABLE: a thread's handle answered a pid")
       1
-    }))
+    }
+  })
 
 (:: crossJoin Int)
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (crossJoin)
-  (let ((h
-    (__proc_spawn (lambda (x) (+ x 1)) 1)))
+  {
+    (let h (__proc_spawn (lambda (x) (+ x 1)) 1))
     {
       (println "spawned")
       (println (__thread_join h))
       (println "UNREACHABLE: a process's handle joined as a thread")
       1
-    }))
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((mode (sysArg 1)))
+  {
+    (let mode (sysArg 1))
     (if (strEq mode "freed-get")
       freedGet
       (if (strEq mode "double-free")
@@ -289,4 +311,5 @@
                       (println
                         "usage: handle-load freed-get | double-free | churn N | race N | sibling | double-join | thread-pid | cross-join")
                       2
-                    }))))))))))
+                    }))))))))
+  })

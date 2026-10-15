@@ -77,12 +77,11 @@
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (acc (memAlloc 8))
-    (i 111)
-    (n 222)
-    (v 333)
-  )
+  {
+    (let acc (memAlloc 8))
+    (let i 111)
+    (let n 222)
+    (let v 333)
     {
       ; --- 1. the range counts [0, n) ---
       (memSetWord acc 0 0)
@@ -104,7 +103,8 @@
         (memSetWord acc 0 (+ (memGetWord acc 0) 1)))
       (println (memGetWord acc 0))  ; 0
       ; --- 4. the bound is read once, range form ---
-      (let ((g vecNew))
+      {
+        (let g vecNew)
         {
           (vecPush g 10)
           (vecPush g 20)
@@ -116,9 +116,11 @@
             })
           (println (memGetWord acc 0))  ; 2, not runaway
           (println (Vec::vecLen g))  ; 4: the body really did push
-        })
+        }
+      }
       ; --- 5. the bound is read once, container form ---
-      (let ((g vecNew))
+      {
+        (let g vecNew)
         {
           (vecPush g 10)
           (vecPush g 20)
@@ -132,50 +134,59 @@
             })
           (println (memGetWord acc 0))  ; 4, not runaway
           (println (Vec::vecLen g))  ; 8
-        })
+        }
+      }
       ; --- 6. hygiene: a caller's i, n and v survive both shapes ---
       (memSetWord acc 0 0)
       (for k in 0..3
         (memSetWord acc 0 (+ (memGetWord acc 0) i)))
       (println (memGetWord acc 0))  ; 333
-      (let ((g vecNew))
+      {
+        (let g vecNew)
         {
           (vecPush g 1)
           (vecPush g 2)
           (for e in g
             (memSetWord acc 0 (+ (memGetWord acc 0) n)))
-        })
+        }
+      }
       (println (memGetWord acc 0))  ; 333 + 444 = 777
       (println i)  ; 111
       (println n)  ; 222
       (println v)  ; 333
       ; --- 7. a container of Strings, printed directly ---
-      (let ((ss vecNew))
+      {
+        (let ss vecNew)
         {
           (vecPush ss "one")
           (vecPush ss "two")
           (for s in ss
             (println s))
-        })
+        }
+      }
       ; one, two
       ; --- 8. a container of Ints, printed directly ---
-      (let ((ns vecNew))
+      {
+        (let ns vecNew)
         {
           (vecPush ns 7)
           (vecPush ns 8)
           (for w in ns
             (println w))
-        })
+        }
+      }
       ; 7, 8
       ; --- 9. an empty container runs zero times ---
       (memSetWord acc 0 0)
-      (let ((emp vecNew))
+      {
+        (let emp vecNew)
         {
           (vecPush emp 1)
           (vecPop emp)
           (for e in emp
             (memSetWord acc 0 (+ (memGetWord acc 0) 1)))
-        })
+        }
+      }
       (println (memGetWord acc 0))  ; 0
       ; --- 10. nesting ---
       (memSetWord acc 0 0)
@@ -184,11 +195,14 @@
           (memSetWord acc 0 (+ (memGetWord acc 0) 1))))
       (println (memGetWord acc 0))  ; 12
       ; --- 11. `for` is an ordinary identifier off the head ---
-      (let ((for 5))
-        (println (twice for)))
+      {
+        (let for 5)
+        (println (twice for))
+      }
       ; 10
       ; --- 12. the qualified read is not captured ---
-      (let ((g vecNew))
+      {
+        (let g vecNew)
         {
           (vecPush g 41)
           (vecPush g 42)
@@ -197,9 +211,11 @@
             (memSetWord acc 0 (+ (memGetWord acc 0) 1)))
           (println (memGetWord acc 0))  ; 2, not 99
           (println (vecLen g))  ; 99: this file's own vecLen really is in scope
-        })
+        }
+      }
       ; --- 13. an element-index pair counts beside the elements ---
-      (let ((g vecNew))
+      {
+        (let g vecNew)
         {
           (vecPush g 10)
           (vecPush g 20)
@@ -208,7 +224,8 @@
           (for (e k) in g
             (memSetWord acc 0 (+ (memGetWord acc 0) (+ e k))))
           (println (memGetWord acc 0))  ; 63
-        })
+        }
+      }
       ; --- 14. a stepped range ---
       (memSetWord acc 0 0)
       (for k in 0..10 by 2
@@ -220,7 +237,8 @@
         (memSetWord acc 0 (+ (memGetWord acc 0) k)))
       (println (memGetWord acc 0))  ; 15
       ; --- 16. the step is read once ---
-      (let ((sc (memAlloc 8)))
+      {
+        (let sc (memAlloc 8))
         {
           (memSetWord sc 0 0)
           (memSetWord acc 0 0)
@@ -231,23 +249,27 @@
             (memSetWord acc 0 (+ (memGetWord acc 0) k)))
           (println (memGetWord sc 0))  ; 1: the step ran once
           (println (memGetWord acc 0))  ; 6: 0+2+4
-        })
+        }
+      }
       ; --- 17. a caller's i survives an indexed loop ---
-      (let ((g vecNew))
+      {
+        (let g vecNew)
         {
           (vecPush g 1)
           (vecPush g 2)
           (for (e k) in g
             (memSetWord acc 0 (+ e k)))
           (println i)  ; 111
-        })
+        }
+      }
       ; --- 18. a String reads byte by byte over a range ---
       (memSetWord acc 0 0)
       (for i in 0..(strLen "hi")
         (memSetWord acc 0 (+ (memGetWord acc 0) (strByte "hi" i))))
       (println (memGetWord acc 0))  ; 209
       ; --- 19. a Map visits through its keys, order-independently ---
-      (let ((m mapNew))
+      {
+        (let m mapNew)
         {
           (mapInsert m 1 10)
           (mapInsert m 2 20)
@@ -255,8 +277,10 @@
           (for k in (mapKeys m)
             (memSetWord acc 0 (+ (memGetWord acc 0) (+ k (mapGet m k 0)))))
           (println (memGetWord acc 0))  ; 33
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; Term 11's callee: `for` in PARAMETER position.
 (:: twice (-> Int Int))

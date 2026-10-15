@@ -17,10 +17,12 @@
 (:: compiler (-> String String))
 ;@axiom:effect(io)
 (fn (compiler dir)
-  (let ((env (sysEnv "AXIOM")))
+  {
+    (let env (sysEnv "AXIOM"))
     (if (strIsEmpty env)
       (concat dir "/../../.axiom-bin/axiom")
-      env)))
+      env)
+  })
 
 ; Run `axiom check FILE` and answer its exit status.
 (:: check (-> String String Int))
@@ -28,10 +30,9 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (check axiom file)
-  (let (
-    (args vecNew)
-    (argv (memAlloc 48))
-  )
+  {
+    (let args vecNew)
+    (let argv (memAlloc 48))
     {
       (vecPush args (strDup axiom))
       (vecPush args "--diagnostic-format=ai")
@@ -43,13 +44,14 @@
       (match (sysRunPath axiom argv sysEnvp)
         ((Ok status) status)
         ((Err e) -1))
-    }))
+    }
+  })
 
 (:: program (-> String String))
 (fn (program body)
   (concat
-    "(import IO)\n(import Axqlite)\n(import Axqlite.Value)\n(:: main Int)\n;@axiom:effect(io)\n(fn (main) (let ((q "
-    (concat body ")) { (println q.text) 0 }))\n")))
+    "(import IO)\n(import Axqlite)\n(import Axqlite.Value)\n(:: main Int)\n;@axiom:effect(io)\n(fn (main) { (let q "
+    (concat body ") (println q.text) 0 })\n")))
 
 ; A connection isn't `shared`, so a `parallel` binding can't capture
 ; one: AX3064.
@@ -62,20 +64,27 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (case axiom label body)
-  (let ((file (concat label ".ax")))
+  {
+    (let file (concat label ".ax"))
     {
-      (let ((_ (writeFile file (program body))))
-        ())
-      (let ((status (check axiom file)))
-        (println "{label}: {status}"))
-    }))
+      {
+        (let _ (writeFile file (program body)))
+        ()
+      }
+      {
+        (let status (check axiom file))
+        (println "{label}: {status}")
+      }
+    }
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((axiom (compiler (sysArg 1))))
+  {
+    (let axiom (compiler (sysArg 1)))
     {
       (case axiom "well-formed" "(axqlSelect users (id name) (where (= id (int 1))) (limit 5))")
       (case axiom "clauses-out-of-order" "(axqlSelect users * (limit 5) (where (= id (int 1))))")
@@ -99,8 +108,13 @@
       (case axiom "an-expression-item-without-alias" "(axqlSelect users ((+ age (int 1))))")
       (case axiom "a-link-without-a-column" "(axqlSelect users * (where (= (link team) (int 1))))")
       (case axiom "an-unknown-function" "(axqlSelect users * (where (= (frob name) (int 1))))")
-      (let ((_ (writeFile "shared-connection.ax" sharedConnection)))
-        ())
-      (let ((status (check axiom "shared-connection.ax")))
-        (println "a-connection-in-a-parallel-binding: {status}"))
-    }))
+      {
+        (let _ (writeFile "shared-connection.ax" sharedConnection))
+        ()
+      }
+      {
+        (let status (check axiom "shared-connection.ax"))
+        (println "a-connection-in-a-parallel-binding: {status}")
+      }
+    }
+  })

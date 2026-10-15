@@ -337,7 +337,7 @@ AX-1044  delivered             -`,
     file: "stock.ax",
     tab: "Records",
     title: "Restock the shelf",
-    lede: "Structs are built positionally and read by name. A field is immutable unless it is declared `mut`, and any record prints without formatting code.",
+    lede: "Structs are built and read by field name. A field is immutable unless it is declared `mut`, and any record prints without formatting code.",
     points: [
       { at: "(mut qty : Int)", text: "Mutability is declared per field." },
       { at: "(set item.qty (+ item.qty order))", text: "`set` writes a `mut` field in place." },

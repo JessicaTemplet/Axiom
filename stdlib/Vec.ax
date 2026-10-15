@@ -115,13 +115,13 @@
 (:: vecBuild (-> Int (Vec a)))
 ;@axiom:effect(unsafe)
 (fn (vecBuild cap)
-  (let (
-    (n (if (< cap 1)
-      1
-      cap))
-    (v (memAllocMapped 32 4))
-    (d (memAlloc (vecBytes n)))
-  )
+  {
+    (let n
+      (if (< cap 1)
+        1
+        cap))
+    (let v (memAllocMapped 32 4))
+    (let d (memAlloc (vecBytes n)))
     {
       (__retain d)
       (memSetWord v 0 0)
@@ -134,7 +134,8 @@
       ; vector says what it is in a word of its own.
       (memSetWord v 3 0)
       (as v (Vec a))
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Accessors
@@ -342,7 +343,8 @@
       ; share back, which is a leak the walk could never find if it
       ; were dropped with the word. An owner given an uncounted word
       ; becomes plain instead, as `vecPush` describes.
-      (let ((counted (__retainref x)))
+      {
+        (let counted (__retainref x))
         {
           (if (vecOwnsRefs v)
             (if (== counted 1)
@@ -355,7 +357,8 @@
             v)
           (memSetWord (vecData v) i (as x Int))
           v
-        }))))
+        }
+      })))
 
 ; ------------------------------------------------------------------
 ; Growth
@@ -396,22 +399,22 @@
 (:: vecReserveExactly (-> (Vec a) Int (Vec a)))
 ;@axiom:effect(unsafe)
 (fn (vecReserveExactly v newCap)
-  (let (
-    (old (vecData v))
-    (bigger (memAlloc (vecBytes newCap)))
-  )
+  {
+    (let old (vecData v))
+    (let bigger (memAlloc (vecBytes newCap)))
     {
       (__retain bigger)
       (if (vecOwnsRefs v)
         (memMarkArray bigger newCap)
         bigger)
       (memCopy bigger old (* (vecLen v) 8))
-      (let ((h
-        (as v Int)))
+      {
+        (let h (as v Int))
         {
           (memSetWord h 2 bigger)
           (memSetWord h 1 newCap)
-        })
+        }
+      }
       ; The copy MOVED the elements' shares, so the old block must not
       ; spend them on the way out: it is marked a leaf first, and its
       ; release then reclaims the block and touches nothing it held.
@@ -420,7 +423,8 @@
       (memMarkLeaf old)
       (__release old)
       v
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Stack operations
@@ -449,12 +453,12 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: vecPush (-> (Vec a) a (Vec a)))
 (pub fn (vecPush v x)
-  (let (
-    (len (vecLen v))
-    (counted (__retainref x))
-    (h (as v Int))
-  )
-    (let ((kind (memGetWord h 3)))
+  {
+    (let len (vecLen v))
+    (let counted (__retainref x))
+    (let h (as v Int))
+    {
+      (let kind (memGetWord h 3))
       {
         (vecReserve v (+ len 1))
         (if (== kind 0)
@@ -472,7 +476,9 @@
         (memSetWord (vecData v) len (as x Int))
         (memSetWord h 0 (+ len 1))
         v
-      })))
+      }
+    }
+  })
 
 ;; Remove and return the last element. REFUSES an empty vector.
 ;
@@ -495,7 +501,8 @@
 ;@axiom:result(owned)
 ;@axiom:effect(unsafe)
 (pub fn (vecPop v)
-  (let ((len (vecLen v)))
+  {
+    (let len (vecLen v))
     (if (== len 0)
       __indexTrap
       ; The slot is ZEROED, and on a vector that owns its elements that is a
@@ -507,12 +514,15 @@
       ; what makes the transfer true, and `result(owned)` above is
       ; what tells the caller's code to hand the share back
       ; (MM-LIFE-2n).
-      (let ((top (memGetWord (vecData v) (- len 1))))
+      {
+        (let top (memGetWord (vecData v) (- len 1)))
         {
           (memSetWord (vecData v) (- len 1) 0)
           (memSetWord (as v Int) 0 (- len 1))
           (as top a)
-        }))))
+        }
+      })
+  })
 
 ;; The last element without removing it. REFUSES an empty vector.
 ;
@@ -549,12 +559,14 @@
 (:: vecDropAt (-> (Vec a) Int (Vec a)))
 ;@axiom:effect(unsafe)
 (fn (vecDropAt v i)
-  (let ((old (memGetWord (vecData v) i)))
+  {
+    (let old (memGetWord (vecData v) i))
     {
       (memSetWord (vecData v) i 0)
       (__release old)
       v
-    }))
+    }
+  })
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (:: vecDropFrom (-> (Vec a) Int (Vec a)))
@@ -630,27 +642,30 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (:: vecSwapWords (-> Int Int Int Int))
 (fn (vecSwapWords d i j)
-  (let ((t (memGetWord d i)))
+  {
+    (let t (memGetWord d i))
     {
       (memSetWord d i (memGetWord d j))
       (memSetWord d j t)
       0
-    }))
+    }
+  })
 
 ; Restore the heap property at `root`, over the first `n` words.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (:: vecSiftDown (-> Int Int Int Int))
 (fn (vecSiftDown d root n)
-  (let (
-    (mut r root)
-    (mut go 1)
-  )
+  {
+    (let mut r root)
+    (let mut go 1)
     {
       (while (== go 1)
-        (let ((c (+ (* 2 r) 1)))
+        {
+          (let c (+ (* 2 r) 1))
           (if (>= c n)
             (set go 0)
-            (let ((mut k c))
+            {
+              (let mut k c)
               {
                 (if (< (+ c 1) n)
                   (if (> (memGetWord d (+ c 1)) (memGetWord d c))
@@ -661,9 +676,12 @@
                     (vecSwapWords d r k)
                     (set r k)
                   })
-              }))))
+              }
+            })
+        })
       0
-    }))
+    }
+  })
 
 ;; Sort a vector of `Int` ascending, in place. Answers the vector.
 ;
@@ -675,40 +693,45 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: vecSort (-> (Vec Int) (Vec Int)))
 (pub fn (vecSort v)
-  (let (
-    (n (vecLen v))
-    (d (vecData v))
-  )
+  {
+    (let n (vecLen v))
+    (let d (vecData v))
     {
-      (let ((mut i (- (/ n 2) 1)))
+      {
+        (let mut i (- (/ n 2) 1))
         (while (>= i 0)
           {
             (vecSiftDown d i n)
             (set i (- i 1))
-          }))
-      (let ((mut e (- n 1)))
+          })
+      }
+      {
+        (let mut e (- n 1))
         (while (> e 0)
           {
             (vecSwapWords d 0 e)
             (vecSiftDown d 0 e)
             (set e (- e 1))
-          }))
+          })
+      }
       v
-    }))
+    }
+  })
 
 (:: vecSiftDownBy (-> (Vec a) Int Int (-> a a Int) Int))
 (fn (vecSiftDownBy v root n cmp)
-  (let (
-    (d (vecData v))
-    (mut r root)
-    (mut go 1)
-  )
+  {
+    (let d (vecData v))
+    (let mut r root)
+    (let mut go 1)
     {
       (while (== go 1)
-        (let ((c (+ (* 2 r) 1)))
+        {
+          (let c (+ (* 2 r) 1))
           (if (>= c n)
             (set go 0)
-            (let ((mut k c))
+            {
+              (let mut k c)
               {
                 (if (< (+ c 1) n)
                   (if (> (cmp (vecGet v (+ c 1)) (vecGet v c)) 0)
@@ -719,9 +742,12 @@
                     (vecSwapWords d r k)
                     (set r k)
                   })
-              }))))
+              }
+            })
+        })
       0
-    }))
+    }
+  })
 
 ;; Sort `v` in place by `cmp`, which takes two elements and answers
 ;; negative, zero or positive the way `strCmp` does. Answers the vector.
@@ -750,30 +776,38 @@
   ; So the vector is checked after every comparison, and a change
   ; stops the program with status 77, the status a bad index has
   ; (tests/stdlib/849-size-refusals.ax).
-  (let (
-    (n (vecLen v))
-    (d (vecData v))
-  )
-    (let ((guarded
-      (lambda (a b)
-        (let ((r (cmp a b)))
-          (if (|| (!= (vecData v) d) (!= (vecLen v) n))
-            __indexTrap
-            r))
-      )))
+  {
+    (let n (vecLen v))
+    (let d (vecData v))
+    {
+      (let guarded
+        (lambda (a b)
+          {
+            (let r (cmp a b))
+            (if (|| (!= (vecData v) d) (!= (vecLen v) n))
+              __indexTrap
+              r)
+          }
+        ))
       {
-        (let ((mut i (- (/ n 2) 1)))
+        {
+          (let mut i (- (/ n 2) 1))
           (while (>= i 0)
             {
               (vecSiftDownBy v i n guarded)
               (set i (- i 1))
-            }))
-        (let ((mut e (- n 1)))
+            })
+        }
+        {
+          (let mut e (- n 1))
           (while (> e 0)
             {
               (vecSwapWords d 0 e)
               (vecSiftDownBy v 0 e guarded)
               (set e (- e 1))
-            }))
+            })
+        }
         v
-      })))
+      }
+    }
+  })

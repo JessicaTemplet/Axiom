@@ -34,40 +34,45 @@
 (:: knot (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (knot i)
-  (let (
-    (a (Node i (as 0 Node)))
-    (b (Node (+ i 1) (as 0 Node)))
-  )
+  {
+    (let a (Node :v i :next (as 0 Node)))
+    (let b (Node :v (+ i 1) :next (as 0 Node)))
     {
       (set a.next b)
       (set b.next a)
       (+ a.v b.v)
-    }))
+    }
+  })
 
 (:: chain (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (chain i)
-  (let ((b
-    (Node (+ i 1) (as 0 Node))))
-    (let ((a (Node i b)))
-      (+ a.v b.v))))
+  {
+    (let b (Node :v (+ i 1) :next (as 0 Node)))
+    {
+      (let a (Node :v i :next b))
+      (+ a.v b.v)
+    }
+  })
 
 (:: broken (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (broken i)
-  (let (
-    (a (Node i (as 0 Node)))
-    (b (Node (+ i 1) (as 0 Node)))
-  )
+  {
+    (let a (Node :v i :next (as 0 Node)))
+    (let b (Node :v (+ i 1) :next (as 0 Node)))
     {
       (set a.next b)
       (set b.next a)
-      (let ((s (+ a.v b.v)))
+      {
+        (let s (+ a.v b.v))
         {
           (set b.next (as 0 Node))
           s
-        })
-    }))
+        }
+      }
+    }
+  })
 
 (:: loop (-> Int Int Int Int))
 (fn (loop shape k acc)
@@ -86,11 +91,13 @@
 (fn (scoped m k acc)
   (if (== k 0)
     acc
-    (let ((r (knot k)))
+    {
+      (let r (knot k))
       {
         (__axiom_arena_reset m)
         (scoped m (- k 1) (+ acc r))
-      })))
+      }
+    }))
 
 (:: backlog Int)
 (fn (backlog)
@@ -99,28 +106,34 @@
 (:: measure (-> String Int Int))
 ;@axiom:effect(io)
 (fn (measure name shape)
-  (let ((b0 (backlog)))
-    (let ((r
-      (if (== shape 3)
-        (scoped __axiom_arena_mark 1000 0)
-        (loop shape 1000 0))))
-      (let ((per (/ (- (backlog) b0) 1000)))
+  {
+    (let b0 (backlog))
+    {
+      (let r
+        (if (== shape 3)
+          (scoped __axiom_arena_mark 1000 0)
+          (loop shape 1000 0)))
+      {
+        (let per (/ (- (backlog) b0) 1000))
         {
           (println "{name}: answer {r}, backlog {per} bytes a knot")
           per
-        }))))
+        }
+      }
+    }
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (k (measure "knots" 0))
-    (c (measure "chains" 1))
-    (b (measure "broken" 2))
-    (s (measure "scoped" 3))
-  )
-    (let (
-      (mapped (>= (__axiom_mem_stat 2) (__axiom_mem_stat 0)))
-      (unknown (__axiom_mem_stat 3))
-    )
-      (println "mapped covers held: {mapped}; an unknown count answers {unknown}"))))
+  {
+    (let k (measure "knots" 0))
+    (let c (measure "chains" 1))
+    (let b (measure "broken" 2))
+    (let s (measure "scoped" 3))
+    {
+      (let mapped (>= (__axiom_mem_stat 2) (__axiom_mem_stat 0)))
+      (let unknown (__axiom_mem_stat 3))
+      (println "mapped covers held: {mapped}; an unknown count answers {unknown}")
+    }
+  })

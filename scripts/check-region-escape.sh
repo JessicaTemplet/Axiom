@@ -263,7 +263,8 @@ s = p.read_text()
 start = s.index("(pub fn (rgnWhile rc e)")
 end = s.index("\n(pub :: rgnMatch ", start)
 s = s[:start] + """(pub fn (rgnWhile rc e)
-  (let ((rep (memGetWord rc 11)))
+  {
+    (let rep (memGetWord rc 11))
     {
       (memSetWord rc 11 0)
       (rgnExpr rc (nodeA e))
@@ -272,15 +273,16 @@ s = s[:start] + """(pub fn (rgnWhile rc e)
       (rgnExpr rc (nodeA e))
       (rgnSeq rc (nodeBVec e) 0 0)
       0
-    }))
+    }
+  })
 """ + s[end:]
 p.write_text(s)
 s = pathlib.Path(sys.argv[2]).read_text()
 for old, new in (
     ("(import Str)", "(import Str)\n(import IO)"),
     ("(:: main Int)\n(fn (main)", "(:: main Int)\n;@axiom:effect(io)\n(fn (main)"),
-    ("(strLen c.s)", '(let ((replacement (strDup "fresh")))\n'
-                      '        { (println c.s) (println replacement) 0 })'),
+    ("(strLen c.s)", '{ (let replacement (strDup "fresh"))\n'
+                      '        { (println c.s) (println replacement) 0 } }'),
 ):
     if s.count(old) != 1:
         raise SystemExit("loop runtime probe no longer matches its source fixture")

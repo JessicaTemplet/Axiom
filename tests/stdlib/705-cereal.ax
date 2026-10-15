@@ -41,22 +41,24 @@
 
 (:: settingsEncode (-> Settings (Result CerealValue Error)))
 (fn (settingsEncode value)
-  (let ((fields vecNew))
+  {
+    (let fields vecNew)
     {
-      (vecPush fields (CerealMember "port" (CInt value.port)))
-      (vecPush fields (CerealMember "name" (CText value.name)))
-      (vecPush fields (CerealMember "enabled" (CBool value.enabled)))
+      (vecPush fields (CerealMember :key "port" :value (CInt value.port)))
+      (vecPush fields (CerealMember :key "name" :value (CText value.name)))
+      (vecPush fields (CerealMember :key "enabled" :value (CBool value.enabled)))
       (Ok (CObject fields))
-    }))
+    }
+  })
 
 (:: settingsDecode (-> CerealValue (Result Settings Error)))
 (fn (settingsDecode value)
-  (let (
-    (port (cerealField cerealIntCodec value "port")?)
-    (name (cerealField cerealTextCodec value "name")?)
-    (enabled (cerealField cerealBoolCodec value "enabled")?)
-  )
-    (Ok (Settings port name enabled))))
+  {
+    (let port (cerealField cerealIntCodec value "port")?)
+    (let name (cerealField cerealTextCodec value "name")?)
+    (let enabled (cerealField cerealBoolCodec value "enabled")?)
+    (Ok (Settings :port port :name name :enabled enabled))
+  })
 
 (:: settingsCodec (Codec Settings))
 (fn (settingsCodec)
@@ -64,7 +66,7 @@
 
 (:: recordRoundtrip (-> CerealFormat Bool))
 (fn (recordRoundtrip format)
-  (match (cerealSerialize format settingsCodec (Settings 8080 "Axiom" true))
+  (match (cerealSerialize format settingsCodec (Settings :port 8080 :name "Axiom" :enabled true))
     ((Err e) false)
     ((Ok encoded)
       (match (cerealDeserialize format settingsCodec encoded)
@@ -81,7 +83,8 @@
 ; string values and exact-number spellings must remain independent.
 (:: ownedResult Bool)
 (fn (ownedResult)
-  (let ((source (strDup "{\"key\":\"value\",\"number\":1.20e3}")))
+  {
+    (let source (strDup "{\"key\":\"value\",\"number\":1.20e3}"))
     (match (cerealDecode CerealJson source)
       ((Err e) false)
       ((Ok value)
@@ -92,14 +95,14 @@
             ((Err e) false)
             ((Ok text) (strEq text "{\"key\":\"value\",\"number\":1.20e3}")))
         }
-      ))))
+      ))
+  })
 
 (:: vectorRoundtrip Bool)
 (fn (vectorRoundtrip)
-  (let (
-    (items vecNew)
-    (codec (cerealVecCodec cerealIntCodec))
-  )
+  {
+    (let items vecNew)
+    (let codec (cerealVecCodec cerealIntCodec))
     {
       (vecPush items 2)
       (vecPush items 3)
@@ -112,11 +115,13 @@
               (&& (== (vecLen values) 2) (&& (== (vecGet values 0) 2) (== (vecGet values 1) 3)))
             ))
         ))
-    }))
+    }
+  })
 
 (:: optionRoundtrip Bool)
 (fn (optionRoundtrip)
-  (let ((codec (cerealOptionCodec cerealTextCodec)))
+  {
+    (let codec (cerealOptionCodec cerealTextCodec))
     (&&
       (match (cerealDeserialize CerealJson codec "null")
         ((Err e) false)
@@ -131,7 +136,8 @@
           (match value
             ((Some text) (strEq text "hello"))
             (_ false))
-        )))))
+        )))
+  })
 
 (:: fieldContext Bool)
 (fn (fieldContext)
@@ -141,19 +147,20 @@
 
 (:: cycleRefused Bool)
 (fn (cycleRefused)
-  (let (
-    (items vecNew)
-    (value (CArray items))
-  )
+  {
+    (let items vecNew)
+    (let value (CArray items))
     {
       (vecPush items value)
       (isErr (cerealEncode CerealJson value))
-    }))
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut bad 0))
+  {
+    (let mut bad 0)
     {
       (set bad (+ bad (check "json record" (recordRoundtrip CerealJson))))
       (set bad (+ bad (check "toml record" (recordRoundtrip CerealToml))))
@@ -222,42 +229,63 @@
                  (check "toml null encode"
                    (isErr
                      (cerealEncode CerealToml
-                       (CObject (vecPush vecNew (CerealMember "a" CNull))))))))
+                       (CObject (vecPush vecNew (CerealMember :key "a" :value CNull))))))))
       (set bad (+ bad
                  (check "input byte boundary"
-                   (isOk (cerealDecodeWith CerealJson (CerealLimits 1 4 1) "null")))))
+                   (isOk
+                     (cerealDecodeWith CerealJson (CerealLimits :depth 1 :bytes 4 :nodes 1)
+                       "null")))))
       (set bad (+ bad
                  (check "input byte refusal"
-                   (isErr (cerealDecodeWith CerealJson (CerealLimits 1 3 1) "null")))))
+                   (isErr
+                     (cerealDecodeWith CerealJson (CerealLimits :depth 1 :bytes 3 :nodes 1)
+                       "null")))))
       (set bad (+ bad
                  (check "output byte boundary"
-                   (isOk (cerealEncodeWith CerealJson (CerealLimits 1 4 1) CNull)))))
+                   (isOk
+                     (cerealEncodeWith CerealJson (CerealLimits :depth 1 :bytes 4 :nodes 1)
+                       CNull)))))
       (set bad (+ bad
                  (check "output byte refusal"
-                   (isErr (cerealEncodeWith CerealJson (CerealLimits 1 3 1) CNull)))))
+                   (isErr
+                     (cerealEncodeWith CerealJson (CerealLimits :depth 1 :bytes 3 :nodes 1)
+                       CNull)))))
       (set bad (+ bad
                  (check "node boundary"
-                   (isOk (cerealDecodeWith CerealJson (CerealLimits 1 100 2) "[1]")))))
+                   (isOk
+                     (cerealDecodeWith CerealJson (CerealLimits :depth 1 :bytes 100 :nodes 2)
+                       "[1]")))))
       (set bad (+ bad
                  (check "node refusal"
-                   (isErr (cerealDecodeWith CerealJson (CerealLimits 1 100 1) "[1]")))))
+                   (isErr
+                     (cerealDecodeWith CerealJson (CerealLimits :depth 1 :bytes 100 :nodes 1)
+                       "[1]")))))
       (set bad (+ bad
                  (check "depth boundary"
-                   (isOk (cerealDecodeWith CerealJson (CerealLimits 1 100 3) "[1]")))))
+                   (isOk
+                     (cerealDecodeWith CerealJson (CerealLimits :depth 1 :bytes 100 :nodes 3)
+                       "[1]")))))
       (set bad (+ bad
                  (check "depth refusal"
-                   (isErr (cerealDecodeWith CerealJson (CerealLimits 1 100 3) "[[1]]")))))
+                   (isErr
+                     (cerealDecodeWith CerealJson (CerealLimits :depth 1 :bytes 100 :nodes 3)
+                       "[[1]]")))))
       (set bad (+ bad
                  (check "toml path depth"
-                   (isErr (cerealDecodeWith CerealToml (CerealLimits 1 100 10) "a.b = 1")))))
+                   (isErr
+                     (cerealDecodeWith CerealToml (CerealLimits :depth 1 :bytes 100 :nodes 10)
+                       "a.b = 1")))))
       (set bad (+ bad
                  (check "invalid limits"
-                   (isErr (cerealDecodeWith CerealJson (CerealLimits 0 100 10) "null")))))
+                   (isErr
+                     (cerealDecodeWith CerealJson (CerealLimits :depth 0 :bytes 100 :nodes 10)
+                       "null")))))
       (set bad (+ bad
                  (check "typed limit"
                    (isErr
-                     (cerealSerializeWith CerealJson (CerealLimits 1 3 10) cerealTextCodec
-                       "abc")))))
+                     (cerealSerializeWith CerealJson (CerealLimits :depth 1 :bytes 3 :nodes 10)
+                       cerealTextCodec "abc")))))
       (println "failures: {bad}")
       bad
-    }))
+    }
+  })

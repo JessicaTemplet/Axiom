@@ -1,190 +1,14 @@
 # The refusal bank: what `axiom fmt` does to each tests/fmt/parity/*.axp case.
 #
-# One `### <case> (exit N)` line per case, followed by the formatted bytes when
-# it formatted at all. 96 cases: 58 rewrites and 38 refusals, which is why this
-# file can tell a formatter that always succeeds from one that always refuses -
-# check-fmt-selfhost.sh requires both outcomes to be present.
-#
-# ONE CASE WAS ADDED when `struct` in expression position became AX2004. 206
-# is the refusal: `check` refuses `(struct P 1 2)` and names the call
-# `(P 1 2)`, so `fmt` refuses it too instead of printing it back.
-#
-# THREE CASES CHANGED when `fmt` stopped rewriting spellings `check` refuses.
-# 181 `(let ((x = 1)) x)` is AX2003 in the parser and is now refused here
-# too, where it used to be rewritten to `(x 1)`. 130 is renamed
-# 130-effect-mut-verbatim: an effect atom prints as written, so `(mut)` stays
-# `(mut)` (AX3016 in `check`) instead of becoming `(Mut)`. 131 is deleted:
-# the lowercase `alloc` effect alias is gone, so `(alloc)` is an ordinary
-# effect name and 130 already pins how one prints.
-#
-# ONE CASE WAS ADDED when `fn` in expression position became AX2004. 205 is
-# the refusal: `check` refuses `((fn (x) x) 1)` and names `lambda`, so `fmt`
-# refuses it too instead of rewriting it to a lambda.
-#
-# 092 FORMATS since 2026-09-29 (AN-59): a negative literal pattern checks and
-# runs, so refusing it, as the retired stage0 parser did, refused a program the
-# compiler accepts.
-# TWO CASES WERE ADDED on 2026-09-29, found by the language server's fuzzer
-# (scripts/lib/lspfuzz.py) through `textDocument/formatting`. Both KILLED the
-# formatter - `axiom fmt` exited 77, vector index out of range, and the server
-# died with it. 240 is an effect whose operation is an empty `()`, where
-# `fpDeclEffect` read the operation's name before asking whether it had one;
-# 241 is a bare `(pub` - an editor buffer mid-keystroke - where `fmtPrint`
-# read the head after `pub` before asking whether there was one. Both now
-# refuse, exit 1, and write nothing.
-#
-# ONE CASE WAS ADDED for the operator-initial identifier (2026-10-02).
-# 242 pins `fscanOperator` extending through `isIdentChar` the way the
-# real lexer does: `*Int` is one identifier to `check` (AX3002), and
-# the old scanner split it, so `fmt` printed `* Int` and rewrote an
-# ill-typed program into one that checks. Regenerating this file for
-# it moved no other case's bytes.
-#
-# THREE CASES WERE ADDED on 2026-09-04, one per layout defect fixed that day,
-# and each is a case the previous formatter FORMATTED - exit 0 both before and
-# after - to different bytes, which is the only kind of regression this bank
-# can see. 220 pins `fpApp`'s broken branch printing one argument per line:
-# before it, the arguments of a five-operand application shared one line
-# separated by the indent width - `a  b  c  d  e` - a run of spaces the
-# printer wrote and the tree then committed in 2,687 lines. 221 pins a comment
-# written as the first line inside a `{ }` block STAYING there: before it,
-# `fpAnchor` gave the block its first statement's position, so the enclosing
-# flush hoisted the comment out past the brace and above the `let`. 222 pins
-# an application whose head is a qualified name laying out like any other:
-# `(println (Vec::vecLen v))` exploded to five lines while `(println (vecLen
-# v))` stayed on one, because `isSimpleForm` transliterated stage0's omission
-# of `EQualified`. Regenerating this file for them moved no other case's
-# bytes - none of the 54 older cases carries a five-operand application, a
-# comment-first block or a qualified head - which is also why they were added.
-#
-# TWO CASES WERE ADDED for the `for` keyword (0.6.4). 198 pins `fpFor`'s head
-# layout for BOTH shapes - the range's three operands and the container's two
-# on the head line, the one body indented under them, which is `while`'s
-# layout and not the application layout a four-operand unknown head would get.
-# 199 pins the other half of the Keywords rule: `for` in parameter, `let`
-# binder, pattern and argument position is an ordinary identifier and prints
-# as one, the same property 190-193 hold for the older keywords. Regenerating
-# this file for them moved no other case's bytes.
-#
-# TWO CASES WERE ADDED for the `region` keyword (2026-09-03, S2 of
-# docs/memory-model.md). 210 pins `fpRegion`'s head layout - the name
-# on the head line, the one body indented under it, which is `while`'s layout
-# and not the application layout a two-operand unknown head would get. 211 is
-# the REFUSAL: `(region r)` has no body, `fpRegion` answers `fpBad` for any
-# element count but two, and `check` refuses the same form at the parser
-# (AX2001). Regenerating this file for them moved no other case's bytes.
-#
-# TWO CASES WERE ADDED for the `parallel` keyword (2026-09-03). 200 pins
-# `fpParallel`'s layout - the region name on the head line, one binding
-# inline and several one per line as `let` prints them, the body indented
-# under the closing `)` of the list - which is `let`'s layout and not the
-# application layout a three-operand unknown head printed before the arm
-# existed. 201 pins the other half of the Keywords rule: `parallel` in
-# parameter, `let` binder, pattern and argument position is an ordinary
-# identifier and prints as one. Regenerating this file for them moved no
-# other case's bytes.
-#
-# THREE CASES WERE ADDED for MAC-TOOL-6 (2026-09-18). 230, 231 and 232
-# pin one refusal each - a backtick, a bare comma and a quote in
-# expression position, every one of which `check` refuses (AX1001 for
-# the backtick, AX2001 for the other two) and every one of which the
-# old printer formatted. 060 already refused, but only through the
-# `,@` beside its backtick; these three are the markers alone.
-# Regenerating this file for them moved no other case's bytes.
-#
-# TWO CASES CHANGED SIDES on 2026-08-28, the other way round from the three
-# below, and for the same reason - this file records what the formatter DID,
-# not what the language allows:
-#
-#   070-keyword-in-expr     exit 1 -> 0   `(fn (f) (g data))`
-#   131-effect-alloc-kw     exit 1 -> 0   `(fn (f n) (handle n (alloc) 0))`
-#
-# Both refusals came from `fpIsReservedWord`, the retired Rust compiler's lexer
-# rule - every structural word reserved in every position - while the
-# self-hosted parser reserves a keyword only in the position its rule claims
-# (docs/reference.md, "Keywords"): `check` on the first complains only that `g`
-# is unbound (AX3001, the checker), and answers OK to the second as written,
-# because the checker accepts a lowercase `alloc` effect. check-fmt.sh met the
-# rule the day `self_host/lsp.ax` named a parameter `data` (f0a2fa3). 190-197
-# pin the rule in both directions: 190-193 and 195 are keyword-spelled
-# identifiers that now print; 194 (`mut` at a binding head, the marker), 196
-# (`consume`) and 197 (`begin`) are the refusals the parser shares - and 196
-# and 197 were REWRITES before, output `check` refuses with AX2004.
-#
-# THREE CASES TURNED OVER for the `cond` removal. 174 was `(cond (else 9))`,
-# exit 0: the only-else `cond` the old printer laid out. There is no
-# only-else `if` - an `if` always ends in its else operand after at least
-# one test and branch - so 174 is the same file number with new content,
-# `(if a b c d e)`, pinning the variadic layout flat, one operand per
-# line. 177 (`(if a b c d)`) pins the other half: an even operand count
-# has no final else, `fpIf` answers `fpBad`, and the file is untouched.
-# 178 keeps the old 174 bytes under a new number to pin the refusal: a
-# `(cond ...)` reaches `fpIsRefusedHead` like `consume` and `begin`.
-# Regenerating for them moved no other case's bytes.
-#
-# THREE CASES CHANGED SIDES on 2026-08-09, and the reason is worth recording
-# here because this file is what recorded the wrong answer:
-#
-#   100-empty-form-dropped  exit 0 -> 1   `()` then `(fn (f) 1)`
-#   170-empty-tuple         exit 0 -> 1   `(fn (f) ())`
-#   172-empty-brace-body    exit 0 -> 1   `(fn (f) {})`
-#
-# 170 and 172 are the two programs that killed the compiler. `check` on either
-# of them was SIGSEGV - exit 139, no output - and this bank recorded, as the
-# correct answer, that the formatter rewrites them and exits 0. It could not
-# see the crash because it never asked the compiler anything: it compares the
-# formatter with its own previous output. 100 is the other direction and needs
-# no crash to be wrong: `()` at the top level is `AX2003` from this compiler,
-# the formatter DELETED the form and exited 0, so `axiom fmt` turned a file the
-# compiler refuses into one it accepts. The gate now asks the compiler about
-# every case as well (section 4), and refuses to read a signal as silence
-# (section 5b).
-#
-# Materialized from the Rust compiler at commit 1041f11 on 2026-08-08, and
-# verified at that commit to be byte-identical to what the self-hosted compiler
-# produces on all 37 cases - status and bytes. That is the provenance, recorded
-# on the last day there were two compilers to compare. It replaces the
-# stage0-vs-stage1 comparison this bank used to be read by, which would have
-# gone silently green the moment both sides became the same binary.
-#
-# `.axp`, not `.ax`, so check-fmt.sh's every-file-formats sweep does not trip
-# over the deliberate refusals.
-#
-# Regenerate deliberately, never automatically:
-#
-#   axc=$(mktemp -d)/axc
-#   .axiom-bin/axiom build --input self_host/main.ax --output "$axc"
-#   t=$(mktemp -d)
-#   for f in tests/fmt/parity/*.axp; do
-#     cp "$f" "$t/case.ax"; "$axc" fmt "$t/case.ax" >/dev/null 2>&1; s=$?
-#     echo "### $(basename "$f") (exit $s)"
-#     [ $s -eq 0 ] && cat "$t/case.ax"
-#   done
-#
-# and keep this header. A re-bless satisfies this file and nothing else: the
-# gate's preservation check reads these same cases against their own source
-# bytes, and the rebuild half never reads a golden at all.
-# Packed-call layout adds 251-253: long constructor rows, a nested width
-# boundary and an interior argument comment. The latter stays inside its call.
-# Width limits apply to short calls as well; unsplittable tokens remain whole.
-#
-# Comment attachment and enclosing widths add 254-257: sibling, nested,
-# head and closing comments, plus the exact space owed to outer closers.
-#
-# Long declarations and typed lists add 258-262, including function
-# and lambda headers, nested types, aliases, imports and patterns.
-#
-# Signed conversions and ascriptions share expression layout. Long type
-# parameters, named fields and extern tails keep bounded list layout. Case
-# 262 keeps its trailing field comment attached to the pattern field.
-#
-### 010-unbalanced.axp (exit 0)
+# One `### 010-unbalanced.axp (exit 0)
 (fn (f)
   (+ 1 2))
 ### 012-unclosed-nested.axp (exit 0)
 (fn (f)
-  (let ((x 1))
-    (+ x 2)))
+  {
+    (let x 1)
+    (+ x 2)
+  })
 ### 014-unclosed-brace.axp (exit 0)
 (fn (f)
   (+ 1 2))
@@ -301,8 +125,10 @@
   data)
 ### 191-keyword-let-binder.axp (exit 0)
 (fn (f)
-  (let ((match 1))
-    match))
+  {
+    (let match 1)
+    match
+  })
 ### 192-keyword-argument.axp (exit 0)
 (fn (f g)
   (g match let data where))
@@ -340,10 +166,12 @@
   for)
 
 (fn (h xs)
-  (let ((for 1))
+  {
+    (let for 1)
     (match xs
       ((Some for) (g for))
-      (_ 0))))
+      (_ 0))
+  })
 ### 200-parallel-layout.axp (exit 0)
 (fn (f)
   {
@@ -364,10 +192,12 @@
   parallel)
 
 (fn (h xs)
-  (let ((parallel 1))
+  {
+    (let parallel 1)
     (match xs
       ((Some parallel) (g parallel))
-      (_ 0))))
+      (_ 0))
+  })
 ### 202-for-missing-in-refused.axp (exit 1)
 ### 203-for-range-names.axp (exit 0)
 (fn (f n p)
@@ -399,12 +229,14 @@
   (g a b c d e))
 ### 221-comment-first-in-block.axp (exit 0)
 (fn (f)
-  (let ((v 1))
+  {
+    (let v 1)
     {
       ; first
       (g v)
       (h v)
-    }))
+    }
+  })
 ### 222-qualified-head-inline.axp (exit 0)
 (fn (f v)
   (println (Vec::vecLen v)))
@@ -421,9 +253,10 @@
 ### 244-padding-and-string-spaces.axp (exit 0)
 (:: padded (-> Int Int))
 (fn (padded n)
-  (let ((f
-    (lambda (x) (+ x 1))))
-    (f n)))
+  {
+    (let f (lambda (x) (+ x 1)))
+    (f n)
+  })
 
 (:: significant String)
 (fn (significant)

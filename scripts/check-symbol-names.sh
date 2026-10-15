@@ -227,7 +227,7 @@ AXEOF
 # parameter: the lifted function's own parameter list.
 struct_probe lambda-capture 42 <<'AXEOF'
 (:: main Int)
-(fn (main) (let ((x' 42)) ((lambda (y+z) (+ x' (- y+z 0))) 0)))
+(fn (main) { (let x' 42) ((lambda (y+z) (+ x' (- y+z 0))) 0)})
 AXEOF
 
 # Constructors, nullary and with a field.

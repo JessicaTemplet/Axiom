@@ -31,12 +31,16 @@
 (fn (rowAt p root n)
   (match (andThen (pagerBeginRead p) (lambda (_) (btreeGet p root (keyRowid n))))
     ((Ok (Some v))
-      (let ((_ (pagerEndRead p)))
-        v)
+      {
+        (let _ (pagerEndRead p))
+        v
+      }
     )
     ((Ok (None))
-      (let ((_ (pagerEndRead p)))
-        "<none>")
+      {
+        (let _ (pagerEndRead p))
+        "<none>"
+      }
     )
     ((Err e) (concat "<" (concat (errorText e) ">")))))
 
@@ -44,7 +48,8 @@
 (:: rewrite (-> Pager Int String (Result Int Error)))
 ;@axiom:effect(io)
 (fn (rewrite p root v)
-  (let ((mut failed None))
+  {
+    (let mut failed None)
     {
       (for n in 0..200
         (if (! (isSome failed))
@@ -56,33 +61,34 @@
       (match failed
         ((Some e) (Err e))
         ((None) (Ok 0)))
-    }))
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (t tallyNew)
-    (box (Box 0))
-  )
+  {
+    (let t tallyNew)
+    (let box (Box :v 0))
     {
-      (let ((_
-        (buildBase "shared.db"
-          (lambda (p)
-            (andThen (btreeCreate p btreeTable)
-              (lambda (r)
-                {
-                  (set box.v r)
-                  (rewrite p r "original, a value long enough to fill pages")
-                }
-              ))
-          ))))
-        ())
-      (let (
-        (root box.v)
-        (a (openOrDie "shared.db" 4))
-        (b (openOrDie "shared.db" 4))
-      )
+      {
+        (let _
+          (buildBase "shared.db"
+            (lambda (p)
+              (andThen (btreeCreate p btreeTable)
+                (lambda (r)
+                  {
+                    (set box.v r)
+                    (rewrite p r "original, a value long enough to fill pages")
+                  }
+                ))
+            )))
+        ()
+      }
+      {
+        (let root box.v)
+        (let a (openOrDie "shared.db" 4))
+        (let b (openOrDie "shared.db" 4))
         {
           (pagerSetDurable a false)
           (pagerSetDurable b false)
@@ -98,7 +104,8 @@
           (is t (pagerBeginRead b) axqBusy "b can't read while a writes")
           (is t (pagerBeginWrite b) axqBusy "b can't write while a writes")
           (check t (== (pagerLockLevel b) 0) "a busy answer leaves b without a lock")
-          (let ((before (fileHash "shared.db")))
+          {
+            (let before (fileHash "shared.db"))
             {
               (is t (rewrite a root "uncommitted, and long enough that the 4-page cache spills") 0
                 "a rewrites every row")
@@ -119,7 +126,8 @@
               (is t (pagerRollback a) 0 "a rolls back")
               (check t (== (pagerLockLevel a) 0) "a rollback releases the lock")
               (check t (== (fileHash "shared.db") before) "the rollback leaves the file as it was")
-            })
+            }
+          }
           (check t (strEq (rowAt b root 7) "original, a value long enough to fill pages")
             "b reads the original row")
           ; a committed change reaches a connection whose cache held the old row
@@ -138,7 +146,8 @@
           (is t (pagerCommit b) 0 "b commits")
           (check t (strEq (rowAt a root 8) "from b") "a reads b's change")
           ; a writer that dies mid transaction
-          (let ((before (fileHash "shared.db")))
+          {
+            (let before (fileHash "shared.db"))
             {
               (is t (pagerBeginWrite a) 0 "a writes")
               (is t (rewrite a root "never committed, long enough to spill from the cache") 0
@@ -156,8 +165,11 @@
                   (lambda (_) (btreeCheck b (vecPush (vecPush vecNew btreeSchemaRoot) root))))
                 0 "the recovered file checks")
               (is t (pagerEndRead b) 0 "b ends its read")
-            })
+            }
+          }
           (is t (pagerClose b) 0 "b closes")
-        })
+        }
+      }
       (tallyReport t "301-two-connections")
-    }))
+    }
+  })

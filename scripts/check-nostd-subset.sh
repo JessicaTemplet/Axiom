@@ -159,11 +159,11 @@ cat > "$work/nostd-probe.ax" <<'AX'
 
 (:: main Int)
 (fn (main)
-  (let ((v (vecPush vecNew 7)))
+  { (let v (vecPush vecNew 7))
     {
       (if (eqBit Lo Hi) (vecPush v 8))
       (+ (vecLen v) (+ (mapLen mapNew) (+ (strLen (fmtInt 42)) (+ (utf8SeqLen 65) (+ (memAlloc 16) (+ errDivideByZero (if (isOk (divChecked 10 2)) 1 0)))))))
-    }))
+    }})
 AX
 printf '(:: main Int)\n\n(fn (main) 0)\n' > "$work/nostd-hello.ax"
 

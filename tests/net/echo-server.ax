@@ -86,28 +86,30 @@
 (:: respond (-> TcpStream String Int Int))
 ;@axiom:effect(io)
 (fn (respond con byte reps)
-  (let (
-    (piece "0123456789abcdef0123456789abcdef")
-    (mut s 0)
-    (mut n 0)
-    (mut i 0)
-  )
+  {
+    (let piece "0123456789abcdef0123456789abcdef")
+    (let mut s 0)
+    (let mut n 0)
+    (let mut i 0)
     {
       (while (< i reps)
-        (let ((next (memAlloc (+ n 32))))
+        {
+          (let next (memAlloc (+ n 32)))
           {
             (memCopy next s n)
             (memCopy (+ next n) (strData piece) 32)
             (set s next)
             (set n (+ n 32))
             (set i (+ i 1))
-          }))
+          }
+        })
       (if (> n 0)
         (match (tcpWrite con byte)
           ((Ok k) k)
           ((Err e) 0))
         0)
-    }))
+    }
+  })
 
 ; One connection, start to finish: 1 when one was taken, 0 when a
 ; sibling took it first. EVERYTHING IT ALLOCATES - the stream, the peer
@@ -131,8 +133,10 @@
                 ((Err e) (- 0 e.code)))
               1)
           (respond con (readBufferText byte 0 1) reps))
-        (let ((_ (tcpClose con)))
-          ())
+        {
+          (let _ (tcpClose con))
+          ()
+        }
         1
       }
     )))
@@ -150,32 +154,34 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (serve lsn arenaOn varied reportPeer)
-  (let (
-    (markCell (memAlloc 32))
-    (byte (readBufferNew 1))
-  )
+  {
+    (let markCell (memAlloc 32))
+    (let byte (readBufferNew 1))
     (match (pollerNew 64)
       ((Err e) (sysExitWith 255))
       ((Ok p)
-        (let (
-          (mut served 0)
-          (mut running 1)
-        )
+        {
+          (let mut served 0)
+          (let mut running 1)
           {
             (if (isErr (pollerAddListener p lsn 1))
               (sysExitWith 255))
-            (let ((_ (pollerAddSignals p (sysSigBit sigTerm) 2)))
-              ())
+            {
+              (let _ (pollerAddSignals p (sysSigBit sigTerm) 2))
+              ()
+            }
             ; A worker that cannot watch SIGTERM still serves; it leaves
             ; on the wait's ten-second timeout instead.
             (while (== running 1)
-              (let ((n
-                (match (pollerWait p 10000)
-                  ((Ok k) k)
-                  ((Err e) (- 0 e.code)))))
+              {
+                (let n
+                  (match (pollerWait p 10000)
+                    ((Ok k) k)
+                    ((Err e) (- 0 e.code))))
                 (if (< n 1)
                   (set running 0)
-                  (let ((mut e 0))
+                  {
+                    (let mut e 0)
                     (while (< e n)
                       {
                         (match (pollerSignal p e)
@@ -183,7 +189,8 @@
                             (set running 0)
                           )
                           ((None)
-                            (let ((m (__axiom_arena_mark_into markCell)))
+                            {
+                              (let m (__axiom_arena_mark_into markCell))
                               {
                                 (set served (+ served
                                               (handleOne lsn byte
@@ -193,13 +200,18 @@
                                                 reportPeer)))
                                 (if (== arenaOn 1)
                                   (__axiom_arena_reset m))
-                              })
+                              }
+                            }
                           ))
                         (set e (+ e 1))
-                      })))))
+                      })
+                  })
+              })
             served
-          })
-      ))))
+          }
+        }
+      ))
+  })
 
 ; The address to listen on: 127.0.0.1, or ::1 under AXIOM_NET_LISTEN6.
 (:: listenAddr (-> Bool Int (Result SocketAddr Error)))
@@ -214,15 +226,14 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (port (argInt 1))
-    (nworkers (argInt 2))
-    (arenaOn (argInt 3))
-    (varied (argInt 4))
-    (setbuf (memAlloc 16))
-    (pids vecNew)
-    (v6 (envOn "AXIOM_NET_LISTEN6"))
-  )
+  {
+    (let port (argInt 1))
+    (let nworkers (argInt 2))
+    (let arenaOn (argInt 3))
+    (let varied (argInt 4))
+    (let setbuf (memAlloc 16))
+    (let pids vecNew)
+    (let v6 (envOn "AXIOM_NET_LISTEN6"))
     (match (listenAddr v6 port)
       ((Err e)
         {
@@ -250,26 +261,33 @@
           )
           ((Ok lsn)
             {
-              (let ((_ (tcpListenerSetNonBlocking lsn true)))
-                ())
-              (let ((_ (sysSignalBlock (sysSigBit sigTerm) setbuf)))
-                ())
-              (let ((mut w 0))
+              {
+                (let _ (tcpListenerSetNonBlocking lsn true))
+                ()
+              }
+              {
+                (let _ (sysSignalBlock (sysSigBit sigTerm) setbuf))
+                ()
+              }
+              {
+                (let mut w 0)
                 (while (< w nworkers)
                   {
-                    (let ((pid sysForkProcess))
+                    {
+                      (let pid sysForkProcess)
                       (if (== pid 0)
                         (sysExitWith (serve lsn arenaOn varied (envOn "AXIOM_NET_PEER")))
-                        (vecPush pids pid)))
+                        (vecPush pids pid))
+                    }
                     (set w (+ w 1))
-                  }))
+                  })
+              }
               ; One line the driver parses, then this process does nothing
               ; but reap - it holds no connection and its own RSS is not
               ; the measurement.
-              (let (
-                (mut s "pids")
-                (mut k 0)
-              )
+              {
+                (let mut s "pids")
+                (let mut k 0)
                 {
                   (while (< k (vecLen pids))
                     {
@@ -277,16 +295,22 @@
                       (set k (+ k 1))
                     })
                   (println s)
-                })
-              (let ((_ (tcpListenerClose lsn)))
-                ())
-              (let ((mut r 0))
+                }
+              }
+              {
+                (let _ (tcpListenerClose lsn))
+                ()
+              }
+              {
+                (let mut r 0)
                 (while (< r (vecLen pids))
                   {
                     (unwrapOr (sysWaitPid (vecGet pids r)) 0)
                     (set r (+ r 1))
-                  }))
+                  })
+              }
               0
             }
           ))
-      ))))
+      ))
+  })

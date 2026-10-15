@@ -88,26 +88,30 @@
 
 (pub :: mangleIdxNew Int)
 (pub fn (mangleIdxNew)
-  (as (MangleIdx internNew vecNew 0) Int))
+  (as (MangleIdx :names internNew :pos vecNew :done 0) Int))
 
 ; Absorb every entry of `bares` from `done` to its end. Answers the
 ; new `done`.
 (pub :: mangleIdxSync (-> Int (Vec String) Int))
 ;@axiom:effect(unsafe)
 (pub fn (mangleIdxSync idx bares)
-  (let ((mut i (memGetWord idx 2)))
+  {
+    (let mut i (memGetWord idx 2))
     {
       (while (< i (vecLen bares))
         {
-          (let ((id (internIntern (memGetWord idx 0) (vecGetStr bares i))))
+          {
+            (let id (internIntern (memGetWord idx 0) (vecGetStr bares i)))
             (if (== id (vecLen (memGetWordVec idx 1)))
               (vecPush (memGetWordVec idx 1) i)
-              (as 0 (Vec Int))))
+              (as 0 (Vec Int)))
+          }
           (set i (+ i 1))
         })
       (memSetWord idx 2 i)
       i
-    }))
+    }
+  })
 
 ; Is `name` in `bares`? The indexed form of `mangleHasIn`, and the
 ; one every writer here asks.
@@ -182,14 +186,16 @@
   (match (mangleIdxIndexOf idx bares bare)
     ((Some i)
       (if (|| (strEq (vecGet fulls i) bare) (mangleIdxHas idx bares (concat "$entry$" bare)))
-        (let ((key (concat "$" bare)))
+        {
+          (let key (concat "$" bare))
           (if (mangleIdxHas idx bares key)
             0
             {
               (vecPush bares key)
               (vecPush fulls full)
               0
-            }))
+            })
+        }
         0)
     )
     ((None) 0)))
@@ -222,14 +228,18 @@
         ; The module that held the slot keeps its view (see
         ; `mangleRecordModuleView`): a generated entry declaration
         ; must no more capture a module's calls than a written one.
-        (let ((held (vecGet fulls i)))
+        {
+          (let held (vecGet fulls i))
           (if (! (strEq held name))
-            (let ((key (concat "$" name)))
+            {
+              (let key (concat "$" name))
               (if (! (mangleIdxHas idx bares key))
                 {
                   (vecPush bares key)
                   (vecPush fulls (strDup held))
-                }))))
+                })
+            })
+        }
         (vecSet fulls i name)
         0
       }
@@ -269,15 +279,18 @@
   (if (== (as modName Int) 0)
     0
     (if (== (nodeTag node) TAG_D_FN)
-      (let ((bare (nodeAName node)))
-        (let ((full
-          (concat (concat (strDup (as modName String)) "$") (strDup bare))))
+      {
+        (let bare (nodeAName node))
+        {
+          (let full (concat (concat (strDup (as modName String)) "$") (strDup bare)))
           {
             (memSetWord node 1 full)
             (if (== exported 1)
               (mangleRecord idx bares fulls bare full)
               (mangleRecordSelf idx bares fulls full))
-          }))
+          }
+        }
+      }
       (if (== (nodeTag node) TAG_D_SIG)
         {
           (memSetWord node 1
@@ -309,18 +322,22 @@
     (if (>= i (vecLen items))
       0
       {
-        (let ((f (vecGet items i)))
+        {
+          (let f (vecGet items i))
           {
             (if (== (nodeVis f) 1)
               (mangleRecord idx bares fulls (nodeAName f) (nodeCName f)))
-            (let ((q (concat modName (concat "$" (nodeAName f)))))
+            {
+              (let q (concat modName (concat "$" (nodeAName f))))
               (if (! (mangleIdxHas idx bares q))
                 {
                   (vecPush bares q)
                   (vecPush fulls (nodeCName f))
-                }))
+                })
+            }
             0
-          })
+          }
+        }
         (mangleExternItems items (+ i 1) idx bares fulls modName)
       })))
 
@@ -346,11 +363,13 @@
 (pub fn (moduleExternExport items mod mods filter writtenPub i visible)
   (if (>= i (vecLen items))
     visible
-    (let ((f (vecGet items i)))
-      (let ((exported
-        (if (&& (== writtenPub 1) (filterKeeps filter (nodeAName f)))
-          1
-          0)))
+    {
+      (let f (vecGet items i))
+      {
+        (let exported
+          (if (&& (== writtenPub 1) (filterKeeps filter (nodeAName f)))
+            1
+            0))
         {
           (if (&& (!= (as mod Int) 0) (== writtenPub 1))
             (modPubsAdd mods mod (nodeAName f)))
@@ -359,7 +378,9 @@
             (if (== exported 1)
               1
               visible))
-        }))))
+        }
+      }
+    }))
 
 ; The half of `mangleRecord` that a private declaration gets: the
 ; mangled name maps to itself, and the bare slot is left for whoever
@@ -403,7 +424,8 @@
 (pub fn (modFilterRecord mods name filter)
   (if (== (as mods Int) 0)
     0
-    (let ((pair vecNew))
+    {
+      (let pair vecNew)
       {
         (vecPush pair (as name Int))
         (vecPush pair filter)
@@ -414,7 +436,8 @@
         (vecPush pair (as vecNew Int))
         (vecPush mods (as pair Int))
         0
-      })))
+      }
+    }))
 
 ; The filter recorded for `name`, or 0 - which `filterKeeps` reads as
 ; "the import named nothing, so everything is kept". The entry file
@@ -432,10 +455,12 @@
 (pub fn (modFilterForIn mods name i)
   (if (>= i (vecLen mods))
     0
-    (let ((pair (vecGet mods i)))
+    {
+      (let pair (vecGet mods i))
       (if (strEq (as (vecGet pair 0) String) name)
         (vecGet pair 1)
-        (modFilterForIn mods name (+ i 1))))))
+        (modFilterForIn mods name (+ i 1)))
+    }))
 
 ; The module's `pub` names, in declaration order - the third element
 ; of its `mods` pair. The resolver reads `nodeVis` BEFORE it
@@ -459,11 +484,12 @@
     ; The pair travels as a handle (`modFilterRecord` stores it
     ; `cast Int`), so it is cast back to a Vec to read, exactly as
     ; `expModsVec` retypes the same table for expansion.
-    (let ((pair
-      (as (vecGet mods i) (Vec Int))))
+    {
+      (let pair (as (vecGet mods i) (Vec Int)))
       (if (strEq (as (vecGet pair 0) String) name)
         (as (vecGet pair 2) (Vec String))
-        (modPubsForIn mods name (+ i 1))))))
+        (modPubsForIn mods name (+ i 1)))
+    }))
 
 ; Record one written-`pub` name against its module. Called while the
 ; module's declarations are spliced, when `nodeVis` still answers the
@@ -482,14 +508,15 @@
 (pub fn (modPubsAddIn mods name pubName i)
   (if (>= i (vecLen mods))
     0
-    (let ((pair
-      (as (vecGet mods i) (Vec Int))))
+    {
+      (let pair (as (vecGet mods i) (Vec Int)))
       (if (strEq (as (vecGet pair 0) String) name)
         {
           (vecPush (as (vecGet pair 2) (Vec String)) pubName)
           0
         }
-        (modPubsAddIn mods name pubName (+ i 1))))))
+        (modPubsAddIn mods name pubName (+ i 1)))
+    }))
 
 ; Replace the module's recorded filter with its widening. A repeat
 ; import names names the first import did not, and phase D applies
@@ -507,14 +534,15 @@
 (pub fn (modFilterWidenIn mods name widened i)
   (if (>= i (vecLen mods))
     0
-    (let ((pair
-      (as (vecGet mods i) (Vec Int))))
+    {
+      (let pair (as (vecGet mods i) (Vec Int)))
       (if (strEq (as (vecGet pair 0) String) name)
         {
           (memSetWord (as pair Int) 1 (as widened Int))
           0
         }
-        (modFilterWidenIn mods name widened (+ i 1))))))
+        (modFilterWidenIn mods name widened (+ i 1)))
+    }))
 
 (pub :: repeatExportExtern (-> (Vec Int) (Vec String) Int Int))
 (pub fn (repeatExportExtern items delta i)

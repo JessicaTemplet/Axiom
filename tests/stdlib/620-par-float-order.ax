@@ -24,14 +24,21 @@
 
 (:: mixHash (-> Int Int))
 (fn (mixHash i)
-  (let ((z (+ (* i 7046029254386353131) 1442695040888963407)))
-    (let ((a (* (^ z (>> z 30)) 5573014789349097917)))
-      (let ((b (* (^ a (>> a 27)) 1181783497276652981)))
-        (^ b (>> b 31))))))
+  {
+    (let z (+ (* i 7046029254386353131) 1442695040888963407))
+    {
+      (let a (* (^ z (>> z 30)) 5573014789349097917))
+      {
+        (let b (* (^ a (>> a 27)) 1181783497276652981))
+        (^ b (>> b 31))
+      }
+    }
+  })
 
 (:: pow2 (-> Int Float))
 (fn (pow2 e)
-  (let ((mut x 1.0))
+  {
+    (let mut x 1.0)
     {
       (if (>= e 0)
         (for k in 0..e
@@ -39,20 +46,23 @@
         (for k in 0..(- 0 e)
           (set x (* x 0.5))))
       x
-    }))
+    }
+  })
 
 (:: term (-> Int Float))
 (fn (term i)
-  (let (
-    (h (mixHash i))
-    (frac (/ (as (& h 1048575) Float) 1048576.0))
-    (tail (/ 1.0 (as (+ i 3) Float)))
-    (e (- (& (>> h 20) 63) 31))
-  )
-    (let ((mag (* (+ 1.0 (+ frac tail)) (pow2 e))))
+  {
+    (let h (mixHash i))
+    (let frac (/ (as (& h 1048575) Float) 1048576.0))
+    (let tail (/ 1.0 (as (+ i 3) Float)))
+    (let e (- (& (>> h 20) 63) 31))
+    {
+      (let mag (* (+ 1.0 (+ frac tail)) (pow2 e)))
       (if (== (& (>> h 40) 1) 1)
         (- 0.0 mag)
-        mag))))
+        mag)
+    }
+  })
 
 (:: add2 (-> Int Int Int))
 (fn (add2 a b)
@@ -60,19 +70,20 @@
 
 (:: seqSum (-> Int Int Int))
 (fn (seqSum lo hi)
-  (let ((mut acc 0))
+  {
+    (let mut acc 0)
     {
       (for i in lo..hi
         (set acc (add2 acc (bitsOf (term i)))))
       acc
-    }))
+    }
+  })
 
 (:: revSum (-> Int Int))
 (fn (revSum n)
-  (let (
-    (mut acc 0)
-    (mut i (- n 1))
-  )
+  {
+    (let mut acc 0)
+    (let mut i (- n 1))
     {
       (while (>= i 0)
         {
@@ -80,7 +91,8 @@
           (set i (- i 1))
         })
       acc
-    }))
+    }
+  })
 
 (:: addText (-> Int (Result String Error) Int))
 (fn (addText acc r)
@@ -104,36 +116,38 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (n 300)
-    (s (seqSum 0 300))
-    (third 100)
-  )
+  {
+    (let n 300)
+    (let s (seqSum 0 300))
+    (let third 100)
     {
       (println "index order {s}")
-      (let ((r (revSum n)))
+      {
+        (let r (revSum n))
         (if (== r s)
           (println "reversed: the same bits, so this data cannot see an order")
-          (println "reversed differs: {r}")))
+          (println "reversed differs: {r}"))
+      }
       (for w in 1..5
         (verdict (concat "taskFold at width " (fmtInt w))
           (taskFold (lambda (i) (fmtInt (bitsOf (term i)))) n (taskOpts w 32) 0
             (lambda (acc i r) (addText acc r)))
           s))
-      (let (
-        (ws (taskMapWords (lambda (i) (bitsOf (term i))) n 8))
-        (mut acc 0)
-      )
+      {
+        (let ws (taskMapWords (lambda (i) (bitsOf (term i))) n 8))
+        (let mut acc 0)
         {
           (for i in 0..n
             (set acc (add2 acc (vecGet ws i))))
           (verdict "taskMapWords at width 8" acc s)
-        })
+        }
+      }
       ; Three chunks, summed beside each other and added in the order
       ; written: the same association as the three sums made in turn,
       ; and a different one from the index-order sum.
-      (let ((grouped (add2 (add2 (add2 0 (seqSum 0 third)) (seqSum third (* 2 third)))
-                       (seqSum (* 2 third) n))))
+      {
+        (let grouped
+          (add2 (add2 (add2 0 (seqSum 0 third)) (seqSum third (* 2 third))) (seqSum (* 2 third) n)))
         {
           (println "three chunks {grouped}")
           (verdict "three parallel bindings"
@@ -147,5 +161,7 @@
           (if (== grouped s)
             (println "three chunks: the same bits as index order")
             (println "three chunks differ from index order"))
-        })
-    }))
+        }
+      }
+    }
+  })

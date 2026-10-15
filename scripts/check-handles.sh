@@ -249,12 +249,12 @@ shape_of() {  # <field type> <field value>: the shape word Box's allocation stor
 
 (:: mk (-> Int Box))
 (fn (mk i)
-  (Box $2 "t" i))
+  (Box :a $2 :s "t" :n i))
 
 (:: main Int)
 (fn (main)
-  (let ((b (mk 3)))
-    b.n))
+  { (let b (mk 3))
+    b.n})
 AX
   (cd "$work" && "$axc" emit-llvm --opt 0 shape.ax -o "$work/shape.ll") > /dev/null 2>&1 || return 1
   awk '/^define .*@mk\(/ {on = 1} on && /@axiom_alloc\(i64 24\)/ {seen = 1; next}

@@ -36,7 +36,7 @@ def wrap(expr, ty, kind):
     if kind == 1:
         return f'(identity {expr})'
     if kind == 2:
-        return f'(let ((v {expr})) v)'
+        return f'{{ (let v {expr}) v }}'
     if kind == 3:
         return f'(if true {expr} {expr})'
     if kind == 4:
@@ -44,7 +44,7 @@ def wrap(expr, ty, kind):
     if kind == 5:
         return f'((lambda (x) x) {expr})'
     if kind == 7:
-        return f'(let ((v {expr})) (- (- v)))'
+        return f'{{ (let v {expr}) (- (- v)) }}'
     other = 'Float' if ty == 'Int' else 'Int'
     return f'(as (as {expr} {other}) {ty})'
 

@@ -136,21 +136,21 @@ cat > "$work/sorted.ax" <<'PROBE'
   ; type variable and is AX3025. Threading one push through the binding
   ; makes the element type `Int` at the binding itself, which is the
   ; shape the standard library's own fixtures use.
-  (let ((v (vecPush vecNew 3)))
+  { (let v (vecPush vecNew 3))
     {
       (vecPush v 1)
       (vecPush v 2)
       (vecSortBy v (lambda (a b) (desc a b)))
-      (let (
-        (x (vecGet v 0))
-        (y (vecGet v 1))
-        (z (vecGet v 2))
-        (d (applyIt dbl 21))
-      )
+      {
+        (let x (vecGet v 0))
+        (let y (vecGet v 1))
+        (let z (vecGet v 2))
+        (let d (applyIt dbl 21))
+
         (println "{x}{y}{z} {d}")
-      )
+      }
     }
-  )
+  }
 )
 PROBE
 

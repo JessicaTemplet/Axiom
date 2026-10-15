@@ -13,7 +13,8 @@
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((db (kitOpen "errors.db")))
+  {
+    (let db (kitOpen "errors.db"))
     {
       (kitRun "no tables yet" (axqExec db "SELECT * FROM items"))
       (kitRun "create"
@@ -46,22 +47,28 @@
                "SELECT 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' z")
         ((Ok _) (println "statement excerpts stay at 80 bytes: false"))
         ((Err e)
-          (let ((bounded (strEq (errContext e)
-                           "running `SELECT 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ...` in axqExec")))
-            (println "statement excerpts stay at 80 bytes: {bounded}"))
+          {
+            (let bounded
+              (strEq (errContext e)
+                "running `SELECT 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ...` in axqExec"))
+            (println "statement excerpts stay at 80 bytes: {bounded}")
+          }
         ))
       (kitRun "parameters"
-        (axqRunOn db (Query "UPDATE items SET price = ? WHERE id = ?" (vec1 (VInt 1)))))
+        (axqRunOn db
+          (Query :text "UPDATE items SET price = ? WHERE id = ?" :params (vec1 (VInt 1)))))
       (kitRun "rows through run" (axqRunOn db (axqlSelect items (name))))
       (kitDone "query with no rows" (axqQueryOn db (axqlDelete items (where (= id (int 999))))))
       (match (axqQueryOn db (axqlSelect items (name price)))
         ((Ok rs)
-          (let ((r (vecGet rs.rows 0)))
+          {
+            (let r (vecGet rs.rows 0))
             {
               (kitRun "a column a row lacks" (rowIntNamed r "prise"))
               (kitRun "TEXT read as INTEGER" (rowInt r 0))
               (kitDone "a column number past the end" (rowText r 5))
-            })
+            }
+          }
         )
         ((Err e) (println (kitErrText e))))
       (match (axqOpen "errors.db" openOptions)
@@ -76,10 +83,14 @@
           }
         )
         ((Err e) (println (kitErrText e))))
-      (kitDone "a file that isn't there" (axqOpen "missing.db" (OpenOptions false false 16)))
+      (kitDone "a file that isn't there"
+        (axqOpen "missing.db" (OpenOptions :create false :readOnly false :cachePages 16)))
       (kitDone "a directory that isn't there" (axqOpen "nowhere/new.db" openOptions))
-      (let ((_ (makeDir "adir")))
-        ())
+      {
+        (let _ (makeDir "adir"))
+        ()
+      }
       (kitDone "a directory" (axqOpen "adir" openOptions))
       (kitRun "close" (axqClose db))
-    }))
+    }
+  })

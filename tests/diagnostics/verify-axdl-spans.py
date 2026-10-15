@@ -390,7 +390,7 @@ class Fixtures(object):
 
 
 def named_construction_anchor(message, source, line, start, end):
-    """AX3132 labels point at the label; other errors point at the head."""
+    """AX3132 covers a field label, constructor head or bare value token."""
     text = source[line - 1]
     claimed = text[start - 1:end - 1]
     before = '\n'.join(source[:line - 1])
@@ -404,8 +404,19 @@ def named_construction_anchor(message, source, line, start, end):
         prefix = before.rstrip()
         if claimed != wanted or not prefix.endswith(':') or prefix.endswith('::'):
             return 'named-field error must cover the name after its single-colon label'
-    elif not re.search(r"\(\s*(?:[A-Za-z_][A-Za-z0-9_'.]*::)*$", before):
-        return 'named-construction error must cover the constructor head'
+    else:
+        app_head = re.search(r"\(\s*(?:[A-Za-z_][A-Za-z0-9_'.]*::)*$", before)
+        # A rejected bare constructor can be a function's answer or a
+        # direct local's initializer. Type annotations have neither
+        # context; pointing at their same-spelled token must still fail.
+        bare_value = (message.startswith('a struct with fields is constructed with labels;')
+                      and re.fullmatch(r"[^\s(){}\[\],;\"]+", claimed)
+                      and re.search(
+                          r"\(\s*(?:(?:pub\s+)?fn\s+\([^()]*\)|"
+                          r"let\s+(?:mut\s+)?[^\s(){}\[\],;\"]+)\s+"
+                          r"(?:[A-Za-z_][A-Za-z0-9_'.]*::)*$", before))
+        if not (app_head or bare_value):
+            return 'named-construction error must cover the constructor head or bare value'
     return None
 
 

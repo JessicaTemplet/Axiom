@@ -508,7 +508,7 @@ plant() {
 }
 
 plant no-io      's/^\(fn \(quietIo n\) \(\+ n 1\)\)$/;\@axiom:effect(io)\n(fn (quietIo n) { (println "io") (+ n 1) })/' AX3049 quietIo
-plant no-alloc   's/^\(fn \(quietAlloc n\) \(\* n 2\)\)$/(fn (quietAlloc n) (let ((v vecNew)) { (vecPush v n) (* n 2) }))/' AX3049 quietAlloc
+plant no-alloc   's/^\(fn \(quietAlloc n\) \(\* n 2\)\)$/(fn (quietAlloc n) { (let v vecNew) { (vecPush v n) (* n 2) } })/' AX3049 quietAlloc
 plant no-cast    's/^\(fn \(quietCast n\) \(- n 3\)\)$/(fn (quietCast n) (- (as n Int) 3))/' AX3049 quietCast
 plant no-foreign 's/^\(import Vec\)$/(import Vec)\n\n(pub extern "axiom_demo"\n  (add :: (-> Int Int Int) (symbol "axffi_add")))/; s/^    \(println "native"\)$/    (add n 1)/' AX3049 quietForeign
 plant unknown    's/^;\@axiom:restrict\(no-cast\)$/;\@axiom:restrict(no-cast,no-fo)/' AX3052 quietCast
@@ -745,7 +745,7 @@ cat > "$work/exempt/exempt.ax" <<'EXEMPT'
 (:: loops (-> (Vec Int) Int))
 
 (fn (loops xs)
-  (let ((mut acc 0))
+  { (let mut acc 0)
     {
       (for i in 0..3
         (set acc (unwrapOr (addChecked acc i) 0)))
@@ -753,7 +753,7 @@ cat > "$work/exempt/exempt.ax" <<'EXEMPT'
         (set acc (unwrapOr (addChecked acc x) 0)))
       acc
     }
-  )
+  }
 )
 
 ;@axiom:restrict(no-wrap)

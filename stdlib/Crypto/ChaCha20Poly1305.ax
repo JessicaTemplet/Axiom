@@ -1,12 +1,17 @@
 ;;! Crypto.ChaCha20Poly1305 - the ChaCha20-Poly1305 AEAD of RFC 8439,
 ;;! one message at a time.
 ;;!
-;;!     (let ((key (unwrapOr (chacha20Poly1305KeyGenerate) ...))
-;;!           (nonce (unwrapOr (aeadNonceRandom) ...)))
+;;!     {
+;;!       (let key (unwrapOr (chacha20Poly1305KeyGenerate) ...))
+;;!       (let nonce (unwrapOr (aeadNonceRandom) ...))
 ;;!       (match (chacha20Poly1305Seal key nonce "header" "attack at dawn")
-;;!         ((Ok sealed)                       ; ciphertext || 16-byte tag
-;;!           (chacha20Poly1305Open key nonce "header" sealed))   ; (Ok "attack at dawn")
-;;!         ((Err e) (Err e))))
+;;!         ((Ok sealed)
+;;!           ; ciphertext || 16-byte tag
+;;!           (chacha20Poly1305Open key nonce "header" sealed)
+;;!         )
+;;!         ; (Ok "attack at dawn")
+;;!         ((Err e) (Err e)))
+;;!     }
 ;
 ; WHAT IT GUARANTEES. `chacha20Poly1305Seal` encrypts the plaintext
 ; and authenticates it together with the associated data, answering
@@ -75,7 +80,7 @@
 ;@axiom:effect(entropy)
 (pub fn (chacha20Poly1305KeyGenerate)
   (match (secretBlockRandom cpKind 32)
-    ((Ok h) (Ok (ChaCha20Poly1305Key h)))
+    ((Ok h) (Ok (ChaCha20Poly1305Key :slot h)))
     ((Err e) (Err e))))
 
 ;; A key holding a copy of `s`, which must be 32 bytes. This is also the
@@ -87,7 +92,7 @@
   (if (!= (secretLen s) 32)
     (cryptoLengthErr "a ChaCha20-Poly1305 key is 32 bytes" "chacha20Poly1305KeyFromSecret")
     (match (secretBlockFrom cpKind (secretAddr s) 32)
-      ((Ok h) (Ok (ChaCha20Poly1305Key h)))
+      ((Ok h) (Ok (ChaCha20Poly1305Key :slot h)))
       ((Err e) (Err e)))))
 
 ;; The key's 32 bytes as a new `SecretBytes`, for storing it somewhere
@@ -128,10 +133,9 @@
 (:: cpTag (-> Int Int Int Int Int Int Int Int Int))
 ;@axiom:ct(*key, *work)
 (fn (cpTag key work nonce aad aadLen ct ctLen tag)
-  (let (
-    (st (+ work 128))
-    (lens (+ work 256))
-  )
+  {
+    (let st (+ work 128))
+    (let lens (+ work 256))
     {
       (chacha20Block work key 0 nonce)
       (poly1305Init st work)
@@ -142,7 +146,8 @@
       (st64le lens 8 ctLen)
       (poly1305Blocks st lens 1 16777216)
       (poly1305Finish st tag)
-    }))
+    }
+  })
 
 ; Whether the 16 bytes at `a` and `b` match, in time that does not
 ; depend on where they differ.
@@ -160,31 +165,31 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: chacha20Poly1305Seal (-> ChaCha20Poly1305Key AeadNonce String String (Result String Error)))
 (pub fn (chacha20Poly1305Seal key nonce aad plaintext)
-  (let (
-    (n nonce.bytes)
-    (ptLen (strLen plaintext))
-  )
+  {
+    (let n nonce.bytes)
+    (let ptLen (strLen plaintext))
     (if (!= (strLen n) 12)
       (cryptoLengthErr "a nonce must be 12 bytes" "chacha20Poly1305Seal")
       (if (> ptLen cpMaxText)
         (cryptoErr cryptoLimitExceeded
           "a ChaCha20-Poly1305 plaintext is at most 274877906880 bytes" "chacha20Poly1305Seal")
-        (let (
-          (k (secretBlockAddr cpKind key.slot))
-          (out (strAlloc (+ ptLen 16)))
-          (work (strAlloc cpWorkBytes))
-        )
-          (let (
-            (o (strData out))
-            (w (strData work))
-          )
+        {
+          (let k (secretBlockAddr cpKind key.slot))
+          (let out (strAlloc (+ ptLen 16)))
+          (let work (strAlloc cpWorkBytes))
+          {
+            (let o (strData out))
+            (let w (strData work))
             {
               (chacha20Xor k (strData n) 1 (strData plaintext) o ptLen w)
               (ctWipe w 64)
               (cpTag k w (strData n) (strData aad) (strLen aad) o ptLen (+ o ptLen))
               (ctWipe w cpWorkBytes)
               (Ok out)
-            }))))))
+            }
+          }
+        }))
+  })
 
 ;; Check and decrypt `sealed` (ciphertext || tag) with `aad` under `key`
 ;; and `nonce`: the plaintext, or `cryptoAuthFailed` for any failure.
@@ -192,34 +197,38 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: chacha20Poly1305Open (-> ChaCha20Poly1305Key AeadNonce String String (Result String Error)))
 (pub fn (chacha20Poly1305Open key nonce aad sealed)
-  (let (
-    (n nonce.bytes)
-    (sLen (strLen sealed))
-  )
+  {
+    (let n nonce.bytes)
+    (let sLen (strLen sealed))
     (if (|| (!= (strLen n) 12) (< sLen 16))
       (cryptoAuthErr "chacha20Poly1305Open")
-      (let ((ctLen (- sLen 16)))
+      {
+        (let ctLen (- sLen 16))
         (if (> ctLen cpMaxText)
           (cryptoAuthErr "chacha20Poly1305Open")
-          (let (
-            (k (secretBlockAddr cpKind key.slot))
-            (work (strAlloc cpWorkBytes))
-          )
-            (let (
-              (w (strData work))
-              (s (strData sealed))
-            )
+          {
+            (let k (secretBlockAddr cpKind key.slot))
+            (let work (strAlloc cpWorkBytes))
+            {
+              (let w (strData work))
+              (let s (strData sealed))
               {
                 (cpTag k w (strData n) (strData aad) (strLen aad) s ctLen (+ w 272))
                 (if (cpTagMatches (+ w 272) (+ s ctLen))
-                  (let ((out (strAlloc ctLen)))
+                  {
+                    (let out (strAlloc ctLen))
                     {
                       (chacha20Xor k (strData n) 1 s (strData out) ctLen w)
                       (ctWipe w cpWorkBytes)
                       (Ok out)
-                    })
+                    }
+                  }
                   {
                     (ctWipe w cpWorkBytes)
                     (cryptoAuthErr "chacha20Poly1305Open")
                   })
-              })))))))
+              }
+            }
+          })
+      })
+  })

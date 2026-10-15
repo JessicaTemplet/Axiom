@@ -25,11 +25,13 @@
 (fn (agree k pk)
   (match (x25519 k pk)
     ((Ok s)
-      (let ((b (secretExposeCopy s)))
+      {
+        (let b (secretExposeCopy s))
         {
           (secretWipe s)
           b
-        })
+        }
+      }
     )
     ((Err _) "")))
 
@@ -55,12 +57,16 @@
 (:: keyOf (-> String X25519SecretKey))
 ;@axiom:effect(io)
 (fn (keyOf bytes)
-  (let ((s (orDie (secretFromString bytes) "secretFromString")))
-    (let ((k (orDie (x25519KeyFromSecret s) "x25519KeyFromSecret")))
+  {
+    (let s (orDie (secretFromString bytes) "secretFromString"))
+    {
+      (let k (orDie (x25519KeyFromSecret s) "x25519KeyFromSecret"))
       {
         (secretWipe s)
         k
-      })))
+      }
+    }
+  })
 
 (:: pubOf (-> String X25519PublicKey))
 ;@axiom:effect(io)
@@ -70,44 +76,48 @@
 ; `n` rounds of k, u = X25519(k, u), k from k = u = 9.
 (:: iterate (-> Int String))
 (fn (iterate n)
-  (let (
-    (mut k x25519BasePoint)
-    (mut u x25519BasePoint)
-  )
+  {
+    (let mut k x25519BasePoint)
+    (let mut u x25519BasePoint)
     {
       (for i in 0..n
-        (let ((next (raw k u)))
+        {
+          (let next (raw k u))
           {
             (set u k)
             (set k next)
-          }))
+          }
+        })
       k
-    }))
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (main)
-  (let (
-    (t (tallyNew "x25519-rfc7748"))
-    (api (tallyNew "x25519-api"))
-  )
+  {
+    (let t (tallyNew "x25519-rfc7748"))
+    (let api (tallyNew "x25519-api"))
     {
       (for line in (katLines "x25519-rfc7748.txt")
-        (let ((f (katFields line)))
-          (let ((kind (katText f 0)))
+        {
+          (let f (katFields line))
+          {
+            (let kind (katText f 0))
             (if (strEq kind "mult")
               (tallyBytes t (katBytes f 3) (raw (katBytes f 1) (katBytes f 2))
                 "section 5.2 function vector")
               (strEq kind "iter")
-              (let ((n (katInt f 1)))
-                (tallyBytes t (katBytes f 2) (iterate n) (concat "iterations: " (katText f 1))))
+              {
+                (let n (katInt f 1))
+                (tallyBytes t (katBytes f 2) (iterate n) (concat "iterations: " (katText f 1)))
+              }
               (strEq kind "dh")
-              (let (
-                (a (keyOf (katBytes f 1)))
-                (b (keyOf (katBytes f 3)))
-                (want (katBytes f 5))
-              )
+              {
+                (let a (keyOf (katBytes f 1)))
+                (let b (keyOf (katBytes f 3)))
+                (let want (katBytes f 5))
                 {
                   (tallyBytes t (katBytes f 2) (x25519PublicKeyBytes (x25519PublicKey a))
                     "section 6.1 Alice's public key")
@@ -121,22 +131,25 @@
                     "section 6.1 through the raw function")
                   (x25519KeyWipe a)
                   (x25519KeyWipe b)
-                })
-              (tallyCheck t false (concat "unknown case kind " kind))))))
+                }
+              }
+              (tallyCheck t false (concat "unknown case kind " kind)))
+          }
+        })
       ; The refusals, and the round trips the API promises.
-      (let (
-        (k (keyOf (bytesNew 32)))
-        (zero (bytesNew 32))
-        (one (orDie (hexDecode "0100000000000000000000000000000000000000000000000000000000000000")
-               "hexDecode"))
-      )
+      {
+        (let k (keyOf (bytesNew 32)))
+        (let zero (bytesNew 32))
+        (let one
+          (orDie (hexDecode "0100000000000000000000000000000000000000000000000000000000000000")
+            "hexDecode"))
         {
           (tallyCheck api (failsWith (x25519 k (pubOf zero)) cryptoInvalidKey)
             "u = 0 gives the all-zero secret")
           (tallyCheck api (failsWith (x25519 k (pubOf one)) cryptoInvalidKey)
             "u = 1 gives the all-zero secret")
           (tallyCheck api
-            (failsWith (x25519 k (X25519PublicKey (bytesNew 31))) cryptoInvalidLength)
+            (failsWith (x25519 k (X25519PublicKey :bytes (bytesNew 31))) cryptoInvalidLength)
             "a forged 31-byte public key")
           (tallyCheck api (failsWith (x25519PublicKeyFromBytes (bytesNew 31)) cryptoInvalidLength)
             "a 31-byte public key")
@@ -156,17 +169,17 @@
             )
             ((Err _) (tallyCheck api false "secret store")))
           (x25519KeyWipe k)
-        })
+        }
+      }
       (match x25519KeyGenerate
         ((Err _) (tallyCheck api false "x25519KeyGenerate"))
         ((Ok a)
           (match x25519KeyGenerate
             ((Err _) (tallyCheck api false "x25519KeyGenerate"))
             ((Ok b)
-              (let (
-                (ab (agree a (x25519PublicKey b)))
-                (ba (agree b (x25519PublicKey a)))
-              )
+              {
+                (let ab (agree a (x25519PublicKey b)))
+                (let ba (agree b (x25519PublicKey a)))
                 {
                   (tallyCheck api (&& (== (strLen ab) 32) (strEq ab ba)) "two generated keys agree")
                   (tallyCheck api
@@ -177,17 +190,21 @@
                   (match (x25519KeyExport a)
                     ((Err _) (tallyCheck api false "x25519KeyExport"))
                     ((Ok s)
-                      (let ((pa (raw (secretExposeCopy s) x25519BasePoint)))
+                      {
+                        (let pa (raw (secretExposeCopy s) x25519BasePoint))
                         {
                           (tallyBytes api (x25519PublicKeyBytes (x25519PublicKey a)) pa
                             "the exported key gives the same public key")
                           (secretWipe s)
-                        })
+                        }
+                      }
                     ))
                   (x25519KeyWipe a)
                   (x25519KeyWipe b)
-                })
+                }
+              }
             ))
         ))
       (+ (tallyReport t) (tallyReport api))
-    }))
+    }
+  })

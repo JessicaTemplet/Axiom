@@ -18,9 +18,13 @@
 
 (:: obfStep (-> Int Int))
 (fn (obfStep state)
-  (let ((a (& (^ state (<< state 13)) 4294967295)))
-    (let ((b (^ a (>> a 17))))
-      (& (^ b (<< b 5)) 4294967295))))
+  {
+    (let a (& (^ state (<< state 13)) 4294967295))
+    {
+      (let b (^ a (>> a 17)))
+      (& (^ b (<< b 5)) 4294967295)
+    }
+  })
 
 (:: obfLiteralSeed (-> Int Int Int))
 (fn (obfLiteralSeed seed id)
@@ -35,26 +39,33 @@
 (:: obfMaskLiteral (-> String Int String))
 ;@axiom:effect(unsafe)
 (fn (obfMaskLiteral body seed)
-  (let (
-    (out (strAlloc (strLen body)))
-    (mut state seed)
-  )
+  {
+    (let out (strAlloc (strLen body)))
+    (let mut state seed)
     {
       (for i in 0..(/ (strLen body) 3)
-        (let ((at (* i 3)))
-          (let ((byte (+ (* (obfHexValue (strByte body (+ at 1))) 16)
-                        (obfHexValue (strByte body (+ at 2))))))
+        {
+          (let at (* i 3))
+          {
+            (let byte
+              (+ (* (obfHexValue (strByte body (+ at 1))) 16)
+                (obfHexValue (strByte body (+ at 2)))))
             {
               (set state (obfStep state))
-              (let ((masked (^ byte (& state 255))))
+              {
+                (let masked (^ byte (& state 255)))
                 {
                   (__store8 (strData out) at 92)
                   (__store8 (strData out) (+ at 1) (hexDigit (/ masked 16)))
                   (__store8 (strData out) (+ at 2) (hexDigit (% masked 16)))
-                })
-            })))
+                }
+              }
+            }
+          }
+        })
       out
-    }))
+    }
+  })
 
 ; Replace complete LLVM symbol tokens, including quoted names. Never
 ; substitute inside string constants or comments. Chunks are joined
@@ -63,15 +74,15 @@
 (fn (obfRenameLine line names replacements)
   (if (|| (strStartsWith (strTrim line) ";") (isSome (strFind line " c\"" 0)))
     line
-    (let (
-      (parts vecNew)
-      (mut pos 0)
-      (mut scan 0)
-    )
+    {
+      (let parts vecNew)
+      (let mut pos 0)
+      (let mut scan 0)
       {
         (while (< scan (strLen line))
           (if (== (strByte line scan) 64)
-            (let ((end (pruneRefEnd line (+ scan 1) (strLen line))))
+            {
+              (let end (pruneRefEnd line (+ scan 1) (strLen line)))
               {
                 (match (internFind names (strSlice line (+ scan 1) (- end (+ scan 1))))
                   ((None) ())
@@ -83,23 +94,25 @@
                     }
                   ))
                 (set scan end)
-              })
+              }
+            }
             (set scan (+ scan 1))))
         (vecPush parts (strSlice line pos (- (strLen line) pos)))
         (obfJoin parts "")
-      })))
+      }
+    }))
 
 (:: obfJoin (-> (Vec String) String String))
 ;@axiom:effect(unsafe)
 (fn (obfJoin parts separator)
-  (let ((mut n 0))
+  {
+    (let mut n 0)
     {
       (for part in parts
         (set n (+ n (+ (strLen part) (strLen separator)))))
-      (let (
-        (out (strAlloc n))
-        (mut offset 0)
-      )
+      {
+        (let out (strAlloc n))
+        (let mut offset 0)
         {
           (for part in parts
             {
@@ -111,8 +124,10 @@
               (set offset (+ offset (strLen separator)))
             })
           out
-        })
-    }))
+        }
+      }
+    }
+  })
 
 (:: obfKeepName (-> String Bool))
 (fn (obfKeepName name)
@@ -126,40 +141,41 @@
 (:: obfTransform (-> String Int Int String))
 ;@axiom:effect(unsafe)
 (fn (obfTransform ir seed share)
-  (let (
-    (lines (strSplit ir 10))
-    (names internNew)
-    (replacements vecNew)
-    (out vecNew)
-    (init vecNew)
-    (mut literal 0)
-  )
+  {
+    (let lines (strSplit ir 10))
+    (let names internNew)
+    (let replacements vecNew)
+    (let out vecNew)
+    (let init vecNew)
+    (let mut literal 0)
     {
       (for name in (as (symtabNames (as lines (Vec Int))) (Vec String))
         (if (! (obfKeepName name))
-          (let ((id (internIntern names name)))
+          {
+            (let id (internIntern names name))
             (vecPush replacements
-              (concat "__axob." (concat (fmtInt seed) (concat "." (fmtInt id))))))))
+              (concat "__axob." (concat (fmtInt seed) (concat "." (fmtInt id)))))
+          }))
       (vecPush init
         "define private void @.axiom.obf.init() noinline optnone {\nentry:\n  %a = load volatile i32, ptr @.axiom.obf.a\n  %b = load volatile i32, ptr @.axiom.obf.b\n  %seed = xor i32 %a, %b")
       (for line in lines
         (if (strStartsWith line "@str_")
-          (let (
-            (end (match (strFindByte line 32 0)
-              ((Some i) i)
-              ((None) 0)))
-            (at (+
-                  (match (strFind line "c\"" 0)
-                    ((Some i) i)
-                    ((None) 0))
-                  2))
-          )
-            (let (
-              (name (strSlice line 1 (- end 1)))
-              (body (strSlice line at (- (- (strLen line) 1) at)))
-              (n (/ (strLen body) 3))
-              (id (fmtInt literal))
-            )
+          {
+            (let end
+              (match (strFindByte line 32 0)
+                ((Some i) i)
+                ((None) 0)))
+            (let at
+              (+
+                (match (strFind line "c\"" 0)
+                  ((Some i) i)
+                  ((None) 0))
+                2))
+            {
+              (let name (strSlice line 1 (- end 1)))
+              (let body (strSlice line at (- (- (strLen line) 1) at)))
+              (let n (/ (strLen body) 3))
+              (let id (fmtInt literal))
               {
                 (vecPush out
                   (concat "@"
@@ -187,7 +203,9 @@
                           (concat ", i64 "
                             (concat (fmtInt n) (concat ", i32 %key" (concat id ")")))))))))
                 (set literal (+ literal 1))
-              }))
+              }
+            }
+          }
           {
             (if (isSome (strFind line "  %r = call i64 @__axiom_user_main()" 0))
               (vecPush out "  call void @.axiom.obf.init()"))
@@ -202,7 +220,8 @@
       (vecPush out (obfJoin init "\n"))
       (internFree names)
       (obfJoin out "\n")
-    }))
+    }
+  })
 
 ; Draw build-specific mask seeds. Entropy failures are reported, with
 ; no deterministic fallback. Ordinary builds never draw entropy here.
@@ -210,7 +229,9 @@
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (pub fn (obfuscateIr ir)
-  (let ((random (strAlloc 8)))
+  {
+    (let random (strAlloc 8))
     (match (sysRandomBytes (strData random) 8)
       ((Err e) (Err e))
-      ((Ok _) (Ok (obfTransform ir (| (obfWord random 0) 1) (obfWord random 4)))))))
+      ((Ok _) (Ok (obfTransform ir (| (obfWord random 0) 1) (obfWord random 4)))))
+  })

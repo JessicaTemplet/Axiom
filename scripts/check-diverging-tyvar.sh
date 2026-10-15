@@ -224,13 +224,13 @@ cat > "$work/shapes.ax" <<'AX'
 ;@axiom:effect(unsafe)
 
 (fn (pLoop m)
-  (let ((mut i 0))
+  { (let mut i 0)
     {
       (while true
         (set i (+ i 1)))
       (as i a)
     }
-  )
+  }
 )
 
 ; 8. every arm of an `if`, which is the MUST half of the analysis

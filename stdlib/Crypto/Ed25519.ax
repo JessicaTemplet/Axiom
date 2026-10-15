@@ -104,17 +104,17 @@
 (:: ed25519BlockFinish (-> Int Int))
 (fn (ed25519BlockFinish h)
   (region scratch
-    (let (
-      (p (secretBlockAddr ed25519Kind h))
-      (pt (memAlloc ge25519P3Bytes))
-    )
+    {
+      (let p (secretBlockAddr ed25519Kind h))
+      (let pt (memAlloc ge25519P3Bytes))
       {
         (sha512Addr p 32 (+ p 32))
         (ed25519Clamp (+ p 32))
         (ge25519ScalarMultBase pt (+ p 32))
         (ge25519ToBytes (+ p 96) pt)
         (ctWipe pt ge25519P3Bytes)
-      })))
+      }
+    }))
 
 ; Clamp the 32-byte scalar at `a` in place: clear the low three bits
 ; and bit 255, set bit 254 (section 5.1.5, step 2).
@@ -147,7 +147,7 @@
         ((Ok _)
           {
             (ed25519BlockFinish h)
-            (Ok (Ed25519SecretKey h))
+            (Ok (Ed25519SecretKey :slot h))
           }
         ))
     )))
@@ -168,7 +168,7 @@
         {
           (ctCopy (secretBlockAddr ed25519Kind h) (secretAddr s) 32)
           (ed25519BlockFinish h)
-          (Ok (Ed25519SecretKey h))
+          (Ok (Ed25519SecretKey :slot h))
         }
       ))))
 
@@ -189,17 +189,19 @@
 ;; The public key of `k`.
 (pub :: ed25519PublicKey (-> Ed25519SecretKey Ed25519PublicKey))
 (pub fn (ed25519PublicKey k)
-  (Ed25519PublicKey (bytesFromAddr (+ (secretBlockAddr ed25519Kind k.slot) 96) 32)))
+  (Ed25519PublicKey :bytes (bytesFromAddr (+ (secretBlockAddr ed25519Kind k.slot) 96) 32)))
 
 ; 1 when the 32 bytes at `p` decode strictly to a point (RFC 8032,
 ; section 5.1.3), 0 otherwise.
 (:: ed25519Decodes (-> Int Int))
 (fn (ed25519Decodes p)
   (region scratch
-    (let ((h (memAlloc ge25519P3Bytes)))
+    {
+      (let h (memAlloc ge25519P3Bytes))
       (if (== (ge25519FromBytesVartime h p) 0)
         1
-        0))))
+        0)
+    }))
 
 ;; A public key from its 32 bytes. `cryptoInvalidLength` for any other
 ;; length, and `cryptoInvalidEncoding` unless the bytes are the strict
@@ -212,7 +214,7 @@
     (if (== (ed25519Decodes (strData s)) 0)
       (cryptoErr cryptoInvalidEncoding "not the encoding of a point on Ed25519"
         "ed25519PublicKeyFromBytes")
-      (Ok (Ed25519PublicKey s)))))
+      (Ok (Ed25519PublicKey :bytes s)))))
 
 ;; The 32 bytes of a public key.
 (pub :: ed25519PublicKeyBytes (-> Ed25519PublicKey String))
@@ -232,7 +234,7 @@
       (if (== (ed25519Decodes (strData s)) 0)
         (cryptoErr cryptoInvalidEncoding "the signature's R is not the encoding of a point"
           "ed25519SignatureFromBytes")
-        (Ok (Ed25519Signature s))))))
+        (Ok (Ed25519Signature :bytes s))))))
 
 ;; The 64 bytes of a signature.
 (pub :: ed25519SignatureBytes (-> Ed25519Signature String))
@@ -249,36 +251,39 @@
 (:: ed25519HashReduce (-> Int Int Int Int Int String Int))
 ;@axiom:ct(*out, *p, *q)
 (fn (ed25519HashReduce out p n q m msg)
-  (let ((h sha512New))
+  {
+    (let h sha512New)
     {
       (sha512UpdateAddr h p n)
       (sha512UpdateAddr h q m)
       (sha512Update h msg)
-      (let ((d (sha512Final h)))
+      {
+        (let d (sha512Final h))
         {
           (sc25519Reduce out (strData d))
           (ctWipe (strData d) (strLen d))
-        })
+        }
+      }
       (sha512Wipe h)
-    }))
+    }
+  })
 
 ;; The signature of `msg` under `k` (section 5.1.6): r = SHA-512(prefix
 ;; || msg) mod L, R = [r]B, k = SHA-512(R || A || msg) mod L, S = (r +
 ;; k a) mod L.
 (pub :: ed25519Sign (-> Ed25519SecretKey String Ed25519Signature))
 (pub fn (ed25519Sign k msg)
-  (let (
-    (p (secretBlockAddr ed25519Kind k.slot))
-    (sig (bytesNew 64))
-  )
+  {
+    (let p (secretBlockAddr ed25519Kind k.slot))
+    (let sig (bytesNew 64))
     {
       (region scratch
-        (let ((w (memAlloc 384)))
-          (let (
-            (r w)
-            (hram (+ w 32))
-            (pt (+ w 64))
-          )
+        {
+          (let w (memAlloc 384))
+          {
+            (let r w)
+            (let hram (+ w 32))
+            (let pt (+ w 64))
             {
               (ed25519HashReduce r (+ p 64) 32 p 0 msg)
               (ge25519ScalarMultBase pt r)
@@ -286,9 +291,12 @@
               (ed25519HashReduce hram (strData sig) 32 (+ p 96) 32 msg)
               (sc25519MulAdd (+ (strData sig) 32) hram (+ p 32) r)
               (ctWipe w 384)
-            })))
-      (Ed25519Signature sig)
-    }))
+            }
+          }
+        })
+      (Ed25519Signature :bytes sig)
+    }
+  })
 
 ;; Whether `sig` is a valid signature of `msg` under `pk` (section
 ;; 5.1.7): false for a public key or signature of the wrong length, a
@@ -297,27 +305,29 @@
 ;; DECIDES above.
 (pub :: ed25519Verify (-> Ed25519PublicKey String Ed25519Signature Bool))
 (pub fn (ed25519Verify pk msg sig)
-  (let (
-    (a pk.bytes)
-    (s sig.bytes)
-  )
+  {
+    (let a pk.bytes)
+    (let s sig.bytes)
     (if (|| (!= (strLen a) 32) (!= (strLen s) 64))
       false
       (if (== (sc25519IsCanonical (+ (strData s) 32)) 0)
         false
         (region scratch
-          (let ((pa (memAlloc ge25519P3Bytes)))
+          {
+            (let pa (memAlloc ge25519P3Bytes))
             (if (!= (ge25519FromBytesVartime pa (strData a)) 0)
               false
-              (let (
-                (k (memAlloc 32))
-                (r (memAlloc ge25519P2Bytes))
-                (check (memAlloc 32))
-              )
+              {
+                (let k (memAlloc 32))
+                (let r (memAlloc ge25519P2Bytes))
+                (let check (memAlloc 32))
                 {
                   (ge25519P3Neg pa)
                   (ed25519HashReduce k (strData s) 32 (strData a) 32 msg)
                   (ge25519DoubleScalarMultVartime r k pa (+ (strData s) 32))
                   (ge25519ToBytes check r)
                   (ctEqAddr check (strData s) 32)
-                }))))))))
+                }
+              })
+          })))
+  })

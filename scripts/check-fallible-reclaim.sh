@@ -108,11 +108,13 @@ import sys
 p = sys.argv[1]
 s = open(p).read()
 old = """(pub fn (binderIsScalar n)
-  (let ((t (nodeBinderTy n)))
+  {
+    (let t (nodeBinderTy n))
     (if (== t 0)
       0"""
 new = """(pub fn (binderIsScalar n)
-  (let ((t (nodeBinderTy n)))
+  {
+    (let t (nodeBinderTy n))
     (if (>= t 0)
       0"""
 if s.count(old) != 1:

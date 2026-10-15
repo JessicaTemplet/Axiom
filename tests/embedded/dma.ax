@@ -62,21 +62,21 @@
 
 (:: bswap32 (-> Int Int))
 (fn (bswap32 x)
-  (let (
-    (b0 (& x 255))
-    (b1 (& (>> x 8) 255))
-    (b2 (& (>> x 16) 255))
-    (b3 (& (>> x 24) 255))
-  )
-    (| (| (<< b0 24) (<< b1 16)) (| (<< b2 8) b3))))
+  {
+    (let b0 (& x 255))
+    (let b1 (& (>> x 8) 255))
+    (let b2 (& (>> x 16) 255))
+    (let b3 (& (>> x 24) 255))
+    (| (| (<< b0 24) (<< b1 16)) (| (<< b2 8) b3))
+  })
 
 (:: bswap64 (-> Int Int))
 (fn (bswap64 x)
-  (let (
-    (lo (bswap32 (& x 4294967295)))
-    (hi (bswap32 (& (>> x 32) 4294967295)))
-  )
-    (| (<< lo 32) hi)))
+  {
+    (let lo (bswap32 (& x 4294967295)))
+    (let hi (bswap32 (& (>> x 32) 4294967295)))
+    (| (<< lo 32) hi)
+  })
 
 ; ---- the DMA buffer and its owner ----------------------------------------
 ; A header of three words: 0 the owner (0 the CPU, 1 the device), 1 the
@@ -102,16 +102,16 @@
 (:: dmaNew (-> Int DmaBuf))
 ;@axiom:effect(unsafe)
 (fn (dmaNew len)
-  (let (
-    (h (memAlloc 32))
-    (d (memAlloc len))
-  )
+  {
+    (let h (memAlloc 32))
+    (let d (memAlloc len))
     {
       (__store64 h 0 0)
       (__store64 h 1 d)
       (__store64 h 2 len)
-      (DmaBuf h)
-    }))
+      (DmaBuf :hdr h)
+    }
+  })
 
 ; Clean (`dc cvac`) or clean-and-invalidate (`dc civac`) every 64-byte
 ; line of the buffer.
@@ -120,10 +120,12 @@
 (fn (dmaLines b invalidate)
   {
     (for off in 0..(+ (/ (dmaLen b) 64) 1)
-      (let ((a (+ (dmaData b) (* off 64))))
+      {
+        (let a (+ (dmaData b) (* off 64)))
         (if (== invalidate 1)
           (__arm_dc_civac a)
-          (__arm_dc_cvac a))))
+          (__arm_dc_cvac a))
+      })
     0
   })
 
@@ -177,7 +179,8 @@
 (:: onIrq Int)
 ;@axiom:effect(unsafe)
 (fn (onIrq)
-  (let ((iar (__vload32 (+ gicc 12))))
+  {
+    (let iar (__vload32 (+ gicc 12)))
     {
       (if (== (& iar 1023) timerId)
         {
@@ -186,7 +189,8 @@
         })
       (__vstore32 (+ gicc 16) iar)
       0
-    }))
+    }
+  })
 
 (:: gicInit Int)
 ;@axiom:effect(unsafe)
@@ -226,24 +230,28 @@
     ; low; the low half's write starts the transfer.
     (__vstore32 (+ cfgBase 16) (bswap32 (& (>> desc 32) 4294967295)))
     (__vstore32 (+ cfgBase 20) (bswap32 (& desc 4294967295)))
-    (let ((mut state 3))
+    {
+      (let mut state 3)
       {
         (while (== state 3)
           {
             (__arm_dc_civac desc)
             __arm_dsb
-            (let ((ctl (bswap32 (& (__vload32 desc) 4294967295))))
+            {
+              (let ctl (bswap32 (& (__vload32 desc) 4294967295)))
               (if (== (& ctl (- 0 2)) 0)
                 (set state (if (== (& ctl ctlError) 0)
                   0
                   1))
                 (if (== (__vload64 flag) 1)
-                  (set state 2))))
+                  (set state 2)))
+            }
           })
         __arm_irq_mask
         (__arm_set_cntv_ctl 0)
         state
-      })
+      }
+    }
   })
 
 ; The same item a byte at a time through the data register.
@@ -259,25 +267,24 @@
 
 (:: be32At (-> DmaBuf Int Int))
 (fn (be32At b i)
-  (let (
-    (b0 (dmaByte b i))
-    (b1 (dmaByte b (+ i 1)))
-    (b2 (dmaByte b (+ i 2)))
-    (b3 (dmaByte b (+ i 3)))
-  )
-    (| (| (<< b0 24) (<< b1 16)) (| (<< b2 8) b3))))
+  {
+    (let b0 (dmaByte b i))
+    (let b1 (dmaByte b (+ i 1)))
+    (let b2 (dmaByte b (+ i 2)))
+    (let b3 (dmaByte b (+ i 3)))
+    (| (| (<< b0 24) (<< b1 16)) (| (<< b2 8) b3))
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (main)
-  (let (
-    (len 4096)
-    (b (dmaNew 4096))
-    (desc (memAlloc 16))
-    (flag (memAlloc 16))
-    (copy (memAlloc 4096))
-  )
+  {
+    (let len 4096)
+    (let b (dmaNew 4096))
+    (let desc (memAlloc 16))
+    (let flag (memAlloc 16))
+    (let copy (memAlloc 4096))
     {
       (__arm_set_tpidr flag)
       (gicInit)
@@ -285,7 +292,8 @@
       (if (== (__vload64 (+ cfgBase 16)) 5135866231211771217)
         (println "dma: the interface answers QEMU CFG")
         (println "dma: no DMA interface here"))
-      (let ((st (dmaRead b desc flag itemFileDir)))
+      {
+        (let st (dmaRead b desc flag itemFileDir))
         {
           (if (== st 2)
             (println "dma: timed out")
@@ -294,10 +302,9 @@
               (println "dma: transfer complete")))
           (dmaTake b)
           (pioRead copy len itemFileDir)
-          (let (
-            (files (be32At b 0))
-            (mut differ 0)
-          )
+          {
+            (let files (be32At b 0))
+            (let mut differ 0)
             {
               (for i in 0..len
                 (if (! (== (dmaByte b i) (__load8 copy i)))
@@ -310,6 +317,9 @@
                   0
                 }
                 1)
-            })
-        })
-    }))
+            }
+          }
+        }
+      }
+    }
+  })

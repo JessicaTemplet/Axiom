@@ -181,22 +181,22 @@ AX
 
 (:: total (-> Int Int))
 (fn (total n)
-  (let ((mut i 1) (mut acc 0))
+  { (let mut i 1) (let mut acc 0)
     {
       (while (<= i n)
-        (let ((v (parseRecord i)))
+        { (let v (parseRecord i))
           {
             (set acc (if (fallibleIsSkipped v) acc (+ acc v)))
             (set i (+ i 1))
-          }))
+          }})
       acc
-    }))
+    }})
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((kept vecNew))
-    { (println (as (handle (total $n) (Fallible Alloc Mut) $handler) Int)) 0 }))
+  { (let kept vecNew)
+    { (println (as (handle (total $n) (Fallible Alloc Mut) $handler) Int)) 0 }})
 AX
       ;;
   esac

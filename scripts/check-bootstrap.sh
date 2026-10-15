@@ -941,12 +941,12 @@ echo "ok   one self-compile peaks at $((peak / 1024)) MiB, under the $((ceiling 
 # stdlib, and that is not the part being asked about.
 nest_src() {
   local d="$1" j
-  printf '(import Vec)\n(import Fmt)\n(import IO)\n\n(:: f (-> (Vec Int) Int))\n(fn (f h)\n  (let (\n'
-  for ((j = 0; j < d; j++)); do printf '    (mut v%d (vecGet h %d))\n' "$j" "$j"; done
-  printf '    (mut i 0)\n  )\n    {\n      (while (< i 64)\n        {\n'
+  printf '(import Vec)\n(import Fmt)\n(import IO)\n\n(:: f (-> (Vec Int) Int))\n(fn (f h)\n  {\n'
+  for ((j = 0; j < d; j++)); do printf '    (let mut v%d (vecGet h %d))\n' "$j" "$j"; done
+  printf '    (let mut i 0)\n    {\n      (while (< i 64)\n        {\n'
   for ((j = d - 1; j > 0; j--)); do printf '          (set v%d v%d)\n' "$j" "$((j - 1))"; done
-  printf '          (set v0 (+ v0 i))\n          (set i (+ i 1))\n        })\n      (+ v0 v%d)\n    }))\n\n' "$((d - 1))"
-  printf '(:: main Int)\n;@axiom:effect(io)\n(fn (main) { (let ((v vecNew)) (println (fmtHex (f v)))) 0 })\n'
+  printf '          (set v0 (+ v0 i))\n          (set i (+ i 1))\n        })\n      (+ v0 v%d)\n    }\n  })\n\n' "$((d - 1))"
+  printf '(:: main Int)\n;@axiom:effect(io)\n(fn (main) { { (let v vecNew) (println (fmtHex (f v))) } 0 })\n'
 }
 mkdir -p "$work/nest"
 nest_src 6 >"$work/nest/n6.ax"

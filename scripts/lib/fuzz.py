@@ -811,15 +811,14 @@ def cmd_human(pos):
 # change to the mutations changes it: run `fuzz.py selftest` and copy
 # the digest it reports into PINNED_DIGEST in the same commit.
 PINNED_CORPUS = {
-    "a.ax": '(import IO)\n\n(:: main Int)\n;@axiom:effect(io)\n(fn (main)\n'
-            '  {\n    (println "hi \\n")\n    (let ((x 42) (y -7)) (+ x y))\n  })\n',
+    "a.ax": '(import IO)\n\n(:: main Int)\n;@axiom:effect(io)\n(fn (main)\n  {\n    (println "hi \\n")\n    { (let x 42) (let y -7) (+ x y)}\n  })\n',
     "b.ax": '#| a #| nested |# comment |#\n(data Shape (Circle Int) (Sq Int))\n'
             '(:: area (-> Shape Int))\n(fn (area s)\n  (match s\n'
             '    ((Circle r) (* 3 (* r r)))\n    ((Sq w) (* w w))))\n',
     "c.ax": "(struct P (x : Int) (y : Int))\n(macro (twice e) (+ e e))\n"
             "(fn (f p) [(P-x p) 'a' '\\n' (twice 9223372036854775807)])\n",
 }
-PINNED_DIGEST = "7234a79dcc9f24c94e84feeab5518c4fb9e1af1095db92798d1264cdc9f902fd"
+PINNED_DIGEST = "7058dd82020523332aa3f9fd777bd852ac53db46660e192d24a221e3486b3fd1"
 
 
 def pinned_digest():

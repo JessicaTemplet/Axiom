@@ -29,23 +29,27 @@
       (match (secretFromString key)
         ((Err e) (Err e))
         ((Ok s)
-          (let ((r
-            (match (chacha20Poly1305KeyFromSecret s)
-              ((Err e) (Err e))
-              ((Ok k)
-                (let ((r
-                  (if sealing
-                    (chacha20Poly1305Seal k n aad text)
-                    (chacha20Poly1305Open k n aad text))))
+          {
+            (let r
+              (match (chacha20Poly1305KeyFromSecret s)
+                ((Err e) (Err e))
+                ((Ok k)
                   {
-                    (chacha20Poly1305KeyWipe k)
-                    r
-                  })
-              ))))
+                    (let r
+                      (if sealing
+                        (chacha20Poly1305Seal k n aad text)
+                        (chacha20Poly1305Open k n aad text)))
+                    {
+                      (chacha20Poly1305KeyWipe k)
+                      r
+                    }
+                  }
+                )))
             {
               (secretWipe s)
               r
-            })
+            }
+          }
         ))
     )))
 
@@ -87,11 +91,13 @@
 (:: flip (-> String Int String))
 ;@axiom:effect(unsafe)
 (fn (flip s i)
-  (let ((c (bytesFromAddr (strData s) (strLen s))))
+  {
+    (let c (bytesFromAddr (strData s) (strLen s)))
     {
       (__store8 (strData c) i (^ (strByte s i) 1))
       c
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Forgeries: every way to change a sealed message must fail to open,
@@ -100,10 +106,9 @@
 (:: forgeries (-> Tally String String String String String Int))
 ;@axiom:effect(io)
 (fn (forgeries t key nonce aad pt sealed)
-  (let (
-    (n (strLen sealed))
-    (id (hexEncode nonce))
-  )
+  {
+    (let n (strLen sealed))
+    (let id (hexEncode nonce))
     {
       (tallyCheck t (answers (open key nonce aad sealed) pt)
         (concat "the genuine message opens " id))
@@ -132,7 +137,8 @@
       (tallyCheck t (authFails (open key (flip nonce 11) aad sealed))
         (concat "nonce last byte flipped " id))
       (tallyCheck t (authFails (open (flip key 0) nonce aad sealed)) (concat "wrong key " id))
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; The key API.
@@ -143,33 +149,37 @@
   (match (secretFromString (bytesNew n))
     ((Err _) false)
     ((Ok s)
-      (let ((a
-        (match (chacha20Poly1305KeyFromSecret s)
-          ((Ok k)
-            {
-              (chacha20Poly1305KeyWipe k)
-              false
-            }
-          )
-          ((Err e) (== (errCode e) cryptoInvalidLength)))))
+      {
+        (let a
+          (match (chacha20Poly1305KeyFromSecret s)
+            ((Ok k)
+              {
+                (chacha20Poly1305KeyWipe k)
+                false
+              }
+            )
+            ((Err e) (== (errCode e) cryptoInvalidLength))))
         {
           (secretWipe s)
           a
-        })
+        }
+      }
     )))
 
 (:: apiChecks (-> Tally Int))
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (apiChecks t)
-  (let ((nonce (unwrapOr (aeadNonceFromBytes "0123456789ab") (AeadNonce ""))))
+  {
+    (let nonce (unwrapOr (aeadNonceFromBytes "0123456789ab") (AeadNonce :bytes "")))
     {
       (for n in (vecOf6 0 16 24 31 33 64)
         (tallyCheck t (keyLengthRefused n) "a key of the wrong length is refused"))
       (match (chacha20Poly1305KeyGenerate)
         ((Err _) (tallyCheck t false "chacha20Poly1305KeyGenerate"))
         ((Ok k)
-          (let ((sealed (chacha20Poly1305Seal k nonce "hdr" "attack at dawn")))
+          {
+            (let sealed (chacha20Poly1305Seal k nonce "hdr" "attack at dawn"))
             {
               (tallyCheck t (== (strLen (unwrapOr sealed "")) 30)
                 "a seal is the plaintext plus 16 bytes")
@@ -177,10 +187,12 @@
                 (answers (chacha20Poly1305Open k nonce "hdr" (unwrapOr sealed "")) "attack at dawn")
                 "a generated key opens its own seal")
               (tallyCheck t
-                (refused (chacha20Poly1305Seal k (AeadNonce "short") "" "x") cryptoInvalidLength)
+                (refused (chacha20Poly1305Seal k (AeadNonce :bytes "short") "" "x")
+                  cryptoInvalidLength)
                 "a forged short nonce is refused by seal")
               (tallyCheck t
-                (authFails (chacha20Poly1305Open k (AeadNonce "short") "hdr" (unwrapOr sealed "")))
+                (authFails
+                  (chacha20Poly1305Open k (AeadNonce :bytes "short") "hdr" (unwrapOr sealed "")))
                 "a forged short nonce fails open")
               (tallyCheck t
                 (answers
@@ -188,9 +200,10 @@
                     (unwrapOr (chacha20Poly1305Seal k nonce "" "") ""))
                   "")
                 "an empty message round-trips")
-              (let ((shown (format "{k}")))
-                (tallyCheck t (strEq shown "<ChaCha20Poly1305Key>")
-                  "a key prints as its type name"))
+              {
+                (let shown (format "{k}"))
+                (tallyCheck t (strEq shown "<ChaCha20Poly1305Key>") "a key prints as its type name")
+              }
               (match (chacha20Poly1305KeyExport k)
                 ((Err _) (tallyCheck t false "chacha20Poly1305KeyExport"))
                 ((Ok s)
@@ -218,13 +231,16 @@
                   }
                 ))
               (chacha20Poly1305KeyWipe k)
-            })
+            }
+          }
         ))
-    }))
+    }
+  })
 
 (:: vecOf6 (-> Int Int Int Int Int Int (Vec Int)))
 (fn (vecOf6 a b c d e f)
-  (let ((v vecNew))
+  {
+    (let v vecNew)
     {
       (vecPush v a)
       (vecPush v b)
@@ -233,48 +249,50 @@
       (vecPush v e)
       (vecPush v f)
       v
-    }))
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (main)
-  (let (
-    (rfc (tallyNew "chacha20-poly1305-rfc8439"))
-    (wp (tallyNew "wycheproof-chacha20-poly1305"))
-    (wpr (tallyNew "wycheproof-chacha20-poly1305-refused"))
-    (diff (tallyNew "chacha20-poly1305-rustcrypto"))
-    (neg (tallyNew "chacha20-poly1305-forgeries"))
-    (api (tallyNew "chacha20-poly1305-keys"))
-    (mut forged 0)
-  )
+  {
+    (let rfc (tallyNew "chacha20-poly1305-rfc8439"))
+    (let wp (tallyNew "wycheproof-chacha20-poly1305"))
+    (let wpr (tallyNew "wycheproof-chacha20-poly1305-refused"))
+    (let diff (tallyNew "chacha20-poly1305-rustcrypto"))
+    (let neg (tallyNew "chacha20-poly1305-forgeries"))
+    (let api (tallyNew "chacha20-poly1305-keys"))
+    (let mut forged 0)
     {
       (for line in (katLines "chacha20-poly1305-rfc8439.txt")
-        (let ((f (katFields line)))
-          (let (
-            (id (katText f 0))
-            (key (katBytes f 1))
-            (nonce (katBytes f 2))
-            (aad (katBytes f 3))
-            (pt (katBytes f 4))
-            (sealed (concat (katBytes f 5) (katBytes f 6)))
-          )
+        {
+          (let f (katFields line))
+          {
+            (let id (katText f 0))
+            (let key (katBytes f 1))
+            (let nonce (katBytes f 2))
+            (let aad (katBytes f 3))
+            (let pt (katBytes f 4))
+            (let sealed (concat (katBytes f 5) (katBytes f 6)))
             {
               (tallyCheck rfc (answers (seal key nonce aad pt) sealed) id)
               (tallyCheck rfc (answers (open key nonce aad sealed) pt) (concat "open " id))
               (forgeries rfc key nonce aad pt sealed)
-            })))
+            }
+          }
+        })
       (for line in (katLines "wycheproof-chacha20-poly1305.txt")
-        (let ((f (katFields line)))
-          (let (
-            (id (concat "tcId " (katText f 0)))
-            (valid (strEq (katText f 1) "valid"))
-            (key (katBytes f 2))
-            (iv (katBytes f 3))
-            (aad (katBytes f 4))
-            (msg (katBytes f 5))
-            (sealed (concat (katBytes f 6) (katBytes f 7)))
-          )
+        {
+          (let f (katFields line))
+          {
+            (let id (concat "tcId " (katText f 0)))
+            (let valid (strEq (katText f 1) "valid"))
+            (let key (katBytes f 2))
+            (let iv (katBytes f 3))
+            (let aad (katBytes f 4))
+            (let msg (katBytes f 5))
+            (let sealed (concat (katBytes f 6) (katBytes f 7)))
             (if (!= (strLen iv) 12)
               {
                 (tallyCheck wpr (refused (seal key iv aad msg) cryptoInvalidLength)
@@ -287,16 +305,18 @@
                   (tallyCheck wp (answers (seal key iv aad msg) sealed) id)
                   (tallyCheck wp (answers (open key iv aad sealed) msg) (concat "open " id))
                 }
-                (tallyCheck wp (authFails (open key iv aad sealed)) id))))))
+                (tallyCheck wp (authFails (open key iv aad sealed)) id)))
+          }
+        })
       (for line in (katLines "chacha20-poly1305-diff.txt")
-        (let ((f (katFields line)))
-          (let (
-            (key (katBytes f 0))
-            (nonce (katBytes f 1))
-            (aad (katBytes f 2))
-            (pt (katBytes f 3))
-            (sealed (concat (katBytes f 4) (katBytes f 5)))
-          )
+        {
+          (let f (katFields line))
+          {
+            (let key (katBytes f 0))
+            (let nonce (katBytes f 1))
+            (let aad (katBytes f 2))
+            (let pt (katBytes f 3))
+            (let sealed (concat (katBytes f 4) (katBytes f 5)))
             {
               (tallyCheck diff (answers (seal key nonce aad pt) sealed) (hexEncode nonce))
               (tallyCheck diff (answers (open key nonce aad sealed) pt)
@@ -306,8 +326,11 @@
                   (forgeries neg key nonce aad pt sealed)
                   (set forged (+ forged 1))
                 })
-            })))
+            }
+          }
+        })
       (apiChecks api)
       (+ (+ (tallyReport rfc) (+ (tallyReport wp) (tallyReport wpr)))
         (+ (tallyReport diff) (+ (tallyReport neg) (tallyReport api))))
-    }))
+    }
+  })

@@ -246,20 +246,20 @@ cat > "$work/loop.ax" <<'AX'
 (:: loop (-> Int Int))
 
 (fn (loop n)
-  (let ((mut i n))
-    (let ((mut acc 0))
+  { (let mut i n)
+    { (let mut acc 0)
       {
         (while (> i 0)
           {
             (region r
-              (let ((b (if (== (% i 2) 0) (mkBox i) (mkBox (- 0 i)))))
-                (set acc (+ acc (usePhi b 0)))))
+              { (let b (if (== (% i 2) 0) (mkBox i) (mkBox (- 0 i))))
+                (set acc (+ acc (usePhi b 0)))})
             (set i (- i 1))
           })
         acc
       }
-    )
-  )
+    }
+  }
 )
 
 (:: main ())
@@ -336,20 +336,20 @@ cat > "$work/evil.ax" <<'AX'
 
 ;@axiom:effect(io)
 (fn (main)
-  (let ((c (Cell (MkBox 0))))
+  { (let c (Cell :b (MkBox 0)))
     {
       (region r
         {
           (evil c (MkBox 1))
           0
         })
-      (let ((w (memAlloc 64)))
+      { (let w (memAlloc 64))
         {
           (memSet w 0 222)
           (println (getInner c.b))
           0
-        })
-    }))
+        }}
+    }})
 AX
 built_new=0; built_abl=0
 if "$axc" build --input "$work/evil.ax" --output "$work/evil" >"$work/evil.log" 2>&1; then built_new=1; fi

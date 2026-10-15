@@ -64,22 +64,26 @@
 (pub fn (fmtUIntWord n)
   (if (>= n 0)
     (fmtInt n)
-    (let (
-      (quotient (/ (& (>> n 1) 9223372036854775807) 5))
-      (digit (- n (* quotient 10)))
-    )
-      (concat (fmtInt quotient) (strFromByte (+ 48 digit))))))
+    {
+      (let quotient (/ (& (>> n 1) 9223372036854775807) 5))
+      (let digit (- n (* quotient 10)))
+      (concat (fmtInt quotient) (strFromByte (+ 48 digit)))
+    }))
 
 ; `n` (assumed non-negative) in base 10.
 ;@axiom:restrict(no-io,no-foreign)
 (:: fmtNat (-> Int String))
 (fn (fmtNat n)
-  (let ((width (fmtIntWidth n)))
-    (let ((out (strAlloc width)))
+  {
+    (let width (fmtIntWidth n))
+    {
+      (let out (strAlloc width))
       {
         (fmtDigits (strData out) n (- width 1))
         out
-      })))
+      }
+    }
+  })
 
 ; Write `n`'s decimal digits into `buf` ending at index `at`, working
 ; right to left.
@@ -87,13 +91,15 @@
 (:: fmtDigits (-> Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (fmtDigits buf n at)
-  (let ((digit (+ 48 (% n 10))))
+  {
+    (let digit (+ 48 (% n 10)))
     {
       (__store8 buf at digit)
       (if (< n 10)
         buf
         (fmtDigits buf (/ n 10) (- at 1)))
-    }))
+    }
+  })
 
 ; `n` in base 16, lower case, no `0x` prefix, no leading zeros.
 ;
@@ -126,12 +132,16 @@
 (pub fn (fmtHex n)
   (if (== n 0)
     "0"
-    (let ((width (fmtHexWidth n 0)))
-      (let ((out (strAlloc width)))
+    {
+      (let width (fmtHexWidth n 0))
+      {
+        (let out (strAlloc width))
         {
           (fmtHexDigits (strData out) n (- width 1))
           out
-        }))))
+        }
+      }
+    }))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (:: fmtHexWidth (-> Int Int Int))
@@ -144,64 +154,86 @@
 (:: fmtHexDigits (-> Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (fmtHexDigits buf n at)
-  (let ((nibble (& n 15)))
-    (let ((digit
-      (if (< nibble 10)
-        (+ 48 nibble)
-        (+ 87 nibble))))
+  {
+    (let nibble (& n 15))
+    {
+      (let digit
+        (if (< nibble 10)
+          (+ 48 nibble)
+          (+ 87 nibble)))
       {
         (__store8 buf at digit)
-        (let ((rest (fmtHexShr4 n)))
+        {
+          (let rest (fmtHexShr4 n))
           (if (== rest 0)
             buf
-            (fmtHexDigits buf rest (- at 1))))
-      })))
+            (fmtHexDigits buf rest (- at 1)))
+        }
+      }
+    }
+  })
 
 ;; `s` padded on the left with spaces to at least `width` bytes.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: fmtPadLeft (-> String Int String))
 (pub fn (fmtPadLeft s width)
-  (let ((len (strLen s)))
+  {
+    (let len (strLen s))
     (if (>= len width)
       s
-      (let ((out (strAlloc width)))
+      {
+        (let out (strAlloc width))
         {
           (memSet (strData out) 32 (- width len))
           (memCopy (+ (strData out) (- width len)) (strData s) len)
           out
-        }))))
+        }
+      })
+  })
 
 ;; `s` padded on the right with spaces to at least `width` bytes.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: fmtPadRight (-> String Int String))
 (pub fn (fmtPadRight s width)
-  (let ((len (strLen s)))
+  {
+    (let len (strLen s))
     (if (>= len width)
       s
-      (let ((out (strAlloc width)))
+      {
+        (let out (strAlloc width))
         {
           (memCopy (strData out) (strData s) len)
           (memSet (+ (strData out) len) 32 (- width len))
           out
-        }))))
+        }
+      })
+  })
 
 ;; `s` centred in `width` bytes, with an odd remainder on the right, as
 ;; Rust's `{:^}` does.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: fmtPadCenter (-> String Int String))
 (pub fn (fmtPadCenter s width)
-  (let ((len (strLen s)))
+  {
+    (let len (strLen s))
     (if (>= len width)
       s
-      (let ((pad (- width len)))
-        (let ((left (/ pad 2)))
-          (let ((out (strAlloc width)))
+      {
+        (let pad (- width len))
+        {
+          (let left (/ pad 2))
+          {
+            (let out (strAlloc width))
             {
               (memSet (strData out) 32 left)
               (memCopy (+ (strData out) left) (strData s) len)
               (memSet (+ (strData out) (+ left len)) 32 (- pad left))
               out
-            }))))))
+            }
+          }
+        }
+      })
+  })
 
 ;; `s` padded on the left with zeros to at least `width` bytes, keeping a
 ;; leading sign in front of them: `-7` at width 4 is `-007`. This is the
@@ -210,24 +242,27 @@
 (pub :: fmtPadZerosLeft (-> String Int String))
 ;@axiom:effect(unsafe)
 (pub fn (fmtPadZerosLeft s width)
-  (let ((len (strLen s)))
+  {
+    (let len (strLen s))
     (if (>= len width)
       s
-      (let (
-        (neg (if (== len 0)
-          0
-          (if (== (strByte s 0) 45)
-            1
-            0)))
-        (out (strAlloc width))
-      )
+      {
+        (let neg
+          (if (== len 0)
+            0
+            (if (== (strByte s 0) 45)
+              1
+              0)))
+        (let out (strAlloc width))
         {
           (if (== neg 1)
             (__store8 (strData out) 0 45))
           (memSet (+ (strData out) neg) 48 (- width len))
           (memCopy (+ (strData out) (+ neg (- width len))) (+ (strData s) neg) (- len neg))
           out
-        }))))
+        }
+      })
+  })
 
 ;; `n` in uppercase hexadecimal with no prefix, such as `FF` for 255: the
 ;; `{n:X}` specifier.
@@ -236,29 +271,39 @@
 (pub fn (fmtHexUpper n)
   (if (== n 0)
     "0"
-    (let ((width (fmtHexWidth n 0)))
-      (let ((out (strAlloc width)))
+    {
+      (let width (fmtHexWidth n 0))
+      {
+        (let out (strAlloc width))
         {
           (fmtHexDigitsUpper (strData out) n (- width 1))
           out
-        }))))
+        }
+      }
+    }))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (:: fmtHexDigitsUpper (-> Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (fmtHexDigitsUpper buf n at)
-  (let ((nibble (& n 15)))
-    (let ((digit
-      (if (< nibble 10)
-        (+ 48 nibble)
-        (+ 55 nibble))))
+  {
+    (let nibble (& n 15))
+    {
+      (let digit
+        (if (< nibble 10)
+          (+ 48 nibble)
+          (+ 55 nibble)))
       {
         (__store8 buf at digit)
-        (let ((rest (fmtHexShr4 n)))
+        {
+          (let rest (fmtHexShr4 n))
           (if (== rest 0)
             buf
-            (fmtHexDigitsUpper buf rest (- at 1))))
-      })))
+            (fmtHexDigitsUpper buf rest (- at 1)))
+        }
+      }
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Floating point

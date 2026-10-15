@@ -96,7 +96,7 @@ emit_probe() {
 
 (:: build (-> Int Int))
 (fn (build n)
-  (let ((v vecNew) (mut i 0))
+  { (let v vecNew) (let mut i 0)
     {
       (while (< i n)
         {
@@ -104,7 +104,7 @@ emit_probe() {
           (set i (+ i 1))
         })
       (vecLen v)
-    }))
+    }})
 
 (:: loop (-> Int Int Int))
 (fn (loop n acc)
@@ -144,21 +144,21 @@ AX
 (fn (loop n keep acc)
   (if (== n 0)
     acc
-    (let ((v vecNew))
+    { (let v vecNew)
       {
         (vecPush v (concat "$payload" (fmtInt n)))
-        (let ((s (vecPop v)))
-          (loop (- n 1) keep (+ acc $sink)))
-      })))
+        { (let s (vecPop v))
+          (loop (- n 1) keep (+ acc $sink))}
+      }}))
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((keep vecNew))
+  { (let keep vecNew)
     {
       (println (loop $n keep 0))
       0
-    }))
+    }})
 AX
       ;;
     chain)
@@ -190,21 +190,21 @@ AX
 
 (:: buildMap (-> Int Int))
 (fn (buildMap n)
-  (let ((m mapNew) (mut i 0))
+  { (let m mapNew) (let mut i 0)
     {
       (while (< i n)
         { (mapInsert m i (strDup "hello world hello world")) (set i (+ i 1)) })
-      (let ((r (mapLen m))) { $keepMap r })
-    }))
+      { (let r (mapLen m)) { $keepMap r }}
+    }})
 
 (:: buildIntern (-> Int Int))
 (fn (buildIntern n)
-  (let ((it internNew) (mut i 0))
+  { (let it internNew) (let mut i 0)
     {
       (while (< i n)
         { (internIntern it (fmtInt i)) (set i (+ i 1)) })
-      (let ((r (internCount it))) { $freeIt r })
-    }))
+      { (let r (internCount it)) { $freeIt r }}
+    }})
 
 (:: loop (-> Int Int Int))
 (fn (loop n acc)

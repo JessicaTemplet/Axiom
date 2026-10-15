@@ -124,10 +124,12 @@
 ; return a negative value, and the guard costs one compare.
 (pub :: internSlotOf (-> String Int Int))
 (pub fn (internSlotOf s cap)
-  (let ((h (% (internHashStr s) cap)))
+  {
+    (let h (% (internHashStr s) cap))
     (if (< h 0)
       (+ h cap)
-      h)))
+      h)
+  })
 
 ; ------------------------------------------------------------------
 ; Construction
@@ -178,11 +180,10 @@
   ; death reaches every interned string - which is the whole point
   ; of an interner being freeable at all, since it is the structure
   ; that holds every identifier a compilation ever saw.
-  (let (
-    (it (memAllocMapped 24 5))
-    (strs (vecWithCapacity cap))
-    (tbl (memAlloc (* cap 8)))
-  )
+  {
+    (let it (memAllocMapped 24 5))
+    (let strs (vecWithCapacity cap))
+    (let tbl (memAlloc (* cap 8)))
     {
       (__retain it)
       (__retain tbl)
@@ -190,7 +191,8 @@
       (memSetWord it 1 cap)
       (memSetWord it 2 tbl)
       it
-    }))
+    }
+  })
 
 ;; Hand `it` back: the slot table, the `Vec`, and one share of every
 ;; string in it. Answers 0.
@@ -291,21 +293,25 @@
 ; underneath it is not a boundary.
 (pub :: internFind (-> Int String (Option Int)))
 (pub fn (internFind it s)
-  (let ((id (internFindFrom it s (internSlotOf s (internCap it)) (internCap it))))
+  {
+    (let id (internFindFrom it s (internSlotOf s (internCap it)) (internCap it)))
     (if (< id 0)
       None
-      (Some id))))
+      (Some id))
+  })
 
 (:: internFindFrom (-> Int String Int Int Int))
 (fn (internFindFrom it s i left)
   (if (<= left 0)
     (- 0 1)
-    (let ((cell (memGetWord (internTable it) i)))
+    {
+      (let cell (memGetWord (internTable it) i))
       (if (== cell 0)
         (- 0 1)
         (if (strEq (vecGetStr (internStrsVec it) (- cell 1)) s)
           (- cell 1)
-          (internFindFrom it s (mapNextSlot i (internCap it)) (- left 1)))))))
+          (internFindFrom it s (mapNextSlot i (internCap it)) (- left 1))))
+    }))
 
 ; ------------------------------------------------------------------
 ; Interning
@@ -333,7 +339,8 @@
 ; obvious from the signatures.
 (pub :: internIntern (-> Int String Int))
 (pub fn (internIntern it s)
-  (let ((existing (internFindFrom it s (internSlotOf s (internCap it)) (internCap it))))
+  {
+    (let existing (internFindFrom it s (internSlotOf s (internCap it)) (internCap it)))
     (if (>= existing 0)
       existing
       ; Grow first, so the id is placed into a table that is already
@@ -345,7 +352,8 @@
           (internRehash it (* (internCap it) 2))
           it)
         (internAdd it s)
-      })))
+      })
+  })
 
 ; Append `s` with the next id and place that id in the table. Returns the
 ; id.
@@ -354,12 +362,14 @@
 ; nth distinct string interned gets id n.
 (:: internAdd (-> Int String Int))
 (fn (internAdd it s)
-  (let ((id (internCount it)))
+  {
+    (let id (internCount it))
     {
       (vecPush (internStrsVec it) s)
       (internPlace it id (internSlotOf s (internCap it)) (internCap it))
       id
-    }))
+    }
+  })
 
 ; Write `id + 1` into the first empty slot at or after `i`.
 ;
@@ -387,10 +397,9 @@
 ;@axiom:effect(unsafe)
 ;@axiom:pre((&& (> newCap 0) (== (& newCap (- newCap 1)) 0)))
 (fn (internRehash it newCap)
-  (let (
-    (old (internTable it))
-    (tbl (memAlloc (* newCap 8)))
-  )
+  {
+    (let old (internTable it))
+    (let tbl (memAlloc (* newCap 8)))
     {
       (__retain tbl)
       (memSetWord it 1 newCap)
@@ -403,7 +412,8 @@
       ; construction.
       (__release old)
       it
-    }))
+    }
+  })
 
 (:: internReplaceFrom (-> Int Int Int))
 (fn (internReplaceFrom it id)

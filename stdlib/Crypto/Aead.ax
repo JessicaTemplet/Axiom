@@ -1,15 +1,18 @@
 ;;! Crypto.Aead - nonces for authenticated encryption, and a sequence
 ;;! that never hands out the same one twice.
 ;;!
-;;!     (let ((key (unwrapOr (aes256GcmKeyGenerate) ...))
-;;!           (seq (unwrapOr (nonceSequenceNew "srv1") ...)))
+;;!     {
+;;!       (let key (unwrapOr (aes256GcmKeyGenerate) ...))
+;;!       (let seq (unwrapOr (nonceSequenceNew "srv1") ...))
 ;;!       (match (nonceSequenceNext seq)
 ;;!         ((Ok nonce)
 ;;!           {
-;;!             (saveCounter (nonceSequencePosition seq))   ; persist first
-;;!             (aes256GcmSeal key nonce aad message)       ; then seal
-;;!           })
-;;!         ((Err e) (Err e))))
+;;!             (saveCounter (nonceSequencePosition seq))  ; persist first
+;;!             (aes256GcmSeal key nonce aad message)  ; then seal
+;;!           }
+;;!         )
+;;!         ((Err e) (Err e)))
+;;!     }
 ;
 ; Both AEADs here, AES-GCM (`Crypto.AesGcm`) and ChaCha20-Poly1305
 ; (`Crypto.ChaCha20Poly1305`), take a 12-byte `AeadNonce`, and both
@@ -76,7 +79,7 @@
 (pub fn (aeadNonceFromBytes b)
   (if (!= (strLen b) aeadNonceLen)
     (cryptoLengthErr "a nonce must be 12 bytes" "aeadNonceFromBytes")
-    (Ok (AeadNonce (bytesFromAddr (strData b) 12)))))
+    (Ok (AeadNonce :bytes (bytesFromAddr (strData b) 12)))))
 
 ;; The nonce's 12 bytes, to send beside the ciphertext.
 (pub :: aeadNonceBytes (-> AeadNonce String))
@@ -91,7 +94,7 @@
 ;@axiom:effect(entropy)
 (pub fn (aeadNonceRandom)
   (match (secureRandomBytes 12)
-    ((Ok b) (Ok (AeadNonce b)))
+    ((Ok b) (Ok (AeadNonce :bytes b)))
     ((Err e) (Err e))))
 
 ; ------------------------------------------------------------------
@@ -131,12 +134,14 @@
 (fn (nonceSequenceStart prefix position where)
   (if (!= (strLen prefix) 4)
     (cryptoLengthErr "a sequence prefix must be 4 bytes" where)
-    (let ((s (bytesNew 12)))
+    {
+      (let s (bytesNew 12))
       {
         (ctCopy (strData s) (strData prefix) 4)
         (st64be (strData s) 4 position)
-        (Ok (NonceSequence s))
-      })))
+        (Ok (NonceSequence :state s))
+      }
+    }))
 
 ;; The next nonce, and the counter moved on past it. Once the counter
 ;; reaches 2^63 - 1 every call answers `cryptoLimitExceeded`: the
@@ -144,24 +149,32 @@
 ;; that is not 12 bytes answers `cryptoInvalidLength`.
 (pub :: nonceSequenceNext (-> NonceSequence (Result AeadNonce Error)))
 (pub fn (nonceSequenceNext seq)
-  (let ((s seq.state))
+  {
+    (let s seq.state)
     (if (!= (strLen s) 12)
       (cryptoLengthErr "a sequence state must be 12 bytes" "nonceSequenceNext")
-      (let ((c (ld64be (strData s) 4)))
+      {
+        (let c (ld64be (strData s) 4))
         (if (|| (< c 0) (== c nonceSequenceEnd))
           (cryptoErr cryptoLimitExceeded "the nonce sequence is used up" "nonceSequenceNext")
-          (let ((n (bytesFromAddr (strData s) 12)))
+          {
+            (let n (bytesFromAddr (strData s) 12))
             {
               (st64be (strData s) 4 (+ c 1))
-              (Ok (AeadNonce n))
-            }))))))
+              (Ok (AeadNonce :bytes n))
+            }
+          })
+      })
+  })
 
 ;; The counter the next nonce will carry: the value to persist, before
 ;; sealing, so a restart can resume after every nonce already given
 ;; out. -1 for a state that is not 12 bytes.
 (pub :: nonceSequencePosition (-> NonceSequence Int))
 (pub fn (nonceSequencePosition seq)
-  (let ((s seq.state))
+  {
+    (let s seq.state)
     (if (!= (strLen s) 12)
       -1
-      (ld64be (strData s) 4))))
+      (ld64be (strData s) 4))
+  })

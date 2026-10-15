@@ -281,8 +281,8 @@ error[AX3012]: cannot assign to immutable binding `x`
 6 |       (set x 1)
   |            ^ `x` cannot be assigned
   |
-  = help: declare it mutable: `(mut x ...)` ~> mut x
-  = help: only a binding introduced by `(let ((mut x ...)) ...)` may be the target of `set`
+  = help: declare it mutable: `(let mut x value)` ~> mut x
+  = help: only a local declared `(let mut name value)` may be the target of `set`
   = help: run `axiom explain AX3012` for a full explanation
 
 compilation failed due to 1 previous error
@@ -316,7 +316,7 @@ substitution, without parsing English. Here is `count.ax` in AXDL:
 
 <!-- doc-gate:render count.ax ai -->
 ```
-E AX3012 count.ax:6:12-13 assign-to-immutable "cannot assign to immutable binding `x`" #"`x` cannot be assigned" ^4:10-11:"`x` is bound here" ?4:10-11:"declare it mutable: `(mut x ...)`"~>"mut x" ?"only a binding introduced by `(let ((mut x ...)) ...)` may be the target of `set`"
+E AX3012 count.ax:6:12-13 assign-to-immutable "cannot assign to immutable binding `x`" #"`x` cannot be assigned" ^4:10-11:"`x` is bound here" ?4:10-11:"declare it mutable: `(let mut x value)`"~>"mut x" ?"only a local declared `(let mut name value)` may be the target of `set`"
 compilation failed due to 1 previous error
 ```
 

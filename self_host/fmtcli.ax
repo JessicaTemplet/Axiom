@@ -26,7 +26,8 @@
 (:: fmtStdout (-> String Int))
 ;@axiom:effect(io)
 (fn (fmtStdout text)
-  (let ((written (writeStr stdout text)))
+  {
+    (let written (writeStr stdout text))
     (if (== written (strLen text))
       0
       (fmtFailure
@@ -35,7 +36,8 @@
             (if (< written 0)
               (errnoReason (- 0 written))
               "short write")
-            "\n"))))))
+            "\n"))))
+  })
 
 (:: fmtHasPath (-> (Vec String) String Int Bool))
 (fn (fmtHasPath paths path i)
@@ -51,11 +53,13 @@
 (fn (fmtOptionValue wanted i)
   (if (>= i sysArgc)
     ""
-    (let ((arg (sysArg i)))
+    {
+      (let arg (sysArg i))
       (if (strEq arg "--")
         ""
         (if (looksLikeFlag arg)
-          (let ((name (flagNamePart arg)))
+          {
+            (let name (flagNamePart arg))
             (if (strEq name wanted)
               (if (flagHasValuePart arg)
                 (flagValuePart arg)
@@ -64,45 +68,53 @@
                 (+ i
                   (if (&& (== (flagArity name) 1) (! (flagHasValuePart arg)))
                     2
-                    1)))))
-          (fmtOptionValue wanted (+ i 1)))))))
+                    1))))
+          }
+          (fmtOptionValue wanted (+ i 1))))
+    }))
 
 (:: fmtPaths (Vec String))
 ;@axiom:effect(io)
 (fn (fmtPaths)
-  (let (
-    (paths vecNew)
-    (mut i 1)
-    (command subcommandIndex)
-    (mut endOptions false)
-  )
+  {
+    (let paths vecNew)
+    (let mut i 1)
+    (let command subcommandIndex)
+    (let mut endOptions false)
     {
       (while (< i sysArgc)
-        (let ((arg (sysArg i)))
+        {
+          (let arg (sysArg i))
           {
             (if (== i command)
               ()
               (if (&& (! endOptions) (strEq arg "--"))
                 (set endOptions true)
                 (if (&& (! endOptions) (looksLikeFlag arg))
-                  (let ((name (flagNamePart arg)))
+                  {
+                    (let name (flagNamePart arg))
                     {
                       (if (strEq name "--input")
-                        (let ((path
-                          (if (flagHasValuePart arg)
-                            (flagValuePart arg)
-                            (sysArg (+ i 1)))))
+                        {
+                          (let path
+                            (if (flagHasValuePart arg)
+                              (flagValuePart arg)
+                              (sysArg (+ i 1))))
                           (if (! (fmtHasPath paths path 0))
-                            (vecPush paths path))))
+                            (vecPush paths path))
+                        })
                       (if (&& (== (flagArity name) 1) (! (flagHasValuePart arg)))
                         (set i (+ i 1)))
-                    })
+                    }
+                  }
                   (if (! (fmtHasPath paths arg 0))
                     (vecPush paths arg)))))
             (set i (+ i 1))
-          }))
+          }
+        })
       paths
-    }))
+    }
+  })
 
 (:: fmtPrepare (-> String FormatInput))
 ;@axiom:effect(io)
@@ -113,30 +125,31 @@
     ((Err error)
       {
         (fmtFailure (readFailMsg path (errCode error)))
-        (FormatInput path "" "" false)
+        (FormatInput :path path :source "" :text "" :valid false)
       }
     )
     ((Ok source)
-      (let ((result (fmtFormat source)))
+      {
+        (let result (fmtFormat source))
         (if (== (fzOk result) 0)
           {
             (if (strEq (fzText result) "AX2005")
               (fmtFailure
                 "error[AX2005]: nesting is too deep for the formatter (limit is 1024); it counts each `.name` and `Mod::name` link as a level\n"))
             (fmtFailure (concat path " was not rewritten: formatter refusal\n"))
-            (FormatInput path source "" false)
+            (FormatInput :path path :source source :text "" :valid false)
           }
-          (FormatInput path source (fzText result) true)))
+          (FormatInput :path path :source source :text (fzText result) :valid true))
+      }
     )))
 
 ; Keep line terminators so a diff records a missing final newline exactly.
 (:: fmtDiffLines (-> String (Vec String)))
 (fn (fmtDiffLines text)
-  (let (
-    (lines vecNew)
-    (mut from 0)
-    (mut i 0)
-  )
+  {
+    (let lines vecNew)
+    (let mut from 0)
+    (let mut i 0)
     {
       (while (< i (strLen text))
         {
@@ -150,7 +163,8 @@
       (if (< from (strLen text))
         (vecPush lines (strSlice text from (- (strLen text) from))))
       lines
-    }))
+    }
+  })
 
 (:: fmtDiffLine (-> String String Int))
 ;@axiom:effect(io)
@@ -176,15 +190,14 @@
 (:: fmtPrintDiff (-> FormatInput Int))
 ;@axiom:effect(io)
 (fn (fmtPrintDiff input)
-  (let (
-    (before (fmtDiffLines input.source))
-    (after (fmtDiffLines input.text))
-    (n (vecLen before))
-    (m (vecLen after))
-    (mut prefix 0)
-    (mut suffix 0)
-    (mut failed 0)
-  )
+  {
+    (let before (fmtDiffLines input.source))
+    (let after (fmtDiffLines input.text))
+    (let n (vecLen before))
+    (let m (vecLen after))
+    (let mut prefix 0)
+    (let mut suffix 0)
+    (let mut failed 0)
     {
       (while (&& (< prefix n)
                (&& (< prefix m) (strEq (vecGet before prefix) (vecGet after prefix))))
@@ -193,70 +206,86 @@
                (&& (< suffix (- m prefix))
                  (strEq (vecGet before (- (- n suffix) 1)) (vecGet after (- (- m suffix) 1)))))
         (set suffix (+ suffix 1)))
-      (let (
-        (start (if (> prefix 3)
-          (- prefix 3)
-          0))
-        (context (if (> suffix 3)
-          3
-          suffix))
-        (oldEnd (+ (- n suffix)
-                  (if (> suffix 3)
-                    3
-                    suffix)))
-        (newEnd (+ (- m suffix)
-                  (if (> suffix 3)
-                    3
-                    suffix)))
-      )
+      {
+        (let start
+          (if (> prefix 3)
+            (- prefix 3)
+            0))
+        (let context
+          (if (> suffix 3)
+            3
+            suffix))
+        (let oldEnd
+          (+ (- n suffix)
+            (if (> suffix 3)
+              3
+              suffix)))
+        (let newEnd
+          (+ (- m suffix)
+            (if (> suffix 3)
+              3
+              suffix)))
         {
-          (let ((header (concat "--- "
-                          (concat input.path
-                            (concat "\n+++ "
-                              (concat input.path
-                                (concat "\n@@ -"
-                                  (concat (fmtDiffRange start (- oldEnd start))
-                                    (concat " +"
-                                      (concat (fmtDiffRange start (- newEnd start))
-                                        " @@\n"))))))))))
+          {
+            (let header
+              (concat "--- "
+                (concat input.path
+                  (concat "\n+++ "
+                    (concat input.path
+                      (concat "\n@@ -"
+                        (concat (fmtDiffRange start (- oldEnd start))
+                          (concat " +"
+                            (concat (fmtDiffRange start (- newEnd start)) " @@\n")))))))))
             (if (!= (fmtStdout header) 0)
-              (set failed 1)))
-          (let ((mut i start))
+              (set failed 1))
+          }
+          {
+            (let mut i start)
             (while (&& (== failed 0) (< i prefix))
               {
                 (if (!= (fmtDiffLine " " (vecGet before i)) 0)
                   (set failed 1))
                 (set i (+ i 1))
-              }))
-          (let ((mut i prefix))
+              })
+          }
+          {
+            (let mut i prefix)
             (while (&& (== failed 0) (< i (- n suffix)))
               {
                 (if (!= (fmtDiffLine "-" (vecGet before i)) 0)
                   (set failed 1))
                 (set i (+ i 1))
-              }))
-          (let ((mut i prefix))
+              })
+          }
+          {
+            (let mut i prefix)
             (while (&& (== failed 0) (< i (- m suffix)))
               {
                 (if (!= (fmtDiffLine "+" (vecGet after i)) 0)
                   (set failed 1))
                 (set i (+ i 1))
-              }))
-          (let ((mut i (- n suffix)))
+              })
+          }
+          {
+            (let mut i (- n suffix))
             (while (&& (== failed 0) (< i (+ (- n suffix) context)))
               {
                 (if (!= (fmtDiffLine " " (vecGet before i)) 0)
                   (set failed 1))
                 (set i (+ i 1))
-              }))
+              })
+          }
           failed
-        })
-    }))
+        }
+      }
+    }
+  })
 
 (:: fmtPublish (-> FormatInput Bool Bool Bool Int))
 ;@axiom:effect(io)
 (fn (fmtPublish input check diff toStdout)
-  (let ((changed (! (strEq input.source input.text))))
+  {
+    (let changed (! (strEq input.source input.text)))
     (if diff
       (if changed
         {
@@ -273,21 +302,21 @@
           (if (&& changed (isErr (writeFile input.path input.text)))
             (fmtFailure
               (concat "error: could not write formatted file '" (concat input.path "'\n")))
-            (fmtStdout (concat "OK: " (concat input.path " formatted\n")))))))))
+            (fmtStdout (concat "OK: " (concat input.path " formatted\n")))))))
+  })
 
 (pub :: runFormatter Int)
 ;@axiom:effect(io)
 (pub fn (runFormatter)
-  (let (
-    (paths fmtPaths)
-    (check (hasFlagAnywhere "fmt" "--check"))
-    (diff (hasFlagAnywhere "fmt" "--diff"))
-    (emit (fmtOptionValue "--emit" 1))
-    (fromStdin (fmtHasPath paths "-" 0))
-    (toStdout (|| fromStdin (strEq emit "stdout")))
-    (inputs vecNew)
-    (mut failed 0)
-  )
+  {
+    (let paths fmtPaths)
+    (let check (hasFlagAnywhere "fmt" "--check"))
+    (let diff (hasFlagAnywhere "fmt" "--diff"))
+    (let emit (fmtOptionValue "--emit" 1))
+    (let fromStdin (fmtHasPath paths "-" 0))
+    (let toStdout (|| fromStdin (strEq emit "stdout")))
+    (let inputs vecNew)
+    (let mut failed 0)
     {
       (if (&& check diff)
         (usageError "error: choose --check or --diff"))
@@ -302,15 +331,18 @@
       (if (== (vecLen paths) 0)
         (set failed (fmtFailure "error: fmt needs an input file\n")))
       (for path in paths
-        (let ((input (fmtPrepare path)))
+        {
+          (let input (fmtPrepare path))
           {
             (if (! input.valid)
               (set failed 1))
             (vecPush inputs input)
-          }))
+          }
+        })
       (if (== failed 0)
         (for input in inputs
           (if (!= (fmtPublish input check diff toStdout) 0)
             (set failed 1))))
       failed
-    }))
+    }
+  })

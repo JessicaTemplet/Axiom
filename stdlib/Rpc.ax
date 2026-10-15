@@ -92,14 +92,16 @@
 ;; open while the reader does.
 (pub :: rdNew (-> File Int))
 (pub fn (rdNew f)
-  (let ((r (memAlloc 32)))
+  {
+    (let r (memAlloc 32))
     {
       (memSetWord r 0 f)
       (memSetWord r 1 (readBufferNew rdCap))
       (memSetWord r 2 0)
       (memSetWord r 3 0)
       r
-    }))
+    }
+  })
 
 ; The reader's file. The cast is at a return inside a signature that
 ; carries the type, for the reason `Mem.memGetWordStr` gives.
@@ -143,28 +145,29 @@
 ; the new buffer is at least as big as what it has to hold.
 (pub :: rdReseat (-> Int Int Int Int))
 (pub fn (rdReseat r addr u)
-  (let ((buf
-    (readBufferNew
-      (if (> u rdCap)
-        u
-        rdCap))))
+  {
+    (let buf
+      (readBufferNew
+        (if (> u rdCap)
+          u
+          rdCap)))
     {
       (readBufferPut buf 0 (strWrap addr u))
       (memSetWord r 1 buf)
       (memSetWord r 2 u)
       (memSetWord r 3 0)
       r
-    }))
+    }
+  })
 
 ; Move the live region to the front, and double the buffer if it is
 ; still full afterwards. Answers nothing useful; it mutates `r`.
 (:: rdCompact (-> Int Int))
 (fn (rdCompact r)
-  (let (
-    (buf (rdBuf r))
-    (c (rdConsumed r))
-    (f (rdFilled r))
-  )
+  {
+    (let buf (rdBuf r))
+    (let c (rdConsumed r))
+    (let f (rdFilled r))
     {
       (if (> c 0)
         {
@@ -174,13 +177,16 @@
         })
       ; Still no room? Grow. The buffer's length is its capacity.
       (if (>= (rdFilled r) (readBufferLen (rdBuf r)))
-        (let ((bigger (readBufferNew (* (readBufferLen (rdBuf r)) 2))))
+        {
+          (let bigger (readBufferNew (* (readBufferLen (rdBuf r)) 2)))
           {
             (readBufferPut bigger 0 (readBufferText (rdBuf r) 0 (rdFilled r)))
             (memSetWord r 1 bigger)
-          }))
+          }
+        })
       0
-    }))
+    }
+  })
 
 ; One `read` into the free tail. Answers the byte count: 0 at end of
 ; file, negative on error.
@@ -190,15 +196,18 @@
   {
     (if (>= (rdFilled r) (readBufferLen (rdBuf r)))
       (rdCompact r))
-    (let ((n
-      (match (fileRead (rdFile r) (rdBuf r) (rdFilled r) (- (readBufferLen (rdBuf r)) (rdFilled r)))
-        ((Ok k) k)
-        ((Err e) (- 0 (errCode e))))))
+    {
+      (let n
+        (match (fileRead (rdFile r) (rdBuf r) (rdFilled r)
+                 (- (readBufferLen (rdBuf r)) (rdFilled r)))
+          ((Ok k) k)
+          ((Err e) (- 0 (errCode e)))))
       {
         (if (> n 0)
           (memSetWord r 2 (+ (rdFilled r) n)))
         n
-      })
+      }
+    }
   })
 
 ; Bytes read but not yet consumed: the message currently in progress.
@@ -222,13 +231,12 @@
 ; under compaction, so the question cannot be got wrong again.
 (:: rdFindHeaderEnd (-> Int Int))
 (fn (rdFindHeaderEnd r)
-  (let (
-    (buf (rdBuf r))
-    (base (rdConsumed r))
-    (n (rdAvail r))
-    (mut i 0)
-    (mut found (- 0 1))
-  )
+  {
+    (let buf (rdBuf r))
+    (let base (rdConsumed r))
+    (let n (rdAvail r))
+    (let mut i 0)
+    (let mut found (- 0 1))
     {
       (while (&& (< found 0) (<= (+ i 4) n))
         {
@@ -240,7 +248,8 @@
           (set i (+ i 1))
         })
       found
-    }))
+    }
+  })
 
 ; ASCII lower-case of one byte.
 (:: rdLower (-> Int Int))
@@ -273,23 +282,22 @@
 ; ceiling from a typo and probe for it.
 (:: rdContentLength (-> Int Int Int))
 (fn (rdContentLength r hdrRel)
-  (let (
-    (buf (rdBuf r))
-    (base (rdConsumed r))
-    (mut i 0)
-    (mut len (- 0 1))
-    (mut over 0)
-  )
-    (let ((end (+ base hdrRel)))
+  {
+    (let buf (rdBuf r))
+    (let base (rdConsumed r))
+    (let mut i 0)
+    (let mut len (- 0 1))
+    (let mut over 0)
+    {
+      (let end (+ base hdrRel))
       {
         (while (&& (== over 0) (&& (< len 0) (< i hdrRel)))
           {
             (if (rdMatchCI r (+ base i) "content-length:" 0)
-              (let (
-                (mut p (+ (+ base i) 15))
-                (mut v 0)
-                (mut digits 0)
-              )
+              {
+                (let mut p (+ (+ base i) 15))
+                (let mut v 0)
+                (let mut digits 0)
                 {
                   (while (&& (< p end) (== (readBufferByte buf p) 32))
                     (set p (+ p 1)))
@@ -315,7 +323,8 @@
                     })
                   (if (&& (== over 0) (> digits 0))
                     (set len v))
-                }))
+                }
+              })
             (set i (+ i 1))
           })
         ; `len` is assigned only where `over` stayed 0, and `over`
@@ -325,7 +334,9 @@
         ; that would let a peer hide a real length behind an
         ; overflowing one and pick which of the two the framer used.
         len
-      })))
+      }
+    }
+  })
 
 ;; Read one whole message: `Some` its body, or `None` when the stream
 ;; ended or broke - the caller stops, which is what an LSP does when its
@@ -339,10 +350,9 @@
 ;@axiom:effect(io)
 (pub fn (rpcRead r)
   ; 1. A complete header block.
-  (let (
-    (mut hdr (- 0 1))
-    (mut dead 0)
-  )
+  {
+    (let mut hdr (- 0 1))
+    (let mut dead 0)
     {
       (while (&& (< hdr 0) (== dead 0))
         {
@@ -353,7 +363,8 @@
         })
       (if (== dead 1)
         None
-        (let ((n (rdContentLength r hdr)))
+        {
+          (let n (rdContentLength r hdr))
           (if (< n 0)
             None
             ; 2. Enough bytes for the body. Growing here is why
@@ -385,7 +396,8 @@
             ; `rdMaxBody` is what closes the hole - the ceiling only
             ; turns a wait for a body that can never arrive into an
             ; immediate refusal.
-            (let ((bodyRel (+ hdr 4)))
+            {
+              (let bodyRel (+ hdr 4))
               {
                 (while (&& (< (- (rdAvail r) bodyRel) n) (== dead 0))
                   (if (< (rdFill r) 1)
@@ -397,13 +409,18 @@
                   ; change under the caller and the JSON parser.
                   ; One copy per message is nothing next to the
                   ; parse that follows it.
-                  (let ((body (readBufferText (rdBuf r) (+ (rdConsumed r) bodyRel) n)))
+                  {
+                    (let body (readBufferText (rdBuf r) (+ (rdConsumed r) bodyRel) n))
                     {
                       (memSetWord r 3 (+ (+ (rdConsumed r) bodyRel) n))
                       (Some body)
-                    }))
-              }))))
-    }))
+                    }
+                  })
+              }
+            })
+        })
+    }
+  })
 
 ; Write all of `s`. The short-write loop - a single `write` may
 ; transfer fewer bytes than asked, and treating that as success is how

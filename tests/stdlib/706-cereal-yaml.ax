@@ -21,20 +21,24 @@
 (fn (yamlJson label source expected)
   (match (cerealDecode CerealYaml source)
     ((Err error)
-      (let ((message error.message))
+      {
+        (let message error.message)
         {
           (println "YAML failed: {label}: {message}")
           1
-        })
+        }
+      }
     )
     ((Ok value)
       (match (cerealEncode CerealJson value)
         ((Err error)
-          (let ((message error.message))
+          {
+            (let message error.message)
             {
               (println "YAML failed: {label}: {message}")
               1
-            })
+            }
+          }
         )
         ((Ok encoded) (yamlCheck label (strEq encoded expected))))
     )))
@@ -70,7 +74,8 @@
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut failures 0))
+  {
+    (let mut failures 0)
     {
       (set failures (+ failures (yamlJson "empty" "" "null")))
       (set failures (+ failures (yamlJson "comments" "# hi\n # bye\n" "null")))
@@ -166,37 +171,56 @@
       (set failures (+ failures (yamlRoundTrip "[\"~\",\"yes\",null,9223372036854775808]")))
       (set failures (+ failures
                       (yamlCheck "depth boundary"
-                        (isOk (cerealDecodeWith CerealYaml (CerealLimits 1 100 10) "a: 1")))))
+                        (isOk
+                          (cerealDecodeWith CerealYaml (CerealLimits :depth 1 :bytes 100 :nodes 10)
+                            "a: 1")))))
       (set failures (+ failures
                       (yamlCheck "depth refusal"
                         (isErr
-                          (cerealDecodeWith CerealYaml (CerealLimits 1 100 10) "a:\n  b: 1")))))
+                          (cerealDecodeWith CerealYaml (CerealLimits :depth 1 :bytes 100 :nodes 10)
+                            "a:\n  b: 1")))))
       (set failures (+ failures
                       (yamlCheck "node boundary"
-                        (isOk (cerealDecodeWith CerealYaml (CerealLimits 2 100 2) "a: 1")))))
+                        (isOk
+                          (cerealDecodeWith CerealYaml (CerealLimits :depth 2 :bytes 100 :nodes 2)
+                            "a: 1")))))
       (set failures (+ failures
                       (yamlCheck "node refusal"
-                        (isErr (cerealDecodeWith CerealYaml (CerealLimits 2 100 1) "a: 1")))))
+                        (isErr
+                          (cerealDecodeWith CerealYaml (CerealLimits :depth 2 :bytes 100 :nodes 1)
+                            "a: 1")))))
       (set failures (+ failures
                       (yamlCheck "combined flow nodes"
-                        (isErr (cerealDecodeWith CerealYaml (CerealLimits 3 100 3) "a: [1,2]")))))
+                        (isErr
+                          (cerealDecodeWith CerealYaml (CerealLimits :depth 3 :bytes 100 :nodes 3)
+                            "a: [1,2]")))))
       (set failures (+ failures
                       (yamlCheck "combined flow depth"
-                        (isErr (cerealDecodeWith CerealYaml (CerealLimits 1 100 10) "a: [1]")))))
+                        (isErr
+                          (cerealDecodeWith CerealYaml (CerealLimits :depth 1 :bytes 100 :nodes 10)
+                            "a: [1]")))))
       (set failures (+ failures
                       (yamlCheck "input byte boundary"
-                        (isOk (cerealDecodeWith CerealYaml (CerealLimits 2 4 2) "a: 1")))))
+                        (isOk
+                          (cerealDecodeWith CerealYaml (CerealLimits :depth 2 :bytes 4 :nodes 2)
+                            "a: 1")))))
       (set failures (+ failures
                       (yamlCheck "input byte refusal"
-                        (isErr (cerealDecodeWith CerealYaml (CerealLimits 2 3 2) "a: 1")))))
+                        (isErr
+                          (cerealDecodeWith CerealYaml (CerealLimits :depth 2 :bytes 3 :nodes 2)
+                            "a: 1")))))
       (set failures (+ failures
                       (yamlCheck "invalid limits"
-                        (isErr (cerealDecodeWith CerealYaml (CerealLimits 0 100 10) "a: 1")))))
+                        (isErr
+                          (cerealDecodeWith CerealYaml (CerealLimits :depth 0 :bytes 100 :nodes 10)
+                            "a: 1")))))
       (set failures (+ failures
                       (yamlCheck "output byte refusal"
                         (isErr
-                          (cerealEncodeWith CerealYaml (CerealLimits 2 4 10) (CText "longer"))))))
+                          (cerealEncodeWith CerealYaml (CerealLimits :depth 2 :bytes 4 :nodes 10)
+                            (CText "longer"))))))
       (set failures (+ failures (yamlRefused "malformed UTF8" (strFromByte 255))))
       (println "YAML failures: {failures}")
       failures
-    }))
+    }
+  })

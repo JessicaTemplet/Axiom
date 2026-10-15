@@ -56,11 +56,11 @@ cat > "$work/b_spawn.ax" <<'AX'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((out (taskMapWords (lambda (i) i) 4000 8)))
-    (let ((s (vecSum out)))
+  { (let out (taskMapWords (lambda (i) i) 4000 8))
+    { (let s (vecSum out))
       {
         (println "{s}")
-      })))
+      }}})
 AX
 
 cat > "$work/b_alloc.ax" <<'AX'
@@ -70,23 +70,23 @@ cat > "$work/b_alloc.ax" <<'AX'
 
 (:: childSum (-> Int Int))
 (fn (childSum n)
-  (let ((v vecNew))
+  { (let v vecNew)
     {
       (for i in 0..n
         (vecPush v i))
       (vecSum v)
-    }))
+    }})
 
 (:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((out (taskMapWords (lambda (i) (childSum 2000)) 2000 8)))
-    (let ((s (vecSum out)))
+  { (let out (taskMapWords (lambda (i) (childSum 2000)) 2000 8))
+    { (let s (vecSum out))
       {
         (println "{s}")
-      })))
+      }}})
 AX
 
 cat > "$work/b_runall.ax" <<'AX'
@@ -100,21 +100,21 @@ cat > "$work/b_runall.ax" <<'AX'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((cmds vecNew))
+  { (let cmds vecNew)
     {
       (for k in 0..800
-        (let ((one vecNew))
+        { (let one vecNew)
           {
             (vecPushStr one "true")
             (vecPushVec cmds one)
-          }))
-      (let ((codes (taskRunCommands cmds 8)))
-        (let ((n (vecLen codes)))
-          (let ((s (vecSum codes)))
+          }})
+      { (let codes (taskRunCommands cmds 8))
+        { (let n (vecLen codes))
+          { (let s (vecSum codes))
             {
               (println "{n} {s}")
-            })))
-    }))
+            }}}}
+    }})
 AX
 
 echo "building..."

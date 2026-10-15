@@ -923,8 +923,8 @@ fn to_words_name(record: &str) -> String {
 /// (:: __pointFromWords (-> (Vec Point) Int Int Int (Vec Point)))
 /// (fn (__pointFromWords __v __p __n __i)
 ///   (if (>= __i __n) __v
-///     (let ((__w0 (ffiWordAt __p (* __i 2))) (__w1 (__floatFromBits .. )))
-///       { (vecPush __v (Point __w0 __w1)) (__pointFromWords __v __p __n (+ __i 1)) })))
+///     { (let __w0 (ffiWordAt __p (* __i 2))) (let __w1 (__floatFromBits ..))
+///       { (vecPush __v (Point __w0 __w1)) (__pointFromWords __v __p __n (+ __i 1)) } }))
 /// ```
 fn record_from_words_loop(r: &RecordTy) -> (String, String) {
     let name = from_words_name(&r.name);
@@ -1455,7 +1455,10 @@ impl Decl {
                         atom(&drop_fn_name(&o.name)),
                     ]),
                 ));
-                Ex::Let(binds, Box::new(app(vec![atom(&o.name), atom("__h")])))
+                Ex::Let(
+                    binds,
+                    Box::new(app(vec![atom(&o.name), atom(":handle"), atom("__h")])),
+                )
             }
             Ret::Record(r) => {
                 call.push(atom("__c"));
@@ -1544,6 +1547,7 @@ impl Decl {
                         Payload::Scalar(_) => atom("__p"),
                         Payload::Opaque(o) => app(vec![
                             atom(&o.name),
+                            atom(":handle"),
                             app(vec![
                                 atom("ffiHandleNew"),
                                 atom("__p"),

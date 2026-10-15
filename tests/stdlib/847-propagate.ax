@@ -22,11 +22,11 @@
 ; A chain of `let`s, each binding through a `?`.
 (:: chain (-> (Vec String) Bool (Result Int String)))
 (fn (chain trace ok)
-  (let (
-    (a (step trace "a" true)?)
-    (b (step trace "bb" ok)?)
-  )
-    (Ok (+ a b))))
+  {
+    (let a (step trace "a" true)?)
+    (let b (step trace "bb" ok)?)
+    (Ok (+ a b))
+  })
 
 ; `?` in an argument: the arguments before it still run first, and the
 ; ones after it never run when it fails.
@@ -48,20 +48,26 @@
 (:: branches (-> (Vec String) Int (Result Int String)))
 (fn (branches trace n)
   (if (> n 0)
-    (let ((v (step trace "pos" (> n 1))?))
-      (Ok (* v 10)))
+    {
+      (let v (step trace "pos" (> n 1))?)
+      (Ok (* v 10))
+    }
     (match n
       (0 (Ok 0))
       (_
-        (let ((w (step trace "neg" false)?))
-          (Ok w))
+        {
+          (let w (step trace "neg" false)?)
+          (Ok w)
+        }
       ))))
 
 ; Stacked: the inner `?` runs first, then the outer one.
 (:: nested (-> (Vec String) Bool (Result Int String)))
 (fn (nested trace ok)
-  (let ((r (wrap trace ok)??))
-    (Ok r)))
+  {
+    (let r (wrap trace ok)??)
+    (Ok r)
+  })
 
 (:: wrap (-> (Vec String) Bool (Result (Result Int String) String)))
 (fn (wrap trace ok)
@@ -73,16 +79,16 @@
 ; A lambda is its own body: its `?` answers the lambda.
 (:: viaLambda (-> (Vec String) Bool (Result Int String)))
 (fn (viaLambda trace ok)
-  (let ((f
-    (lambda (n) (Ok (+ n (step trace "lam" ok)?)))))
-    (f 100)))
+  {
+    (let f (lambda (n) (Ok (+ n (step trace "lam" ok)?))))
+    (f 100)
+  })
 
 (:: joined (-> (Vec String) String))
 (fn (joined xs)
-  (let (
-    (mut out "")
-    (mut i 0)
-  )
+  {
+    (let mut out "")
+    (let mut i 0)
     {
       (while (< i (vecLen xs))
         {
@@ -94,24 +100,28 @@
       (if (== (vecLen xs) 0)
         "(none)"
         out)
-    }))
+    }
+  })
 
 (:: show (-> String (Vec String) (Result Int String) Int))
 ;@axiom:effect(io)
 (fn (show name trace r)
-  (let ((steps (joined trace)))
+  {
+    (let steps (joined trace))
     {
       (match r
         ((Ok v) (println "{name}: Ok {v} after {steps}"))
         ((Err e) (println "{name}: Err {e} after {steps}")))
       (vecClear trace)
       0
-    }))
+    }
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((t vecNew))
+  {
+    (let t vecNew)
     {
       (show "chain" t (chain t true))
       (show "chain" t (chain t false))
@@ -127,4 +137,5 @@
       (show "nested" t (nested t false))
       (show "lambda" t (viaLambda t true))
       (show "lambda" t (viaLambda t false))
-    }))
+    }
+  })

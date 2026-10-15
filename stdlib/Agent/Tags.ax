@@ -113,12 +113,14 @@
 ; separated the location from it.
 (:: axsymTrimEnd (-> String String))
 (fn (axsymTrimEnd s)
-  (let ((n (strLen s)))
+  {
+    (let n (strLen s))
     (if (== n 0)
       s
       (if (== (strByte s (- n 1)) axsymSpace)
         (axsymTrimEnd (strSlice s 0 (- n 1)))
-        s))))
+        s))
+  })
 
 ; The bytes `saAxMeta` escapes on the way out, restated here because
 ; this is the other end of the same wire: space and every control byte
@@ -160,10 +162,12 @@
           (match (axsymHexVal (strByte s (+ i 2)))
             ((None) None)
             ((Some lo)
-              (let ((b (+ (* hi 16) lo)))
+              {
+                (let b (+ (* hi 16) lo))
                 (if (axsymEscapable b)
                   (Some b)
-                  None))
+                  None)
+              }
             ))
         )))))
 
@@ -193,10 +197,11 @@
 (:: axsymMeta (-> String Meta))
 (fn (axsymMeta tok)
   (match (strFindByte tok axsymEquals 0)
-    ((None) (Meta (axsymUnpct tok) ""))
+    ((None) (Meta :key (axsymUnpct tok) :val ""))
     ((Some cut)
-      (Meta (axsymUnpct (strSlice tok 0 cut))
-        (axsymUnpct (strSlice tok (+ cut 1) (- (strLen tok) (+ cut 1)))))
+      (Meta
+        :key (axsymUnpct (strSlice tok 0 cut))
+        :val (axsymUnpct (strSlice tok (+ cut 1) (- (strLen tok) (+ cut 1)))))
     )))
 
 ; The metadata section, from `at` to the end of the line. A token opens
@@ -248,25 +253,32 @@
 ; is the one path that answers a symbol.
 (:: axsymBuild (-> String Int Int (Option Sym)))
 (fn (axsymBuild ln q1 q2)
-  (let ((head (axsymTrimEnd (strSlice ln 2 (- q1 2)))))
+  {
+    (let head (axsymTrimEnd (strSlice ln 2 (- q1 2))))
     (match (strFindByte head axsymSpace 0)
       ((None) None)
       ((Some cut)
-        (let (
-          (rest (strSlice ln (+ q2 1) (- (strLen ln) (+ q2 1))))
-          (name (strSlice head 0 cut))
-          (loc (axsymTrimEnd (strSlice head (+ cut 1) (- (strLen head) (+ cut 1)))))
-          (ty (strSlice ln (+ q1 1) (- q2 (+ q1 1))))
-        )
+        {
+          (let rest (strSlice ln (+ q2 1) (- (strLen ln) (+ q2 1))))
+          (let name (strSlice head 0 cut))
+          (let loc (axsymTrimEnd (strSlice head (+ cut 1) (- (strLen head) (+ cut 1)))))
+          (let ty (strSlice ln (+ q1 1) (- q2 (+ q1 1))))
           (if (&& (axsymLocation loc)
                 (if (== (strByte ln 0) 69)
                   (strEq ty (concat "effect " name))
                   true))
             (Some
-              (Sym (strByte ln 0) name loc ty (axsymNid rest)
-                (axsymMetaScan rest 0 (- 0 1) vecNew)))
-            None))
-      ))))
+              (Sym
+                :kind (strByte ln 0)
+                :name name
+                :loc loc
+                :ty ty
+                :nid (axsymNid rest)
+                :meta (axsymMetaScan rest 0 (- 0 1) vecNew)))
+            None)
+        }
+      ))
+  })
 
 ; A symbol location ends in column-column, after its final colon.
 ; Paths may contain spaces and colons; AXDL has a slug after the span.
@@ -274,21 +286,22 @@
 (fn (axsymLocation loc)
   (if (strEq loc "-")
     true
-    (let ((mut colon (- 0 1)))
+    {
+      (let mut colon (- 0 1))
       {
         (for i in 0..(strLen loc)
           (if (== (strByte loc i) 58)
             (set colon i)))
         (if (< colon 0)
           false
-          (let (
-            (mut dashes 0)
-            (mut bad 0)
-            (end (strLen loc))
-          )
+          {
+            (let mut dashes 0)
+            (let mut bad 0)
+            (let end (strLen loc))
             {
               (for i in (+ colon 1)..end
-                (let ((b (strByte loc i)))
+                {
+                  (let b (strByte loc i))
                   (if (== b 45)
                     {
                       (set dashes (+ dashes 1))
@@ -296,10 +309,13 @@
                         (set bad 1))
                     }
                     (if (! (&& (>= b 48) (<= b 57)))
-                      (set bad 1)))))
+                      (set bad 1)))
+                })
               (&& (== dashes 1) (== bad 0))
-            }))
-      })))
+            }
+          })
+      }
+    }))
 
 ; The `@<nid>` between the type and the metadata, empty when absent.
 ; It is bounded by the next space rather than by the end, because the
@@ -318,8 +334,10 @@
 ;; caller may pass the compiler's output unfiltered.
 (pub :: axsymParse (-> String (Vec Sym)))
 (pub fn (axsymParse text)
-  (let ((lines (strSplit text axsymNewline)))
-    (axsymParseFrom lines 0 vecNew)))
+  {
+    (let lines (strSplit text axsymNewline))
+    (axsymParseFrom lines 0 vecNew)
+  })
 
 (:: axsymParseFrom (-> (Vec String) Int (Vec Sym) (Vec Sym)))
 (fn (axsymParseFrom lines i out)
@@ -353,11 +371,15 @@
 
 (:: symTagFrom (-> (Vec Meta) String Int String))
 (fn (symTagFrom meta key i)
-  (let ((hit (symTagLastIdx meta key i (- 0 1))))
+  {
+    (let hit (symTagLastIdx meta key i (- 0 1)))
     (if (< hit 0)
       ""
-      (let ((m (vecGet meta hit)))
-        m.val))))
+      {
+        (let m (vecGet meta hit))
+        m.val
+      })
+  })
 
 ; The index of the last `#key` at or after `i`, or -1. Carried in an
 ; accumulator rather than compared on the way out of the recursion,
@@ -367,11 +389,13 @@
 (fn (symTagLastIdx meta key i best)
   (if (>= i (vecLen meta))
     best
-    (let ((m (vecGet meta i)))
+    {
+      (let m (vecGet meta i))
       (symTagLastIdx meta key (+ i 1)
         (if (strEq m.key key)
           i
-          best)))))
+          best))
+    }))
 
 ;; Whether the line carries `#key` at all, with or without a value.
 (pub :: symHasTag (-> Sym String Bool))
@@ -382,10 +406,12 @@
 (fn (symHasTagFrom meta key i)
   (if (>= i (vecLen meta))
     false
-    (let ((m (vecGet meta i)))
+    {
+      (let m (vecGet meta i))
       (if (strEq m.key key)
         true
-        (symHasTagFrom meta key (+ i 1))))))
+        (symHasTagFrom meta key (+ i 1)))
+    }))
 
 ;; The effect row the CHECKER derived - not what the author claimed.
 ;; Empty when the declaration performs none.

@@ -26,115 +26,137 @@
 ; message, whose final resets it, then for `msg`.
 (:: streamOf (-> Int String Int Bool String))
 (fn (streamOf alg msg c viaAddr)
-  (let (
-    (n (strLen msg))
-    (p (strData msg))
-  )
+  {
+    (let n (strLen msg))
+    (let p (strData msg))
     (if (== alg 256)
-      (let (
-        (h sha256New)
-        (mut off 0)
-      )
+      {
+        (let h sha256New)
+        (let mut off 0)
         {
           (sha256Update h "throwaway")
           (sha256Final h)
           (while (< off n)
-            (let ((k
-              (if (< c (- n off))
-                c
-                (- n off))))
+            {
+              (let k
+                (if (< c (- n off))
+                  c
+                  (- n off)))
               {
                 (if viaAddr
                   (sha256UpdateAddr h (+ p off) k)
                   (sha256Update h (strSlice msg off k)))
                 (set off (+ off k))
-              }))
+              }
+            })
           (sha256Final h)
-        })
+        }
+      }
       (if (== alg 384)
-        (let (
-          (h sha384New)
-          (mut off 0)
-        )
+        {
+          (let h sha384New)
+          (let mut off 0)
           {
             (sha384Update h "throwaway")
             (sha384Final h)
             (while (< off n)
-              (let ((k
-                (if (< c (- n off))
-                  c
-                  (- n off))))
+              {
+                (let k
+                  (if (< c (- n off))
+                    c
+                    (- n off)))
                 {
                   (if viaAddr
                     (sha384UpdateAddr h (+ p off) k)
                     (sha384Update h (strSlice msg off k)))
                   (set off (+ off k))
-                }))
+                }
+              })
             (sha384Final h)
-          })
-        (let (
-          (h sha512New)
-          (mut off 0)
-        )
+          }
+        }
+        {
+          (let h sha512New)
+          (let mut off 0)
           {
             (sha512Update h "throwaway")
             (sha512Final h)
             (while (< off n)
-              (let ((k
-                (if (< c (- n off))
-                  c
-                  (- n off))))
+              {
+                (let k
+                  (if (< c (- n off))
+                    c
+                    (- n off)))
                 {
                   (if viaAddr
                     (sha512UpdateAddr h (+ p off) k)
                     (sha512Update h (strSlice msg off k)))
                   (set off (+ off k))
-                }))
+                }
+              })
             (sha512Final h)
-          })))))
+          }
+        }))
+  })
 
 ; `msg`'s digest from a state that absorbed its first half, was copied,
 ; and finished the second half in the copy. The original then finishes
 ; a different ending, which must not disturb the copy.
 (:: copiedOf (-> Int String String))
 (fn (copiedOf alg msg)
-  (let ((n (strLen msg)))
-    (let ((half (/ n 2)))
+  {
+    (let n (strLen msg))
+    {
+      (let half (/ n 2))
       (if (== alg 256)
-        (let ((h sha256New))
+        {
+          (let h sha256New)
           {
             (sha256Update h (strSlice msg 0 half))
-            (let ((g (sha256Copy h)))
+            {
+              (let g (sha256Copy h))
               {
                 (sha256Update h "different")
                 (sha256Update g (strSlice msg half (- n half)))
                 (sha256Final h)
                 (sha256Final g)
-              })
-          })
+              }
+            }
+          }
+        }
         (if (== alg 384)
-          (let ((h sha384New))
+          {
+            (let h sha384New)
             {
               (sha384Update h (strSlice msg 0 half))
-              (let ((g (sha384Copy h)))
+              {
+                (let g (sha384Copy h))
                 {
                   (sha384Update h "different")
                   (sha384Update g (strSlice msg half (- n half)))
                   (sha384Final h)
                   (sha384Final g)
-                })
-            })
-          (let ((h sha512New))
+                }
+              }
+            }
+          }
+          {
+            (let h sha512New)
             {
               (sha512Update h (strSlice msg 0 half))
-              (let ((g (sha512Copy h)))
+              {
+                (let g (sha512Copy h))
                 {
                   (sha512Update h "different")
                   (sha512Update g (strSlice msg half (- n half)))
                   (sha512Final h)
                   (sha512Final g)
-                })
-            }))))))
+                }
+              }
+            }
+          }))
+    }
+  })
 
 ; SHAVS section 6.4: from `seed`, 1000 digests each of the previous
 ; three concatenated, answering the last. Runs in one buffer of three
@@ -142,8 +164,10 @@
 (:: monte (-> Int String String))
 ;@axiom:effect(unsafe)
 (fn (monte alg seed)
-  (let ((d (strLen seed)))
-    (let ((buf (memAlloc (* 4 d))))
+  {
+    (let d (strLen seed))
+    {
+      (let buf (memAlloc (* 4 d)))
       {
         (for j in 0..3
           (ctCopy (+ buf (* j d)) (strData seed) d))
@@ -158,81 +182,89 @@
               (__store8 buf k (__load8 buf (+ k d))))
           })
         (bytesFromAddr (+ buf (* 2 d)) d)
-      })))
+      }
+    }
+  })
 
 ; Whether the SHA-256 state refuses to absorb once the message would
 ; pass 2^61 - 1 bytes. The byte count is planted in the blob directly.
 (:: limitHolds Bool)
 ;@axiom:effect(unsafe)
 (fn (limitHolds)
-  (let (
-    (h sha256New)
-    (g sha512New)
-  )
-    (let (
-      (s h.state)
-      (t g.state)
-    )
+  {
+    (let h sha256New)
+    (let g sha512New)
+    {
+      (let s h.state)
+      (let t g.state)
       {
         (__store64 (strData s) 8 (- 2305843009213693951 5))
         (__store64 (strData t) 8 (- 9223372036854775807 5))
         (&& (&& (== (sha256Update h "123456") -1) (== (sha256Update h "12345") 0))
           (&& (== (sha512Update g "123456") -1) (== (sha512Update g "12345") 0)))
-      })))
+      }
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (cavp (tallyNew "sha2-cavp"))
-    (monteT (tallyNew "sha2-monte"))
-    (diff (tallyNew "sha2-diff"))
-    (stream (tallyNew "sha2-stream"))
-    (api (tallyNew "sha2-api"))
-    (mut row 0)
-  )
+  {
+    (let cavp (tallyNew "sha2-cavp"))
+    (let monteT (tallyNew "sha2-monte"))
+    (let diff (tallyNew "sha2-diff"))
+    (let stream (tallyNew "sha2-stream"))
+    (let api (tallyNew "sha2-api"))
+    (let mut row 0)
     {
       (for line in (katLines "sha2-cavp-msg.txt")
-        (let ((f (katFields line)))
-          (let (
-            (alg (katInt f 0))
-            (msg (katBytes f 1))
-            (md (katBytes f 2))
-          )
-            (tallyBytes cavp md (digestOf alg msg) (concat "SHA-" (katText f 0))))))
+        {
+          (let f (katFields line))
+          {
+            (let alg (katInt f 0))
+            (let msg (katBytes f 1))
+            (let md (katBytes f 2))
+            (tallyBytes cavp md (digestOf alg msg) (concat "SHA-" (katText f 0)))
+          }
+        })
       (for line in (katLines "sha2-cavp-monte.txt")
-        (let ((f (katFields line)))
-          (let (
-            (alg (katInt f 0))
-            (seed (katBytes f 1))
-            (md (katBytes f 2))
-          )
-            (tallyBytes monteT md (monte alg seed) (concat "SHA-" (katText f 0))))))
+        {
+          (let f (katFields line))
+          {
+            (let alg (katInt f 0))
+            (let seed (katBytes f 1))
+            (let md (katBytes f 2))
+            (tallyBytes monteT md (monte alg seed) (concat "SHA-" (katText f 0)))
+          }
+        })
       (for line in (katLines "sha2-diff.txt")
-        (let ((f (katFields line)))
-          (let (
-            (alg (katInt f 0))
-            (msg (katBytes f 1))
-            (md (katBytes f 2))
-          )
+        {
+          (let f (katFields line))
+          {
+            (let alg (katInt f 0))
+            (let msg (katBytes f 1))
+            (let md (katBytes f 2))
             {
               (tallyBytes diff md (digestOf alg msg) (concat "SHA-" (katText f 0)))
               ; every piece size from 1 to 130, then whole
-              (let ((c (+ 1 (% row 131))))
+              {
+                (let c (+ 1 (% row 131)))
                 {
                   (tallyBytes stream md (streamOf alg msg c false) "pieces")
                   (tallyBytes stream md (streamOf alg msg (+ 1 (% (* row 7) 257)) true)
                     "pieces by address")
                   (tallyBytes stream md (copiedOf alg msg) "copied state")
-                })
+                }
+              }
               (set row (+ row 1))
-            })))
+            }
+          }
+        })
       ; the refusals and the reset
-      (let (
-        (bad (Sha256 "too short"))
-        (bad5 (Sha512 ""))
-        (bad3 (Sha384 "x"))
-      )
+      {
+        (let bad (Sha256 :state "too short"))
+        (let bad5 (Sha512 :state ""))
+        (let bad3 (Sha384 :state "x"))
         {
           (tallyCheck api (== (sha256Update bad "abc") -1)
             "a SHA-256 blob of the wrong size is refused")
@@ -243,12 +275,14 @@
           (tallyCheck api (== (sha384Update bad3 "abc") -1)
             "a SHA-384 blob of the wrong size is refused")
           (tallyCheck api (strEq (sha384Final bad3) "") "and finishes empty")
-        })
+        }
+      }
       (tallyCheck api
         (==
           (sha256Update
             (Sha256
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+              :state
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
             "abc")
           -1)
         "a SHA-256 state over a string literal is refused")
@@ -256,16 +290,19 @@
         (==
           (sha512Update
             (Sha512
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+              :state
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
             "abc")
           -1)
         "a SHA-512 state over a string literal is refused")
-      (tallyCheck api (== (sha256Wipe (Sha256 "abc")) -1) "and a wipe writes nothing")
+      (tallyCheck api (== (sha256Wipe (Sha256 :state "abc")) -1) "and a wipe writes nothing")
       (tallyCheck api (limitHolds) "the length limit")
-      (let ((h sha256New))
+      {
+        (let h sha256New)
         {
           (sha256Update h "abc")
-          (let ((first (sha256Final h)))
+          {
+            (let first (sha256Final h))
             {
               (sha256Update h "abc")
               (tallyCheck api (strEq first (sha256Final h)) "a final resets the state")
@@ -277,12 +314,13 @@
                 (strEq (hexEncode first)
                   "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
                 "FIPS 180-4 example, abc")
-            })
-        })
-      (let (
-        (h sha512New)
-        (g sha384New)
-      )
+            }
+          }
+        }
+      }
+      {
+        (let h sha512New)
+        (let g sha384New)
         {
           (sha512Update h "partial")
           (sha512Wipe h)
@@ -290,8 +328,10 @@
           (sha384Wipe g)
           (tallyCheck api (strEq (sha512Final h) (sha512 "")) "a SHA-512 wipe leaves a fresh state")
           (tallyCheck api (strEq (sha384Final g) (sha384 "")) "a SHA-384 wipe leaves a fresh state")
-        })
+        }
+      }
       (tallyCheck api (== (strLen (sha384 "abc")) 48) "SHA-384 is 48 bytes")
       (+ (+ (tallyReport cavp) (tallyReport monteT))
         (+ (tallyReport diff) (+ (tallyReport stream) (tallyReport api))))
-    }))
+    }
+  })

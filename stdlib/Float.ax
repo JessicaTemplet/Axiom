@@ -75,15 +75,19 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: floatIsNan (-> Float Bool))
 (pub fn (floatIsNan x)
-  (let ((b (floatToBits x)))
-    (&& (== (& (>> b 52) 2047) 2047) (!= (& b 4503599627370495) 0))))
+  {
+    (let b (floatToBits x))
+    (&& (== (& (>> b 52) 2047) 2047) (!= (& b 4503599627370495) 0))
+  })
 
 ;; True for positive and negative infinity.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: floatIsInfinite (-> Float Bool))
 (pub fn (floatIsInfinite x)
-  (let ((b (floatToBits x)))
-    (&& (== (& (>> b 52) 2047) 2047) (== (& b 4503599627370495) 0))))
+  {
+    (let b (floatToBits x))
+    (&& (== (& (>> b 52) 2047) 2047) (== (& b 4503599627370495) 0))
+  })
 
 ;; True for every value that is neither an infinity nor a NaN.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
@@ -117,16 +121,19 @@
   ; including Int.max rounding to 2^63. `discarded` is at most 11.
   ; Masking two's-complement words checks negative multiples too,
   ; without negating Int.min or using a saturating round trip.
-  (let ((value
-    (as n Float)))
-    (let ((discarded (- (& (>> (floatToBits value) 52) 2047) 1075)))
+  {
+    (let value (as n Float))
+    {
+      (let discarded (- (& (>> (floatToBits value) 52) 2047) 1075))
       (if (<= discarded 0)
         (Ok value)
         (if (== (& n (- (<< 1 discarded) 1)) 0)
           (Ok value)
           (Err
             (floatConversionError "integer cannot be represented exactly as Float"
-              "floatFromIntExact")))))))
+              "floatFromIntExact"))))
+    }
+  })
 
 ;; Convert a finite, integral `x` in the signed 64-bit range to `Int`.
 ;; Both signed zeros answer zero. Fractions, infinities, NaNs and
@@ -134,8 +141,10 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: floatToIntExact (-> Float (Result Int Error)))
 (pub fn (floatToIntExact x)
-  (let ((bits (floatToBits x)))
-    (let ((exponent (& (>> bits 52) 2047)))
+  {
+    (let bits (floatToBits x))
+    {
+      (let exponent (& (>> bits 52) 2047))
       (if (== exponent 2047)
         (Err (floatConversionError "non-finite Float cannot be converted to Int" "floatToIntExact"))
         ; At exponent 63 only -2^63 fits Int. Test the encoding before
@@ -143,11 +152,14 @@
         ; to round-trip, and cannot prove this boundary is in range.
         (if (|| (> exponent 1086) (&& (== exponent 1086) (!= bits (- 0 4332462841530417152))))
           (Err (floatConversionError "Float is outside the Int range" "floatToIntExact"))
-          (let ((integer
-            (as x Int)))
+          {
+            (let integer (as x Int))
             (if (== (as integer Float) x)
               (Ok integer)
-              (Err (floatConversionError "Float has a fractional part" "floatToIntExact")))))))))
+              (Err (floatConversionError "Float has a fractional part" "floatToIntExact")))
+          }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Big non-negative integers, for the exact arithmetic both directions
@@ -193,21 +205,22 @@
 ; Drop leading zero limbs, so the length is exact and zero is length 0.
 (:: bnTrim (-> Int Int))
 (fn (bnTrim p)
-  (let ((mut n (bnLen p)))
+  {
+    (let mut n (bnLen p))
     {
       (while (&& (> n 0) (== (bnLimb p (- n 1)) 0))
         (set n (- n 1)))
       (bnSetLen p n)
-    }))
+    }
+  })
 
 ; `p` = `v`, for any non-negative `v`.
 (:: bnSetInt (-> Int Int Int))
 ;@axiom:pre((>= v 0))
 (fn (bnSetInt p v)
-  (let (
-    (mut x v)
-    (mut i 0)
-  )
+  {
+    (let mut x v)
+    (let mut i 0)
     {
       (while (> x 0)
         {
@@ -216,167 +229,184 @@
           (set i (+ i 1))
         })
       (bnSetLen p i)
-    }))
+    }
+  })
 
 (:: bnCopy (-> Int Int Int))
 (fn (bnCopy dst src)
-  (let ((n (bnLen src)))
+  {
+    (let n (bnLen src))
     {
       (for i in 0..n
         (bnPut dst i (bnLimb src i)))
       (bnSetLen dst n)
-    }))
+    }
+  })
 
 ; `p` = `p` * `k` + `add`, for `k` and `add` below 2^28.
 (:: bnMulAdd (-> Int Int Int Int))
 ;@axiom:pre((&& (&& (>= k 0) (< k 268435456)) (&& (>= add 0) (< add 268435456))))
 (fn (bnMulAdd p k add)
-  (let (
-    (n (bnLen p))
-    (mut carry add)
-  )
+  {
+    (let n (bnLen p))
+    (let mut carry add)
     {
       (for i in 0..n
-        (let ((t (+ (* (bnLimb p i) k) carry)))
+        {
+          (let t (+ (* (bnLimb p i) k) carry))
           {
             (bnPut p i (& t bnMask))
             (set carry (>> t 28))
-          }))
+          }
+        })
       (if (> carry 0)
         {
           (bnPut p n carry)
           (bnSetLen p (+ n 1))
         }
         (bnSetLen p n))
-    }))
+    }
+  })
 
 ; `p` = `p` * 10^`n`.
 (:: bnMulPow10 (-> Int Int Int))
 (fn (bnMulPow10 p n)
-  (let ((mut left n))
+  {
+    (let mut left n)
     {
       (while (>= left 8)
         {
           (bnMulAdd p 100000000 0)
           (set left (- left 8))
         })
-      (let ((mut k 1))
+      {
+        (let mut k 1)
         {
           (for i in 0..left
             (set k (* k 10)))
           (bnMulAdd p k 0)
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; `p` = `p` * 5^`n`.
 (:: bnMulPow5 (-> Int Int Int))
 (fn (bnMulPow5 p n)
-  (let ((mut left n))
+  {
+    (let mut left n)
     {
       (while (>= left 12)
         {
           (bnMulAdd p 244140625 0)
           (set left (- left 12))
         })
-      (let ((mut k 1))
+      {
+        (let mut k 1)
         {
           (for i in 0..left
             (set k (* k 5)))
           (bnMulAdd p k 0)
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; `p` = `p` * 2^`n`.
 (:: bnShl (-> Int Int Int))
 (fn (bnShl p n)
-  (let (
-    (whole (/ n 28))
-    (bits (% n 28))
-    (len (bnLen p))
-  )
+  {
+    (let whole (/ n 28))
+    (let bits (% n 28))
+    (let len (bnLen p))
     (if (== len 0)
       0
       {
-        (let ((mut i (- len 1)))
+        {
+          (let mut i (- len 1))
           (while (>= i 0)
             {
               (bnPut p (+ i whole) (bnLimb p i))
               (set i (- i 1))
-            }))
+            })
+        }
         (for i in 0..whole
           (bnPut p i 0))
         (bnSetLen p (+ len whole))
         (if (> bits 0)
           (bnMulAdd p (<< 1 bits) 0)
           0)
-      })))
+      })
+  })
 
 ; `p` = `p` / 2, rounding down.
 (:: bnShr1 (-> Int Int))
 (fn (bnShr1 p)
-  (let (
-    (mut i (- (bnLen p) 1))
-    (mut high 0)
-  )
+  {
+    (let mut i (- (bnLen p) 1))
+    (let mut high 0)
     {
       (while (>= i 0)
-        (let ((t (| (bnLimb p i) (<< high 28))))
+        {
+          (let t (| (bnLimb p i) (<< high 28)))
           {
             (bnPut p i (>> t 1))
             (set high (& t 1))
             (set i (- i 1))
-          }))
+          }
+        })
       (bnTrim p)
-    }))
+    }
+  })
 
 ; -1, 0 or 1 as `a` is less than, equal to or greater than `b`.
 (:: bnCmp (-> Int Int Int))
 (fn (bnCmp a b)
-  (let (
-    (la (bnLen a))
-    (lb (bnLen b))
-  )
+  {
+    (let la (bnLen a))
+    (let lb (bnLen b))
     (if (!= la lb)
       (if (< la lb)
         -1
         1)
-      (let (
-        (mut i (- la 1))
-        (mut r 0)
-      )
+      {
+        (let mut i (- la 1))
+        (let mut r 0)
         {
           (while (&& (>= i 0) (== r 0))
-            (let (
-              (x (bnLimb a i))
-              (y (bnLimb b i))
-            )
+            {
+              (let x (bnLimb a i))
+              (let y (bnLimb b i))
               {
                 (if (!= x y)
                   (set r (if (< x y)
                     -1
                     1)))
                 (set i (- i 1))
-              }))
+              }
+            })
           r
-        }))))
+        }
+      })
+  })
 
 ; `a` = `a` - `b`, where `a` is at least `b`.
 (:: bnSub (-> Int Int Int))
 (fn (bnSub a b)
-  (let (
-    (la (bnLen a))
-    (lb (bnLen b))
-    (mut borrow 0)
-  )
+  {
+    (let la (bnLen a))
+    (let lb (bnLen b))
+    (let mut borrow 0)
     {
       (for i in 0..la
-        (let ((t
-          (-
-            (- (bnLimb a i)
-              (if (< i lb)
-                (bnLimb b i)
-                0))
-            borrow)))
+        {
+          (let t
+            (-
+              (- (bnLimb a i)
+                (if (< i lb)
+                  (bnLimb b i)
+                  0))
+              borrow))
           (if (< t 0)
             {
               (bnPut a i (+ t 268435456))
@@ -385,20 +415,22 @@
             {
               (bnPut a i t)
               (set borrow 0)
-            })))
+            })
+        })
       (bnTrim a)
-    }))
+    }
+  })
 
 ; The number of bits in `p`: 0 for zero.
 (:: bnBitLen (-> Int Int))
 (fn (bnBitLen p)
-  (let ((n (bnLen p)))
+  {
+    (let n (bnLen p))
     (if (== n 0)
       0
-      (let (
-        (mut top (bnLimb p (- n 1)))
-        (mut bits 0)
-      )
+      {
+        (let mut top (bnLimb p (- n 1)))
+        (let mut bits 0)
         {
           (while (> top 0)
             {
@@ -406,35 +438,38 @@
               (set bits (+ bits 1))
             })
           (+ (* (- n 1) 28) bits)
-        }))))
+        }
+      })
+  })
 
 ; `p` = `p` / `k`, answering the remainder, for `k` below 2^28.
 (:: bnDivSmall (-> Int Int Int))
 ;@axiom:pre((&& (>= k 1) (< k 268435456)))
 (fn (bnDivSmall p k)
-  (let (
-    (mut i (- (bnLen p) 1))
-    (mut rem 0)
-  )
+  {
+    (let mut i (- (bnLen p) 1))
+    (let mut rem 0)
     {
       (while (>= i 0)
-        (let ((t (| (<< rem 28) (bnLimb p i))))
+        {
+          (let t (| (<< rem 28) (bnLimb p i)))
           {
             (bnPut p i (/ t k))
             (set rem (% t k))
             (set i (- i 1))
-          }))
+          }
+        })
       (bnTrim p)
       rem
-    }))
+    }
+  })
 
 ; `p`'s value, when it is below 2^62.
 (:: bnToInt (-> Int Int))
 (fn (bnToInt p)
-  (let (
-    (mut i (- (bnLen p) 1))
-    (mut v 0)
-  )
+  {
+    (let mut i (- (bnLen p) 1))
+    (let mut v 0)
     {
       (while (>= i 0)
         {
@@ -442,21 +477,22 @@
           (set i (- i 1))
         })
       v
-    }))
+    }
+  })
 
 ; Divide `a` by `b` where the quotient is below 2^62: answers the
 ; quotient and leaves the remainder in `a`. `b` is destroyed.
 (:: bnDivLong (-> Int Int Int))
 (fn (bnDivLong a b)
-  (let ((shift (- (bnBitLen a) (bnBitLen b))))
+  {
+    (let shift (- (bnBitLen a) (bnBitLen b)))
     (if (< shift 0)
       0
       {
         (bnShl b shift)
-        (let (
-          (mut i shift)
-          (mut q 0)
-        )
+        {
+          (let mut i shift)
+          (let mut q 0)
           {
             (while (>= i 0)
               {
@@ -469,8 +505,10 @@
                 (set i (- i 1))
               })
             q
-          })
-      })))
+          }
+        }
+      })
+  })
 
 ; ------------------------------------------------------------------
 ; Parsing.
@@ -484,57 +522,66 @@
 (fn (digitAt s i)
   (if (>= i (strLen s))
     -1
-    (let ((c (strByte s i)))
+    {
+      (let c (strByte s i))
       (if (&& (>= c 48) (<= c 57))
         (- c 48)
-        -1))))
+        -1)
+    }))
 
 ; True when the byte at `i` is `a` or `b`.
 (:: byteIs (-> String Int Int Int Bool))
 (fn (byteIs s i a b)
   (if (>= i (strLen s))
     false
-    (let ((c (strByte s i)))
-      (|| (== c a) (== c b)))))
+    {
+      (let c (strByte s i))
+      (|| (== c a) (== c b))
+    }))
 
 ; The byte at `i` folded to lower case.
 (:: lowerAt (-> String Int Int))
 (fn (lowerAt s i)
-  (let ((c (strByte s i)))
+  {
+    (let c (strByte s i))
     (if (&& (>= c 65) (<= c 90))
       (+ c 32)
-      c)))
+      c)
+  })
 
 ; True when `s` from `start` is `word`, ignoring case.
 (:: restIs (-> String Int String Bool))
 (fn (restIs s start word)
   (if (!= (- (strLen s) start) (strLen word))
     false
-    (let ((mut ok true))
+    {
+      (let mut ok true)
       {
         (for i in 0..(strLen word)
           (if (!= (lowerAt s (+ start i)) (strByte word i))
             (set ok false)))
         ok
-      })))
+      }
+    }))
 
 ; The float with sign `neg`, biased exponent `be` and stored
 ; significand bits `mant`.
 (:: assemble (-> Bool Int Int Float))
 (fn (assemble neg be mant)
-  (let ((b (| (<< be 52) mant)))
+  {
+    (let b (| (<< be 52) mant))
     (floatFromBits
       (if neg
         (| b (<< 1 63))
-        b))))
+        b))
+  })
 
 ; The number of bits in `x`, for `x` at least 0.
 (:: intBits (-> Int Int))
 (fn (intBits x)
-  (let (
-    (mut v x)
-    (mut n 0)
-  )
+  {
+    (let mut v x)
+    (let mut n 0)
     {
       (while (> v 0)
         {
@@ -542,31 +589,33 @@
           (set n (+ n 1))
         })
       n
-    }))
+    }
+  })
 
 ; Whether to round significand `m` up, given the bits `low` below it
 ; out of `extra` dropped ones, and whether anything below those is
 ; non-zero (`restNonZero`), ties to even.
 (:: roundUp (-> Int Int Int Bool Bool))
 (fn (roundUp m low extra restNonZero)
-  (let ((half (<< 1 (- extra 1))))
+  {
+    (let half (<< 1 (- extra 1)))
     (if (> low half)
       true
       (if (< low half)
         false
         (if restNonZero
           true
-          (== (& m 1) 1))))))
+          (== (& m 1) 1))))
+  })
 
 ; The binary64 nearest to `d` * 10^`e10`, ties to even, for a trimmed,
 ; non-zero big integer `d`.
 (:: nearest (-> Bool Int Int Float))
 (fn (nearest neg d e10)
-  (let (
-    (num bnNew)
-    (den bnNew)
-    (div bnNew)
-  )
+  {
+    (let num bnNew)
+    (let den bnNew)
+    (let div bnNew)
     {
       (bnCopy num d)
       (bnSetInt den 1)
@@ -580,11 +629,13 @@
       ; num / den lies in [2^(bl-1), 2^(bl+1)), so with e = bl - 54 the
       ; quotient has 54 or 55 bits, unless the value is subnormal and e
       ; is held at -1074.
-      (let ((bl (- (bnBitLen num) (bnBitLen den))))
-        (let ((e0
-          (if (< (- bl 54) -1074)
-            -1074
-            (- bl 54))))
+      {
+        (let bl (- (bnBitLen num) (bnBitLen den)))
+        {
+          (let e0
+            (if (< (- bl 54) -1074)
+              -1074
+              (- bl 54)))
           {
             (if (>= e0 0)
               {
@@ -594,76 +645,91 @@
               (bnShl num (- 0 e0)))
             ; The division leaves the remainder in num and consumes den;
             ; div keeps the divisor for the rounding test.
-            (let ((q (bnDivLong num den)))
-              (let ((extra
-                (if (> (intBits q) 53)
-                  (- (intBits q) 53)
-                  0)))
-                (let (
-                  (m0 (>> q extra))
-                  (e1 (+ e0 extra))
-                )
-                  (let ((up
-                    (if (== extra 0)
+            {
+              (let q (bnDivLong num den))
+              {
+                (let extra
+                  (if (> (intBits q) 53)
+                    (- (intBits q) 53)
+                    0))
+                {
+                  (let m0 (>> q extra))
+                  (let e1 (+ e0 extra))
+                  {
+                    (let up
+                      (if (== extra 0)
+                        {
+                          (bnShl num 1)
+                          {
+                            (let c (bnCmp num div))
+                            (if (> c 0)
+                              true
+                              (if (< c 0)
+                                false
+                                (== (& m0 1) 1)))
+                          }
+                        }
+                        (roundUp m0 (& q (- (<< 1 extra) 1)) extra (> (bnLen num) 0))))
+                    {
+                      (let m1
+                        (if up
+                          (+ m0 1)
+                          m0))
                       {
-                        (bnShl num 1)
-                        (let ((c (bnCmp num div)))
-                          (if (> c 0)
-                            true
-                            (if (< c 0)
-                              false
-                              (== (& m0 1) 1))))
-                      }
-                      (roundUp m0 (& q (- (<< 1 extra) 1)) extra (> (bnLen num) 0)))))
-                    (let ((m1
-                      (if up
-                        (+ m0 1)
-                        m0)))
-                      (let (
-                        (m (if (== m1 9007199254740992)
-                          4503599627370496
-                          m1))
-                        (e (if (== m1 9007199254740992)
-                          (+ e1 1)
-                          e1))
-                      )
+                        (let m
+                          (if (== m1 9007199254740992)
+                            4503599627370496
+                            m1))
+                        (let e
+                          (if (== m1 9007199254740992)
+                            (+ e1 1)
+                            e1))
                         (if (> e 971)
                           (assemble neg 2047 0)
                           (if (< m 4503599627370496)
                             (assemble neg 0 m)
-                            (assemble neg (+ e 1075) (- m 4503599627370496))))))))))
-          }))
-    }))
+                            (assemble neg (+ e 1075) (- m 4503599627370496))))
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  })
 
 ;; The number that `s` spells, correctly rounded to the nearest
 ;; binary64, ties to even. See the module comment for the syntax.
 (pub :: floatParse (-> String (Result Float Error)))
 (pub fn (floatParse s)
-  (let (
-    (n (strLen s))
-    (neg (byteIs s 0 45 45))
-    (start (if (byteIs s 0 43 45)
-      1
-      0))
-  )
+  {
+    (let n (strLen s))
+    (let neg (byteIs s 0 45 45))
+    (let start
+      (if (byteIs s 0 43 45)
+        1
+        0))
     (if (|| (restIs s start "inf") (restIs s start "infinity"))
       (Ok (assemble neg 2047 0))
       (if (restIs s start "nan")
         (Ok (assemble neg 2047 2251799813685248))
-        (let (
-          (d bnNew)
-          (mut i start)
-          (mut nsig 0)
-          (mut e10 0)
-          (mut sticky false)
-          (mut ndig 0)
-          (mut ok true)
-        )
+        {
+          (let d bnNew)
+          (let mut i start)
+          (let mut nsig 0)
+          (let mut e10 0)
+          (let mut sticky false)
+          (let mut ndig 0)
+          (let mut ok true)
           {
             ; Integer digits. Leading zeros change nothing; digits past
             ; the 800th scale the value and only mark the sticky digit.
             (while (>= (digitAt s i) 0)
-              (let ((c (digitAt s i)))
+              {
+                (let c (digitAt s i))
                 {
                   (if (! (&& (== nsig 0) (== c 0)))
                     (if (< nsig 800)
@@ -678,13 +744,15 @@
                       }))
                   (set ndig (+ ndig 1))
                   (set i (+ i 1))
-                }))
+                }
+              })
             ; Fraction digits.
             (if (byteIs s i 46 46)
               {
                 (set i (+ i 1))
                 (while (>= (digitAt s i) 0)
-                  (let ((c (digitAt s i)))
+                  {
+                    (let c (digitAt s i))
                     {
                       (if (&& (== nsig 0) (== c 0))
                         (set e10 (- e10 1))
@@ -698,17 +766,17 @@
                             (set sticky true))))
                       (set ndig (+ ndig 1))
                       (set i (+ i 1))
-                    }))
+                    }
+                  })
               })
             (if (== ndig 0)
               (set ok false))
             ; The exponent, saturated far past where every value is 0 or inf.
             (if (&& ok (byteIs s i 101 69))
-              (let (
-                (mut ev 0)
-                (mut edig 0)
-                (eneg (byteIs s (+ i 1) 45 45))
-              )
+              {
+                (let mut ev 0)
+                (let mut edig 0)
+                (let eneg (byteIs s (+ i 1) 45 45))
                 {
                   (set i (+ i 1))
                   (if (byteIs s i 43 45)
@@ -725,7 +793,8 @@
                   (set e10 (if eneg
                     (- e10 ev)
                     (+ e10 ev)))
-                }))
+                }
+              })
             (if (|| (! ok) (!= i n))
               (parseErr s)
               (if (== nsig 0)
@@ -738,14 +807,18 @@
                       (set e10 (- e10 1))
                     })
                   ; The value lies in [10^(l-1), 10^l).
-                  (let ((l (+ nsig e10)))
+                  {
+                    (let l (+ nsig e10))
                     (if (> l 310)
                       (Ok (assemble neg 2047 0))
                       (if (< l -325)
                         (Ok (assemble neg 0 0))
-                        (Ok (nearest neg d e10)))))
+                        (Ok (nearest neg d e10))))
+                  }
                 }))
-          })))))
+          }
+        }))
+  })
 
 ; ------------------------------------------------------------------
 ; Printing.
@@ -755,16 +828,14 @@
 (:: bnDecimal (-> Int String))
 ;@axiom:effect(unsafe)
 (fn (bnDecimal p)
-  (let (
-    (buf (strAlloc 800))
-    (mut pos 800)
-  )
+  {
+    (let buf (strAlloc 800))
+    (let mut pos 800)
     {
       (while (> (bnLen p) 0)
-        (let (
-          (mut c (bnDivSmall p 100000000))
-          (mut k 0)
-        )
+        {
+          (let mut c (bnDivSmall p 100000000))
+          (let mut k 0)
           (while (&& (< k 8) (|| (> (bnLen p) 0) (> c 0)))
             {
               ; A chunk below the top one is always eight digits.
@@ -772,36 +843,40 @@
               (__store8 (strData buf) pos (+ 48 (% c 10)))
               (set c (/ c 10))
               (set k (+ k 1))
-            })))
+            })
+        })
       (strSlice buf pos (- 800 pos))
-    }))
+    }
+  })
 
 ; `digits` with its trailing zeros removed.
 (:: trimZeros (-> String String))
 (fn (trimZeros digits)
-  (let ((mut n (strLen digits)))
+  {
+    (let mut n (strLen digits))
     {
       (while (&& (> n 1) (== (strByte digits (- n 1)) 48))
         (set n (- n 1)))
       (strSlice digits 0 n)
-    }))
+    }
+  })
 
 ; `digits` plus one in the last place. A carry out of the first digit
 ; makes the answer one digit longer.
 (:: incDigits (-> String String))
 ;@axiom:effect(unsafe)
 (fn (incDigits digits)
-  (let (
-    (n (strLen digits))
-    (out (strAlloc (strLen digits)))
-    (mut i (- (strLen digits) 1))
-    (mut carry 1)
-  )
+  {
+    (let n (strLen digits))
+    (let out (strAlloc (strLen digits)))
+    (let mut i (- (strLen digits) 1))
+    (let mut carry 1)
     {
       (for k in 0..n
         (__store8 (strData out) k (strByte digits k)))
       (while (&& (>= i 0) (== carry 1))
-        (let ((c (+ (strByte digits i) 1)))
+        {
+          (let c (+ (strByte digits i) 1))
           {
             (if (> c 57)
               (__store8 (strData out) i 48)
@@ -810,21 +885,22 @@
                 (set carry 0)
               })
             (set i (- i 1))
-          }))
+          }
+        })
       (if (== carry 1)
         (concat "1" out)
         out)
-    }))
+    }
+  })
 
 ; `n` in decimal, for `n` at least 0.
 (:: natText (-> Int String))
 ;@axiom:effect(unsafe)
 (fn (natText n)
-  (let (
-    (buf (strAlloc 20))
-    (mut pos 20)
-    (mut x n)
-  )
+  {
+    (let buf (strAlloc 20))
+    (let mut pos 20)
+    (let mut x n)
     {
       (if (== x 0)
         {
@@ -838,7 +914,8 @@
             (set x (/ x 10))
           }))
       (strSlice buf pos (- 20 pos))
-    }))
+    }
+  })
 
 ; `n` in decimal, signed.
 (:: intText (-> Int String))
@@ -859,12 +936,14 @@
 (:: zeros (-> Int String))
 ;@axiom:effect(unsafe)
 (fn (zeros n)
-  (let ((buf (strAlloc n)))
+  {
+    (let buf (strAlloc n))
     {
       (for i in 0..n
         (__store8 (strData buf) i 48))
       buf
-    }))
+    }
+  })
 
 ; A candidate decimal: its digits, its point position, and whether it
 ; reads back.
@@ -876,13 +955,15 @@
 ; True when every digit of `s` from `from` on is zero.
 (:: zerosFrom (-> String Int Bool))
 (fn (zerosFrom s from)
-  (let ((mut z true))
+  {
+    (let mut z true)
     {
       (for k in from..(strLen s)
         (if (!= (strByte s k) 48)
           (set z false)))
       z
-    }))
+    }
+  })
 
 ; The best `p`-digit candidate for the value whose exact expansion is
 ; 0.`exact` * 10^`decpt`: the expansion cut to `p` digits or that plus
@@ -890,63 +971,67 @@
 ; do, ties to an even last digit.
 (:: candAt (-> String Int Int Int Cand))
 (fn (candAt exact decpt bits p)
-  (let ((n (strLen exact)))
+  {
+    (let n (strLen exact))
     (if (>= p n)
-      (Cand exact decpt true)
-      (let (
-        (cut (strSlice exact 0 p))
-        (upd (incDigits (strSlice exact 0 p)))
-      )
-        (let (
-          (upPt (if (> (strLen upd) p)
-            (+ decpt 1)
-            decpt))
-          (upDigits (if (> (strLen upd) p)
-            (strSlice upd 0 p)
-            upd))
-        )
-          (let (
-            (lowOk (readsBack cut decpt bits))
-            (upOk (readsBack upDigits upPt bits))
-          )
+      (Cand :digits exact :decpt decpt :ok true)
+      {
+        (let cut (strSlice exact 0 p))
+        (let upd (incDigits (strSlice exact 0 p)))
+        {
+          (let upPt
+            (if (> (strLen upd) p)
+              (+ decpt 1)
+              decpt))
+          (let upDigits
+            (if (> (strLen upd) p)
+              (strSlice upd 0 p)
+              upd))
+          {
+            (let lowOk (readsBack cut decpt bits))
+            (let upOk (readsBack upDigits upPt bits))
             (if (&& lowOk upOk)
-              (let (
-                (first (strByte exact p))
-                (restZero (zerosFrom exact (+ p 1)))
-              )
+              {
+                (let first (strByte exact p))
+                (let restZero (zerosFrom exact (+ p 1)))
                 (if (|| (> first 53) (&& (== first 53) (! restZero)))
-                  (Cand upDigits upPt true)
+                  (Cand :digits upDigits :decpt upPt :ok true)
                   (if (&& (== first 53) (&& restZero (== (& (strByte cut (- p 1)) 1) 1)))
-                    (Cand upDigits upPt true)
-                    (Cand cut decpt true))))
+                    (Cand :digits upDigits :decpt upPt :ok true)
+                    (Cand :digits cut :decpt decpt :ok true)))
+              }
               (if lowOk
-                (Cand cut decpt true)
+                (Cand :digits cut :decpt decpt :ok true)
                 (if upOk
-                  (Cand upDigits upPt true)
-                  (Cand cut decpt false))))))))))
+                  (Cand :digits upDigits :decpt upPt :ok true)
+                  (Cand :digits cut :decpt decpt :ok false))))
+          }
+        }
+      })
+  })
 
 ; `digits` (no trailing zeros) with the point at `decpt`, laid out as
 ; Python's `repr` lays it out.
 (:: reprFormat (-> String Int String))
 (fn (reprFormat digits decpt)
-  (let (
-    (nd (strLen digits))
-    (x10 (- decpt 1))
-  )
+  {
+    (let nd (strLen digits))
+    (let x10 (- decpt 1))
     (if (&& (>= x10 -4) (< x10 16))
       (if (<= decpt 0)
         (concat "0." (concat (zeros (- 0 decpt)) digits))
         (if (>= decpt nd)
           (concat digits (concat (zeros (- decpt nd)) ".0"))
           (concat (strSlice digits 0 decpt) (concat "." (strSlice digits decpt (- nd decpt))))))
-      (let (
-        (mant (if (== nd 1)
-          digits
-          (concat (strSlice digits 0 1) (concat "." (strSlice digits 1 (- nd 1))))))
-        (ax (if (< x10 0)
-          (- 0 x10)
-          x10))
-      )
+      {
+        (let mant
+          (if (== nd 1)
+            digits
+            (concat (strSlice digits 0 1) (concat "." (strSlice digits 1 (- nd 1))))))
+        (let ax
+          (if (< x10 0)
+            (- 0 x10)
+            x10))
         (concat mant
           (concat
             (if (< x10 0)
@@ -954,40 +1039,49 @@
               "e+")
             (if (< ax 10)
               (concat "0" (natText ax))
-              (natText ax))))))))
+              (natText ax))))
+      })
+  })
 
 ; The shortest text for a finite, non-zero magnitude whose exact
 ; expansion is 0.`exact` * 10^`decpt`. When `p` digits read back, so do
 ; `p` + 1, so the shortest precision is found by bisection.
 (:: shortestText (-> String Int Int String))
 (fn (shortestText exact decpt bits)
-  (let (
-    (mut lo 1)
-    (mut hi (if (< (strLen exact) 17)
-      (strLen exact)
-      17))
-  )
+  {
+    (let mut lo 1)
+    (let mut hi
+      (if (< (strLen exact) 17)
+        (strLen exact)
+        17))
     {
       (while (< lo hi)
-        (let ((mid (/ (+ lo hi) 2)))
-          (let ((c (candAt exact decpt bits mid)))
+        {
+          (let mid (/ (+ lo hi) 2))
+          {
+            (let c (candAt exact decpt bits mid))
             (if c.ok
               (set hi mid)
-              (set lo (+ mid 1))))))
-      (let ((best (candAt exact decpt bits lo)))
-        (reprFormat (trimZeros best.digits) best.decpt))
-    }))
+              (set lo (+ mid 1)))
+          }
+        })
+      {
+        (let best (candAt exact decpt bits lo))
+        (reprFormat (trimZeros best.digits) best.decpt)
+      }
+    }
+  })
 
 ;; The shortest text that `floatParse` reads back to exactly `x`, in
 ;; Python's `repr` format: `0.1`, `2.0`, `1e+22`, `-0.0`, `inf`, `nan`.
 (pub :: floatToString (-> Float String))
 (pub fn (floatToString x)
-  (let ((bits (floatToBits x)))
-    (let (
-      (neg (< bits 0))
-      (be (& (>> bits 52) 2047))
-      (mant (& bits 4503599627370495))
-    )
+  {
+    (let bits (floatToBits x))
+    {
+      (let neg (< bits 0))
+      (let be (& (>> bits 52) 2047))
+      (let mant (& bits 4503599627370495))
       (if (== be 2047)
         (if (!= mant 0)
           "nan"
@@ -998,11 +1092,17 @@
           (if neg
             "-0.0"
             "0.0")
-          (let ((decimal (exactDecimal bits)))
-            (let ((text (shortestText decimal.digits decimal.decpt bits)))
+          {
+            (let decimal (exactDecimal bits))
+            {
+              (let text (shortestText decimal.digits decimal.decpt bits))
               (if neg
                 (concat "-" text)
-                text))))))))
+                text)
+            }
+          }))
+    }
+  })
 
 ; The exact finite magnitude, shared by shortest and fixed rendering.
 (:: exactDecimal (-> Int Cand))
@@ -1011,39 +1111,47 @@
   ; A binary64 magnitude needs at most 53 + 3*1074 bits even when
   ; each power of five is bounded by eight: fewer than 128 limbs.
   ; This exclusive scratch fits a reusable allocation class.
-  (let (
-    (be (& (>> bits 52) 2047))
-    (mant (& bits 4503599627370495))
-    (m (if (== be 0)
-      mant
-      (| mant 4503599627370496)))
-    (e (if (== be 0)
-      -1074
-      (- be 1075)))
-    (p (memAlloc (* 8 129)))
-  )
+  {
+    (let be (& (>> bits 52) 2047))
+    (let mant (& bits 4503599627370495))
+    (let m
+      (if (== be 0)
+        mant
+        (| mant 4503599627370496)))
+    (let e
+      (if (== be 0)
+        -1074
+        (- be 1075)))
+    (let p (memAlloc (* 8 129)))
     {
       ; Raw allocations start unowned. Adopt this exclusive scratch
       ; before releasing it after the decimal string has been copied.
       (__retain p)
       (bnSetInt p m)
-      (let ((decimal
-        (if (>= e 0)
-          {
-            (bnShl p e)
-            (let ((ds (bnDecimal p)))
-              (Cand ds (strLen ds) true))
-          }
-          {
-            (bnMulPow5 p (- 0 e))
-            (let ((ds (bnDecimal p)))
-              (Cand ds (+ (strLen ds) e) true))
-          })))
+      {
+        (let decimal
+          (if (>= e 0)
+            {
+              (bnShl p e)
+              {
+                (let ds (bnDecimal p))
+                (Cand :digits ds :decpt (strLen ds) :ok true)
+              }
+            }
+            {
+              (bnMulPow5 p (- 0 e))
+              {
+                (let ds (bnDecimal p))
+                (Cand :digits ds :decpt (+ (strLen ds) e) :ok true)
+              }
+            }))
         {
           (__release p)
           decimal
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ;; `x` with `places` decimal places, rounded from its exact binary64
 ;; value, with halfway cases away from zero. Negative precision means
@@ -1053,68 +1161,82 @@
 (pub :: floatToFixed (-> Float Int String))
 ;@axiom:pre((<= places 4096))
 (pub fn (floatToFixed x places)
-  (let (
-    (bits (floatToBits x))
-    (be (& (>> bits 52) 2047))
-    (mant (& bits 4503599627370495))
-    (precision (if (< places 0)
-      0
-      places))
-  )
+  {
+    (let bits (floatToBits x))
+    (let be (& (>> bits 52) 2047))
+    (let mant (& bits 4503599627370495))
+    (let precision
+      (if (< places 0)
+        0
+        places))
     (if (== be 2047)
       (floatToString x)
       ; A finite binary64 has at most 309 integer digits, plus sign,
       ; point and precision. The returned storage belongs outside the
       ; scratch region; only its filled length crosses the boundary.
-      (let ((out (strAlloc (+ precision 312))))
-        (let ((length
-          (region fixedFormatting
-            (let ((decimal
-              (if (&& (== be 0) (== mant 0))
-                (Cand "0" 1 true)
-                (exactDecimal bits))))
-              (let ((magnitude (fixedMagnitude decimal.digits decimal.decpt precision)))
-                (let ((text
-                  (if (< bits 0)
-                    (concat "-" magnitude)
-                    magnitude)))
+      {
+        (let out (strAlloc (+ precision 312)))
+        {
+          (let length
+            (region fixedFormatting
+              {
+                (let decimal
+                  (if (&& (== be 0) (== mant 0))
+                    (Cand :digits "0" :decpt 1 :ok true)
+                    (exactDecimal bits)))
+                {
+                  (let magnitude (fixedMagnitude decimal.digits decimal.decpt precision))
                   {
-                    (memCopy (strData out) (strData text) (strLen text))
-                    (strLen text)
-                  }))))))
+                    (let text
+                      (if (< bits 0)
+                        (concat "-" magnitude)
+                        magnitude))
+                    {
+                      (memCopy (strData out) (strData text) (strLen text))
+                      (strLen text)
+                    }
+                  }
+                }
+              }))
           {
             ; `out` is fresh and remains exclusive until this return.
             ; Shrinking its header preserves the zero terminator and
             ; its existing owner share; no slice needs a second header.
             (memSetWord (as out Int) 0 length)
             out
-          })))))
+          }
+        }
+      })
+  })
 
 ; Round the exact magnitude after shifting its decimal point by places.
 ; The resulting integer is a decimal string, so neither scaling nor
 ; rounding can overflow an Int.
 (:: fixedMagnitude (-> String Int Int String))
 (fn (fixedMagnitude exact decpt places)
-  (let (
-    (keep (+ decpt places))
-    (n (strLen exact))
-    (digits (if (< keep 0)
-      "0"
-      (if (== keep 0)
-        (if (>= (strByte exact 0) 53)
-          "1"
-          "0")
-        (if (>= keep n)
-          (concat exact (zeros (- keep n)))
-          (let ((cut (strSlice exact 0 keep)))
-            (if (>= (strByte exact keep) 53)
-              (incDigits cut)
-              cut))))))
-    (length (strLen digits))
-  )
+  {
+    (let keep (+ decpt places))
+    (let n (strLen exact))
+    (let digits
+      (if (< keep 0)
+        "0"
+        (if (== keep 0)
+          (if (>= (strByte exact 0) 53)
+            "1"
+            "0")
+          (if (>= keep n)
+            (concat exact (zeros (- keep n)))
+            {
+              (let cut (strSlice exact 0 keep))
+              (if (>= (strByte exact keep) 53)
+                (incDigits cut)
+                cut)
+            }))))
+    (let length (strLen digits))
     (if (== places 0)
       digits
       (if (<= length places)
         (concat "0." (concat (zeros (- places length)) digits))
         (concat (strSlice digits 0 (- length places))
-          (concat "." (strSlice digits (- length places) places)))))))
+          (concat "." (strSlice digits (- length places) places)))))
+  })

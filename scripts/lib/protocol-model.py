@@ -2604,7 +2604,7 @@ INSTRUMENT_SEAMS = [
     ("(__load64 ch i)", "(trGet ch i)", 1),
     ("(__store64 ch i v)", "(trPut ch i v)", 1),
     ("(> cap 1048576)", "(> cap 504)", 1),
-    ("(let ((len (* 8 (+ cap 8))))", "(let ((len (+ 4096 (* 8 (+ 3 (* 6 trMax))))))", 1),
+    ("(let len (* 8 (+ cap 8)))", "(let len (+ 4096 (* 8 (+ 3 (* 6 trMax)))))", 1),
     ("(chanPut ch 7 len)\n", "(chanPut ch 7 len)\n            (trStart ch)\n", 1),
     ("(sysUnmapShared ch (chanGet ch 7))", "(trFree ch)", 1),
 ]
@@ -2644,12 +2644,12 @@ TRACE_AX = r'''
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (trNote addr op a b r)
-  (let ((t (trArea addr)))
+  { (let t (trArea addr))
     (if (== (__load64 t 1) 1)
-      (let ((k (__load64 t 2)))
+      { (let k (__load64 t 2))
         {
           (if (< k trMax)
-            (let ((e (+ t (* 8 (+ 3 (* 6 k))))))
+            { (let e (+ t (* 8 (+ 3 (* 6 k)))))
               {
                 (__store64 e 0 sysPid)
                 (__store64 e 1 op)
@@ -2658,129 +2658,129 @@ TRACE_AX = r'''
                 (__store64 e 4 b)
                 (__store64 e 5 r)
                 0
-              })
+              }}
             0)
           (__store64 t 2 (+ k 1))
           0
-        })
-      0)))
+        }}
+      0)})
 
 (:: trLoad (-> Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (trLoad a)
-  (let ((t (trArea a)))
+  { (let t (trArea a))
     {
       (trEnter t)
-      (let ((r (__atomic_load a)))
+      { (let r (__atomic_load a))
         {
           (trNote a 1 0 0 r)
           (trLeave t)
           r
-        })
-    }))
+        }}
+    }})
 
 (:: trStore (-> Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (trStore a v)
-  (let ((t (trArea a)))
+  { (let t (trArea a))
     {
       (trEnter t)
       (__atomic_store a v)
       (trNote a 2 v 0 0)
       (trLeave t)
       0
-    }))
+    }})
 
 (:: trAdd (-> Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (trAdd a d)
-  (let ((t (trArea a)))
+  { (let t (trArea a))
     {
       (trEnter t)
-      (let ((r (__atomic_add a d)))
+      { (let r (__atomic_add a d))
         {
           (trNote a 3 d 0 r)
           (trLeave t)
           r
-        })
-    }))
+        }}
+    }})
 
 (:: trCas (-> Int Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (trCas a old new)
-  (let ((t (trArea a)))
+  { (let t (trArea a))
     {
       (trEnter t)
-      (let ((r (__atomic_cas a old new)))
+      { (let r (__atomic_cas a old new))
         {
           (trNote a 4 old new r)
           (trLeave t)
           r
-        })
-    }))
+        }}
+    }})
 
 (:: trGet (-> Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (trGet ch i)
-  (let ((t (trArea ch)))
+  { (let t (trArea ch))
     {
       (trEnter t)
-      (let ((r (__load64 ch i)))
+      { (let r (__load64 ch i))
         {
           (trNote (+ ch (* 8 i)) 5 0 0 r)
           (trLeave t)
           r
-        })
-    }))
+        }}
+    }})
 
 (:: trPut (-> Int Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (trPut ch i v)
-  (let ((t (trArea ch)))
+  { (let t (trArea ch))
     {
       (trEnter t)
       (__store64 ch i v)
       (trNote (+ ch (* 8 i)) 6 v 0 0)
       (trLeave t)
       0
-    }))
+    }})
 
 (:: trWaitFor (-> Int Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (trWaitFor addr expected nanos)
-  (let ((t (trArea addr)))
+  { (let t (trArea addr))
     {
       (trEnter t)
       (trNote addr 7 expected 0 (__atomic_load addr))
       (trLeave t)
-      (let ((code (sysWaitWordTimeout addr expected nanos)))
+      { (let code (sysWaitWordTimeout addr expected nanos))
         {
           (trEnter t)
           (trNote addr 8 expected 0 code)
           (trLeave t)
           code
-        })
-    }))
+        }}
+    }})
 
 (:: trWake (-> Int Int))
 ;@axiom:effect(io)
 (fn (trWake addr)
-  (let ((t (trArea addr)))
+  { (let t (trArea addr))
     {
       (trEnter t)
       (trNote addr 9 0 0 0)
       (sysWakeWord addr)
       (trLeave t)
       0
-    }))
+    }})
 
 (:: trStart (-> Int Int))
 ;@axiom:effect(unsafe)
@@ -2794,32 +2794,32 @@ TRACE_AX = r'''
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (trFree ch)
-  (let (
-    (t (trArea ch))
-    (n (__load64 (trArea ch) 2))
-    (cap (__load64 ch 5))
-    (mx trMax)
-    (mut k 0)
-  )
+  {
+    (let t (trArea ch))
+    (let n (__load64 (trArea ch) 2))
+    (let cap (__load64 ch 5))
+    (let mx trMax)
+    (let mut k 0)
+
     {
       (__store64 t 1 0)
       (println "trace {cap} {n} {mx}")
       (while (&& (< k n) (< k mx))
-        (let ((e (+ t (* 8 (+ 3 (* 6 k))))))
-          (let (
-            (p (__load64 e 0))
-            (o (__load64 e 1))
-            (w (__load64 e 2))
-            (x (__load64 e 3))
-            (y (__load64 e 4))
-            (r (__load64 e 5))
-          )
+        { (let e (+ t (* 8 (+ 3 (* 6 k)))))
+          {
+            (let p (__load64 e 0))
+            (let o (__load64 e 1))
+            (let w (__load64 e 2))
+            (let x (__load64 e 3))
+            (let y (__load64 e 4))
+            (let r (__load64 e 5))
+
             {
               (println "{p} {o} {w} {x} {y} {r}")
               (set k (+ k 1))
-            })))
+            }}})
       (sysUnmapShared ch (__load64 ch 7))
-    }))
+    }})
 '''
 
 # Changes the gate plants in the copy before tracing it, each of which the

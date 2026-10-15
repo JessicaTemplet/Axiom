@@ -177,8 +177,8 @@ import os, shutil, sys
 src, base = sys.argv[1], sys.argv[2]
 cuts = {
   # chanSend and chanRecv park after releasing the lock.
-  "park": ("Chan.ax", "                (let ((seen (chanPark ch)))\n                  {\n                    (chanUnlock ch me)\n                    (chanSleep ch seen)\n                  }))))))",
-           "                {\n                  (chanUnlock ch me)\n                  (let ((seen (chanPark ch)))\n                    (chanSleep ch seen))\n                }))))", 2),
+  "park": ("Chan.ax", "                  (let seen (chanPark ch))\n                  {\n                    (chanUnlock ch me)\n                    (chanSleep ch seen)\n                  }",
+           "                  {\n                    (chanUnlock ch me)\n                    (let seen (chanPark ch))\n                    (chanSleep ch seen)\n                  }", 2),
   # A guard's contended release wakes nobody.
   "wake": ("Sync.ax", "              (syncStore m 0 0)\n              (sysWakeWord m)\n              0", "              (syncStore m 0 0)\n              0", 1),
   # A task's deadline kill sends signal 0 (check-task.sh's kill ablation).
@@ -354,8 +354,8 @@ def cut(path, old, new):
 sync = os.path.join(d, "stdlib", "Sync.ax")
 cut(sync, ";@axiom:effect(io)\n;@axiom:effect(block)\n(fn (syncAcquire m b timed)",
     ";@axiom:effect(io)\n;@axiom:effect(unsafe)\n;@axiom:effect(block)\n(fn (syncAcquire m b timed)")
-cut(sync, "                      (let ((code (sysWaitWordTimeout m w slice)))\n                        {",
-    "                      (let ((code (sysWaitWordTimeout m w slice)))\n                        {\n"
+cut(sync, "                        (let code (sysWaitWordTimeout m w slice))\n                        {",
+    "                        (let code (sysWaitWordTimeout m w slice))\n                        {\n"
     "                          (if (== code 1)\n                            {\n"
     "                              (__atomic_add (+ m 40) 1)\n"
     "                              (if (== (__atomic_load m) 0)\n                                (__atomic_add (+ m 48) 1)\n                                0)\n"
@@ -368,11 +368,11 @@ with open(sync, "a", encoding="utf-8") as f:
 prog = os.path.join(d, "liveness.ax")
 # Printed before `(shares res)`, which stays the run's answer.
 cut(prog, "            (shares res)\n",
-    "            (let (\n              (n (syncSliceCount m 5))\n              (f (syncSliceCount m 6))\n            )\n"
-    "              (println \"slice-timeouts {n} lock-free {f}\"))\n            (shares res)\n")
+    "            { (let n (syncSliceCount m 5))\n              (let f (syncSliceCount m 6))\n"
+    "              (println \"slice-timeouts {n} lock-free {f}\") }\n            (shares res)\n")
 cut(prog, "                (println \"done\")\n                0\n              }\n            )\n            ((Err e) 3))",
-    "                (println \"done\")\n                (let (\n                  (n (+ (syncSliceCount a 5) (syncSliceCount b 5)))\n                )\n"
-    "                  (println \"slice-timeouts {n}\"))\n                0\n              }\n            )\n            ((Err e) 3))")
+    "                (println \"done\")\n                { (let n (+ (syncSliceCount a 5) (syncSliceCount b 5)))\n"
+    "                  (println \"slice-timeouts {n}\") }\n                0\n              }\n            )\n            ((Err e) 3))")
 PY
 then
   for lowering in processes threads; do

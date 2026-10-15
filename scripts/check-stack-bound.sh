@@ -136,12 +136,12 @@ K = 60
 L = ["(import Sys)", ""]
 L += [";@axiom:restrict(no-recursion)", "(:: f0 (-> Int Int))", "(fn (f0 x) (+ x 1))", ""]
 for i in range(1, N + 1):
-    lets = " ".join("(v%d (* (+ x %d) %d))" % (j, j, j + 3) for j in range(K))
+    lets = " ".join("(let v%d (* (+ x %d) %d))" % (j, j, j + 3) for j in range(K))
     expr = "(f%d (+ x 1))" % (i - 1)
     for j in range(K):
         expr = "(+ v%d %s)" % (j, expr)
     L += [";@axiom:restrict(no-recursion)", "(:: f%d (-> Int Int))" % i,
-          "(fn (f%d x) (let (%s) %s))" % (i, lets, expr), ""]
+          "(fn (f%d x) { %s %s })" % (i, lets, expr), ""]
 L += [";@axiom:restrict(no-recursion)", "(:: run (-> Int Int))",
       "(fn (run n) (f%d n))" % N, ""]
 L += [";@axiom:effect(io)", "(:: main Int)",
@@ -378,10 +378,10 @@ if pipeline "$work/hi.ax" 1 "hi"; then
 ;@axiom:effect(io)
 (:: main ())
 (fn (main)
-  (let ((s (concat "h" "i")))
+  { (let s (concat "h" "i"))
     {
       (println s)
-    }))
+    }})
 AX
   if pipeline "$work/hirel.ax" 1 "hirel"; then
     checks=$((checks + 1))

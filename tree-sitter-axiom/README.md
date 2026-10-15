@@ -16,6 +16,27 @@ tree-sitter-axiom/
 └── tree-sitter.json         CLI configuration
 ```
 
+## Locals and records
+
+```scheme
+(struct Point (x : Int) (y : Int))
+(:: make (-> Int Point))
+(fn (make input)
+  {
+    (let point (Point :x input :y 20))
+    point
+  })
+```
+
+A local declaration belongs to its surrounding brace block. Its name
+becomes visible after the initialiser; nested blocks have separate scopes.
+Use `(let mut name value)` for an assignable local. Struct construction
+names every field, and field values run in written order.
+
+The grammar represents these as `local_binding`, `struct_construction`
+and `constructor_field`. Grouped `let` forms have no binding rule; the
+compiler diagnoses them while the editor recovers a usable tree.
+
 <a id="verifying-it"></a>
 ## Check the grammar
 
@@ -101,7 +122,7 @@ the one the compiler makes.
   nearly always mid-edit. A grammar that fails on incomplete input
   produces an `ERROR` that swallows the rest of the file and breaks
   highlighting just when you need it.
-- Removed constructs still parse. `union`, `region` and `foreign` are
+- Removed constructs still parse. `union`, `cond` and `foreign` are
   gone from the language but still reserved, and the compiler reports
   `AX2004` for them. A `removed_form` node consumes the whole form, so
   your editor gets one bounded region to mark as an error. The trailing

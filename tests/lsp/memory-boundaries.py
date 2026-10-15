@@ -93,8 +93,8 @@ def run(compiler):
 (type Message = Packet)
 (:: readRaw (-> Int String))
 (fn (readRaw address)
-  (let ((item (as address Message)))
-    item.text))
+  { (let item (as address Message))
+    item.text})
 """
         path = root / "Forge.ax"
         path.write_text(source)

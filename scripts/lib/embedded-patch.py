@@ -229,9 +229,9 @@ ABLATIONS = {
     # `isr(fault)` is parsed, checked and then ignored: no module has a
     # hook, so a fault takes the fixed 81 and a trap its own status.
     "hookoff": (
-        """  (let ((fs (isrVectorNames (isrBindings (memGetWordVec cg 8) vecNew 0) "fault" 0 vecNew)))
+        """    (let fs (isrVectorNames (isrBindings (memGetWordVec cg 8) vecNew 0) "fault" 0 vecNew))
     (if (== (vecLen fs) 1)""",
-        """  (let ((fs (isrVectorNames (isrBindings (memGetWordVec cg 8) vecNew 0) "fault" 0 vecNew)))
+        """    (let fs (isrVectorNames (isrBindings (memGetWordVec cg 8) vecNew 0) "fault" 0 vecNew))
     (if (== (vecLen fs) 999)""",
         "A19 - the hook binding reaching the fault exit",
     ),

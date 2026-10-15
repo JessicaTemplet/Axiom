@@ -33,11 +33,11 @@ cat > "$work/p/witness.ax" <<'AX'
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((s (strDup "freed-value-12345678")))
+  { (let s (strDup "freed-value-12345678"))
     {
       (dropIt (as s Int))
-      (let ((word (readWord (as s Int)))) (println "{word}"))
-    }))
+      { (let word (readWord (as s Int))) (println "{word}")}
+    }})
 AX
 for mode in plain poison; do
   flags=(--diagnostic-format=ai)
@@ -56,12 +56,12 @@ cat > "$work/p/zero.ax" <<'AX'
 (:: main Int)
 ;@axiom:effect(unsafe)
 (fn (main)
-  (let ((s (strDup "reusable")) (p (as s Int)))
+  { (let s (strDup "reusable")) (let p (as s Int))
     {
       (__release p)
-      (let ((q (__alloc 24)))
-        (if (&& (== p q) (== (__load64 q 0) 0)) 42 1))
-    }))
+      { (let q (__alloc 24))
+        (if (&& (== p q) (== (__load64 q 0) 0)) 42 1)}
+    }})
 AX
 "$axiom" --diagnostic-format=ai --alloc-poison build "$work/p/zero.ax" -o "$work/p/zero" >"$work/p/zero.log" 2>&1 \
   || fail "the zeroed-allocation witness did not build"

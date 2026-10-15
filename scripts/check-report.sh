@@ -112,11 +112,11 @@ cat > "$work/facts.ax" <<'AX'
 
 (:: build (-> Int (Vec Int)))
 (fn (build n)
-  (let ((v vecNew))
+  { (let v vecNew)
     {
       (vecPush v n)
       v
-    }))
+    }})
 
 ;@axiom:isr
 (fn (tick)

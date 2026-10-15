@@ -41,6 +41,19 @@ and selected entry roots; they do not establish aviation or space certification.
   `tests/stdlib/963-block-local-bindings.ax` and
   `tests/stdlib/964-named-struct-construction.ax`.
 
+- Grouped bindings and positional struct construction are retired. Compiler,
+  library, fixtures, generated bindings and documentation use the canonical
+  forms. Tested by `tests/diagnostics/1452-retired-grouped-let.axbad` and
+  `tests/diagnostics/1454-retired-struct-construction.ax`.
+
+- Value bindings shadow constructor names consistently during checking
+  and native emission. Tested by
+  `tests/selfhost/1022-local-constructor-shadow.ax`.
+
+- Discarded fallible results are diagnosed through nested blocks, loop bodies
+  and unit-returning branches. Tested by
+  `tests/diagnostics/1451-discarded-block-results.ax`.
+
 - Region diagnostic checks wait for background analysis before shutting
   down the language server. Tested by `tests/lsp/region-boundary-hints.py`.
 

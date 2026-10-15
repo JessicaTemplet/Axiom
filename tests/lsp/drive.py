@@ -1021,7 +1021,7 @@ NAV = """(import NavHelper)
 (fn (helper) 3)
 
 (:: main Int)
-(fn (main) (let ((o (Point 1 2))) (+ (+ (tagColour) helper) (+ (bump 1) o.x))))
+(fn (main) { (let o (Point :x 1 :y 2)) (+ (+ (tagColour) helper) (+ (bump 1) o.x))})
 """
 # A declaration taller than a tooltip. `lspClampLines` cuts a hover's
 # fence at 40 lines and says so in the fence's own comment syntax, and
@@ -1484,18 +1484,18 @@ NAV_MAIN = """(import RefHelper)
 (pub :: area (-> Int Int Int))
 
 (pub fn (area pw ph)
-  (let ((ph (+ ph 1)))
-    (+ ph (twice pw))))
+  { (let ph (+ ph 1))
+    (+ ph (twice pw))})
 
 ; A mutable binding written by `set`.
 (pub :: count (-> Int Int))
 
 (pub fn (count n)
-  (let ((mut acc 0))
+  { (let mut acc 0)
     {
       (set acc (+ acc n))
       acc
-    }))
+    }})
 
 ; A `match` with a constructor head and a pattern binder.
 (pub :: radius (-> Shape Int))
@@ -1513,11 +1513,11 @@ NAV_MAIN = """(import RefHelper)
 (:: main Int)
 
 (fn (main)
-  (let ((c3 (count 3))
-        (dt (Dot))
-        (bx (Box (Dot) 7))
-        (tp bx.top))
-    (+ c3 (+ (apply2) (+ (radius (Circle 4)) (+ (radius tp) (match dt ((Dot) 0) (_ 1))))))))
+  { (let c3 (count 3))
+        (let dt (Dot))
+        (let bx (Box :top (Dot) :n 7))
+        (let tp bx.top)
+    (+ c3 (+ (apply2) (+ (radius (Circle 4)) (+ (radius tp) (match dt ((Dot) 0) (_ 1))))))})
 """
 NAV_USER = """(import NavMain)
 
@@ -1681,7 +1681,7 @@ if "acc" not in ACC_TEXT or ACC_TEXT.count("(") < 1 or ACC_TEXT not in NAV_MAIN:
     sys.exit(f"FAIL: the derived let pair for `acc` ({ACC_TEXT!r}) is not "
              f"a `(mut acc v)` triple cut from NavMain.ax")
 for _name, _text in (("c3", C3_TEXT), ("dt", DT_TEXT), ("bx", BX_TEXT), ("tp", TP_TEXT)):
-    if not (_text.startswith(f"({_name} ") and _text.endswith(")") and _text in NAV_MAIN):
+    if not (_text.startswith(f"(let {_name} ") and _text.endswith(")") and _text in NAV_MAIN):
         sys.exit(f"FAIL: the derived let pair for `{_name}` ({_text!r}) is not "
                  f"a `(name value)` pair cut from NavMain.ax")
 # The result of `count`'s arrow, the `data` and `struct` names, and
@@ -2238,11 +2238,11 @@ HOLES_SRC = """(import IO)
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((v 41))
+  { (let v 41)
     {
-      (println "v={v} padded {v:>4} braces {{v}}")
+      (println \"v={v} padded {v:>4} braces {{v}}\")
       0
-    }))
+    }})
 """
 holes_uri = "file://" + os.path.join(NAVREF_DIR, "Holes.ax")
 open(os.path.join(NAVREF_DIR, "Holes.ax"), "w", encoding="utf-8").write(HOLES_SRC)
@@ -2474,7 +2474,7 @@ CH_MAIN = """(import ChHelper (bump twice))
 ; A local binding, for the local half of the declaration request.
 (pub :: scaled (-> Int Int))
 
-(pub fn (scaled n) (let ((factor 3)) (* n factor)))
+(pub fn (scaled n) { (let factor 3) (* n factor)})
 
 (pub :: caller (-> Int Int))
 
@@ -3516,15 +3516,15 @@ VIEW = """(import ViewHelper)
 
 (:: sumUp (-> Int Int))
 (fn (sumUp x)
-  (let ((total (add 1 2))
-        (same (add x 3)))
-    (+ total same)))
+  { (let total (add 1 2))
+        (let same (add x 3))
+    (+ total same)})
 
 (:: shape Shape)
 (fn (shape) (Circle 7))
 
 (:: viaLocal Int)
-(fn (viaLocal) (let ((add (lambda (p q) (+ p q)))) (add 8 9)))
+(fn (viaLocal) { (let add (lambda (p q) (+ p q))) (add 8 9)})
 
 (:: main Int)
 (fn (main) (twice (add 4 5)))
@@ -3554,6 +3554,8 @@ def vform(src, opener, occurrence=1):
     idx = -1
     for _ in range(occurrence):
         idx = src.index(opener, idx + 1)
+    opening = src[idx]
+    closing = ")" if opening == "(" else "}"
     depth, i = 0, idx
     while i < len(src):
         c = src[i]
@@ -3561,9 +3563,9 @@ def vform(src, opener, occurrence=1):
             nl = src.find("\n", i)
             i = len(src) if nl < 0 else nl
             continue
-        if c == "(":
+        if c == opening:
             depth += 1
-        elif c == ")":
+        elif c == closing:
             depth -= 1
             if depth == 0:
                 return idx, i + 1
@@ -3641,7 +3643,7 @@ if len(ADD_DOC.split("\n")) < 3:
 # a type hint, kind 2 a parameter name; both come from the protocol.
 HDR_ADD, HDR_SUM = "(fn (add x y)", "(fn (sumUp x)"
 CALL_LIT, CALL_SAME, CALL_IMP = "(add 1 2)", "(add x 3)", "(twice (add 4 5))"
-LET_TOTAL, LET_SAME = "(let ((total (add 1 2))", "(same (add x 3))"
+LET_TOTAL, LET_SAME = "(let total (add 1 2))", "(let same (add x 3))"
 
 
 def vhint(anchor, sub, label, kind):
@@ -3666,8 +3668,8 @@ HINTS_WANT = sorted([
     vhint(CALL_IMP, "(twice (add ", ADD_PARAMS[0] + ":", 2),
     vhint(CALL_IMP, "(twice (add 4 ", ADD_PARAMS[1] + ":", 2),
     # (d) the value shape after each `let` binder both calls resolve to.
-    vhint(LET_TOTAL, "(let ((total", ": " + ADD_TYS[2], 1),
-    vhint(LET_SAME, "(same", ": " + ADD_TYS[2], 1),
+    vhint(LET_TOTAL, "(let total", ": " + ADD_TYS[2], 1),
+    vhint(LET_SAME, "(let same", ": " + ADD_TYS[2], 1),
 ])
 FORBIDDEN_HINT = vhint(CALL_SAME, "(add ", ADD_PARAMS[0] + ":", 2)
 HDR_ADD_LINE = locate(VIEW, HDR_ADD, 1)["line"]
@@ -3678,8 +3680,8 @@ HINTS_ONE_LINE = sorted(h for h in HINTS_WANT if h[0] == HDR_ADD_LINE)
 # the one thing a lookup by bare name cannot know.
 CALL_LOCAL = "(add 8 9)"
 LOCAL_CALL_LINE = locate(VIEW, CALL_LOCAL, 1)["line"]
-if "(let ((add " not in VIEW or VIEW.count(CALL_LOCAL) != 1 \
-        or LOCAL_CALL_LINE != locate(VIEW, "(let ((add ", 1)["line"]:
+if "(let add " not in VIEW or VIEW.count(CALL_LOCAL) != 1 \
+        or LOCAL_CALL_LINE != locate(VIEW, "(let add ", 1)["line"]:
     sys.exit("FAIL: the VIEW document no longer binds a local `add` and calls it once on "
              "the binding's own line")
 if len(HINTS_WANT) < 10 or len(HINTS_ONE_LINE) < 3 or FORBIDDEN_HINT in HINTS_WANT \
@@ -3690,9 +3692,9 @@ if len(HINTS_WANT) < 10 or len(HINTS_ONE_LINE) < 3 or FORBIDDEN_HINT in HINTS_WA
 
 # --- folding, selection, links, symbols: derived ---------------------
 FOLD_FN = vform(VIEW, "(fn (sumUp")
-FOLD_LET = vform(VIEW, "(let ((total")
+FOLD_BLOCK = vform(VIEW, "{ (let total")
 FOLD_PLUS = vform(VIEW, "(+ total same)")
-FOLD_FN_L, FOLD_LET_L = vlines(VIEW, FOLD_FN), vlines(VIEW, FOLD_LET)
+FOLD_FN_L, FOLD_BLOCK_L = vlines(VIEW, FOLD_FN), vlines(VIEW, FOLD_BLOCK)
 COMMENT_L = (locate(VIEW, "; A block", 1)["line"], locate(VIEW, "; as one region.", 1)["line"])
 IMPORTS_L = (locate(VIEW, "(import ViewHelper)", 1)["line"], locate(VIEW, "(import Nested.Deep)", 1)["line"])
 DATA_LINE = locate(VIEW, "(data Shape", 1)["line"]
@@ -3706,7 +3708,7 @@ if FOLD_FN_L[0] == FOLD_FN_L[1] or COMMENT_L[1] - COMMENT_L[0] != 2 or IMPORTS_L
 TOTAL_IDX = VIEW.index("total", VIEW.index("total") + 1)
 SEL_POS = vat(VIEW, "total", 2, "to")
 CHAIN_WANT = [vrange(VIEW, TOTAL_IDX, TOTAL_IDX + len("total")),
-              vrange(VIEW, *FOLD_PLUS), vrange(VIEW, *FOLD_LET),
+              vrange(VIEW, *FOLD_PLUS), vrange(VIEW, *FOLD_BLOCK),
               vrange(VIEW, *FOLD_FN), vrange(VIEW, 0, len(VIEW))]
 # The empty last line: nothing encloses it, so the chain is the document.
 EOF_POS = {"line": VIEW.count("\n"), "character": 0}
@@ -3762,7 +3764,7 @@ view_session = b"".join(frame(m) for m in [
      "params": {"textDocument": {"uri": view_uri, "languageId": "axiom",
                                  "version": 1, "text": VIEW}}},
     vsig(40, CALL_LIT, "(add 1 "),        # on the `2`: the second argument
-    vsig(41, "(let ((total", "(let "),    # a keyword head
+    vsig(41, "(let total", "(let "),    # a keyword head
     vsig(42, "(Circle 7)", "(Circle "),   # a constructor
     vsig(43, CALL_IMP, "(twice"),         # touching an imported head
     vhints(44, 0, VIEW_LINES),
@@ -3963,8 +3965,8 @@ elif folds46 is None:
     vwhy = f"foldingRange answered {vres(46)!r}, want an array"
 elif (FOLD_FN_L[0], FOLD_FN_L[1], None) not in folds46:
     vwhy = f"folding did not offer the fn form {FOLD_FN_L}; it offered {folds46}"
-elif (FOLD_LET_L[0], FOLD_LET_L[1], None) not in folds46:
-    vwhy = f"folding did not offer the let form {FOLD_LET_L}; it offered {folds46}"
+elif (FOLD_BLOCK_L[0], FOLD_BLOCK_L[1], None) not in folds46:
+    vwhy = f"folding did not offer the scoped block {FOLD_BLOCK_L}; it offered {folds46}"
 elif (COMMENT_L[0], COMMENT_L[1], "comment") not in folds46:
     vwhy = f"folding did not offer the comment block {COMMENT_L} as kind comment; it offered {folds46}"
 elif (IMPORTS_L[0], IMPORTS_L[1], "imports") not in folds46:
@@ -4030,10 +4032,10 @@ else:
           f"literal and nested arguments, none before the var spelled like its "
           f"parameter, none on a call whose head is a local; {len(HINTS_ONE_LINE)} "
           f"for one line; the same hints on a document that does not parse)")
-    print(f"ok   folding    (the fn {FOLD_FN_L}, the let {FOLD_LET_L}, a comment "
+    print(f"ok   folding    (the fn {FOLD_FN_L}, the block {FOLD_BLOCK_L}, a comment "
           f"run {COMMENT_L}, an import run {IMPORTS_L}; the same forms on a "
           f"document that does not parse; [] with nothing to fold)")
-    print(f"ok   selection  (word -> form -> let -> fn -> document, {len(CHAIN_WANT)} "
+    print(f"ok   selection  (word -> form -> block -> fn -> document, {len(CHAIN_WANT)} "
           f"derived ranges; the document alone on the empty last line)")
     print(f"ok   links      ({len(LINKS_WANT)} module names, one dotted, to their files' URIs; "
           f"the same on a document that does not parse)")
@@ -4062,7 +4064,7 @@ shutil.rmtree(VIEWDIR, ignore_errors=True)
 #     derived from the document's line count; the formatted text,
 #     opened as a document, must answer an empty list;
 #   * the two quickfixes must land where the document says: AX3012's on
-#     the BINDER `x` of `(let ((x 1)) ...)` - not the `set` the
+#     the BINDER `x` of `{ (let x 1) ... }` - not the `set` the
 #     diagnostic anchors on - with the text `mut x`, and AX3001's on
 #     the misspelt call with the name of the declaration it meant;
 #   * the "Add type signature" assist must insert, at column 0 of the
@@ -4111,7 +4113,7 @@ FIX = """; A shape, for typeDefinition to land on.
 (struct EqOf (a) (eq : (-> a a Bool)))
 
 (:: eqOfInt (EqOf Int))
-(fn (eqOfInt) (EqOf (lambda (x y) (== x y))))
+(fn (eqOfInt) (EqOf :eq (lambda (x y) (== x y))))
 
 (macro deriveEq ((deriveEq T)
    (:: (syntax/join eq T) (-> T T Bool))
@@ -4142,7 +4144,7 @@ FIX = """; A shape, for typeDefinition to land on.
 (fn (call) (helpr 1))
 
 (:: bump Int)
-(fn (bump) (let ((x 1)) { (set x 2) x }))
+(fn (bump) { (let x 1) { (set x 2) x }})
 
 (fn (twice x)   (+ x
   x))
@@ -4164,7 +4166,7 @@ exp2_uri = "file://" + os.path.join(FIXDIR, "fix-expansion-impl.ax")
 def locate_in(src, context, name):
     """`name` at its first occurrence INSIDE the first occurrence of
     `context` - for a one-letter name the document holds in many
-    places, such as the binder `x` of `(let ((x 1)) ...)`."""
+    places, such as the binder `x` of `{ (let x 1) ... }`."""
     i = src.index(context)
     k = src.index(name, i, i + len(context))
     ln, text, col = line_of(src, k)
@@ -4185,7 +4187,7 @@ def cut(src, before, after):
 
 
 # --- what the document says --------------------------------------------
-BINDER = locate_in(FIX, "(let ((x 1))", "x")       # AX3012's fix goes HERE
+BINDER = locate_in(FIX, "(let x 1)", "x")       # AX3012's fix goes HERE
 SET_X = locate_in(FIX, "(set x 2)", "x")           # ...not where it anchors
 HELPR = locate(FIX, "helpr", 1)                    # AX3001's misspelt call
 HELPER_NAME = cut(FIX, "(fn (", " n) (+ n 1))")    # ...and the name it meant
@@ -4563,7 +4565,7 @@ elif len(fres(3) or []) != 4:
             f"action(s), want 2 quickfixes and 2 assists: {json.dumps(fres(3))[:400]}")
 elif ax3012 is None:
     fwhy = f"no quickfix carrying the AX3012 diagnostic: {json.dumps(fres(3))[:400]}"
-elif edit_is(ax3012, rng(BINDER), "mut " + cut(FIX, "(let ((", " 1))")):
+elif edit_is(ax3012, rng(BINDER), "mut " + cut(FIX, "(let ", " 1)")):
     fwhy = ("the AX3012 quickfix " + edit_is(ax3012, rng(BINDER), "mut x")
             + f" - the fix goes on the BINDER at {rng(BINDER)}, not the `set` at {rng(SET_X)}")
 elif ax3012.get("isPreferred") is not True:
@@ -4814,8 +4816,7 @@ shutil.rmtree(FIXDIR, ignore_errors=True)
 #     and exits 3 = (3+1) + (4+5) - 10, so a duplicated call is a
 #     second `tick` line; on `(> n 0)`, the test of an `if`, the whole
 #     `if` is the statement. On `tick 3` (two items), `(tick n)` (a
-#     branch of an `if`), `(+ y 2)` (its `y` bound inside the
-#     statement), the `+` head, an empty range and an unparseable
+#     branch of an `if`), the local binder `y` (which is not an expression), the `+` head, an empty range and an unparseable
 #     document: no extraction;
 #   * on the bool-if condition, the unread binding and the dead
 #     literal, one `nolint` suppression each - the tag above the
@@ -4870,12 +4871,12 @@ CA_EXTRACT = """(import IO)
 (:: tick (-> Int Int))
 ;@axiom:effect(io)
 (fn (tick n) {
-  (println "tick")
+  (println \"tick\")
   (+ n 1)
 })
 
 (:: keep (-> Int Int))
-(fn (keep n) (let ((extracted 5)) (+ n extracted)))
+(fn (keep n) { (let extracted 5) (+ n extracted)})
 
 (:: pick (-> Int Int))
 ;@axiom:effect(io)
@@ -4884,8 +4885,8 @@ CA_EXTRACT = """(import IO)
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main) {
-  (println "start")
-  (let ((y 1)) (+ y 2))
+  (println \"start\")
+  { (let y 1) (+ y 2)}
   (- (+ (tick 3) (keep 4)) 10)
 })
 """
@@ -4896,7 +4897,7 @@ CA_LINT = """; Shapes for the lint assists: a bool-if to simplify, an unused
 (fn (isYes ok) (if ok true false))
 
 (:: countDown (-> Int Int))
-(fn (countDown n) (let ((waste n)) 0))
+(fn (countDown n) { (let waste n) 0})
 
 (:: pickTrue (-> Bool Int))
 (fn (pickTrue flag) (if true 1 2))
@@ -4978,13 +4979,13 @@ IF_STMT = IF_LINE[len("(fn (" + PICK + " n) "):-1]           # the fn's body, an
 IF_STMT_AT = locate(CA_EXTRACT, IF_STMT, 1)
 EX_TWO = locate(CA_EXTRACT, "tick 3", 1)
 EX_BRANCH = locate(CA_EXTRACT, "(tick n)", 1)
-EX_BOUND = locate(CA_EXTRACT, "(+ y 2)", 1)
+EX_BOUND = locate_in(CA_EXTRACT, "(let y 1)", "y")
 EX_HEAD = locate_in(CA_EXTRACT, "(+ (tick 3)", "+")
 ISYES_FN = cut(CA_LINT, "(fn (", " ok) (if")
 ISYES_COND = locate_in(CA_LINT, "(if ok true false)", "ok")
 ISYES_FORM = locate(CA_LINT, "(if ok true false)", 1)
 ISYES_SIG_LINE = locate(CA_LINT, "(:: " + ISYES_FN, 1)["line"]
-COUNT_FN = cut(CA_LINT, "(fn (", " n) (let ((waste n)) 0))")
+COUNT_FN = cut(CA_LINT, "(fn (", " n) { (let waste n) 0})")
 WASTE = locate(CA_LINT, "waste", 1)
 COUNT_SIG_LINE = locate(CA_LINT, "(:: " + COUNT_FN, 1)["line"]
 PICK_FN = cut(CA_LINT, "(fn (", " flag) (if true 1 2))")
@@ -5509,7 +5510,7 @@ HL = r"""(import RefHelper)
 ;@axiom:restrict(no-foreign)
 (pub :: area (-> Shape Int Int))
 (pub fn (area s k)
-  (let ((base 3) (mut acc 0))
+  { (let base 3) (let mut acc 0)
     {
       (set acc (+ base k))
       (for i in 0..3
@@ -5517,7 +5518,7 @@ HL = r"""(import RefHelper)
       (match s
         ((Dot) acc)
         ((Circle r) (twice (+ r acc))))
-    }))
+    }})
 
 (:: left (-> Pair String))
 (fn (left p)
@@ -5583,12 +5584,12 @@ HL_PARSING = {"hl.ax", "nav.ax", "NavMain.ax", "NavUser.ax", "RefHelper.ax"}
 
 
 def hl_source_list(fn_name):
-    m = re.search(r"\(pub fn \(" + fn_name + r"\)\n  \(let \(\(v vecNew\)\)\n    \{\n"
-                  r"((?:      \(vecPush v \"[^\"]+\"\)\n)+)", _lsrc)
+    m = re.search(r"\(pub fn \(" + re.escape(fn_name)
+                  + r"\)([\s\S]*?)(?=\n\(pub (?:fn|::)|\Z)", _lsrc)
     if not m:
         sys.exit(f"FAIL: could not read `{fn_name}` out of self_host/lsp.ax - the "
                  f"legend check would compare the server against nothing")
-    return re.findall(r'\(vecPush v "([^"]+)"\)', m.group(1))
+    return re.findall(r'\(vecPush v "([^\"]+)"\)', m.group(1))
 
 
 HL_TYPES = hl_source_list("lspSemanticTypes")
@@ -5838,10 +5839,10 @@ def hl_obligations(src):
     for m in re.finditer(r"\(set\s+(" + HL_IDENT + ")", src):
         if code(m.start(1)):
             hl_want(obs, f"set target `{m.group(1)}`", src, m.start(1), m.group(1), "variable", MOD, DECL)
-    for m in re.finditer(r"\(mut\s+([a-z]" + HL_IDENT + r")\s+[^:]", src):
+    for m in re.finditer(r"\(let\s+mut\s+([a-z]" + HL_IDENT + r")\s+[^:]", src):
         if code(m.start(1)):
             hl_want(obs, f"mut binder `{m.group(1)}`", src, m.start(1), m.group(1), "variable", DECL, RO | MOD)
-    for m in re.finditer(r"\(let\s+\(\((?!mut\s)([a-z]" + HL_IDENT + r")\s", src):
+    for m in re.finditer(r"\(let\s+(?!mut\s)([a-z]" + HL_IDENT + r")\s", src):
         if code(m.start(1)):
             hl_want(obs, f"let binder `{m.group(1)}`", src, m.start(1), m.group(1), "variable", DECL | RO, MOD)
     # operator heads: the checker's builtins from the library, the arrow not
@@ -6078,8 +6079,8 @@ RC_TWIN = r"""(import IO)
 
 (:: twice (-> Int Int))
 (fn (twice n)
-  (let ((y (bump n)))
-    (bump (bump y))))
+  { (let y (bump n))
+    (bump (bump y))})
 
 (:: shade (-> Colour Int))
 (fn (shade c)
@@ -6091,9 +6092,9 @@ RC_TWIN = r"""(import IO)
 
 def rc_cut(text, line_no, k):
     """`text` with the last `k` bytes of line `line_no` (0-based) removed,
-    each of which must be a `)`."""
+    each of which must be a closing delimiter."""
     lines = text.split("\n")
-    if not lines[line_no].endswith(")" * k):
+    if len(lines[line_no]) < k or any(ch not in ")]}" for ch in lines[line_no][-k:]):
         sys.exit(f"FAIL: RECOVER twin line {line_no} does not end in {k} closers: {lines[line_no]!r}")
     lines[line_no] = lines[line_no][:-k]
     return "\n".join(lines)
@@ -6101,7 +6102,7 @@ def rc_cut(text, line_no, k):
 
 _rc_lines = RC_TWIN.split("\n")
 RC_BUMP_END = _rc_lines.index("  (+ x 1))")
-RC_TWICE_END = _rc_lines.index("    (bump (bump y))))")
+RC_TWICE_END = _rc_lines.index("    (bump (bump y))})")
 RC_SHADE_END = _rc_lines.index("    ((Green) (twice 2))))")
 RC_BROKEN = {
     # a `fn` in the middle missing its last paren
@@ -6113,7 +6114,7 @@ RC_BROKEN = {
 }
 RC_REPAIR = {
     # a `let` binding with no value: repaired with `()`, nothing dropped
-    "rc-hole.ax": RC_TWIN + "\n(:: k (-> Int Int))\n(fn (k x) (let ((w)) (bump x)))\n",
+    "rc-hole.ax": RC_TWIN + "\n(:: k (-> Int Int))\n(fn (k x) { (let w) (bump x)})\n",
     # a closer nothing opened, between two forms: dropped
     "rc-stray.ax": RC_TWIN.replace("\n(data Colour", "\n)\n(data Colour"),
     # an unterminated string, closed at its line's end
@@ -6173,8 +6174,8 @@ def rc_at(text, needle, sub=0):
 
 RC_ASK = [
     # (key, document, method, needle, offset into needle, extra params)
-    ("hole-hover", "rc-hole.ax", "textDocument/hover", "(bump x)))\n", 1, {}),
-    ("hole-def", "rc-hole.ax", "textDocument/definition", "(bump x)))\n", 1, {}),
+    ("hole-hover", "rc-hole.ax", "textDocument/hover", "(bump x)})\n", 1, {}),
+    ("hole-def", "rc-hole.ax", "textDocument/definition", "(bump x)})\n", 1, {}),
     ("hole-rename", "rc-hole.ax", "textDocument/prepareRename", "(fn (k x)", 7, {}),
     ("stray-hover", "rc-stray.ax", "textDocument/hover", "(bump (bump y)", 7, {}),
     ("stray-rename", "rc-stray.ax", "textDocument/prepareRename", "(bump (bump y)", 7, {}),

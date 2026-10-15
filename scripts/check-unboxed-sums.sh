@@ -240,20 +240,20 @@ cat > "$work/us/ref.ax" <<'AX'
 
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (a1 (memGetWord __axiom_arena_mark 0))
-    (c1 (memGetWord __axiom_arena_mark 2))
-    (s1 (loopOpt 0 20000 0))
-    (s2 (loopRes 0 20000 0))
-    (a2 (memGetWord __axiom_arena_mark 0))
-    (c2 (memGetWord __axiom_arena_mark 2))
-  )
+  {
+    (let a1 (memGetWord __axiom_arena_mark 0))
+    (let c1 (memGetWord __axiom_arena_mark 2))
+    (let s1 (loopOpt 0 20000 0))
+    (let s2 (loopRes 0 20000 0))
+    (let a2 (memGetWord __axiom_arena_mark 0))
+    (let c2 (memGetWord __axiom_arena_mark 2))
+
     {
       (println s1)
       (println s2)
       (println (if (== c1 c2) (- a2 a1) (- 0 1)))
     }
-  )
+  }
 )
 AX
 if ! "$axc" emit-llvm --input "$work/us/ref.ax" -o "$work/us/ref.ll" > "$work/us/ref.log" 2>&1; then
@@ -395,12 +395,12 @@ cat > "$work/us/indirect.ax" <<'AX'
 (:: viaLet (-> Int Int))
 
 (fn (viaLet n)
-  (let ((r (optFind n)))
+  { (let r (optFind n))
     (match r
       ((Some v) v)
       ((None) 0)
     )
-  )
+  }
 )
 
 (:: main ())
@@ -510,12 +510,12 @@ cat > "$work/us/claim.ax" <<'AX'
 (:: stored (-> Int Int))
 
 (fn (stored n)
-  (let ((r (look n)))
+  { (let r (look n))
     (match r
       ((Some v) (+ v 1))
       ((None) 0)
     )
-  )
+  }
 )
 
 (:: main ())

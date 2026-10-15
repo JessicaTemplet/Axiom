@@ -169,19 +169,27 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (lockAfter m flag ms what)
-  (let ((buf (memAlloc 16)))
+  {
+    (let buf (memAlloc 16))
     {
       (while (== (memGetWord flag 0) 0)
         (sysWaitWordTimeout flag 0 1000000))
-      (let ((t0 (sysTimeoutMicros buf)))
-        (let ((r (mutexLockTimeout m (* ms 1000000))))
-          (let ((us (elapsedSince buf t0)))
+      {
+        (let t0 (sysTimeoutMicros buf))
+        {
+          (let r (mutexLockTimeout m (* ms 1000000)))
+          {
+            (let us (elapsedSince buf t0))
             (report
               (if (== what 0)
                 "lock-timeout"
                 "lock-got")
-              (codeOf r) us))))
-    }))
+              (codeOf r) us)
+          }
+        }
+      }
+    }
+  })
 
 (:: sendLater (-> Chan Int Int Int))
 ;@axiom:effect(io)
@@ -198,17 +206,24 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (recvWithin ch ms)
-  (let ((buf (memAlloc 16)))
-    (let ((t0 (sysTimeoutMicros buf)))
-      (let ((r (chanRecvTimeout ch (* ms 1000000))))
-        (report "recv-got" (recvCode r) (elapsedSince buf t0))))))
+  {
+    (let buf (memAlloc 16))
+    {
+      (let t0 (sysTimeoutMicros buf))
+      {
+        (let r (chanRecvTimeout ch (* ms 1000000)))
+        (report "recv-got" (recvCode r) (elapsedSince buf t0))
+      }
+    }
+  })
 
 (:: timed (-> Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (timed idle ms)
-  (let ((buf (memAlloc 16)))
+  {
+    (let buf (memAlloc 16))
     (match (chanNew 1)
       ((Ok ch)
         (match (mutexNew)
@@ -216,13 +231,21 @@
             (match (sysMapShared 4096)
               ((Ok flag)
                 {
-                  (let ((t0 (sysTimeoutMicros buf)))
-                    (let ((r (chanRecvTimeout ch (* ms 1000000))))
-                      (report "recv-timeout" (recvCode r) (elapsedSince buf t0))))
+                  {
+                    (let t0 (sysTimeoutMicros buf))
+                    {
+                      (let r (chanRecvTimeout ch (* ms 1000000)))
+                      (report "recv-timeout" (recvCode r) (elapsedSince buf t0))
+                    }
+                  }
                   (chanSend ch 1)
-                  (let ((t0 (sysTimeoutMicros buf)))
-                    (let ((r (chanSendTimeout ch 2 (* ms 1000000))))
-                      (report "send-timeout" (sendCode r) (elapsedSince buf t0))))
+                  {
+                    (let t0 (sysTimeoutMicros buf))
+                    {
+                      (let r (chanSendTimeout ch 2 (* ms 1000000)))
+                      (report "send-timeout" (sendCode r) (elapsedSince buf t0))
+                    }
+                  }
                   (chanRecv ch)
                   (parallel p (
                     (a (holdFor m flag idle (* 3 ms)))
@@ -247,7 +270,8 @@
           )
           ((Err e) 2))
       )
-      ((Err e) 1))))
+      ((Err e) 1))
+  })
 
 ; ---- dead ----------------------------------------------------------------
 (:: holdForever (-> Mutex Int Int Int))
@@ -280,34 +304,46 @@
     ((Ok m)
       (match (sysMapShared 4096)
         ((Ok flag)
-          (let (
-            (buf (memAlloc 16))
-            (cell (memAlloc 8))
-            (h (__proc_spawn (lambda (x) (holdForever m flag idle)) 0))
-          )
+          {
+            (let buf (memAlloc 16))
+            (let cell (memAlloc 8))
+            (let h (__proc_spawn (lambda (x) (holdForever m flag idle)) 0))
             {
               (while (== (memGetWord flag 0) 0)
                 (sysWaitWordTimeout flag 0 1000000))
-              (let ((t0 (sysTimeoutMicros buf)))
-                (let ((r (mutexLockTimeout m 250000000)))
-                  (report "alive-timed" (codeOf r) (elapsedSince buf t0))))
+              {
+                (let t0 (sysTimeoutMicros buf))
+                {
+                  (let r (mutexLockTimeout m 250000000))
+                  (report "alive-timed" (codeOf r) (elapsedSince buf t0))
+                }
+              }
               (match (sysKill (handlePid h) 9)
                 ((Ok z) ())
                 ((Err e) ()))
               (__proc_join_nr h cell)
               (say "holder-status" (memGetWord cell 0))
-              (let ((t0 (sysTimeoutMicros buf)))
-                (let ((r (mutexLockTimeout m 2000000000)))
-                  (report "dead-timed" (codeOf r) (elapsedSince buf t0))))
-              (let ((t0 (sysTimeoutMicros buf)))
-                (let ((r (mutexLock m)))
-                  (report "dead-untimed" (codeOf r) (elapsedSince buf t0))))
+              {
+                (let t0 (sysTimeoutMicros buf))
+                {
+                  (let r (mutexLockTimeout m 2000000000))
+                  (report "dead-timed" (codeOf r) (elapsedSince buf t0))
+                }
+              }
+              {
+                (let t0 (sysTimeoutMicros buf))
+                {
+                  (let r (mutexLock m))
+                  (report "dead-untimed" (codeOf r) (elapsedSince buf t0))
+                }
+              }
               (say "poisoned"
                 (if (mutexOwnerDead m)
                   1
                   0))
               0
-            })
+            }
+          }
         )
         ((Err e) 2))
     )
@@ -353,10 +389,16 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (timedLock m ms what)
-  (let ((buf (memAlloc 16)))
-    (let ((t0 (sysTimeoutMicros buf)))
-      (let ((r (mutexLockTimeout m (* ms 1000000))))
-        (report what (codeOf r) (elapsedSince buf t0))))))
+  {
+    (let buf (memAlloc 16))
+    {
+      (let t0 (sysTimeoutMicros buf))
+      {
+        (let r (mutexLockTimeout m (* ms 1000000)))
+        (report what (codeOf r) (elapsedSince buf t0))
+      }
+    }
+  })
 
 (:: zombie (-> Int Int))
 ;@axiom:effect(io)
@@ -369,37 +411,45 @@
         ((Ok m)
           (match (sysMapShared 4096)
             ((Ok flag)
-              (let (
-                (buf (memAlloc 16))
-                (cell (memAlloc 8))
-              )
+              {
+                (let buf (memAlloc 16))
+                (let cell (memAlloc 8))
                 {
                   ; A binding beside the parent asks about the zombie.
-                  (let ((h (spawnExit s flag)))
+                  {
+                    (let h (spawnExit s flag))
                     {
                       (awaitFlag flag)
                       (parallel p ((a (timedLock s 300 "sibling-timed")))
                         a)
                       (__proc_join_nr h cell)
-                    })
+                    }
+                  }
                   (memSetWord flag 0 0)
                   ; The parent asks about its own zombie child.
-                  (let ((h (spawnExit m flag)))
+                  {
+                    (let h (spawnExit m flag))
                     {
                       (awaitFlag flag)
                       (timedLock m 2000 "zombie-timed")
-                      (let ((t0 (sysTimeoutMicros buf)))
-                        (let ((r (mutexLock m)))
-                          (report "zombie-untimed" (codeOf r) (elapsedSince buf t0))))
+                      {
+                        (let t0 (sysTimeoutMicros buf))
+                        {
+                          (let r (mutexLock m))
+                          (report "zombie-untimed" (codeOf r) (elapsedSince buf t0))
+                        }
+                      }
                       (__proc_join_nr h cell)
                       (say "holder-status" (memGetWord cell 0))
                       (say "poisoned"
                         (if (mutexOwnerDead m)
                           1
                           0))
-                    })
+                    }
+                  }
                   0
-                })
+                }
+              }
             )
             ((Err e) 3))
         )
@@ -412,7 +462,8 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((mode (sysArg 1)))
+  {
+    (let mode (sysArg 1))
     (match (sysMapShared 4096)
       ((Ok idle)
         (if (strEq mode "excl")
@@ -420,16 +471,22 @@
             ((Ok m)
               (match (sysMapShared 4096)
                 ((Ok cell)
-                  (let ((n (argInt 3)))
+                  {
+                    (let n (argInt 3))
                     {
                       (excl m cell n (argInt 2))
-                      (let ((c (memGetWord cell 0)))
+                      {
+                        (let c (memGetWord cell 0))
                         (if (== c (* 4 n))
                           (println "count {c} ok")
-                          (let ((lost (- (* 4 n) c)))
-                            (println "count {c} lost {lost}"))))
+                          {
+                            (let lost (- (* 4 n) c))
+                            (println "count {c} lost {lost}")
+                          })
+                      }
                       0
-                    })
+                    }
+                  }
                 )
                 ((Err e) 2))
             )
@@ -445,4 +502,5 @@
                   2
                 }))))
       )
-      ((Err e) 1))))
+      ((Err e) 1))
+  })

@@ -36,10 +36,9 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (produce ch lo hi)
-  (let (
-    (mut i lo)
-    (mut sent 0)
-  )
+  {
+    (let mut i lo)
+    (let mut sent 0)
     {
       (while (< i hi)
         {
@@ -48,7 +47,8 @@
           (set i (+ i 1))
         })
       sent
-    }))
+    }
+  })
 
 (:: feed (-> Chan Int Int))
 ;@axiom:effect(io)
@@ -71,12 +71,11 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (tally ch out)
-  (let (
-    (mut count 0)
-    (mut sum 0)
-    (mut sq 0)
-    (mut going 1)
-  )
+  {
+    (let mut count 0)
+    (let mut sum 0)
+    (let mut sq 0)
+    (let mut going 1)
     {
       (while (== going 1)
         (match (chanRecv ch)
@@ -93,7 +92,8 @@
       (chanSend out sum)
       (chanSend out sq)
       count
-    }))
+    }
+  })
 
 (:: recvOr (-> Chan Int))
 ;@axiom:effect(io)
@@ -124,15 +124,14 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (stress cap n)
-  (let (
-    (ch (newOr cap))
-    (o1 (newOr 2))
-    (o2 (newOr 2))
-    (o3 (newOr 2))
-    (mut i 1)
-    (mut wantSum 0)
-    (mut wantSq 0)
-  )
+  {
+    (let ch (newOr cap))
+    (let o1 (newOr 2))
+    (let o2 (newOr 2))
+    (let o3 (newOr 2))
+    (let mut i 1)
+    (let mut wantSum 0)
+    (let mut wantSq 0)
     {
       (while (<= i (* 3 n))
         {
@@ -146,18 +145,19 @@
         (c2 (tally ch o2))
         (c3 (tally ch o3))
       )
-        (let (
-          (count (+ c1 (+ c2 c3)))
-          (sum (+ (recvOr o1) (+ (recvOr o2) (recvOr o3))))
-          (sq (+ (recvOr o1) (+ (recvOr o2) (recvOr o3))))
-        )
+        {
+          (let count (+ c1 (+ c2 c3)))
+          (let sum (+ (recvOr o1) (+ (recvOr o2) (recvOr o3))))
+          (let sq (+ (recvOr o1) (+ (recvOr o2) (recvOr o3))))
           {
             (if (&& (== fed (* 3 n)) (&& (== count (* 3 n)) (&& (== sum wantSum) (== sq wantSq))))
               (println "ok {c1} {c2} {c3}")
               (println "bad fed {fed} count {count} sum {sum}/{wantSum} sq {sq}/{wantSq}"))
             0
-          }))
-    }))
+          }
+        })
+    }
+  })
 
 (:: now (-> Int Int))
 ;@axiom:effect(io)
@@ -172,7 +172,8 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (waiter m)
-  (let ((mut calls 0))
+  {
+    (let mut calls 0)
     {
       (while (== (__atomic_load m) 0)
         {
@@ -180,22 +181,23 @@
           (set calls (+ calls 1))
         })
       calls
-    }))
+    }
+  })
 
 (:: waker (-> Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (waker m)
-  (let (
-    (buf (memAlloc 16))
-    (t0 (now (memAlloc 16)))
-  )
+  {
+    (let buf (memAlloc 16))
+    (let t0 (now (memAlloc 16)))
     {
       (while (< (- (now buf) t0) 200000)
         0)
       (__atomic_store m 1)
       (sysWakeWord m)
-    }))
+    }
+  })
 
 (:: waitMode Int)
 ;@axiom:effect(io)
@@ -236,31 +238,35 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (sentAt ch)
-  (let (
-    (buf (memAlloc 16))
-    (t0 (now (memAlloc 16)))
-  )
+  {
+    (let buf (memAlloc 16))
+    (let t0 (now (memAlloc 16)))
     {
       (while (< (- (now buf) t0) 20000)
         0)
-      (let ((t (now buf)))
+      {
+        (let t (now buf))
         {
           (chanSend ch 1)
           t
-        })
-    }))
+        }
+      }
+    }
+  })
 
 (:: wakeRound Int)
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (wakeRound)
-  (let ((ch (newOr 1)))
+  {
+    (let ch (newOr 1))
     (parallel p (
       (got (arrivedAt ch))
       (sent (sentAt ch))
     )
-      (- got sent))))
+      (- got sent))
+  })
 
 ; Eleven rounds, sorted in place: the median is the sixth.
 (:: wakeMode Int)
@@ -268,10 +274,9 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (wakeMode)
-  (let (
-    (v (:: vecNew (Vec Int)))
-    (mut i 0)
-  )
+  {
+    (let v (:: vecNew (Vec Int)))
+    (let mut i 0)
     {
       (while (< i 11)
         {
@@ -280,10 +285,9 @@
         })
       (set i 1)
       (while (< i 11)
-        (let (
-          (x (vecGet v i))
-          (mut j i)
-        )
+        {
+          (let x (vecGet v i))
+          (let mut j i)
           {
             (while (&& (> j 0) (> (vecGet v (- j 1)) x))
               {
@@ -292,33 +296,38 @@
               })
             (vecSet v j x)
             (set i (+ i 1))
-          }))
-      (let (
-        (med (vecGet v 5))
-        (worst (vecGet v 10))
-      )
-        (println "wake median {med} max {worst}"))
+          }
+        })
+      {
+        (let med (vecGet v 5))
+        (let worst (vecGet v 10))
+        (println "wake median {med} max {worst}")
+      }
       0
-    }))
+    }
+  })
 
 (:: stuck Int)
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (stuck)
-  (let ((ch (newOr 1)))
+  {
+    (let ch (newOr 1))
     (parallel p ((r (recvOr ch)))
       {
         (println "received {r}")
         0
-      })))
+      })
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((mode (sysArg 1)))
+  {
+    (let mode (sysArg 1))
     (if (strEq mode "stress")
       (stress (argInt 2 4) (argInt 3 1000))
       (if (strEq mode "wait")
@@ -330,4 +339,5 @@
             {
               (println "usage: chan-load (stress CAP N | wait | stuck | wake)")
               2
-            }))))))
+            }))))
+  })

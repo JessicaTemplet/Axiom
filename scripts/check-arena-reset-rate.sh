@@ -11,7 +11,7 @@
 #
 # Three arms attribute the cost:
 #
-#   live      `(let ((m __axiom_arena_mark)) { ... (__axiom_arena_reset m) })`
+#   live      `{ (let m __axiom_arena_mark) { ... (__axiom_arena_reset m) } }`
 #   noreset   the same, with the reset spelled `(+ 0 0)`
 #   nomark    the same again, with the mark spelled `0`
 #
@@ -60,24 +60,24 @@ probe() {  # <name> <mark-expr> <reset-expr> [<tag line>]
 ${4:-}
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (mut i 0)
-    (mut acc 0)
-  )
+  {
+    (let mut i 0)
+    (let mut acc 0)
+
     {
       (while (< i $N)
-        (let ((m $2))
+        { (let m $2)
           {
             (set acc (+ acc 1))
             $3
             (set i (+ i 1))
           }
-        )
+        }
       )
       (println "{acc}")
       0
     }
-  )
+  }
 )
 AX
   if ! "$axc" build --input "$work/$1.ax" --output "$work/$1" >"$work/$1.build" 2>&1; then

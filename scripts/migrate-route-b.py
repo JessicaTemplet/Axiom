@@ -378,6 +378,53 @@ class Repository:
                 return [self.module(p) for p in variants], None
         return [], f"cannot find imported module {name!r}; supply -I for its directory"
 
+    def imported_symbols(self, module: Module) -> tuple[dict[str, list[Symbol]], list[str]]:
+        """Collect the compiler's transitive public visibility without guessing.
+
+        An import selection filters declarations in that module only. Its own
+        imports remain visible, and a qualified spelling names the defining
+        module, not the module through which it was reached. Repeated paths
+        through a diamond or cycle contribute the same defining symbol once.
+        All lookups retain the entry file's search-root precedence.
+        """
+        imported: dict[str, list[Symbol]] = {}
+        unresolved: list[str] = []
+        pending = list(module.imports)
+        visited: set[tuple[Path, str, frozenset[str] | None]] = set()
+        expanded: set[Path] = set()
+        at = 0
+        while at < len(pending):
+            item = pending[at]
+            at += 1
+            try:
+                variants, error = self.resolve(item.name, module.path)
+            except (MigrationError, OSError) as exc:
+                variants, error = [], str(exc)
+            if error:
+                if error not in unresolved:
+                    unresolved.append(error)
+                continue
+            for variant in variants:
+                view = (variant.path, item.name, item.selected)
+                if view in visited:
+                    continue
+                visited.add(view)
+                if variant.path not in expanded:
+                    expanded.add(variant.path)
+                    pending.extend(variant.imports)
+                for name, symbols in variant.symbols.items():
+                    if item.selected is not None and name not in item.selected:
+                        continue
+                    for symbol in symbols:
+                        if not symbol.public:
+                            continue
+                        spellings = {name, f"{item.name}::{name}", f"{item.name.replace('.', '::')}::{name}"}
+                        for spelling in spellings:
+                            entries = imported.setdefault(spelling, [])
+                            if symbol not in entries:
+                                entries.append(symbol)
+        return imported, unresolved
+
 
 class Migration:
     def __init__(self, module: Module, repository: Repository, *, locals: bool = True, records: bool = True):
@@ -391,24 +438,7 @@ class Migration:
         self.local_count = 0
         self.record_count = 0
         if records:
-            for item in module.imports:
-                try:
-                    variants, error = repository.resolve(item.name, module.path)
-                except (MigrationError, OSError) as exc:
-                    variants, error = [], str(exc)
-                if error:
-                    self.unresolved.append(error)
-                # A variant's non-record exports participate too: the same
-                # spelling being a function on one target is an ambiguity.
-                for variant in variants:
-                    for name, symbols in variant.symbols.items():
-                        if item.selected is not None and name not in item.selected:
-                            continue
-                        for symbol in symbols:
-                            if symbol.public:
-                                qualified = {name, f"{item.name}::{name}", f"{item.name.replace('.', '::')}::{name}"}
-                                for spelling in qualified:
-                                    self.imported.setdefault(spelling, []).append(symbol)
+            self.imported, self.unresolved = repository.imported_symbols(module)
 
     def fail(self, node: Node, message: str) -> None:
         raise MigrationError(self.module.path, self.module.source, node.start, message)
@@ -826,10 +856,12 @@ def migrate_python(source: str, path: Path, repository: Repository, **options) -
         tree = ast.parse(source)
     except SyntaxError as exc:
         raise MigrationError(path, source, 0, f"cannot read Python container: {exc.msg}") from None
-    lines = source.splitlines(keepends=True)
+    # Python AST/tokenize line numbers follow LF, not Unicode separators
+    # that are ordinary characters inside string literals and comments.
+    lines = source.split("\n")
     starts = [0]
-    for line in lines:
-        starts.append(starts[-1] + len(line))
+    for line in lines[:-1]:
+        starts.append(starts[-1] + len(line) + 1)
 
     def location(line: int, column: int, utf8: bool = False) -> int:
         prefix = lines[line - 1].encode("utf-8")[:column].decode("utf-8") if utf8 else lines[line - 1][:column]

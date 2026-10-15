@@ -84,27 +84,27 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (onIrq)
-  (let (
-    (st __arm_tpidr)
-    (iar (__vload32 (+ gicc 12)))
-  )
+  {
+    (let st __arm_tpidr)
+    (let iar (__vload32 (+ gicc 12)))
     {
       (if (== (& iar 1023) timerId)
-        (let (
-          (late (- __arm_cntvct (stGet st 2)))
-          (next (+ (stGet st 2) (stGet st 1)))
-        )
+        {
+          (let late (- __arm_cntvct (stGet st 2)))
+          (let next (+ (stGet st 2) (stGet st 1)))
           {
             (if (> late (stGet st 3))
               (stSet st 3 late))
             (stSet st 2 next)
             (__arm_set_cntv_cval next)
             (stSet st 0 (+ (stGet st 0) 1))
-          })
+          }
+        }
         (stSet st 4 (+ (stGet st 4) 1)))
       (__vstore32 (+ gicc 16) iar)
       0
-    }))
+    }
+  })
 
 ; The periodic work: fold tick `k` into a 16-word filter state and
 ; answer the new checksum. No allocation, no recursion, and the same
@@ -113,24 +113,28 @@
 (:: step (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (step buf k)
-  (let (
-    (slot (% k 16))
-    (old (__load64 buf slot))
-  )
-    (let ((new (& (+ (* old 31) (+ (* k k) 7)) 1073741823)))
+  {
+    (let slot (% k 16))
+    (let old (__load64 buf slot))
+    {
+      (let new (& (+ (* old 31) (+ (* k k) 7)) 1073741823))
       {
         (__store64 buf slot new)
         (& (+ (__load64 buf 16) new) 1073741823)
-      })))
+      }
+    }
+  })
 
 (:: runStep (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (runStep buf k)
-  (let ((sum (step buf k)))
+  {
+    (let sum (step buf k))
     {
       (__store64 buf 16 sum)
       sum
-    }))
+    }
+  })
 
 (:: zeroed (-> Int Int Int))
 ;@axiom:effect(unsafe)
@@ -144,27 +148,28 @@
 ; The same twenty steps, straight through: what the timed run must equal.
 (:: straight (-> Int Int))
 (fn (straight buf)
-  (let ((mut sum 0))
+  {
+    (let mut sum 0)
     {
       (zeroed buf 17)
       (for k in 0..ticksWanted
         (set sum (runStep buf k)))
       sum
-    }))
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (st (zeroed (memAlloc 64) 8))
-    (buf (zeroed (memAlloc 136) 17))
-    (check (memAlloc 136))
-    (period (/ __arm_cntfrq 100))
-    (mut seen 0)
-    (mut steps 0)
-    (mut missed 0)
-    (mut sum 0)
-  )
+  {
+    (let st (zeroed (memAlloc 64) 8))
+    (let buf (zeroed (memAlloc 136) 17))
+    (let check (memAlloc 136))
+    (let period (/ __arm_cntfrq 100))
+    (let mut seen 0)
+    (let mut steps 0)
+    (let mut missed 0)
+    (let mut sum 0)
     {
       (__arm_set_tpidr st)
       (stSet st 1 period)
@@ -176,23 +181,24 @@
       (while (< steps ticksWanted)
         {
           __arm_wfi
-          (let ((t (stGet st 0)))
+          {
+            (let t (stGet st 0))
             (if (> t seen)
               {
                 (set missed (+ missed (- t (+ seen 1))))
                 (set seen t)
                 (set sum (runStep buf steps))
                 (set steps (+ steps 1))
-              }))
+              })
+          }
         })
       __arm_irq_mask
       (__arm_set_cntv_ctl 0)
-      (let (
-        (ticks (stGet st 0))
-        (worst (stGet st 3))
-        (other (stGet st 4))
-        (want (straight check))
-      )
+      {
+        (let ticks (stGet st 0))
+        (let worst (stGet st 3))
+        (let other (stGet st 4))
+        (let want (straight check))
         {
           (println
             "periodic: {steps} steps on {ticks} ticks, {missed} missed, {other} other interrupts")
@@ -209,5 +215,7 @@
               (println "periodic: checksum {sum}, straight run {want} - MISMATCH")
               1
             })
-        })
-    }))
+        }
+      }
+    }
+  })

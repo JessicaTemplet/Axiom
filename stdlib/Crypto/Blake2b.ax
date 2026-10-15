@@ -63,31 +63,33 @@
 ; `x` rotated right by a literal `n` in 1..63: one rotate instruction
 ; after `opt`. The mask clears the sign copies the arithmetic shift
 ; brings in.
-(macro (b2Rotr x n) (let ((x0 x))
-  (| (& (>> x0 n) (- (<< 1 (- 64 n)) 1)) (<< x0 (- 64 n)))))
+(macro (b2Rotr x n) {
+  (let x0 x)
+  (| (& (>> x0 n) (- (<< 1 (- 64 n)) 1)) (<< x0 (- 64 n)))
+})
 
 ; The little-endian 64-bit word at `p` + `off`, which need not be
 ; aligned, byte by byte; `opt` combines the bytes into one load.
-(macro (b2Ld64le p off) (let (
-  (q p)
-  (o off)
-)
+(macro (b2Ld64le p off) {
+  (let q p)
+  (let o off)
   (|
     (| (__load8 q o)
       (| (<< (__load8 q (+ o 1)) 8) (| (<< (__load8 q (+ o 2)) 16) (<< (__load8 q (+ o 3)) 24))))
     (<<
       (| (__load8 q (+ o 4))
         (| (<< (__load8 q (+ o 5)) 8) (| (<< (__load8 q (+ o 6)) 16) (<< (__load8 q (+ o 7)) 24))))
-      32))))
+      32))
+})
 
 ; Copy `n` bytes from `src` to `dst`, which do not overlap.
-(macro (b2Copy dst src n) (let (
-  (d dst)
-  (s src)
-  (k n)
-)
+(macro (b2Copy dst src n) {
+  (let d dst)
+  (let s src)
+  (let k n)
   (for i in 0..k
-    (__store8 d i (__load8 s i)))))
+    (__store8 d i (__load8 s i)))
+})
 
 ; ------------------------------------------------------------------
 ; The compression function (RFC 7693 section 3.2).
@@ -111,13 +113,15 @@
 (:: blake2bCount (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (blake2bCount ctr inc)
-  (let ((t0 (+ (__load64 ctr 0) inc)))
+  {
+    (let t0 (+ (__load64 ctr 0) inc))
     {
       (__store64 ctr 0 t0)
       (if (&& (>= t0 0) (< t0 inc))
         (__store64 ctr 1 (+ (__load64 ctr 1) 1)))
       0
-    }))
+    }
+  })
 
 ; Fold `nblocks` 128-byte blocks at `p` into the chaining value in the
 ; eight words at `cv`, with the 128-bit byte counter in the two words at
@@ -138,67 +142,67 @@
 ;@axiom:ct(*cv, *p)
 ;@axiom:effect(unsafe)
 (fn (blake2bBlocks cv ctr p nblocks mode)
-  (let (
-    (inc (if (== mode 0)
-      128
-      0))
-    (flag (if (== mode 1)
-      -1
-      0))
-    (mut h0 (b2Ld64le cv 0))
-    (mut h1 (b2Ld64le cv 8))
-    (mut h2 (b2Ld64le cv 16))
-    (mut h3 (b2Ld64le cv 24))
-    (mut h4 (b2Ld64le cv 32))
-    (mut h5 (b2Ld64le cv 40))
-    (mut h6 (b2Ld64le cv 48))
-    (mut h7 (b2Ld64le cv 56))
-    (mut t0 (b2Ld64le ctr 0))
-    (mut t1 (b2Ld64le ctr 8))
-  )
+  {
+    (let inc
+      (if (== mode 0)
+        128
+        0))
+    (let flag
+      (if (== mode 1)
+        -1
+        0))
+    (let mut h0 (b2Ld64le cv 0))
+    (let mut h1 (b2Ld64le cv 8))
+    (let mut h2 (b2Ld64le cv 16))
+    (let mut h3 (b2Ld64le cv 24))
+    (let mut h4 (b2Ld64le cv 32))
+    (let mut h5 (b2Ld64le cv 40))
+    (let mut h6 (b2Ld64le cv 48))
+    (let mut h7 (b2Ld64le cv 56))
+    (let mut t0 (b2Ld64le ctr 0))
+    (let mut t1 (b2Ld64le ctr 8))
     {
       (for blk in 0..nblocks
-        (let ((q (+ p (* 128 blk))))
+        {
+          (let q (+ p (* 128 blk)))
           {
             (set t0 (+ t0 inc))
             (if (&& (>= t0 0) (< t0 inc))
               (set t1 (+ t1 1)))
-            (let (
-              (m0 (b2Ld64le q 0))
-              (m1 (b2Ld64le q 8))
-              (m2 (b2Ld64le q 16))
-              (m3 (b2Ld64le q 24))
-              (m4 (b2Ld64le q 32))
-              (m5 (b2Ld64le q 40))
-              (m6 (b2Ld64le q 48))
-              (m7 (b2Ld64le q 56))
-              (m8 (b2Ld64le q 64))
-              (m9 (b2Ld64le q 72))
-              (m10 (b2Ld64le q 80))
-              (m11 (b2Ld64le q 88))
-              (m12 (b2Ld64le q 96))
-              (m13 (b2Ld64le q 104))
-              (m14 (b2Ld64le q 112))
-              (m15 (b2Ld64le q 120))
-            )
-              (let (
-                (mut v0 h0)
-                (mut v1 h1)
-                (mut v2 h2)
-                (mut v3 h3)
-                (mut v4 h4)
-                (mut v5 h5)
-                (mut v6 h6)
-                (mut v7 h7)
-                (mut v8 7640891576956012808)
-                (mut v9 -4942790177534073029)
-                (mut v10 4354685564936845355)
-                (mut v11 -6534734903238641935)
-                (mut v12 (^ 5840696475078001361 t0))
-                (mut v13 (^ -7276294671716946913 t1))
-                (mut v14 (^ 2270897969802886507 flag))
-                (mut v15 6620516959819538809)
-              )
+            {
+              (let m0 (b2Ld64le q 0))
+              (let m1 (b2Ld64le q 8))
+              (let m2 (b2Ld64le q 16))
+              (let m3 (b2Ld64le q 24))
+              (let m4 (b2Ld64le q 32))
+              (let m5 (b2Ld64le q 40))
+              (let m6 (b2Ld64le q 48))
+              (let m7 (b2Ld64le q 56))
+              (let m8 (b2Ld64le q 64))
+              (let m9 (b2Ld64le q 72))
+              (let m10 (b2Ld64le q 80))
+              (let m11 (b2Ld64le q 88))
+              (let m12 (b2Ld64le q 96))
+              (let m13 (b2Ld64le q 104))
+              (let m14 (b2Ld64le q 112))
+              (let m15 (b2Ld64le q 120))
+              {
+                (let mut v0 h0)
+                (let mut v1 h1)
+                (let mut v2 h2)
+                (let mut v3 h3)
+                (let mut v4 h4)
+                (let mut v5 h5)
+                (let mut v6 h6)
+                (let mut v7 h7)
+                (let mut v8 7640891576956012808)
+                (let mut v9 -4942790177534073029)
+                (let mut v10 4354685564936845355)
+                (let mut v11 -6534734903238641935)
+                (let mut v12 (^ 5840696475078001361 t0))
+                (let mut v13 (^ -7276294671716946913 t1))
+                (let mut v14 (^ 2270897969802886507 flag))
+                (let mut v15 6620516959819538809)
                 {
                   ; round 0
                   (blake2bG v0 v4 v8 v12 m0 m1)
@@ -316,8 +320,11 @@
                   (set h5 (^ h5 (^ v5 v13)))
                   (set h6 (^ h6 (^ v6 v14)))
                   (set h7 (^ h7 (^ v7 v15)))
-                }))
-          }))
+                }
+              }
+            }
+          }
+        })
       (__store64 cv 0 h0)
       (__store64 cv 1 h1)
       (__store64 cv 2 h2)
@@ -329,7 +336,8 @@
       (__store64 ctr 0 t0)
       (__store64 ctr 1 t1)
       0
-    }))
+    }
+  })
 
 ;; Fold one 128-byte block at `p` into the chaining value in words 0-7
 ;; at `st`, after advancing the byte counter in words 8 and 9 by `inc`;
@@ -429,10 +437,9 @@
 (fn (blake2bAbsorbIn cv ctr buf p n)
   (if (< n 0)
     -1
-    (let (
-      (mut have (__load64 ctr 2))
-      (mut off 0)
-    )
+    {
+      (let mut have (__load64 ctr 2))
+      (let mut off 0)
       {
         (if (> n 0)
           {
@@ -442,10 +449,11 @@
                 (set have 0)
               })
             (if (> have 0)
-              (let ((take
-                (if (< n (- 128 have))
-                  n
-                  (- 128 have))))
+              {
+                (let take
+                  (if (< n (- 128 have))
+                    n
+                    (- 128 have)))
                 {
                   (b2Copy (+ buf have) p take)
                   (set have (+ have take))
@@ -455,21 +463,25 @@
                       (blake2bBlocks cv ctr buf 1 0)
                       (set have 0)
                     })
-                }))
+                }
+              })
             (if (== have 0)
               ; whole blocks straight from the input, keeping 1 to 128
               ; bytes back for the pending block
-              (let ((whole (>> (- (- n off) 1) 7)))
+              {
+                (let whole (>> (- (- n off) 1) 7))
                 {
                   (blake2bBlocks cv ctr (+ p off) whole 0)
                   (set off (+ off (<< whole 7)))
                   (b2Copy buf (+ p off) (- n off))
                   (set have (- n off))
-                }))
+                }
+              })
           })
         (__store64 ctr 2 have)
         0
-      })))
+      }
+    }))
 
 ; `blake2bAbsorbIn` on the state blob at `st`.
 (:: blake2bAbsorb (-> Int Int Int Int))
@@ -487,10 +499,9 @@
 ;@axiom:ct(*cv, *buf, *out)
 ;@axiom:effect(unsafe)
 (fn (blake2bFinishIn cv ctr buf out)
-  (let (
-    (have (__load64 ctr 2))
-    (outLen (__load64 ctr 3))
-  )
+  {
+    (let have (__load64 ctr 2))
+    (let outLen (__load64 ctr 3))
     {
       (for i in have..128
         (__store8 buf i 0))
@@ -499,7 +510,8 @@
       (for i in 0..outLen
         (__store8 out i (& (>> (b2Ld64le cv (* 8 (>> i 3))) (* 8 (& i 7))) 255)))
       0
-    }))
+    }
+  })
 
 ; `blake2bFinishIn` on the state blob at `st`.
 (:: blake2bFinish (-> Int Int Int))
@@ -522,15 +534,17 @@
 (fn (blake2bBlobOk s)
   (if (! (blake2bWritable s))
     false
-    (let ((st (strData s)))
-      (let (
-        (have (__load64 st 10))
-        (outLen (__load64 st 11))
-        (keyLen (__load64 st 12))
-      )
+    {
+      (let st (strData s))
+      {
+        (let have (__load64 st 10))
+        (let outLen (__load64 st 11))
+        (let keyLen (__load64 st 12))
         (&& (&& (>= have 0) (<= have 128))
           (&& (&& (>= outLen 1) (<= outLen 64))
-            (&& (&& (>= keyLen 0) (<= keyLen 64)) (== (__load64 st 13) 0))))))))
+            (&& (&& (>= keyLen 0) (<= keyLen 64)) (== (__load64 st 13) 0))))
+      }
+    }))
 
 ;; The BLAKE2b digest of `n` bytes at `p`, `outLen` bytes long and keyed
 ;; with the `keyLen` bytes at `key`, written to `out`. The scratch state
@@ -539,14 +553,16 @@
 ;@axiom:ct(*key, *p)
 ;@axiom:effect(unsafe)
 (pub fn (blake2bAddr out outLen key keyLen p n)
-  (let ((st (memAlloc blake2bStateBytes)))
+  {
+    (let st (memAlloc blake2bStateBytes))
     {
       (b2Copy (+ st 240) key keyLen)
       (blake2bInit st outLen keyLen)
       (blake2bAbsorb st p n)
       (blake2bFinish st out)
       (blake2bErase st)
-    }))
+    }
+  })
 
 ;; The `outLen`-byte BLAKE2b digest of `msg` keyed with `key`; an empty
 ;; key is unkeyed BLAKE2b. A digest length outside 1 to 64 or a key over
@@ -557,29 +573,35 @@
     (cryptoLengthErr "a BLAKE2b digest is 1 to 64 bytes" "blake2b")
     (if (> (strLen key) 64)
       (cryptoLengthErr "a BLAKE2b key is at most 64 bytes" "blake2b")
-      (let ((out (strAlloc outLen)))
+      {
+        (let out (strAlloc outLen))
         {
           (blake2bAddr (strData out) outLen (strData key) (strLen key) (strData msg) (strLen msg))
           (Ok out)
-        }))))
+        }
+      })))
 
 ;; The 64-byte unkeyed BLAKE2b digest of `msg` (BLAKE2b-512).
 (pub :: blake2b512 (-> String String))
 (pub fn (blake2b512 msg)
-  (let ((out (strAlloc 64)))
+  {
+    (let out (strAlloc 64))
     {
       (blake2bAddr (strData out) 64 (strData "") 0 (strData msg) (strLen msg))
       out
-    }))
+    }
+  })
 
 ;; The 32-byte unkeyed BLAKE2b digest of `msg` (BLAKE2b-256).
 (pub :: blake2b256 (-> String String))
 (pub fn (blake2b256 msg)
-  (let ((out (strAlloc 32)))
+  {
+    (let out (strAlloc 32))
     {
       (blake2bAddr (strData out) 32 (strData "") 0 (strData msg) (strLen msg))
       out
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Streaming.
@@ -595,13 +617,17 @@
 ;@axiom:ct(*key)
 ;@axiom:effect(unsafe)
 (fn (blake2bMake outLen key keyLen)
-  (let ((s (strAlloc blake2bStateBytes)))
-    (let ((st (strData s)))
+  {
+    (let s (strAlloc blake2bStateBytes))
+    {
+      (let st (strData s))
       {
         (b2Copy (+ st 240) key keyLen)
         (blake2bInit st outLen keyLen)
-        (Blake2b s)
-      })))
+        (Blake2b :state s)
+      }
+    }
+  })
 
 ;; A fresh unkeyed hash with an `outLen`-byte digest, or
 ;; `cryptoInvalidLength` when `outLen` is outside 1 to 64.
@@ -636,10 +662,12 @@
 (pub :: blake2bUpdateAddr (-> Blake2b Int Int Int))
 ;@axiom:ct(*p)
 (pub fn (blake2bUpdateAddr h p n)
-  (let ((s h.state))
+  {
+    (let s h.state)
     (if (blake2bBlobOk s)
       (blake2bAbsorb (strData s) p n)
-      -1)))
+      -1)
+  })
 
 ;; Absorb `msg`. Answers 0, or -1 when `h` is not a live BLAKE2b state.
 (pub :: blake2bUpdate (-> Blake2b String Int))
@@ -653,27 +681,35 @@
 (pub :: blake2bFinal (-> Blake2b String))
 ;@axiom:effect(unsafe)
 (pub fn (blake2bFinal h)
-  (let ((s h.state))
+  {
+    (let s h.state)
     (if (blake2bBlobOk s)
-      (let ((st (strData s)))
-        (let (
-          (outLen (__load64 st 11))
-          (keyLen (__load64 st 12))
-        )
-          (let ((out (strAlloc outLen)))
+      {
+        (let st (strData s))
+        {
+          (let outLen (__load64 st 11))
+          (let keyLen (__load64 st 12))
+          {
+            (let out (strAlloc outLen))
             {
               (blake2bFinish st (strData out))
               (blake2bInit st outLen keyLen)
               out
-            })))
-      "")))
+            }
+          }
+        }
+      }
+      "")
+  })
 
 ;; An independent copy of `h`, which goes on from the same point. It
 ;; holds its own copy of any key.
 (pub :: blake2bCopy (-> Blake2b Blake2b))
 (pub fn (blake2bCopy h)
-  (let ((s h.state))
-    (Blake2b (bytesFromAddr (strData s) (strLen s)))))
+  {
+    (let s h.state)
+    (Blake2b :state (bytesFromAddr (strData s) (strLen s)))
+  })
 
 ;; Erase everything `h` holds, the key included. Every later operation
 ;; on it is refused. Answers 0, or -1 with nothing written when `h` is
@@ -681,11 +717,13 @@
 (pub :: blake2bWipe (-> Blake2b Int))
 ;@axiom:effect(unsafe)
 (pub fn (blake2bWipe h)
-  (let ((s h.state))
+  {
+    (let s h.state)
     (if (blake2bWritable s)
       {
         (blake2bErase (strData s))
         (__store64 (strData s) 13 1)
         0
       }
-      -1)))
+      -1)
+  })

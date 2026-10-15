@@ -79,12 +79,14 @@
 (:: getBe (-> Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (getBe a off n)
-  (let ((mut v 0))
+  {
+    (let mut v 0)
     {
       (for i in 0..n
         (set v (| (<< v 8) (__load8 a (+ off i)))))
       v
-    }))
+    }
+  })
 
 ; `x` shifted right by `s` with zeros coming in, for `s` in 0..64.
 (:: shrU (-> Int Int Int))
@@ -105,10 +107,9 @@
 ; The position of the highest set bit of `x` > 0, 0..62.
 (:: highBit (-> Int Int))
 (fn (highBit x)
-  (let (
-    (mut v x)
-    (mut p 0)
-  )
+  {
+    (let mut v x)
+    (let mut p 0)
     {
       (while (> v 1)
         {
@@ -116,7 +117,8 @@
           (set p (+ p 1))
         })
       p
-    }))
+    }
+  })
 
 (:: corrupt (-> String String (Result a Error)))
 (fn (corrupt what where)
@@ -160,11 +162,10 @@
 (pub :: recEncode (-> (Vec Value) (Result String Error)))
 ;@axiom:effect(unsafe)
 (pub fn (recEncode vals)
-  (let (
-    (n (vecLen vals))
-    (mut size 0)
-    (mut nan false)
-  )
+  {
+    (let n (vecLen vals))
+    (let mut size 0)
+    (let mut nan false)
     {
       (set size (+ 2 n))
       (for v in vals
@@ -180,15 +181,16 @@
           (axqErr axqType "a NaN can't be stored" "recEncode")
           (if (> size recMaxBytes)
             (axqErr axqTooBig "a record is at most 1 GiB" "recEncode")
-            (let (
-              (out (strAlloc size))
-              (mut at (+ 2 n))
-            )
-              (let ((a (strData out)))
+            {
+              (let out (strAlloc size))
+              (let mut at (+ 2 n))
+              {
+                (let a (strData out))
                 {
                   (putBe a 0 2 n)
                   (for i in 0..n
-                    (let ((v (vecGet vals i)))
+                    {
+                      (let v (vecGet vals i))
                       {
                         (__store8 a (+ 2 i) (typeCode v))
                         (match v
@@ -219,19 +221,25 @@
                               (set at (+ at (+ 4 (strLen s))))
                             }
                           ))
-                      }))
+                      }
+                    })
                   (Ok out)
-                })))))
-    }))
+                }
+              }
+            })))
+    }
+  })
 
 ; A fresh string holding the `n` bytes at `a + off`.
 (:: bytesAt (-> Int Int Int String))
 (fn (bytesAt a off n)
-  (let ((s (strAlloc n)))
+  {
+    (let s (strAlloc n))
     {
       (memCopy (strData s) (+ a off) n)
       s
-    }))
+    }
+  })
 
 ; The value of type `code` whose payload starts at byte `at` of a
 ; record `size` bytes long at `a`, and the offset just past it; `Err`
@@ -243,20 +251,26 @@
     (if (|| (== code 1) (== code 2))
       (if (> (+ at 8) size)
         (corrupt "a number runs past the end of its record" "recDecode")
-        (let ((bits (getBe a at 8)))
+        {
+          (let bits (getBe a at 8))
           (if (== code 1)
             (Ok (VInt bits))
-            (Ok (VReal (floatFromBits bits))))))
+            (Ok (VReal (floatFromBits bits))))
+        })
       (if (|| (== code 3) (== code 4))
         (if (> (+ at 4) size)
           (corrupt "a length runs past the end of its record" "recDecode")
-          (let ((len (getBe a at 4)))
+          {
+            (let len (getBe a at 4))
             (if (> len (- size (+ at 4)))
               (corrupt "a string runs past the end of its record" "recDecode")
-              (let ((s (bytesAt a (+ at 4) len)))
+              {
+                (let s (bytesAt a (+ at 4) len))
                 (if (== code 3)
                   (Ok (VText s))
-                  (Ok (VBlob s)))))))
+                  (Ok (VBlob s)))
+              })
+          })
         (corrupt "an unknown type code in a record" "recDecode")))))
 
 ; How many payload bytes a value of type `code` at `at` takes, reading
@@ -276,20 +290,19 @@
 (pub :: recDecode (-> String (Result (Vec Value) Error)))
 ;@axiom:effect(unsafe)
 (pub fn (recDecode rec)
-  (let (
-    (size (strLen rec))
-    (a (strData rec))
-  )
+  {
+    (let size (strLen rec))
+    (let a (strData rec))
     (if (< size 2)
       (corrupt "a record shorter than its column count" "recDecode")
-      (let ((n (getBe a 0 2)))
+      {
+        (let n (getBe a 0 2))
         (if (> (+ 2 n) size)
           (corrupt "a record shorter than its type codes" "recDecode")
-          (let (
-            (out vecNew)
-            (mut at (+ 2 n))
-            (mut bad None)
-          )
+          {
+            (let out vecNew)
+            (let mut at (+ 2 n))
+            (let mut bad None)
             {
               (for i in 0..n
                 (if (isNone bad)
@@ -310,43 +323,52 @@
                     (corrupt "a record with bytes after its last value" "recDecode")
                     (Ok out))
                 ))
-            }))))))
+            }
+          })
+      })
+  })
 
 ;; How many columns a record holds.
 (pub :: recColumnCount (-> String (Result Int Error)))
 (pub fn (recColumnCount rec)
   (if (< (strLen rec) 2)
     (corrupt "a record shorter than its column count" "recColumnCount")
-    (let ((n (getBe (strData rec) 0 2)))
+    {
+      (let n (getBe (strData rec) 0 2))
       (if (> (+ 2 n) (strLen rec))
         (corrupt "a record shorter than its type codes" "recColumnCount")
-        (Ok n)))))
+        (Ok n))
+    }))
 
 ;; Column `i` of a record, without decoding the columns after it. An
 ;; `i` outside the record answers `axqMisuse`.
 (pub :: recColumn (-> String Int (Result Value Error)))
 ;@axiom:effect(unsafe)
 (pub fn (recColumn rec i)
-  (let ((n (recColumnCount rec)?))
+  {
+    (let n (recColumnCount rec)?)
     (if (|| (< i 0) (>= i n))
       (axqErr axqMisuse "no such column in this record" "recColumn")
-      (let (
-        (a (strData rec))
-        (size (strLen rec))
-        (mut at (+ 2 n))
-        (mut ok true)
-      )
+      {
+        (let a (strData rec))
+        (let size (strLen rec))
+        (let mut at (+ 2 n))
+        (let mut ok true)
         {
           (for j in 0..i
             (if ok
-              (let ((span (payloadSpan a size (__load8 a (+ 2 j)) at)))
+              {
+                (let span (payloadSpan a size (__load8 a (+ 2 j)) at))
                 (if (|| (< span 0) (> span (- size at)))
                   (set ok false)
-                  (set at (+ at span))))))
+                  (set at (+ at span)))
+              }))
           (if ok
             (readPayload a size (__load8 a (+ 2 i)) at)
             (corrupt "a string runs past the end of its record" "recColumn"))
-        }))))
+        }
+      })
+  })
 
 ; ------------------------------------------------------------------
 ; Keys.
@@ -385,11 +407,13 @@
 ;; flipped, so bytewise order is numeric order.
 (pub :: keyRowid (-> Int String))
 (pub fn (keyRowid n)
-  (let ((out (strAlloc 8)))
+  {
+    (let out (strAlloc 8))
     {
       (putBe (strData out) 0 8 (^ n intMin))
       out
-    }))
+    }
+  })
 
 ;; The rowid a table key holds.
 (pub :: keyRowidOf (-> String (Result Int Error)))
@@ -401,10 +425,12 @@
 ;; The rowid in the last 8 bytes of an index key.
 (pub :: keyIndexRowid (-> String (Result Int Error)))
 (pub fn (keyIndexRowid k)
-  (let ((n (strLen k)))
+  {
+    (let n (strLen k))
     (if (< n 8)
       (corrupt "an index key shorter than a rowid" "keyIndexRowid")
-      (Ok (^ (getBe (strData k) (- n 8) 8) intMin)))))
+      (Ok (^ (getBe (strData k) (- n 8) 8) intMin)))
+  })
 
 ;; An index key: `prefix`, the key encoding of the indexed columns, then
 ;; the rowid's 8 bytes.
@@ -423,37 +449,44 @@
 (:: numOfInt (-> Int Num))
 (fn (numOfInt n)
   (if (== n 0)
-    (Num 0 0 0)
+    (Num :sign 0 :e 0 :mant 0)
     (if (== n intMin)
-      (Num -1 63 0)
-      (let (
-        (mag (if (< n 0)
-          (- 0 n)
-          n))
-        (sign (if (< n 0)
-          -1
-          1))
-      )
-        (let ((e (highBit mag)))
-          (Num sign e (shlU mag (- 64 e))))))))
+      (Num :sign -1 :e 63 :mant 0)
+      {
+        (let mag
+          (if (< n 0)
+            (- 0 n)
+            n))
+        (let sign
+          (if (< n 0)
+            -1
+            1))
+        {
+          (let e (highBit mag))
+          (Num :sign sign :e e :mant (shlU mag (- 64 e)))
+        }
+      })))
 
 (:: numOfBits (-> Int Num))
 (fn (numOfBits bits)
-  (let (
-    (sign (if (< bits 0)
-      -1
-      1))
-    (ex (& (>> bits 52) 2047))
-    (frac (& bits 4503599627370495))
-  )
+  {
+    (let sign
+      (if (< bits 0)
+        -1
+        1))
+    (let ex (& (>> bits 52) 2047))
+    (let frac (& bits 4503599627370495))
     (if (&& (== ex 0) (== frac 0))
-      (Num 0 0 0)
+      (Num :sign 0 :e 0 :mant 0)
       (if (== ex 2047)
-        (Num sign 1024 0)
+        (Num :sign sign :e 1024 :mant 0)
         (if (> ex 0)
-          (Num sign (- ex 1023) (<< frac 12))
-          (let ((p (highBit frac)))
-            (Num sign (- p 1074) (shlU frac (- 64 p)))))))))
+          (Num :sign sign :e (- ex 1023) :mant (<< frac 12))
+          {
+            (let p (highBit frac))
+            (Num :sign sign :e (- p 1074) :mant (shlU frac (- 64 p)))
+          })))
+  })
 
 (:: numKeyBytes (-> Num Int))
 (fn (numKeyBytes num)
@@ -469,7 +502,8 @@
       (__store8 a at tagZero)
       1
     }
-    (let ((ex (+ num.e expBias)))
+    {
+      (let ex (+ num.e expBias))
       (if (> num.sign 0)
         {
           (__store8 a at tagPos)
@@ -482,33 +516,34 @@
           (putBe a (+ at 1) 2 (^ ex 65535))
           (putBe a (+ at 3) 8 (^ num.mant -1))
           11
-        }))))
+        })
+    }))
 
 (:: zeroCount (-> String Int))
 ;@axiom:effect(unsafe)
 (fn (zeroCount s)
-  (let (
-    (a (strData s))
-    (mut z 0)
-  )
+  {
+    (let a (strData s))
+    (let mut z 0)
     {
       (for i in 0..(strLen s)
         (if (== (__load8 a i) 0)
           (set z (+ z 1))))
       z
-    }))
+    }
+  })
 
 (:: putEscaped (-> Int Int Int String Int))
 ;@axiom:effect(unsafe)
 (fn (putEscaped a at tag s)
-  (let (
-    (src (strData s))
-    (mut w (+ at 1))
-  )
+  {
+    (let src (strData s))
+    (let mut w (+ at 1))
     {
       (__store8 a at tag)
       (for i in 0..(strLen s)
-        (let ((b (__load8 src i)))
+        {
+          (let b (__load8 src i))
           (if (== b 0)
             {
               (__store8 a w 0)
@@ -518,11 +553,13 @@
             {
               (__store8 a w b)
               (set w (+ w 1))
-            })))
+            })
+        })
       (__store8 a w 0)
       (__store8 a (+ w 1) 1)
       (- (+ w 2) at)
-    }))
+    }
+  })
 
 ; The key bytes of one value; 0 for a NaN, which has none.
 (:: valueKeyBytes (-> Value Int))
@@ -558,28 +595,30 @@
 ;; `axqType`.
 (pub :: keyEncode (-> (Vec Value) (Result String Error)))
 (pub fn (keyEncode vals)
-  (let (
-    (mut size 0)
-    (mut nan false)
-  )
+  {
+    (let mut size 0)
+    (let mut nan false)
     {
       (for v in vals
-        (let ((b (valueKeyBytes v)))
+        {
+          (let b (valueKeyBytes v))
           (if (== b 0)
             (set nan true)
-            (set size (+ size b)))))
+            (set size (+ size b)))
+        })
       (if nan
         (axqErr axqType "a NaN has no place in a key" "keyEncode")
-        (let (
-          (out (strAlloc size))
-          (mut at 0)
-        )
+        {
+          (let out (strAlloc size))
+          (let mut at 0)
           {
             (for v in vals
               (set at (+ at (putValueKey (strData out) at v))))
             (Ok out)
-          }))
-    }))
+          }
+        })
+    }
+  })
 
 ;; The key encoding of one value.
 (pub :: keyEncodeValue (-> Value (Result String Error)))
@@ -590,63 +629,74 @@
 ; `neg` when the tag said negative.
 (:: numFromKey (-> Int Int Bool Value))
 (fn (numFromKey a at neg)
-  (let (
-    (ex (if neg
-      (^ (getBe a at 2) 65535)
-      (getBe a at 2)))
-    (mant (if neg
-      (^ (getBe a (+ at 2) 8) -1)
-      (getBe a (+ at 2) 8)))
-  )
-    (let ((e (- ex expBias)))
+  {
+    (let ex
+      (if neg
+        (^ (getBe a at 2) 65535)
+        (getBe a at 2)))
+    (let mant
+      (if neg
+        (^ (getBe a (+ at 2) 8) -1)
+        (getBe a (+ at 2) 8)))
+    {
+      (let e (- ex expBias))
       (if (&& (>= e 0) (<= e 62))
         ; integral when no mantissa bit lies below the units place
         (if (== (shlU mant e) 0)
-          (let ((mag (| (<< 1 e) (shrU mant (- 64 e)))))
+          {
+            (let mag (| (<< 1 e) (shrU mant (- 64 e))))
             (VInt
               (if neg
                 (- 0 mag)
-                mag)))
+                mag))
+          }
           (VReal (floatFromBits (numBits neg e mant))))
         (if (&& (&& neg (== e 63)) (== mant 0))
           (VInt intMin)
-          (VReal (floatFromBits (numBits neg e mant))))))))
+          (VReal (floatFromBits (numBits neg e mant)))))
+    }
+  })
 
 ; The binary64 bits of sign, exponent and mantissa. Exact for every
 ; number a REAL can hold; an integer beyond 53 bits never reaches here.
 (:: numBits (-> Bool Int Int Int))
 (fn (numBits neg e mant)
-  (let ((s
-    (if neg
-      intMin
-      0)))
+  {
+    (let s
+      (if neg
+        intMin
+        0))
     (if (>= e 1024)
       (| s 9218868437227405312)
       (if (>= e -1022)
         (| s (| (<< (+ e 1023) 52) (shrU mant 12)))
-        (let ((p (+ e 1074)))
-          (| s (| (shlU 1 p) (shrU mant (- 64 p)))))))))
+        {
+          (let p (+ e 1074))
+          (| s (| (shlU 1 p) (shrU mant (- 64 p))))
+        }))
+  })
 
 ; The escaped string starting at `a + at` (after its tag), and where it
 ; ends; `None` when the terminator is missing or an escape is invalid.
 (:: unescape (-> Int Int Int (Option (Vec Int))))
 ;@axiom:effect(unsafe)
 (fn (unescape a at n)
-  (let (
-    (bytes vecNew)
-    (mut i at)
-    (mut done false)
-    (mut ok true)
-  )
+  {
+    (let bytes vecNew)
+    (let mut i at)
+    (let mut done false)
+    (let mut ok true)
     {
       (while (&& ok (! done))
         (if (>= i n)
           (set ok false)
-          (let ((b (__load8 a i)))
+          {
+            (let b (__load8 a i))
             (if (== b 0)
               (if (>= (+ i 1) n)
                 (set ok false)
-                (let ((c (__load8 a (+ i 1))))
+                {
+                  (let c (__load8 a (+ i 1)))
                   (if (== c 1)
                     {
                       (set done true)
@@ -657,15 +707,18 @@
                         (vecPush bytes 0)
                         (set i (+ i 2))
                       }
-                      (set ok false)))))
+                      (set ok false)))
+                })
               {
                 (vecPush bytes b)
                 (set i (+ i 1))
-              }))))
+              })
+          }))
       (if ok
         (Some (vecPush bytes i))
         None)
-    }))
+    }
+  })
 
 ;; The values a key encodes. Numbers come back as `VInt` when they are
 ;; integral and in the 64-bit range, and as `VReal` otherwise. Bytes
@@ -673,16 +726,16 @@
 (pub :: keyDecode (-> String (Result (Vec Value) Error)))
 ;@axiom:effect(unsafe)
 (pub fn (keyDecode k)
-  (let (
-    (a (strData k))
-    (n (strLen k))
-    (out vecNew)
-    (mut at 0)
-    (mut ok true)
-  )
+  {
+    (let a (strData k))
+    (let n (strLen k))
+    (let out vecNew)
+    (let mut at 0)
+    (let mut ok true)
     {
       (while (&& ok (< at n))
-        (let ((tag (__load8 a at)))
+        {
+          (let tag (__load8 a at))
           (if (== tag tagNull)
             {
               (vecPush out VNull)
@@ -706,10 +759,9 @@
                       (set ok false)
                     )
                     ((Some bytes)
-                      (let (
-                        (len (- (vecLen bytes) 1))
-                        (s (strAlloc (- (vecLen bytes) 1)))
-                      )
+                      {
+                        (let len (- (vecLen bytes) 1))
+                        (let s (strAlloc (- (vecLen bytes) 1)))
                         {
                           (for j in 0..len
                             (__store8 (strData s) j (vecGet bytes j)))
@@ -718,13 +770,16 @@
                               (VText s)
                               (VBlob s)))
                           (set at (vecGet bytes len))
-                        })
+                        }
+                      }
                     ))
-                  (set ok false)))))))
+                  (set ok false)))))
+        })
       (if ok
         (Ok out)
         (corrupt "bytes that aren't a key" "keyDecode"))
-    }))
+    }
+  })
 
 ;; The smallest key greater than every key that starts with `prefix`:
 ;; the prefix with its last byte below FF incremented and the rest cut
@@ -733,22 +788,24 @@
 (pub :: keyPrefixEnd (-> String (Option String)))
 ;@axiom:effect(unsafe)
 (pub fn (keyPrefixEnd prefix)
-  (let (
-    (a (strData prefix))
-    (mut i (- (strLen prefix) 1))
-  )
+  {
+    (let a (strData prefix))
+    (let mut i (- (strLen prefix) 1))
     {
       (while (&& (>= i 0) (== (__load8 a i) 255))
         (set i (- i 1)))
       (if (< i 0)
         None
-        (let ((out (strAlloc (+ i 1))))
+        {
+          (let out (strAlloc (+ i 1)))
           {
             (memCopy (strData out) a (+ i 1))
             (__store8 (strData out) i (+ (__load8 a i) 1))
             (Some out)
-          }))
-    }))
+          }
+        })
+    }
+  })
 
 ;; Compare two keys as the B-tree does: bytewise by unsigned value, and
 ;; a prefix before any longer key. Negative, zero or positive.

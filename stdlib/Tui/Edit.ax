@@ -180,7 +180,20 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledNew (-> (Vec String) String LineEd))
 (pub fn (ledNew ring wordChars)
-  (LineEd vecNew vecNew ring 0 0 0 80 24 1 0 "" 0 wordChars))
+  (LineEd
+    :left vecNew
+    :right vecNew
+    :ring ring
+    :ringIdx 0
+    :lastKill 0
+    :yankLen 0
+    :cols 80
+    :height 24
+    :rows 1
+    :curRow 0
+    :prompt ""
+    :pcols 0
+    :wordChars wordChars))
 
 ;; Prepare for the next physical line. Keeps both vectors' capacity.
 ;@axiom:restrict(no-io,no-foreign)
@@ -219,10 +232,12 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: ledCpAt (-> LineEd Int Int))
 (pub fn (ledCpAt ed i)
-  (let ((nl (vecLen ed.left)))
+  {
+    (let nl (vecLen ed.left))
     (if (< i nl)
       (vecGet ed.left i)
-      (vecGet ed.right (- (- (vecLen ed.right) 1) (- i nl))))))
+      (vecGet ed.right (- (- (vecLen ed.right) 1) (- i nl))))
+  })
 
 ;; `cnt` code points from `s`, as a String.
 ;
@@ -237,11 +252,10 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledRangeStr (-> LineEd Int Int String))
 (pub fn (ledRangeStr ed s cnt)
-  (let (
-    (n (ledLen ed))
-    (mut i 0)
-    (mut total 0)
-  )
+  {
+    (let n (ledLen ed))
+    (let mut i 0)
+    (let mut total 0)
     {
       (while (< i cnt)
         {
@@ -249,25 +263,28 @@
             (set total (+ total (utf8Width (ledCpAt ed (+ s i))))))
           (set i (+ i 1))
         })
-      (let (
-        (out (strAlloc total))
-        (mut o 0)
-        (mut j 0)
-      )
+      {
+        (let out (strAlloc total))
+        (let mut o 0)
+        (let mut j 0)
         {
           (while (< j cnt)
             {
               (if (&& (>= (+ s j) 0) (< (+ s j) n))
-                (let ((one (utf8FromChar (ledCpAt ed (+ s j)))))
+                {
+                  (let one (utf8FromChar (ledCpAt ed (+ s j))))
                   {
                     (memCopy (+ (strData out) o) (strData one) (strLen one))
                     (set o (+ o (strLen one)))
-                  }))
+                  }
+                })
               (set j (+ j 1))
             })
           out
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ;; The whole line as a `String`.
 ;
@@ -307,11 +324,10 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledInsertStr (-> LineEd String Int))
 (pub fn (ledInsertStr ed s)
-  (let (
-    (n (strLen s))
-    (mut i 0)
-    (mut got 0)
-  )
+  {
+    (let n (strLen s))
+    (let mut i 0)
+    (let mut got 0)
     {
       (while (< i n)
         {
@@ -323,7 +339,8 @@
           (set i (utf8Next s i))
         })
       got
-    }))
+    }
+  })
 
 ;; Replace the buffer, cursor at the end. What history and completion
 ;; need: one call to put a whole line in.
@@ -392,24 +409,28 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledHome (-> LineEd Int))
 (pub fn (ledHome ed)
-  (let ((mut n 0))
+  {
+    (let mut n 0)
     {
       (while (> (vecLen ed.left) 0)
         (set n (+ n (ledLeft ed))))
       n
-    }))
+    }
+  })
 
 ;; Move the cursor to the end of the line. Answers how many code points
 ;; it moved.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledEnd (-> LineEd Int))
 (pub fn (ledEnd ed)
-  (let ((mut n 0))
+  {
+    (let mut n 0)
     {
       (while (> (vecLen ed.right) 0)
         (set n (+ n (ledRight ed))))
       n
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Words.
@@ -458,28 +479,32 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledWordLeft (-> LineEd Int))
 (pub fn (ledWordLeft ed)
-  (let ((mut n 0))
+  {
+    (let mut n 0)
     {
       (while (&& (> (vecLen ed.left) 0) (! (ledIsWord ed (vecLast ed.left))))
         (set n (+ n (ledLeft ed))))
       (while (&& (> (vecLen ed.left) 0) (ledIsWord ed (vecLast ed.left)))
         (set n (+ n (ledLeft ed))))
       n
-    }))
+    }
+  })
 
 ;; Move the cursor to the end of the next word. Answers how many code
 ;; points it moved.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledWordRight (-> LineEd Int))
 (pub fn (ledWordRight ed)
-  (let ((mut n 0))
+  {
+    (let mut n 0)
     {
       (while (&& (> (vecLen ed.right) 0) (! (ledIsWord ed (vecLast ed.right))))
         (set n (+ n (ledRight ed))))
       (while (&& (> (vecLen ed.right) 0) (ledIsWord ed (vecLast ed.right)))
         (set n (+ n (ledRight ed))))
       n
-    }))
+    }
+  })
 
 ;; How many code points a forward word kill would take, without moving
 ;; the cursor.
@@ -490,18 +515,18 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: ledWordRightSpan (-> LineEd Int))
 (pub fn (ledWordRightSpan ed)
-  (let (
-    (k (ledCursor ed))
-    (n (ledLen ed))
-    (mut i 0)
-  )
+  {
+    (let k (ledCursor ed))
+    (let n (ledLen ed))
+    (let mut i 0)
     {
       (while (&& (< (+ k i) n) (! (ledIsWord ed (ledCpAt ed (+ k i)))))
         (set i (+ i 1)))
       (while (&& (< (+ k i) n) (ledIsWord ed (ledCpAt ed (+ k i))))
         (set i (+ i 1)))
       i
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; The kill ring.
@@ -522,11 +547,13 @@
 (pub fn (ledKillPush ed text dir)
   {
     (if (&& (== ed.lastKill dir) (> (vecLen ed.ring) 0))
-      (let ((cur (vecGetStr ed.ring ed.ringIdx)))
+      {
+        (let cur (vecGetStr ed.ring ed.ringIdx))
         (vecSet ed.ring ed.ringIdx
           (if (== dir 1)
             (concat cur text)
-            (concat text cur))))
+            (concat text cur)))
+      }
       (if (< (vecLen ed.ring) LED_RING_MAX)
         {
           (vecPush ed.ring text)
@@ -551,28 +578,32 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledKillToEnd (-> LineEd Int))
 (pub fn (ledKillToEnd ed)
-  (let ((cnt (vecLen ed.right)))
+  {
+    (let cnt (vecLen ed.right))
     (if (== cnt 0)
       0
       {
         (ledKillPush ed (ledRangeStr ed (ledCursor ed) cnt) 1)
         (vecClear ed.right)
         cnt
-      })))
+      })
+  })
 
 ;; Kill from the start of the line to the cursor onto the ring. Answers
 ;; how many code points were killed.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledKillToStart (-> LineEd Int))
 (pub fn (ledKillToStart ed)
-  (let ((cnt (vecLen ed.left)))
+  {
+    (let cnt (vecLen ed.left))
     (if (== cnt 0)
       0
       {
         (ledKillPush ed (ledRangeStr ed 0 cnt) 2)
         (vecClear ed.left)
         cnt
-      })))
+      })
+  })
 
 ;; Kill from the start of the previous word to the cursor onto the
 ;; ring. Answers how many code points were killed.
@@ -583,38 +614,46 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledKillWordLeft (-> LineEd Int))
 (pub fn (ledKillWordLeft ed)
-  (let ((moved (ledWordLeft ed)))
+  {
+    (let moved (ledWordLeft ed))
     (if (== moved 0)
       0
       {
         (ledKillPush ed (ledRangeStr ed (ledCursor ed) moved) 2)
-        (let ((mut i 0))
+        {
+          (let mut i 0)
           (while (< i moved)
             {
               (vecPop ed.right)
               (set i (+ i 1))
-            }))
+            })
+        }
         moved
-      })))
+      })
+  })
 
 ;; Kill from the cursor to the end of the next word onto the ring.
 ;; Answers how many code points were killed.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledKillWordRight (-> LineEd Int))
 (pub fn (ledKillWordRight ed)
-  (let ((span (ledWordRightSpan ed)))
+  {
+    (let span (ledWordRightSpan ed))
     (if (== span 0)
       0
       {
         (ledKillPush ed (ledRangeStr ed (ledCursor ed) span) 1)
-        (let ((mut i 0))
+        {
+          (let mut i 0)
           (while (< i span)
             {
               (vecPop ed.right)
               (set i (+ i 1))
-            }))
+            })
+        }
         span
-      })))
+      })
+  })
 
 ;; Insert the newest kill-ring entry at the cursor. Answers how many
 ;; code points were inserted, 0 with an empty ring.
@@ -640,12 +679,14 @@
   (if (|| (== ed.yankLen 0) (< (vecLen ed.ring) 2))
     0
     {
-      (let ((mut i 0))
+      {
+        (let mut i 0)
         (while (< i ed.yankLen)
           {
             (vecPop ed.left)
             (set i (+ i 1))
-          }))
+          })
+      }
       (set ed.ringIdx (% (+ (- ed.ringIdx 1) (vecLen ed.ring)) (vecLen ed.ring)))
       (set ed.yankLen (ledInsertStr ed (vecGetStr ed.ring ed.ringIdx)))
       ed.yankLen
@@ -678,29 +719,31 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: tuiVisLen (-> String Int))
 (pub fn (tuiVisLen s)
-  (let (
-    (n (strLen s))
-    (mut i 0)
-    (mut w 0)
-  )
+  {
+    (let n (strLen s))
+    (let mut i 0)
+    (let mut w 0)
     {
       (while (< i n)
         (if (&& (== (strByte s i) 27) (&& (< (+ i 1) n) (== (strByte s (+ i 1)) 91)))
-          (let ((mut j (+ i 2)))
+          {
+            (let mut j (+ i 2))
             {
               (while (&& (< j n) (!= (strByte s j) 109))
                 (set j (+ j 1)))
               (set i (if (< j n)
                 (+ j 1)
                 n))
-            })
+            }
+          }
           {
             (if (! (utf8IsCont (strByte s i)))
               (set w (+ w 1)))
             (set i (+ i 1))
           }))
       w
-    }))
+    }
+  })
 
 ;; Every fragment in `v`, concatenated, in one allocation.
 ;
@@ -715,33 +758,35 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: tuiCat (-> (Vec String) String))
 (pub fn (tuiCat v)
-  (let (
-    (n (vecLen v))
-    (mut total 0)
-    (mut i 0)
-  )
+  {
+    (let n (vecLen v))
+    (let mut total 0)
+    (let mut i 0)
     {
       (while (< i n)
         {
           (set total (+ total (strLen (vecGetStr v i))))
           (set i (+ i 1))
         })
-      (let (
-        (out (strAlloc total))
-        (mut o 0)
-        (mut j 0)
-      )
+      {
+        (let out (strAlloc total))
+        (let mut o 0)
+        (let mut j 0)
         {
           (while (< j n)
-            (let ((piece (vecGetStr v j)))
+            {
+              (let piece (vecGetStr v j))
               {
                 (memCopy (+ (strData out) o) (strData piece) (strLen piece))
                 (set o (+ o (strLen piece)))
                 (set j (+ j 1))
-              }))
+              }
+            })
           out
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Geometry. Pure arithmetic, and where wrap correctness is decided.
@@ -771,11 +816,10 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: ledColsBefore (-> LineEd Int Int))
 (pub fn (ledColsBefore ed k)
-  (let (
-    (n (ledLen ed))
-    (mut i 0)
-    (mut w 0)
-  )
+  {
+    (let n (ledLen ed))
+    (let mut i 0)
+    (let mut w 0)
     {
       (while (&& (< i k) (< i n))
         {
@@ -783,7 +827,8 @@
           (set i (+ i 1))
         })
       w
-    }))
+    }
+  })
 
 ;; The width to compute with: the terminal's, or 80 when it answered
 ;; something a division can't use.
@@ -845,21 +890,26 @@
 (pub fn (ledCup n final)
   (if (< n 1)
     ""
-    (let ((d (fmtInt n)))
-      (let ((out (strAlloc (+ (strLen d) 3))))
+    {
+      (let d (fmtInt n))
+      {
+        (let out (strAlloc (+ (strLen d) 3)))
         {
           (memPutByte (strData out) 0 27)
           (memPutByte (strData out) 1 91)
           (memCopy (+ (strData out) 2) (strData d) (strLen d))
           (memPutByte (strData out) (+ (strLen d) 2) final)
           out
-        }))))
+        }
+      }
+    }))
 
 ;; `ESC [ H ESC [ 2 J` - cursor home, erase the whole screen. Ctrl-L.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledClearScreen (-> Int String))
 (pub fn (ledClearScreen _u)
-  (let ((out (strAlloc 7)))
+  {
+    (let out (strAlloc 7))
     {
       (memPutByte (strData out) 0 27)
       (memPutByte (strData out) 1 91)
@@ -869,7 +919,8 @@
       (memPutByte (strData out) 5 50)
       (memPutByte (strData out) 6 74)
       out
-    }))
+    }
+  })
 
 ;; `ESC [ 0 K`: erase from the cursor to the end of the row.
 ;
@@ -879,14 +930,16 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: ledEraseRow (-> Int String))
 (pub fn (ledEraseRow _u)
-  (let ((out (strAlloc 4)))
+  {
+    (let out (strAlloc 4))
     {
       (memPutByte (strData out) 0 27)
       (memPutByte (strData out) 1 91)
       (memPutByte (strData out) 2 48)
       (memPutByte (strData out) 3 75)
       out
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; The redraw.
@@ -919,14 +972,16 @@
 (pub fn (ledEraseOld ed out)
   {
     (vecPush out (ledCup (- (- ed.rows 1) ed.curRow) 66))
-    (let ((mut i 0))
+    {
+      (let mut i 0)
       (while (< i (- ed.rows 1))
         {
           (vecPush out "\r")
           (vecPush out (ledEraseRow 0))
           (vecPush out (ledCup 1 65))
           (set i (+ i 1))
-        }))
+        })
+    }
     (vecPush out "\r")
     (vecPush out (ledEraseRow 0))
     0
@@ -938,11 +993,10 @@
 (pub :: ledRefreshFull (-> LineEd (Vec String) Int))
 ;@axiom:effect(unsafe)
 (pub fn (ledRefreshFull ed out)
-  (let (
-    (w (ledCols ed))
-    (c (ledContentCols ed))
-    (k (ledCursor ed))
-  )
+  {
+    (let w (ledCols ed))
+    (let c (ledContentCols ed))
+    (let k (ledCursor ed))
     {
       (ledEraseOld ed out)
       (vecPush out ed.prompt)
@@ -956,7 +1010,8 @@
       (set ed.rows (+ (/ c w) 1))
       (set ed.curRow (ledRowOf ed k))
       0
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; The single-row window, for content taller than the screen.
@@ -981,28 +1036,32 @@
 (pub fn (ledRefreshWindow ed out)
   ; One column is held back so the row can never fill exactly and
   ; raise the phantom-column question a second time.
-  (let (
-    (w (ledCols ed))
-    (n (ledLen ed))
-    (k (ledCursor ed))
-  )
-    (let ((keepPrompt
-      (if (< ed.pcols (- w 8))
-        1
-        0)))
-      (let ((pc
-        (if (== keepPrompt 1)
-          ed.pcols
-          0)))
-        (let ((avail (- (- w pc) 1)))
-          (let ((s
-            (if (> k avail)
-              (- k avail)
-              0)))
-            (let ((cnt
-              (if (> (- n s) avail)
-                avail
-                (- n s))))
+  {
+    (let w (ledCols ed))
+    (let n (ledLen ed))
+    (let k (ledCursor ed))
+    {
+      (let keepPrompt
+        (if (< ed.pcols (- w 8))
+          1
+          0))
+      {
+        (let pc
+          (if (== keepPrompt 1)
+            ed.pcols
+            0))
+        {
+          (let avail (- (- w pc) 1))
+          {
+            (let s
+              (if (> k avail)
+                (- k avail)
+                0))
+            {
+              (let cnt
+                (if (> (- n s) avail)
+                  avail
+                  (- n s)))
               {
                 (ledEraseOld ed out)
                 (if (== keepPrompt 1)
@@ -1014,7 +1073,13 @@
                 (set ed.rows 1)
                 (set ed.curRow 0)
                 0
-              })))))))
+              }
+            }
+          }
+        }
+      }
+    }
+  })
 
 ;; Append to `out` the redraw of the line: the windowed repaint when the
 ;; line is taller than the terminal, the full one otherwise.
@@ -1053,11 +1118,10 @@
 (pub :: ledRefreshFullPainted (-> LineEd (Vec String) String Int))
 ;@axiom:effect(unsafe)
 (pub fn (ledRefreshFullPainted ed out painted)
-  (let (
-    (w (ledCols ed))
-    (c (ledContentCols ed))
-    (k (ledCursor ed))
-  )
+  {
+    (let w (ledCols ed))
+    (let c (ledContentCols ed))
+    (let k (ledCursor ed))
     {
       (ledEraseOld ed out)
       (vecPush out ed.prompt)
@@ -1071,7 +1135,8 @@
       (set ed.rows (+ (/ c w) 1))
       (set ed.curRow (ledRowOf ed k))
       0
-    }))
+    }
+  })
 
 ;; Like `ledRefresh`, but the full repaint draws `painted` - the
 ;; caller's rendering of the current buffer - instead of the plain

@@ -120,17 +120,17 @@ cat > "$work/reconcile.ax" <<'AXEOF'
 (:: spansCover (-> String Int))
 
 (fn (spansCover src)
-  (let (
-    (sp (hlScanSpans (hlScan src)))
-    (n (strLen src))
-    (mut i 0)
-    (mut p 0)
-    (mut ok 1)
-  )
+  {
+    (let sp (hlScanSpans (hlScan src)))
+    (let n (strLen src))
+    (let mut i 0)
+    (let mut p 0)
+    (let mut ok 1)
+
     {
       (while (< i (vecLen sp))
         {
-          (let ((s (vecGet sp i)))
+          { (let s (vecGet sp i))
             {
               (set ok (if (== (hlSpanStart s) p)
                 ok
@@ -142,7 +142,7 @@ cat > "$work/reconcile.ax" <<'AXEOF'
               ))
               (set p (hlSpanEnd s))
             }
-          )
+          }
           (set i (+ i 1))
         })
       (if (&& (== ok 1) (== p n))
@@ -150,21 +150,21 @@ cat > "$work/reconcile.ax" <<'AXEOF'
         0
       )
     }
-  )
+  }
 )
 
 (:: sweepLine (-> String Int Int Int))
 
 (fn (sweepLine line acc bad)
-  (let (
-    (n (strLen line))
-    (mut i 0)
-    (mut b bad)
-  )
+  {
+    (let n (strLen line))
+    (let mut i 0)
+    (let mut b bad)
+
     {
       (while (<= i n)
         {
-          (let ((pre (strSlice line 0 i)))
+          { (let pre (strSlice line 0 i))
             {
               (set b (if (== (replParenDepth pre) (replHlDepth pre))
                 b
@@ -179,41 +179,41 @@ cat > "$work/reconcile.ax" <<'AXEOF'
                 (+ b 1000000)
               ))
             }
-          )
+          }
           (set i (+ i 1))
         })
       b
     }
-  )
+  }
 )
 
 (:: sweepFile (-> String Int))
 
 ;@axiom:effect(io)
 (fn (sweepFile path)
-  (let (
-    (src (unwrapOr (readFile path) ""))
-    (n (strLen src))
-    (mut i 0)
-    (mut cmp 0)
-    (mut bad 0)
-  )
+  {
+    (let src (unwrapOr (readFile path) ""))
+    (let n (strLen src))
+    (let mut i 0)
+    (let mut cmp 0)
+    (let mut bad 0)
+
     {
       (while (< i n)
-        (let ((stop (match (strFindByte src 10 i)
+        { (let stop (match (strFindByte src 10 i)
             ((None) n)
             ((Some e) e)
-          )))
+          ))
           {
-            (let ((line (strSlice src i (- stop i))))
+            { (let line (strSlice src i (- stop i)))
               {
                 (set bad (sweepLine line 0 bad))
                 (set cmp (+ cmp (+ (strLen line) 1)))
               }
-            )
+            }
             (set i (+ stop 1))
           }
-        ))
+        })
       (writeStr stdout (concat "swept " (concat (fmtI cmp) (concat " mid-edit buffers of " (concat path (concat ", " (concat (fmtI bad) " failures\n")))))))
       (if (> bad 0)
         1
@@ -226,7 +226,7 @@ cat > "$work/reconcile.ax" <<'AXEOF'
         )
       )
     }
-  )
+  }
 )
 
 (:: fmtI (-> Int String))
@@ -242,16 +242,16 @@ cat > "$work/reconcile.ax" <<'AXEOF'
 
 ;@axiom:effect(io)
 (fn (main)
-  (let ((a (sweepFile "self_host/replhl.ax")))
-    (let ((b (sweepFile "self_host/style.ax")))
-      (let ((c (sweepFile "self_host/lexer.ax")))
+  { (let a (sweepFile "self_host/replhl.ax"))
+    { (let b (sweepFile "self_host/style.ax"))
+      { (let c (sweepFile "self_host/lexer.ax"))
         (if (> (+ a (+ b c)) 0)
           (+ a (+ b c))
           42
         )
-      )
-    )
-  )
+      }
+    }
+  }
 )
 AXEOF
 checks=$((checks + 1))

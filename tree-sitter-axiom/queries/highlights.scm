@@ -183,7 +183,6 @@
 ; ---------------------------------------------------------------
 
 ([
-  (let_binding pattern: (identifier) @variable)
   (local_binding name: (identifier) @variable)
   (parallel_binding name: (identifier) @variable)
   (for_expression binder: (identifier) @variable)
@@ -227,8 +226,6 @@
   (handle_expression body: (identifier) @constructor)
   (handle_expression handler: (identifier) @constructor)
   (lambda body: (identifier) @constructor)
-  (let_expression body: (identifier) @constructor)
-  (let_binding value: (identifier) @constructor)
   (local_binding value: (identifier) @constructor)
   (constructor_field value: (identifier) @constructor)
   (list_literal element: (identifier) @constructor)
@@ -269,8 +266,6 @@
   (handle_expression body: (identifier) @variable)
   (handle_expression handler: (identifier) @variable)
   (lambda body: (identifier) @variable)
-  (let_expression body: (identifier) @variable)
-  (let_binding value: (identifier) @variable)
   (local_binding value: (identifier) @variable)
   (constructor_field value: (identifier) @variable)
   (list_literal element: (identifier) @variable)

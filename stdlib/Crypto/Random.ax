@@ -77,29 +77,33 @@
 (fn (rndrFill p n)
   (if (== rndrPresent 0)
     (cryptoErr cryptoEntropyUnavailable "the CPU has no RNDR register (FEAT_RNG)" "randomFill")
-    (let (
-      (mut off 0)
-      (mut tries 0)
-    )
+    {
+      (let mut off 0)
+      (let mut tries 0)
       {
         (while (&& (< off n) (< tries 64))
-          (let ((w (rndrWord)))
+          {
+            (let w (rndrWord))
             (if (== w 0)
               (set tries (+ tries 1))
               {
                 (set tries 0)
-                (let ((take
-                  (if (> (- n off) 8)
-                    8
-                    (- n off))))
+                {
+                  (let take
+                    (if (> (- n off) 8)
+                      8
+                      (- n off)))
                   (for i in 0..take
-                    (__store8 p (+ off i) (& (>> w (* 8 i)) 255))))
+                    (__store8 p (+ off i) (& (>> w (* 8 i)) 255)))
+                }
                 (set off (+ off 8))
-              })))
+              })
+          })
         (if (< off n)
           (cryptoErr cryptoEntropyFailed "RNDR failed 64 times in a row" "randomFill")
           (Ok 0))
-      })))
+      }
+    }))
 
 ;; Fill `n` bytes at `p` with secure random bytes. The low-level entry
 ;; every other function here and every key generator uses. On `Err` the
@@ -145,25 +149,30 @@
 (pub fn (secureRandomBytes n)
   (if (< n 0)
     (cryptoLengthErr "a negative byte count" "secureRandomBytes")
-    (let ((s (bytesNew n)))
+    {
+      (let s (bytesNew n))
       (match (randomFill (strData s) n)
         ((Ok _) (Ok s))
-        ((Err e) (Err e))))))
+        ((Err e) (Err e)))
+    }))
 
 ;; A uniformly random 64-bit word (any Int, negative included).
 (pub :: randomWord (Result Int Error))
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (pub fn (randomWord)
-  (let ((b (memAlloc 8)))
+  {
+    (let b (memAlloc 8))
     (match (randomFill b 8)
       ((Ok _) (Ok (ld64le b 0)))
-      ((Err e) (Err e)))))
+      ((Err e) (Err e)))
+  })
 
 ; The smallest all-ones mask covering `x`: 2^k - 1 >= x.
 (:: coverMask (-> Int Int))
 (fn (coverMask x)
-  (let ((mut m x))
+  {
+    (let mut m x)
     {
       (set m (| m (>> m 1)))
       (set m (| m (>> m 2)))
@@ -172,7 +181,8 @@
       (set m (| m (>> m 16)))
       (set m (| m (>> m 32)))
       m
-    }))
+    }
+  })
 
 ; Draw below `bound` from a buffer of `k` random words at `buf`,
 ; refilling it when used up. Rejection sampling: mask a word down to
@@ -186,10 +196,9 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(entropy)
 (fn (belowFrom st bound mask k)
-  (let (
-    (mut r -1)
-    (mut failed 0)
-  )
+  {
+    (let mut r -1)
+    (let mut failed 0)
     {
       (while (&& (< r 0) (== failed 0))
         {
@@ -200,28 +209,33 @@
                 (set failed 1)
               )))
           (if (== failed 0)
-            (let ((w (& (ld64le (__load64 st 0) (* 8 (__load64 st 2))) mask)))
+            {
+              (let w (& (ld64le (__load64 st 0) (* 8 (__load64 st 2))) mask))
               {
                 (__store64 st 2 (+ (__load64 st 2) 1))
                 (if (< w bound)
                   (set r w))
-              }))
+              }
+            })
         })
       r
-    }))
+    }
+  })
 
 ; A three-word draw state over a fresh buffer of `k` words, marked
 ; used up so the first draw fills it.
 (:: drawState (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (drawState k)
-  (let ((st (memAlloc 24)))
+  {
+    (let st (memAlloc 24))
     {
       (__store64 st 0 (memAlloc (* 8 k)))
       (__store64 st 1 k)
       (__store64 st 2 k)
       st
-    }))
+    }
+  })
 
 ; Wipe and forget a draw state's buffer: the words it holds decided
 ; what was drawn.
@@ -237,14 +251,18 @@
 (pub fn (randomBelow bound)
   (if (< bound 1)
     (cryptoErr cryptoInvalidLength "the bound must be at least 1" "randomBelow")
-    (let ((st (drawState 2)))
-      (let ((r (belowFrom st bound (& (coverMask (- bound 1)) 9223372036854775807) 2)))
+    {
+      (let st (drawState 2))
+      {
+        (let r (belowFrom st bound (& (coverMask (- bound 1)) 9223372036854775807) 2))
         {
           (drawDone st)
           (if (< r 0)
             (cryptoErr cryptoEntropyFailed "the kernel entropy call failed" "randomBelow")
             (Ok r))
-        }))))
+        }
+      }
+    }))
 
 ;; A uniformly random Int in lo..hi-1. `hi` must be above `lo`, and the
 ;; range must fit in an Int.
@@ -254,12 +272,14 @@
 (pub fn (randomRange lo hi)
   (if (<= hi lo)
     (cryptoErr cryptoInvalidLength "the range is empty" "randomRange")
-    (let ((span (- hi lo)))
+    {
+      (let span (- hi lo))
       (if (< span 1)
         (cryptoErr cryptoLimitExceeded "the range is wider than an Int" "randomRange")
         (match (randomBelow span)
           ((Ok r) (Ok (+ lo r)))
-          ((Err e) (Err e)))))))
+          ((Err e) (Err e))))
+    }))
 
 ;; Shuffle `v` in place into a uniformly random order (Fisher-Yates:
 ;; position i swaps with a uniform choice among 0..i). Answers `v`'s
@@ -269,30 +289,34 @@
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (pub fn (randomShuffle v)
-  (let (
-    (n (vecLen v))
-    (st (drawState 32))
-    (mut i (- (vecLen v) 1))
-    (mut failed 0)
-  )
+  {
+    (let n (vecLen v))
+    (let st (drawState 32))
+    (let mut i (- (vecLen v) 1))
+    (let mut failed 0)
     {
       (while (&& (> i 0) (== failed 0))
-        (let ((j (belowFrom st (+ i 1) (& (coverMask i) 9223372036854775807) 32)))
+        {
+          (let j (belowFrom st (+ i 1) (& (coverMask i) 9223372036854775807) 32))
           (if (< j 0)
             (set failed 1)
             {
-              (let ((t (vecGet v i)))
+              {
+                (let t (vecGet v i))
                 {
                   (vecSet v i (vecGet v j))
                   (vecSet v j t)
-                })
+                }
+              }
               (set i (- i 1))
-            })))
+            })
+        })
       (drawDone st)
       (if (== failed 0)
         (Ok n)
         (cryptoErr cryptoEntropyFailed "the kernel entropy call failed" "randomShuffle"))
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Tokens. An unguessable identifier is its entropy; the text is only

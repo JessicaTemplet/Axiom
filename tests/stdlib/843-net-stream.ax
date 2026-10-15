@@ -76,11 +76,11 @@
                 ; small writes go at once, so a non-blocking read
                 ; after one finds its bytes
                 ((Ok s)
-                  (let (
-                    (_ (tcpSetNoDelay c true))
-                    (_ (tcpSetNoDelay s true))
-                  )
-                    (Ok (Pair lsn c s)))
+                  {
+                    (let _ (tcpSetNoDelay c true))
+                    (let _ (tcpSetNoDelay s true))
+                    (Ok (Pair :lsn lsn :client c :server s))
+                  }
                 ))
             ))
         ))
@@ -109,97 +109,118 @@
 (:: lines (-> Pair Int))
 ;@axiom:effect(io)
 (fn (lines p)
-  (let (
-    (c p.client)
-    (s p.server)
-  )
+  {
+    (let c p.client)
+    (let s p.server)
     {
-      (let ((_ (send c "a\r\nb\n")))
-        ())
+      {
+        (let _ (send c "a\r\nb\n"))
+        ()
+      }
       ; CRLF and LF both end a line; the terminator is not answered
       (say (strEq (lineOf (tcpReadLine s 100)) "a") "a CRLF line")
       (say (strEq (lineOf (tcpReadLine s 100)) "b") "an LF line")
-      (let ((_ (send c "one\ntwo\n")))
-        ())
+      {
+        (let _ (send c "one\ntwo\n"))
+        ()
+      }
       ; two lines in one write: the second comes from the buffer
       (say (strEq (lineOf (tcpReadLine s 100)) "one") "the first of two lines")
       (say (== (tcpBuffered s) 4) "the second waits in the buffer")
       (say (strEq (lineOf (tcpReadLine s 100)) "two") "the second line")
       (say (== (tcpBuffered s) 0) "the buffer is empty again")
-      (let ((_ (send c "abcdefghij\n")))
-        ())
+      {
+        (let _ (send c "abcdefghij\n"))
+        ()
+      }
       ; a line longer than the limit is refused and kept
       (say (strEq (lineOf (tcpReadLine s 4)) "InvalidData") "a line past the limit is InvalidData")
       (say (strEq (lineOf (tcpReadLine s 100)) "abcdefghij") "and its bytes are still there")
-      (let ((_ (send c "abcd\r\n")))
-        ())
+      {
+        (let _ (send c "abcd\r\n"))
+        ()
+      }
       (say (strEq (lineOf (tcpReadLine s 4)) "abcd") "a line of exactly the limit")
       ; a timeout in the middle of a line keeps what arrived
       (say (isOk (tcpSetReadTimeout s (Some 100))) "a 100 ms read timeout")
-      (let ((_ (send c "par")))
-        ())
+      {
+        (let _ (send c "par"))
+        ()
+      }
       (say (strEq (lineOf (tcpReadLine s 100)) "TimedOut") "half a line times out")
-      (let ((_ (send c "tial\n")))
-        ())
+      {
+        (let _ (send c "tial\n"))
+        ()
+      }
       (say (strEq (lineOf (tcpReadLine s 100)) "partial") "and the line completes later")
       (say (isOk (tcpSetReadTimeout s None)) "the timeout is cleared")
       ; non-blocking: half a line is kept and the read would block
       (say (isOk (tcpSetNonBlocking s true)) "non-blocking")
-      (let ((_ (send c "hal")))
-        ())
+      {
+        (let _ (send c "hal"))
+        ()
+      }
       (say (== (waitReadable s) 1) "a poller sees the half")
       (say (strEq (lineOf (tcpReadLine s 100)) "WouldBlock") "half a line would block")
       (say (== (tcpBuffered s) 3) "the half is buffered")
-      (let ((_ (send c "f\n")))
-        ())
+      {
+        (let _ (send c "f\n"))
+        ()
+      }
       (say (== (waitReadable s) 1) "a poller sees the rest")
       (say (strEq (lineOf (tcpReadLine s 100)) "half") "and completes")
       (say (strEq (lineOf (tcpReadLine s 100)) "WouldBlock")
         "an empty non-blocking stream would block")
       (say (isOk (tcpSetNonBlocking s false)) "blocking again")
-      (let ((_ (send c "tail")))
-        ())
+      {
+        (let _ (send c "tail"))
+        ()
+      }
       ; the last line need not end in a newline
       (say (isOk (tcpShutdown c ShutdownWrite)) "the client shuts its writing half")
       (say (strEq (lineOf (tcpReadLine s 100)) "tail") "an unterminated last line")
       (say (strEq (lineOf (tcpReadLine s 100)) "<eof>") "then end of stream")
       0
-    }))
+    }
+  })
 
 (:: exact (-> Pair Int))
 ;@axiom:effect(io)
 (fn (exact p)
-  (let (
-    (c p.client)
-    (s p.server)
-  )
+  {
+    (let c p.client)
+    (let s p.server)
     {
-      (let ((_ (send c "12345678")))
-        ())
+      {
+        (let _ (send c "12345678"))
+        ()
+      }
       (say (strEq (textOf (tcpReadExact s 3)) "123") "tcpReadExact 3")
       (say (strEq (textOf (tcpPeek s 2)) "45") "tcpPeek answers without consuming")
       (say (strEq (textOf (tcpPeek s 64)) "45") "a second peek answers the buffered bytes")
       (say (strEq (textOf (tcpReadExact s 5)) "45678") "tcpReadExact reads what was peeked")
-      (let ((_ (send c "ab")))
-        ())
+      {
+        (let _ (send c "ab"))
+        ()
+      }
       (say (isOk (tcpShutdown c ShutdownWrite)) "the client shuts its writing half")
       (say (strEq (textOf (tcpReadExact s 3)) "UnexpectedEof") "a short stream is UnexpectedEof")
       (say (strEq (textOf (tcpReadAll s)) "ab") "and keeps what did arrive")
       0
-    }))
+    }
+  })
 
 ; A non-blocking writer fills the peer's buffer: a write answers part of
 ; its bytes, or would block, and never loses count.
 (:: fill (-> Pair Int))
 ;@axiom:effect(io)
 (fn (fill p)
-  (let (
-    (c p.client)
-    (chunk (strAlloc 65536))
-    (mut stop "")
-    (mut sent 0)
-    (mut tries 0)
-  )
+  {
+    (let c p.client)
+    (let chunk (strAlloc 65536))
+    (let mut stop "")
+    (let mut sent 0)
+    (let mut tries 0)
     {
       (say (isOk (tcpSetNonBlocking c true)) "a non-blocking writer")
       (while (&& (== (strLen stop) 0) (< tries 100000))
@@ -216,12 +237,14 @@
       (say (strEq stop "WouldBlock") "a full buffer would block")
       (say (> sent 0) "after some bytes went")
       0
-    }))
+    }
+  })
 
 (:: options (-> Pair Int))
 ;@axiom:effect(io)
 (fn (options p)
-  (let ((s p.server))
+  {
+    (let s p.server)
     {
       (say (isOk (tcpSetReadTimeout s (Some 2000))) "set a read timeout")
       (say
@@ -278,7 +301,8 @@
           (_ false))
         "no pending listener error")
       0
-    }))
+    }
+  })
 
 (:: connecting Int)
 ;@axiom:effect(io)
@@ -310,9 +334,11 @@
               "tcpListen refuses a bad address")
             (say (strEq (outcome (tcpListenAddr bound)) "AddrInUse")
               "a second listener on the port is AddrInUse")
-            (let ((_ (tcpListenerClose lsn)))
+            {
+              (let _ (tcpListenerClose lsn))
               (say (strEq (outcome (tcpConnectAddr bound)) "ConnectionRefused")
-                "a closed port is ConnectionRefused"))
+                "a closed port is ConnectionRefused")
+            }
           }
         ))
     )))
@@ -328,8 +354,10 @@
       ((Err e) (say false "IPv6 pair"))
       ((Ok p)
         {
-          (let ((_ (send p.client "over six\n")))
-            ())
+          {
+            (let _ (send p.client "over six\n"))
+            ()
+          }
           (say (strEq (lineOf (tcpReadLine p.server 100)) "over six") "a line over IPv6")
         }
       ))

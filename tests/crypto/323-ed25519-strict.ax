@@ -64,29 +64,31 @@
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (main)
-  (let (
-    (t (tallyNew "ed25519-strict"))
-    (api (tallyNew "ed25519-api"))
-  )
+  {
+    (let t (tallyNew "ed25519-strict"))
+    (let api (tallyNew "ed25519-api"))
     {
       (for line in (katLines "ed25519-strict.txt")
-        (let ((f (katFields line)))
-          (let (
-            (op (katText f 0))
-            (want (katBytes f 4))
-          )
-            (let ((label (concat op (concat " " (katText f 1)))))
+        {
+          (let f (katFields line))
+          {
+            (let op (katText f 0))
+            (let want (katBytes f 4))
+            {
+              (let label (concat op (concat " " (katText f 1))))
               (if (strEq op "pk")
                 (tallyBytes t want (verdict (ed25519PublicKeyFromBytes (katBytes f 1))) label)
                 (strEq op "sig")
                 (tallyBytes t want (verdict (ed25519SignatureFromBytes (katBytes f 1))) label)
                 (strEq op "verify")
-                (let (
-                  (pk (katBytes f 1))
-                  (msg (katBytes f 2))
-                  (sig (katBytes f 3))
-                )
-                  (let ((direct (ed25519Verify (Ed25519PublicKey pk) msg (Ed25519Signature sig))))
+                {
+                  (let pk (katBytes f 1))
+                  (let msg (katBytes f 2))
+                  (let sig (katBytes f 3))
+                  {
+                    (let direct
+                      (ed25519Verify (Ed25519PublicKey :bytes pk) msg
+                        (Ed25519Signature :bytes sig)))
                     {
                       (tallyBytes t want (strFromBool direct) label)
                       ; the strict path gives the same verdict
@@ -100,8 +102,13 @@
                                 ((Ok s) (ed25519Verify k msg s)))
                             )))
                         (concat label " (through the decoders)"))
-                    }))
-                (tallyCheck t false (concat "unknown operation " op)))))))
+                    }
+                  }
+                }
+                (tallyCheck t false (concat "unknown operation " op)))
+            }
+          }
+        })
       ; lengths
       (tallyCheck api (failsWith (ed25519PublicKeyFromBytes (bytesNew 31)) cryptoInvalidLength)
         "a 31-byte public key")
@@ -111,22 +118,22 @@
         "a 63-byte signature")
       (tallyCheck api (failsWith (ed25519SignatureFromBytes (bytesNew 65)) cryptoInvalidLength)
         "a 65-byte signature")
-      (let ((short (orDie (secretFromString (bytesNew 31)) "secretFromString")))
+      {
+        (let short (orDie (secretFromString (bytesNew 31)) "secretFromString"))
         {
           (tallyCheck api (failsWith (ed25519KeyFromSecret short) cryptoInvalidLength)
             "a 31-byte seed")
           (secretWipe short)
-        })
+        }
+      }
       ; generate, sign, verify, export and restore
-      (let (
-        (k (orDie ed25519KeyGenerate "ed25519KeyGenerate"))
-        (other (orDie ed25519KeyGenerate "ed25519KeyGenerate"))
-      )
-        (let (
-          (pk (ed25519PublicKey k))
-          (sig (ed25519Sign k "hello"))
-          (empty (ed25519Sign k ""))
-        )
+      {
+        (let k (orDie ed25519KeyGenerate "ed25519KeyGenerate"))
+        (let other (orDie ed25519KeyGenerate "ed25519KeyGenerate"))
+        {
+          (let pk (ed25519PublicKey k))
+          (let sig (ed25519Sign k "hello"))
+          (let empty (ed25519Sign k ""))
           {
             (tallyCheck api (ed25519Verify pk "hello" sig) "a generated key's signature verifies")
             (tallyCheck api (ed25519Verify pk "" empty)
@@ -137,20 +144,22 @@
             (tallyCheck api
               (strEq (ed25519SignatureBytes sig) (ed25519SignatureBytes (ed25519Sign k "hello")))
               "signing is deterministic")
-            (tallyCheck api (! (ed25519Verify (Ed25519PublicKey (bytesNew 31)) "hello" sig))
+            (tallyCheck api (! (ed25519Verify (Ed25519PublicKey :bytes (bytesNew 31)) "hello" sig))
               "a forged 31-byte public key")
             (tallyCheck api
               (!
                 (ed25519Verify pk "hello"
-                  (Ed25519Signature (strSlice (ed25519SignatureBytes sig) 0 63))))
+                  (Ed25519Signature :bytes (strSlice (ed25519SignatureBytes sig) 0 63))))
               "a forged 63-byte signature")
             (tallyCheck api
               (!
                 (ed25519Verify pk "hello"
-                  (Ed25519Signature (concat (ed25519SignatureBytes sig) "\0"))))
+                  (Ed25519Signature :bytes (concat (ed25519SignatureBytes sig) "\0"))))
               "a forged 65-byte signature")
-            (let ((seed (orDie (ed25519KeyExport k) "ed25519KeyExport")))
-              (let ((back (orDie (ed25519KeyFromSecret seed) "ed25519KeyFromSecret")))
+            {
+              (let seed (orDie (ed25519KeyExport k) "ed25519KeyExport"))
+              {
+                (let back (orDie (ed25519KeyFromSecret seed) "ed25519KeyFromSecret"))
                 {
                   (tallyCheck api (== (secretLen seed) 32) "the exported seed is 32 bytes")
                   (tallyBytes api (ed25519PublicKeyBytes pk)
@@ -160,13 +169,18 @@
                     (ed25519SignatureBytes (ed25519Sign back "hello")) "and signs the same")
                   (ed25519KeyWipe back)
                   (secretWipe seed)
-                }))
+                }
+              }
+            }
             (tallyCheck api (isOk (ed25519PublicKeyFromBytes (ed25519PublicKeyBytes pk)))
               "a generated public key decodes strictly")
             (tallyCheck api (isOk (ed25519SignatureFromBytes (ed25519SignatureBytes sig)))
               "a generated signature decodes strictly")
             (ed25519KeyWipe k)
             (ed25519KeyWipe other)
-          }))
+          }
+        }
+      }
       (+ (tallyReport t) (tallyReport api))
-    }))
+    }
+  })

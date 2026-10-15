@@ -270,12 +270,12 @@
 (pub :: keyScanCtrl (-> Int KeyEv))
 (pub fn (keyScanCtrl b)
   (if (|| (== b 13) (== b 10))
-    (KeyEv KEY_ENTER 0 0 1)
+    (KeyEv :kind KEY_ENTER :cp 0 :mods 0 :used 1)
     (if (== b 9)
-      (KeyEv KEY_TAB 0 0 1)
+      (KeyEv :kind KEY_TAB :cp 0 :mods 0 :used 1)
       (if (|| (== b 127) (== b 8))
-        (KeyEv KEY_BACKSPACE 0 0 1)
-        (KeyEv KEY_CTRL (+ b 64) 0 1)))))
+        (KeyEv :kind KEY_BACKSPACE :cp 0 :mods 0 :used 1)
+        (KeyEv :kind KEY_CTRL :cp (+ b 64) :mods 0 :used 1)))))
 
 ; ------------------------------------------------------------------
 ; The offset of a CSI's FINAL byte, given the offset of the byte after
@@ -286,11 +286,10 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: keyCsiEnd (-> String Int Int Int))
 (pub fn (keyCsiEnd src len i0)
-  (let (
-    (mut i i0)
-    (mut done 0)
-    (mut ans 0)
-  )
+  {
+    (let mut i i0)
+    (let mut done 0)
+    (let mut ans 0)
     {
       ; parameter bytes
       (while (&& (< i len) (&& (>= (strByte src i) 48) (<= (strByte src i) 63)))
@@ -310,7 +309,8 @@
             (set ans i)
             (set ans (- 0 2)))))
       ans
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; The `idx`'th semicolon-separated decimal parameter of the CSI whose
@@ -330,15 +330,15 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: keyCsiParam (-> String Int Int Int Int))
 (pub fn (keyCsiParam src len i0 idx)
-  (let (
-    (mut i i0)
-    (mut seen 0)
-    (mut val (- 0 1))
-    (mut done 0)
-  )
+  {
+    (let mut i i0)
+    (let mut seen 0)
+    (let mut val (- 0 1))
+    (let mut done 0)
     {
       (while (&& (== done 0) (&& (< i len) (&& (>= (strByte src i) 48) (<= (strByte src i) 63))))
-        (let ((b (strByte src i)))
+        {
+          (let b (strByte src i))
           (if (== b 59)
             {
               (set seen (+ seen 1))
@@ -361,9 +361,11 @@
               ; `:` or a private marker - the number, if any, ended
               (if (== seen idx)
                 (set done 1)
-                (set i (+ i 1)))))))
+                (set i (+ i 1)))))
+        })
       val
-    }))
+    }
+  })
 
 ;; A CSI whose first parameter byte is `<`, `=`, `>` or `?` is a
 ;; private form: a mouse report, a device-attributes reply, a mode
@@ -373,8 +375,10 @@
 (pub fn (keyCsiPrivate src len i0)
   (if (>= i0 len)
     false
-    (let ((b (strByte src i0)))
-      (&& (>= b 60) (<= b 63)))))
+    {
+      (let b (strByte src i0))
+      (&& (>= b 60) (<= b 63))
+    }))
 
 ;; The key a `~`-final CSI names, from its first parameter.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
@@ -443,51 +447,63 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: keyFromCsi (-> String Int Int Int KeyEv))
 (pub fn (keyFromCsi src len off fin)
-  (let (
-    (used (+ (- fin off) 1))
-    (i0 (+ off 2))
-    (final (strByte src fin))
-  )
+  {
+    (let used (+ (- fin off) 1))
+    (let i0 (+ off 2))
+    (let final (strByte src fin))
     (if (keyCsiPrivate src len i0)
-      (KeyEv KEY_NONE 0 0 used)
-      (let (
-        (p0 (keyCsiParam src len i0 0))
-        (p1 (keyCsiParam src len i0 1))
-      )
+      (KeyEv :kind KEY_NONE :cp 0 :mods 0 :used used)
+      {
+        (let p0 (keyCsiParam src len i0 0))
+        (let p1 (keyCsiParam src len i0 1))
         (if (== final 126)
           ; `~`: parameter 0 names the key, parameter 1 modifies it.
-          (let ((fnum
-            (keyTildeFn
-              (if (< p0 0)
-                1
-                p0))))
+          {
+            (let fnum
+              (keyTildeFn
+                (if (< p0 0)
+                  1
+                  p0)))
             (if (> fnum 0)
-              (KeyEv KEY_FN fnum
-                (if (> p1 0)
-                  (- p1 1)
-                  0)
-                used)
               (KeyEv
-                (keyTildeKind
-                  (if (< p0 0)
-                    1
-                    p0))
-                0
-                (if (> p1 0)
-                  (- p1 1)
-                  0)
-                used)))
-          (let ((k (keyFinalKind final)))
+                :kind KEY_FN
+                :cp fnum
+                :mods
+                  (if (> p1 0)
+                    (- p1 1)
+                    0)
+                :used used)
+              (KeyEv
+                :kind
+                  (keyTildeKind
+                    (if (< p0 0)
+                      1
+                      p0))
+                :cp 0
+                :mods
+                  (if (> p1 0)
+                    (- p1 1)
+                    0)
+                :used used))
+          }
+          {
+            (let k (keyFinalKind final))
             (if (== k KEY_NONE)
               ; Well-formed and unbound: consumed whole, never typed.
-              (KeyEv KEY_NONE 0 0 used)
-              (KeyEv k 0
-                (if (> p1 0)
-                  (- p1 1)
-                  (if (> p0 0)
-                    (- p0 1)
-                    0))
-                used))))))))
+              (KeyEv :kind KEY_NONE :cp 0 :mods 0 :used used)
+              (KeyEv
+                :kind k
+                :cp 0
+                :mods
+                  (if (> p1 0)
+                    (- p1 1)
+                    (if (> p0 0)
+                      (- p0 1)
+                      0))
+                :used used))
+          })
+      })
+  })
 
 ; ------------------------------------------------------------------
 ; ESC O <final>: an arrow from a terminal left in application-cursor
@@ -503,14 +519,18 @@
 (pub :: keyFromSs3 (-> String Int Int KeyEv))
 (pub fn (keyFromSs3 src len off)
   (if (>= (+ off 2) len)
-    (KeyEv KEY_MORE 0 0 0)
-    (let ((f (strByte src (+ off 2))))
+    (KeyEv :kind KEY_MORE :cp 0 :mods 0 :used 0)
+    {
+      (let f (strByte src (+ off 2)))
       (if (&& (>= f 80) (<= f 83))
-        (KeyEv KEY_FN (+ (- f 80) 1) 0 3)
-        (let ((k (keyFinalKind f)))
+        (KeyEv :kind KEY_FN :cp (+ (- f 80) 1) :mods 0 :used 3)
+        {
+          (let k (keyFinalKind f))
           (if (== k KEY_NONE)
-            (KeyEv KEY_NONE 0 0 3)
-            (KeyEv k 0 0 3)))))))
+            (KeyEv :kind KEY_NONE :cp 0 :mods 0 :used 3)
+            (KeyEv :kind k :cp 0 :mods 0 :used 3))
+        })
+    }))
 
 ; ------------------------------------------------------------------
 ; The offset PAST the terminator of an OSC/DCS/PM/APC string, or -1
@@ -527,14 +547,14 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: keyStrEnd (-> String Int Int Int))
 (pub fn (keyStrEnd src len i0)
-  (let (
-    (mut i i0)
-    (mut ans (- 0 1))
-    (mut done 0)
-  )
+  {
+    (let mut i i0)
+    (let mut ans (- 0 1))
+    (let mut done 0)
     {
       (while (&& (== done 0) (< i len))
-        (let ((b (strByte src i)))
+        {
+          (let b (strByte src i))
           (if (== b 7)
             {
               (set ans (+ i 1))
@@ -553,11 +573,13 @@
                   (set ans (- 0 1))
                   (set done 1)
                 }
-                (set i (+ i 1)))))))
+                (set i (+ i 1)))))
+        })
       (if (&& (== done 0) (> (- i i0) keyStrMax))
         (- 0 2)
         ans)
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; A lead byte >= 128.
@@ -576,14 +598,16 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: keyScanUtf8 (-> String Int Int KeyEv))
 (pub fn (keyScanUtf8 src len off)
-  (let ((need (utf8SeqLen (strByte src off))))
+  {
+    (let need (utf8SeqLen (strByte src off)))
     (if (> (+ off need) len)
-      (KeyEv KEY_MORE 0 0 0)
+      (KeyEv :kind KEY_MORE :cp 0 :mods 0 :used 0)
       (match (utf8DecodeAt (strSlice src off need) 0)
         ; A stray continuation byte or an 11111xxx lead: advance
         ; one, the same rule Utf8.ax gives, for the same reason.
-        ((None) (KeyEv KEY_NONE 0 0 1))
-        ((Some cp) (KeyEv KEY_CHAR cp 0 need))))))
+        ((None) (KeyEv :kind KEY_NONE :cp 0 :mods 0 :used 1))
+        ((Some cp) (KeyEv :kind KEY_CHAR :cp cp :mods 0 :used need))))
+  })
 
 ; ------------------------------------------------------------------
 ; THE DECODER. src, valid length, offset -> the event.
@@ -595,15 +619,17 @@
 (pub :: keyScan (-> String Int Int KeyEv))
 (pub fn (keyScan src len off)
   (if (>= off len)
-    (KeyEv KEY_MORE 0 0 0)
-    (let ((b (strByte src off)))
+    (KeyEv :kind KEY_MORE :cp 0 :mods 0 :used 0)
+    {
+      (let b (strByte src off))
       (if (== b 27)
         (keyScanEsc src len off)
         (if (|| (< b 32) (== b 127))
           (keyScanCtrl b)
           (if (< b 128)
-            (KeyEv KEY_CHAR b 0 1)
-            (keyScanUtf8 src len off)))))))
+            (KeyEv :kind KEY_CHAR :cp b :mods 0 :used 1)
+            (keyScanUtf8 src len off))))
+    }))
 
 ;; Decode the key that starts with the ESC at `off`: a CSI or SS3
 ;; sequence, a control string, Alt with a key, or a lone Escape.
@@ -611,8 +637,9 @@
 (pub :: keyScanEsc (-> String Int Int KeyEv))
 (pub fn (keyScanEsc src len off)
   (if (>= (+ off 1) len)
-    (KeyEv KEY_MORE 0 0 0)
-    (let ((n (strByte src (+ off 1))))
+    (KeyEv :kind KEY_MORE :cp 0 :mods 0 :used 0)
+    {
+      (let n (strByte src (+ off 1)))
       (if (== n 91)
         (keyScanCsi src len off)
         (if (== n 79)
@@ -620,44 +647,51 @@
           (if (|| (== n 93) (|| (== n 80) (|| (== n 94) (== n 95))))
             (keyScanStr src len off)
             (if (== n 27)
-              (KeyEv KEY_ESCAPE 0 0 1)
-              (keyScanAlt src len off))))))))
+              (KeyEv :kind KEY_ESCAPE :cp 0 :mods 0 :used 1)
+              (keyScanAlt src len off)))))
+    }))
 
 ;; Decode the CSI escape sequence at `off`, or answer `KEY_MORE` when
 ;; it is not complete.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: keyScanCsi (-> String Int Int KeyEv))
 (pub fn (keyScanCsi src len off)
-  (let ((fin (keyCsiEnd src len (+ off 2))))
+  {
+    (let fin (keyCsiEnd src len (+ off 2)))
     (if (== fin (- 0 1))
-      (KeyEv KEY_MORE 0 0 0)
+      (KeyEv :kind KEY_MORE :cp 0 :mods 0 :used 0)
       ; Malformed: drop the ESC alone and resync on the next byte.
       ; Swallowing the run would hide a real keystroke inside it.
       (if (== fin (- 0 2))
-        (KeyEv KEY_NONE 0 0 1)
-        (keyFromCsi src len off fin)))))
+        (KeyEv :kind KEY_NONE :cp 0 :mods 0 :used 1)
+        (keyFromCsi src len off fin)))
+  })
 
 ;; Skip the control string (OSC, DCS, APC) at `off`, answering
 ;; `KEY_NONE` with its length, or `KEY_MORE` when it is not complete.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: keyScanStr (-> String Int Int KeyEv))
 (pub fn (keyScanStr src len off)
-  (let ((e (keyStrEnd src len (+ off 2))))
+  {
+    (let e (keyStrEnd src len (+ off 2)))
     (if (== e (- 0 1))
-      (KeyEv KEY_MORE 0 0 0)
+      (KeyEv :kind KEY_MORE :cp 0 :mods 0 :used 0)
       (if (== e (- 0 2))
-        (KeyEv KEY_NONE 0 0 1)
-        (KeyEv KEY_NONE 0 0 (- e off))))))
+        (KeyEv :kind KEY_NONE :cp 0 :mods 0 :used 1)
+        (KeyEv :kind KEY_NONE :cp 0 :mods 0 :used (- e off))))
+  })
 
 ;; ESC <anything else> is Alt-that-key: decode the key at off+1 and OR
 ;; MOD_ALT into it. `used` grows by the ESC.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: keyScanAlt (-> String Int Int KeyEv))
 (pub fn (keyScanAlt src len off)
-  (let ((inner (keyScan src len (+ off 1))))
+  {
+    (let inner (keyScan src len (+ off 1)))
     (if (== inner.kind KEY_MORE)
-      (KeyEv KEY_MORE 0 0 0)
-      (KeyEv inner.kind inner.cp (| inner.mods MOD_ALT) (+ inner.used 1)))))
+      (KeyEv :kind KEY_MORE :cp 0 :mods 0 :used 0)
+      (KeyEv :kind inner.kind :cp inner.cp :mods (| inner.mods MOD_ALT) :used (+ inner.used 1)))
+  })
 
 ; ------------------------------------------------------------------
 ; What a KEY_MORE prefix means once nothing more has arrived.
@@ -679,7 +713,7 @@
 (pub :: keyResolve (-> String Int Int KeyEv))
 (pub fn (keyResolve src len off)
   (if (>= off len)
-    (KeyEv KEY_NONE 0 0 1)
+    (KeyEv :kind KEY_NONE :cp 0 :mods 0 :used 1)
     (if (&& (== (strByte src off) 27) (>= (+ off 1) len))
-      (KeyEv KEY_ESCAPE 0 0 1)
-      (KeyEv KEY_NONE 0 0 (- len off)))))
+      (KeyEv :kind KEY_ESCAPE :cp 0 :mods 0 :used 1)
+      (KeyEv :kind KEY_NONE :cp 0 :mods 0 :used (- len off)))))

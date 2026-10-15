@@ -47,7 +47,7 @@
 ;@axiom:effect(entropy)
 (pub fn (obfuscationKeyGenerate)
   (match (secretBlockRandom obfuscationKind 32)
-    ((Ok h) (Ok (ObfuscationKey h)))
+    ((Ok h) (Ok (ObfuscationKey :slot h)))
     ((Err e) (Err e))))
 
 ;; Copy a 32-byte secret into a master key, leaving the secret live.
@@ -57,7 +57,7 @@
   (if (!= (secretLen s) 32)
     (cryptoLengthErr "an obfuscation key is 32 bytes" "obfuscationKeyFromSecret")
     (match (secretBlockFrom obfuscationKind (secretAddr s) 32)
-      ((Ok h) (Ok (ObfuscationKey h)))
+      ((Ok h) (Ok (ObfuscationKey :slot h)))
       ((Err e) (Err e)))))
 
 ;; Reconstruct a master key from two 32-byte XOR shares directly in the
@@ -72,12 +72,14 @@
     (match (secretBlockNew obfuscationKind 32)
       ((Err e) (Err e))
       ((Ok h)
-        (let ((p (secretBlockAddr obfuscationKind h)))
+        {
+          (let p (secretBlockAddr obfuscationKind h))
           {
             (for i in 0..32
               (__store8 p i (^ (strByte a i) (strByte b i))))
-            (Ok (ObfuscationKey h))
-          })
+            (Ok (ObfuscationKey :slot h))
+          }
+        }
       ))))
 
 ;; Erase and free the master key. Later use stops with status 85.
@@ -95,22 +97,25 @@
   (match (secretFromAddr (secretBlockAddr obfuscationKind k.slot) 32)
     ((Err e) (Err e))
     ((Ok master)
-      (let ((derived (hkdfSha256 master nonce
-                       (concat "Axiom.Obfuscate.v1\0"
-                         (concat (bytesU64Be (strLen context)) context))
-                       32)))
+      {
+        (let derived
+          (hkdfSha256 master nonce
+            (concat "Axiom.Obfuscate.v1\0" (concat (bytesU64Be (strLen context)) context)) 32))
         {
           (secretWipe master)
           (match derived
             ((Err e) (Err e))
             ((Ok s)
-              (let ((r (chacha20Poly1305KeyFromSecret s)))
+              {
+                (let r (chacha20Poly1305KeyFromSecret s))
                 {
                   (secretWipe s)
                   r
-                })
+                }
+              }
             ))
-        })
+        }
+      }
     )))
 
 (:: obfuscationAad (-> String String String))
@@ -130,20 +135,26 @@
     (match aeadNonceRandom
       ((Err e) (Err e))
       ((Ok nonce)
-        (let ((nb (aeadNonceBytes nonce)))
+        {
+          (let nb (aeadNonceBytes nonce))
           (match (obfuscationDerive k nb context)
             ((Err e) (Err e))
             ((Ok derived)
-              (let ((prefix (concat obfuscationHeader nb)))
-                (let ((r (chacha20Poly1305Seal derived nonce (obfuscationAad prefix context)
-                           plaintext)))
+              {
+                (let prefix (concat obfuscationHeader nb))
+                {
+                  (let r
+                    (chacha20Poly1305Seal derived nonce (obfuscationAad prefix context) plaintext))
                   {
                     (chacha20Poly1305KeyWipe derived)
                     (match r
                       ((Err e) (Err e))
                       ((Ok sealed) (Ok (concat prefix sealed))))
-                  }))
-            )))
+                  }
+                }
+              }
+            ))
+        }
       ))))
 
 ;; Authenticate and open a v1 envelope for `context`. Wrong keys,
@@ -159,20 +170,24 @@
     (if (|| (< (strLen envelope) 36) (! (strEq (strSlice envelope 0 8) obfuscationHeader)))
       (cryptoErr cryptoInvalidEncoding
         "an obfuscation envelope needs a complete v1 header, nonce and tag" "obfuscationOpen")
-      (let ((nb (strSlice envelope 8 12)))
+      {
+        (let nb (strSlice envelope 8 12))
         (match (obfuscationDerive k nb context)
           ((Err e) (Err e))
           ((Ok derived)
-            (let ((r
-              (match (aeadNonceFromBytes nb)
-                ((Err e) (Err e))
-                ((Ok nonce)
-                  (chacha20Poly1305Open derived nonce
-                    (obfuscationAad (strSlice envelope 0 20) context)
-                    (strSlice envelope 20 (- (strLen envelope) 20)))
-                ))))
+            {
+              (let r
+                (match (aeadNonceFromBytes nb)
+                  ((Err e) (Err e))
+                  ((Ok nonce)
+                    (chacha20Poly1305Open derived nonce
+                      (obfuscationAad (strSlice envelope 0 20) context)
+                      (strSlice envelope 20 (- (strLen envelope) 20)))
+                  )))
               {
                 (chacha20Poly1305KeyWipe derived)
                 r
-              })
-          ))))))
+              }
+            }
+          ))
+      })))

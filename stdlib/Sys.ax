@@ -204,13 +204,17 @@
 (:: sysEnvLookup (-> String Int String))
 ;@axiom:effect(io)
 (fn (sysEnvLookup prefix i)
-  (let ((p (sysEnvSlot i)))
+  {
+    (let p (sysEnvSlot i))
     (if (== p 0)
       ""
-      (let ((e (strFromLit p)))
+      {
+        (let e (strFromLit p))
         (if (strStartsWith e prefix)
           (strSlice e (strLen prefix) (- (strLen e) (strLen prefix)))
-          (sysEnvLookup prefix (+ i 1)))))))
+          (sysEnvLookup prefix (+ i 1)))
+      })
+  })
 
 ;; A NULL-terminated copy of the process's own environment vector, in the
 ;; form a child expects.
@@ -223,12 +227,16 @@
 (pub :: sysEnvp Int)
 ;@axiom:effect(io)
 (pub fn (sysEnvp)
-  (let ((n sysEnvCount))
-    (let ((v (memAlloc (* (+ n 1) 8))))
+  {
+    (let n sysEnvCount)
+    {
+      (let v (memAlloc (* (+ n 1) 8)))
       {
         (sysEnvpFill v 0 n)
         v
-      })))
+      }
+    }
+  })
 
 (:: sysEnvpFill (-> Int Int Int Int))
 ;@axiom:effect(io)
@@ -277,7 +285,8 @@
   (sysResult
     "sysSpawn"
     (if (== spawnUsesPosixSpawn 1)
-      (let ((pidbuf (memAlloc 8)))
+      {
+        (let pidbuf (memAlloc 8))
         {
           (memSetWord pidbuf 0 0)
           ; FIVE arguments, not libc's six: the kernel entry point fuses
@@ -286,11 +295,14 @@
           ; on `sysPosixSpawnNum` in the Darwin platform module for what the
           ; six-argument spelling does instead, and why it is nearly
           ; invisible.
-          (let ((rc (__syscall5 sysPosixSpawnNum pidbuf path 0 argv envp)))
+          {
+            (let rc (__syscall5 sysPosixSpawnNum pidbuf path 0 argv envp))
             (if (< rc 0)
               rc
-              (memGetWord pidbuf 0)))
-        })
+              (memGetWord pidbuf 0))
+          }
+        }
+      }
       ; The path is tested BEFORE the fork, and only this backend needs
       ; the test. `posix_spawn` resolves the path in the PARENT and
       ; answers `-ENOENT` without creating a process; here the fork
@@ -308,13 +320,16 @@
       ; and runnable by everyone), and `execve` is the only thing
       ; entitled to decide that, so every other open failure still
       ; forks and asks it.
-      (let ((probe (sysOpenRaw path oRdonly)))
+      {
+        (let probe (sysOpenRaw path oRdonly))
         (if (== probe (- 0 2))
           probe
           {
             (if (>= probe 0)
-              (let ((_ (sysCloseFd probe)))
-                ()))
+              {
+                (let _ (sysCloseFd probe))
+                ()
+              })
             ; Through `sysForkProcess` rather than the raw syscall, because
             ; the test below is `pid == 0` and that is only the child on a
             ; platform where `fork` answers 0 to one of them. Darwin does
@@ -323,7 +338,8 @@
             ; would have the CHILD fall through to `pid` and return into
             ; the caller as a second copy of the driver, which is the one
             ; failure the comment below is guarding against.
-            (let ((pid sysForkProcess))
+            {
+              (let pid sysForkProcess)
               (if (< pid 0)
                 pid
                 (if (== pid 0)
@@ -338,8 +354,10 @@
                     (__syscall1 sysExitNum 127)
                     0
                   }
-                  pid)))
-          })))))
+                  pid))
+            }
+          })
+      })))
 
 ;; Wait for `pid`. `(Ok status)` is the raw wait status; `(Err e)`
 ;; carries the errno of a wait that could not be performed.
@@ -350,17 +368,21 @@
 (pub fn (sysWaitPid pid)
   (sysResult
     "sysWaitPid"
-    (let ((statbuf (memAlloc 8)))
+    {
+      (let statbuf (memAlloc 8))
       {
         ; The kernel writes a 32-bit int into an 8-byte word, so the upper
         ; half is whatever was there before. Zeroing first is what makes
         ; the read below the status rather than the status plus garbage.
         (memSetWord statbuf 0 0)
-        (let ((w (__syscall4 sysWait4Num pid statbuf 0 0)))
+        {
+          (let w (__syscall4 sysWait4Num pid statbuf 0 0))
           (if (< w 0)
             w
-            (memGetWord statbuf 0)))
-      })))
+            (memGetWord statbuf 0))
+        }
+      }
+    }))
 
 ;; The exit code carried by a wait status, for a child that exited
 ;; normally.
@@ -498,10 +520,12 @@
     ((None) false)
     ((Some _) true))
     (sysRun (strCStr (strDup name)) argv envp)
-    (let ((path (sysEnv "PATH")))
+    {
+      (let path (sysEnv "PATH"))
       (if (== (strLen path) 0)
         (Err (mkError 2 "sysRunPath: PATH is empty"))
-        (sysRunSearch name argv envp path 0)))))
+        (sysRunSearch name argv envp path 0))
+    }))
 
 ; Try `name` in each `:`-separated entry of `path` starting at `from`.
 ;
@@ -538,11 +562,13 @@
     ; spelling for one, and it is unambiguous: a name with
     ; a slash in it. `sysRunPath` hands `./llc` straight to
     ; `sysRun` and never comes here.
-    (let ((end
-      (match (strFindByte path 58 from)
-        ((None) (strLen path))
-        ((Some colon) colon))))
-      (let ((dir (strSlice path from (- end from))))
+    {
+      (let end
+        (match (strFindByte path 58 from)
+          ((None) (strLen path))
+          ((Some colon) colon)))
+      {
+        (let dir (strSlice path from (- end from)))
         (if (== (strLen dir) 0)
           (sysRunSearch name argv envp path (+ end 1))
           ; `concat` copies, so the candidate is
@@ -554,25 +580,37 @@
           ; distinguishable - once the fork has happened, "no
           ; such file" and "the tool exited 127" are the same
           ; integer.
-          (let ((cand (concat (concat dir "/") name)))
-            (let ((cpath (strCStr cand)))
-              (let ((fd (sysOpenRaw cpath oRdonly)))
+          {
+            (let cand (concat (concat dir "/") name))
+            {
+              (let cpath (strCStr cand))
+              {
+                (let fd (sysOpenRaw cpath oRdonly))
                 (if (< fd 0)
                   (sysRunSearch name argv envp path (+ end 1))
                   {
-                    (let ((_ (sysCloseFd fd)))
-                      ())
+                    {
+                      (let _ (sysCloseFd fd))
+                      ()
+                    }
                     ; `Ok` here means the child RAN, whatever it
                     ; answered - a non-zero exit is this entry's
                     ; result and ends the walk. Only a spawn failure
                     ; (`Err`) means try the next `PATH` entry, which
                     ; is the distinction the old `>= 0` was making by
                     ; sign.
-                    (let ((rc (sysRun cpath argv envp)))
+                    {
+                      (let rc (sysRun cpath argv envp))
                       (if (isOk rc)
                         rc
-                        (sysRunSearch name argv envp path (+ end 1))))
-                  })))))))))
+                        (sysRunSearch name argv envp path (+ end 1)))
+                    }
+                  })
+              }
+            }
+          })
+      }
+    }))
 
 ;; Run `name` as `sysRunPath` does, with the child's standard error
 ;; written to the file at `errPath`, created or truncated, rather than
@@ -600,10 +638,12 @@
 (pub fn (sysRunPathErrTo name argv envp errPath)
   (if (== usesSyscallAbi 0)
     (sysRunPath name argv envp)
-    (let ((fd (sysOpenPathMode (strCStr (strDup errPath)) (| oWronlyCreateTrunc oCloexec) 420)))
+    {
+      (let fd (sysOpenPathMode (strCStr (strDup errPath)) (| oWronlyCreateTrunc oCloexec) 420))
       (if (< fd 0)
         (Err (mkError (- 0 fd) (concat "sysRunPathErrTo: " errPath)))
-        (let ((saved (__syscall3 sysFcntlNum 2 fDupFdCloexec 3)))
+        {
+          (let saved (__syscall3 sysFcntlNum 2 fDupFdCloexec 3))
           (if (< saved 0)
             {
               (__syscall1 sysCloseNum fd)
@@ -613,14 +653,18 @@
               (__syscall1 sysCloseNum 2)
               (__syscall3 sysFcntlNum fd 0 2)
               (__syscall1 sysCloseNum fd)
-              (let ((r (sysRunPath name argv envp)))
+              {
+                (let r (sysRunPath name argv envp))
                 {
                   (__syscall1 sysCloseNum 2)
                   (__syscall3 sysFcntlNum saved 0 2)
                   (__syscall1 sysCloseNum saved)
                   r
-                })
-            }))))))
+                }
+              }
+            })
+        })
+    }))
 
 ;; Spawn `path` as `sysSpawn` does, with the child's standard output
 ;; written to the file at `outPath` and its standard error to the file
@@ -639,20 +683,21 @@
 (pub fn (sysSpawnOutErrTo path argv envp outPath errPath)
   (if (== usesSyscallAbi 0)
     (sysSpawn path argv envp)
-    (let ((ofd (sysOpenPathMode (strCStr (strDup outPath)) (| oWronlyCreateTrunc oCloexec) 420)))
+    {
+      (let ofd (sysOpenPathMode (strCStr (strDup outPath)) (| oWronlyCreateTrunc oCloexec) 420))
       (if (< ofd 0)
         (Err (mkError (- 0 ofd) (concat "sysSpawnOutErrTo: " outPath)))
-        (let ((efd (sysOpenPathMode (strCStr (strDup errPath)) (| oWronlyCreateTrunc oCloexec)
-                     420)))
+        {
+          (let efd
+            (sysOpenPathMode (strCStr (strDup errPath)) (| oWronlyCreateTrunc oCloexec) 420))
           (if (< efd 0)
             {
               (__syscall1 sysCloseNum ofd)
               (Err (mkError (- 0 efd) (concat "sysSpawnOutErrTo: " errPath)))
             }
-            (let (
-              (savedOut (__syscall3 sysFcntlNum 1 fDupFdCloexec 3))
-              (savedErr (__syscall3 sysFcntlNum 2 fDupFdCloexec 3))
-            )
+            {
+              (let savedOut (__syscall3 sysFcntlNum 1 fDupFdCloexec 3))
+              (let savedErr (__syscall3 sysFcntlNum 2 fDupFdCloexec 3))
               (if (|| (< savedOut 0) (< savedErr 0))
                 {
                   (__syscall1 sysCloseNum ofd)
@@ -676,7 +721,8 @@
                   (__syscall1 sysCloseNum 2)
                   (__syscall3 sysFcntlNum efd 0 2)
                   (__syscall1 sysCloseNum efd)
-                  (let ((r (sysSpawn path argv envp)))
+                  {
+                    (let r (sysSpawn path argv envp))
                     {
                       (__syscall1 sysCloseNum 1)
                       (__syscall3 sysFcntlNum savedOut 0 1)
@@ -685,8 +731,12 @@
                       (__syscall3 sysFcntlNum savedErr 0 2)
                       (__syscall1 sysCloseNum savedErr)
                       r
-                    })
-                }))))))))
+                    }
+                  }
+                })
+            })
+        })
+    }))
 
 ;; The calling process's own id, such as a suffix that keeps two
 ;; processes' scratch files apart.
@@ -725,14 +775,18 @@
 ;@axiom:effect(unsafe)
 (pub fn (sysNowMicros buf)
   (if (== clockIsGettimeofday 1)
-    (let ((r (__syscall3 sysClockNum buf 0 0)))
+    {
+      (let r (__syscall3 sysClockNum buf 0 0))
       (if (< r 0)
         (Err (mkError (- 0 r) "sysNowMicros"))
-        (Ok (+ (* (memGetWord buf 0) 1000000) (& (memGetWord buf 1) 4294967295)))))
-    (let ((r (__syscall3 sysClockNum clockMonotonicId buf 0)))
+        (Ok (+ (* (memGetWord buf 0) 1000000) (& (memGetWord buf 1) 4294967295))))
+    }
+    {
+      (let r (__syscall3 sysClockNum clockMonotonicId buf 0))
       (if (< r 0)
         (Err (mkError (- 0 r) "sysNowMicros"))
-        (Ok (+ (* (memGetWord buf 0) 1000000) (/ (memGetWord buf 1) 1000)))))))
+        (Ok (+ (* (memGetWord buf 0) 1000000) (/ (memGetWord buf 1) 1000))))
+    }))
 
 ; The arm64 virtual counter and its frequency in hertz, which the
 ; system sets at boot (24 MHz on Apple silicon). `isb` keeps the read
@@ -789,15 +843,19 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (sysNowMonotonicNanos buf)
-  (let ((k sysMonotonicKind))
+  {
+    (let k sysMonotonicKind)
     (if (== k 2)
       (Ok (sysCounterNanos sysCounterTicks sysCounterHz))
       (if (== k 0)
         (Err (mkError 78 "sysNowMonotonicNanos"))
-        (let ((r (__syscall3 sysClockNum clockMonotonicId buf 0)))
+        {
+          (let r (__syscall3 sysClockNum clockMonotonicId buf 0))
           (if (< r 0)
             (Err (mkError (- 0 r) "sysNowMonotonicNanos"))
-            (Ok (+ (* (memGetWord buf 0) 1000000000) (memGetWord buf 1)))))))))
+            (Ok (+ (* (memGetWord buf 0) 1000000000) (memGetWord buf 1))))
+        }))
+  })
 
 ;; Microseconds from a clock that NEVER steps backwards, or `Err` when
 ;; this platform has none. The 16-byte buffer is the caller's, as
@@ -838,21 +896,24 @@
     (Err (mkError 78 "sysNowRealtimeNanos"))
     ; CLOCK_REALTIME is 0 on Linux and on FreeBSD alike, unlike
     ; the monotonic clock's id.
-    (let ((r
-      (if (== clockIsGettimeofday 1)
-        (__syscall3 sysClockNum buf 0 0)
-        (__syscall3 sysClockNum 0 buf 0))))
+    {
+      (let r
+        (if (== clockIsGettimeofday 1)
+          (__syscall3 sysClockNum buf 0 0)
+          (__syscall3 sysClockNum 0 buf 0)))
       (if (< r 0)
         (Err (mkError (- 0 r) "sysNowRealtimeNanos"))
-        (let (
-          (secs (memGetWord buf 0))
-          (ns (if (== clockIsGettimeofday 1)
-            (* (& (memGetWord buf 1) 4294967295) 1000)
-            (memGetWord buf 1)))
-        )
+        {
+          (let secs (memGetWord buf 0))
+          (let ns
+            (if (== clockIsGettimeofday 1)
+              (* (& (memGetWord buf 1) 4294967295) 1000)
+              (memGetWord buf 1)))
           (if (|| (>= secs 9223372036) (<= secs -9223372036))
             (Err (mkError errOverflow "sysNowRealtimeNanos"))
-            (Ok (+ (* secs 1000000000) ns))))))))
+            (Ok (+ (* secs 1000000000) ns)))
+        })
+    }))
 
 ; ------------------------------------------------------------------
 ; Socket addresses
@@ -1064,12 +1125,14 @@
 ; does. It is made when a line is written, not on every accept.
 (pub :: netAddrText (-> Int String))
 (pub fn (netAddrText addr)
-  (let ((fam (netAddrFamily addr)))
+  {
+    (let fam (netAddrFamily addr))
     (if (== fam afInet6)
       (netAddrText6 addr 0 (netAddrZeroRunStart addr 0 (- 0 1) 1) "")
       (if (== fam afInet)
         (netAddrText4 addr)
-        (concat "af=" (fmtInt fam))))))
+        (concat "af=" (fmtInt fam))))
+  })
 
 (:: netAddrText4 (-> Int String))
 (fn (netAddrText4 addr)
@@ -1098,7 +1161,8 @@
 (fn (netAddrZeroRunStart addr i best bestLen)
   (if (>= i 8)
     best
-    (let ((n (netAddrZeroRun addr i)))
+    {
+      (let n (netAddrZeroRun addr i))
       (if (> n bestLen)
         (netAddrZeroRunStart addr (+ i n) i n)
         (netAddrZeroRunStart addr
@@ -1106,7 +1170,8 @@
             (if (> n 0)
               n
               1))
-          best bestLen)))))
+          best bestLen))
+    }))
 
 ; The groups joined, lowercase and without leading zeroes - RFC 5952
 ; §4.1 and §4.3 - with the run beginning at `zs` collapsed to `::`.
@@ -1121,12 +1186,14 @@
   (if (>= i 8)
     acc
     (if (== i zs)
-      (let ((n (netAddrZeroRun addr i)))
+      {
+        (let n (netAddrZeroRun addr i))
         (netAddrText6 addr (+ i n) zs
           (concat acc
             (if (== (+ i n) 8)
               "::"
-              ":"))))
+              ":")))
+      }
       (netAddrText6 addr (+ i 1) zs
         (concat
           (if (== i 0)
@@ -1213,20 +1280,24 @@
 (pub fn (sysRandomBytes buf n)
   (sysResult
     "sysRandomBytes"
-    (let ((mut off 0))
-      (let ((mut rc
-        (if (|| (== usesSyscallAbi 0) (== sysRandomNum 0))
-          (if (> n 0)
-            sysNoCall
-            0)
-          0)))
+    {
+      (let mut off 0)
+      {
+        (let mut rc
+          (if (|| (== usesSyscallAbi 0) (== sysRandomNum 0))
+            (if (> n 0)
+              sysNoCall
+              0)
+            0))
         {
           (while (&& (< off n) (== rc 0))
-            (let ((want
-              (if (> (- n off) randomMaxChunk)
-                randomMaxChunk
-                (- n off))))
-              (let ((r (__syscall3 sysRandomNum (+ buf off) want 0)))
+            {
+              (let want
+                (if (> (- n off) randomMaxChunk)
+                  randomMaxChunk
+                  (- n off)))
+              {
+                (let r (__syscall3 sysRandomNum (+ buf off) want 0))
                 (if (< r 0)
                   (set rc r)
                   (if (== randomIsGetentropy 1)
@@ -1238,11 +1309,15 @@
                     ; so it is treated as a failure the caller can see.
                     (if (== r 0)
                       (set rc (- 0 1))
-                      (set off (+ off r))))))))
+                      (set off (+ off r)))))
+              }
+            })
           (if (< rc 0)
             rc
             0)
-        }))))
+        }
+      }
+    }))
 
 ; ------------------------------------------------------------------
 ; Signals
@@ -1331,14 +1406,16 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(spawn)
 (pub fn (sysForkProcess)
-  (let ((r (__syscall5 sysForkNum sysForkArg 0 0 0 0)))
+  {
+    (let r (__syscall5 sysForkNum sysForkArg 0 0 0 0))
     (if (< r 0)
       r
       (if (== forkChildIsZero 1)
         r
         (if (== r (__syscall3 sysGetPidNum 0 0 0))
           0
-          r)))))
+          r)))
+  })
 
 ; ------------------------------------------------------------------
 ; Memory two bindings can share, and blocking on a word in it.
@@ -1542,11 +1619,13 @@
 (:: sysScratch (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (sysScratch n)
-  (let ((b (memAlloc n)))
+  {
+    (let b (memAlloc n))
     {
       (__retain b)
       b
-    }))
+    }
+  })
 
 (:: sysScratchDone (-> Int Int))
 ;@axiom:effect(unsafe)
@@ -1612,27 +1691,33 @@
 ;@axiom:effect(block)
 (fn (sysWaitWordTimed addr expected nanos)
   (if (== waitWordKind 1)
-    (let ((ts (sysScratch 16)))
+    {
+      (let ts (sysScratch 16))
       {
         (memSetWord ts 0 (/ nanos 1000000000))
         (memSetWord ts 1 (% nanos 1000000000))
-        (let ((r (__syscall6 sysWaitWordNum addr 0 expected ts 0 0)))
+        {
+          (let r (__syscall6 sysWaitWordNum addr 0 expected ts 0 0))
           {
             (sysScratchDone ts)
             (sysWaitAnswer r 0)
-          })
-      })
+          }
+        }
+      }
+    }
     ; A wait past the kernel's 32-bit microseconds goes straight to the
     ; clamped path: rounding such a `nanos` up by adding 999 could wrap
     ; it negative, skip the clamp, and hand the kernel a truncated,
     ; SHORTER wait that it then reports as timed out.
-    (let ((us
-      (if (> nanos 4294967295000)
-        4294967296
-        (/ (+ nanos 999) 1000))))
+    {
+      (let us
+        (if (> nanos 4294967295000)
+          4294967296
+          (/ (+ nanos 999) 1000)))
       (if (> us 4294967295)
         (sysWaitAnswer (sysUlockWait addr expected 4294967295) 1)
-        (sysWaitAnswer (sysUlockWait addr expected us) 0)))))
+        (sysWaitAnswer (sysUlockWait addr expected us) 0))
+    }))
 
 ; `__ulock_wait(UL_COMPARE_AND_WAIT64_SHARED, addr, expected, us)`: the
 ; kernel's raw answer.
@@ -1661,11 +1746,11 @@
 (:: sysWaitWordSpin (-> Int Int Int Int))
 ;@axiom:effect(io)
 (fn (sysWaitWordSpin addr expected nanos)
-  (let (
-    (buf (sysScratch 16))
-    (mut state 0)
-  )
-    (let ((start (sysTimeoutMicros buf)))
+  {
+    (let buf (sysScratch 16))
+    (let mut state 0)
+    {
+      (let start (sysTimeoutMicros buf))
       {
         (while (== state 0)
           (if (!= (memGetWord addr 0) expected)
@@ -1674,7 +1759,9 @@
               (set state 1))))
         (sysScratchDone buf)
         state
-      })))
+      }
+    }
+  })
 
 ;; Microseconds from the clock a timeout is measured on: the monotonic
 ;; one where the target has it (`sysHasMonotonic`), and the realtime
@@ -1704,10 +1791,9 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (sysSleepLoop buf deadline)
-  (let (
-    (mut state 0)
-    (mut failed 0)
-  )
+  {
+    (let mut state 0)
+    (let mut failed 0)
     {
       (memSetWord buf 2 0)
       (while (== state 0)
@@ -1726,7 +1812,8 @@
       (if (== state 1)
         (Ok 0)
         (Err (mkError failed "sysSleepUntilNanos")))
-    }))
+    }
+  })
 
 ;; Sleep until the monotonic clock reads at least `deadline` nanoseconds
 ;; (`sysNowMonotonicNanos`): `Ok 0` once it does, at once for a deadline
@@ -1742,12 +1829,16 @@
 ;@axiom:effect(block)
 (pub fn (sysSleepUntilNanos deadline)
   (if sysHasMonotonic
-    (let ((buf (sysScratch 24)))
-      (let ((r (sysSleepLoop buf deadline)))
+    {
+      (let buf (sysScratch 24))
+      {
+        (let r (sysSleepLoop buf deadline))
         {
           (sysScratchDone buf)
           r
-        }))
+        }
+      }
+    }
     (Err (mkError 78 "sysSleepUntilNanos"))))
 
 ;; Sleep for at least `nanos` nanoseconds of the monotonic clock:
@@ -1759,8 +1850,10 @@
 (pub fn (sysSleepNanos nanos)
   (if (<= nanos 0)
     (Ok 0)
-    (let ((buf (sysScratch 16)))
-      (let ((now (sysNowMonotonicNanos buf)))
+    {
+      (let buf (sysScratch 16))
+      {
+        (let now (sysNowMonotonicNanos buf))
         {
           (sysScratchDone buf)
           (match now
@@ -1771,7 +1864,9 @@
                   (+ t nanos)))
             )
             ((Err e) (Err (mkError (errCode e) "sysSleepNanos"))))
-        }))))
+        }
+      }
+    }))
 
 ;; Bytes of caller scratch `sysChildExited` needs: a `siginfo_t` is 104
 ;; bytes on Darwin and 128 on Linux.
@@ -1814,7 +1909,8 @@
     {
       (memSetWord buf 0 0)
       (memSetWord buf 1 0)
-      (let ((r (__syscall6 sysWaitIdNum waitIdPidType pid buf waitPollOptions 0 0)))
+      {
+        (let r (__syscall6 sysWaitIdNum waitIdPidType pid buf waitPollOptions 0 0))
         (if (< r 0)
           (if (== r (- 0 4))
             (Ok false)
@@ -1823,6 +1919,9 @@
             ; wait6 writes a wait status. A stopped or continued child
             ; has low seven bits 127 and is still unsafe to join.
             (Ok (&& (> r 0) (!= (& (memGetWord buf 0) 127) 127)))
-            (let ((code (& (memGetWord buf 1) 4294967295)))
-              (Ok (&& (!= (& (memGetWord buf 0) 4294967295) 0) (&& (>= code 1) (<= code 3))))))))
+            {
+              (let code (& (memGetWord buf 1) 4294967295))
+              (Ok (&& (!= (& (memGetWord buf 0) 4294967295) 0) (&& (>= code 1) (<= code 3))))
+            }))
+      }
     }))

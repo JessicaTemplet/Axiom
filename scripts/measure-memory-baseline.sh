@@ -101,32 +101,32 @@ emit_probe() {
   (if (== n 0) b (advance (step b) (- n 1))))' ;;
     managed) advance='(:: copyBoard (-> (Vec Int) (Vec Int)))
 (fn (copyBoard src)
-  (let ((dst (vecWithCapacity 576)) (mut i 0))
+  { (let dst (vecWithCapacity 576)) (let mut i 0)
     {
       (while (< i 576)
         { (vecPush dst (vecGet src i)) (set i (+ i 1)) })
       dst
-    }))
+    }})
 
 (:: advance (-> (Vec Int) Int (Vec Int)))
 ;@axiom:effect(unsafe)
 (fn (advance b n)
-  (let ((cell (memAlloc 8)) (m (__axiom_arena_mark)) (mut nn n))
+  { (let cell (memAlloc 8)) (let m (__axiom_arena_mark)) (let mut nn n)
     {
       (memSetWord cell 0 b)
       (while (> nn 0)
-        (let ((up (as (copyBoard (step (memGetWordVec cell 0))) Int)))
+        { (let up (as (copyBoard (step (memGetWordVec cell 0))) Int))
           {
             (__axiom_arena_reset m)
             (memSetWord cell 0 (copyBoard (as up (Vec Int))))
             (set nn (- nn 1))
-          }))
+          }})
       (memGetWordVec cell 0)
-    }))' ;;
+    }})' ;;
     ablated) advance='(:: advance (-> (Vec Int) Int (Vec Int)))
 ;@axiom:effect(unsafe)
 (fn (advance b n)
-  (let ((m (__axiom_arena_mark)) (mut bb b) (mut nn n))
+  { (let m (__axiom_arena_mark)) (let mut bb b) (let mut nn n)
     {
       (while (> nn 0)
         {
@@ -135,7 +135,7 @@ emit_probe() {
           (set nn (- nn 1))
         })
       bb
-    }))' ;;
+    }})' ;;
   esac
   cat > "$out" <<AX
 ; 24x24 toroidal Game of Life, one board live, advanced $n times.
@@ -157,26 +157,26 @@ emit_probe() {
 
 (:: step (-> (Vec Int) (Vec Int)))
 (fn (step b)
-  (let ((nb vecNew) (mut i 0))
+  { (let nb vecNew) (let mut i 0)
     {
       (while (< i 576)
-        (let ((x (% i 24)) (y (/ i 24)))
-          (let ((n (neighbors b x y)))
+        { (let x (% i 24)) (let y (/ i 24))
+          { (let n (neighbors b x y))
             {
               (vecPush nb
                 (if (== n 3)
                     1
                     (if (&& (== n 2) (== (vecGet b i) 1)) 1 0)))
               (set i (+ i 1))
-            })))
+            }}})
       nb
-    }))
+    }})
 
 $advance
 
 (:: population (-> (Vec Int) Int))
 (fn (population b)
-  (let ((mut i 0) (mut p 0))
+  { (let mut i 0) (let mut p 0)
     {
       (while (< i 576)
         {
@@ -184,11 +184,11 @@ $advance
           (set i (+ i 1))
         })
       p
-    }))
+    }})
 
 (:: seed (Vec Int))
 (fn (seed)
-  (let ((b vecNew) (mut i 0))
+  { (let b vecNew) (let mut i 0)
     {
       (while (< i 576) { (vecPush b 0) (set i (+ i 1)) })
       ; a lone glider: population is EXACTLY 5 at every generation,
@@ -201,7 +201,7 @@ $advance
       (vecSet b (+ (* 3 24) 2) 1)
       (vecSet b (+ (* 3 24) 3) 1)
       b
-    }))
+    }})
 
 (:: main Int)
 ;@axiom:effect(io)

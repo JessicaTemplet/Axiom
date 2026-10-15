@@ -130,23 +130,24 @@
 (:: arrive (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (arrive ctr round)
-  (let (
-    (mut spins 0)
-    (want (* 2 (+ round 1)))
-  )
+  {
+    (let mut spins 0)
+    (let want (* 2 (+ round 1)))
     {
       (__atomic_add ctr 1)
       (while (< (__atomic_load ctr) want)
         (set spins (+ spins 1)))
       spins
-    }))
+    }
+  })
 
 ; ---- sb ------------------------------------------------------------
 ; mode 0 sc, 1 plain, 2 fence. Writes round i's load into res[i].
 (:: sbThread (-> Int Int Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (sbThread mine other res ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
@@ -169,7 +170,8 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 (:: runSb (-> Int Int Int))
 ;@axiom:effect(io)
@@ -177,15 +179,14 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runSb mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (ys (__alloc (* 8 n)))
-    (r0 (__alloc (* 8 n)))
-    (r1 (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-    (mut i 0)
-    (mut weak 0)
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let ys (__alloc (* 8 n)))
+    (let r0 (__alloc (* 8 n)))
+    (let r1 (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
+    (let mut i 0)
+    (let mut weak 0)
     {
       (parallel p (
         (a (sbThread xs ys r0 ctr n mode))
@@ -200,7 +201,8 @@
         })
       (println (concat (fmtInt weak) (concat " " (fmtInt n))))
       0
-    }))
+    }
+  })
 
 ; ---- mp ------------------------------------------------------------
 ; mode 0 sc (plain data, atomic flag), 1 plain, 2 fence (plain, with
@@ -208,7 +210,8 @@
 (:: mpWriter (-> Int Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (mpWriter data flag ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
@@ -232,7 +235,8 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; Round i's flag, through the atomic load (mode 0) or a plain one.
 (:: loadFlag (-> Int Int Int Int))
@@ -249,17 +253,17 @@
 (:: mpReader (-> Int Int Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (mpReader data flag ctr n mode out)
-  (let (
-    (mut i 0)
-    (mut weak 0)
-    (mut seen 0)
-  )
+  {
+    (let mut i 0)
+    (let mut weak 0)
+    (let mut seen 0)
     {
       (while (< i n)
         {
           (arrive ctr i)
           (if (== mode 3)
-            (let ((d (__atomic_load (+ data (* 8 i)))))
+            {
+              (let d (__atomic_load (+ data (* 8 i))))
               {
                 (waitStored (+ flag (* 8 i)) waitSpins)
                 (if (== (__atomic_load (+ flag (* 8 i))) 1)
@@ -268,7 +272,8 @@
                     (if (== d 0)
                       (set weak (+ weak 1)))
                   })
-              })
+              }
+            }
             ; The data word is read only once the flag says it was
             ; published. Read before the test, it raced the writer's
             ; plain store whenever the flag was still 0 (MM-PAR-9), and
@@ -286,7 +291,8 @@
       (__store64 out 0 weak)
       (__store64 out 1 seen)
       0
-    }))
+    }
+  })
 
 (:: runMp (-> Int Int Int))
 ;@axiom:effect(io)
@@ -294,12 +300,11 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runMp mode n)
-  (let (
-    (data (__alloc (* 8 n)))
-    (flag (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-    (out (__alloc 16))
-  )
+  {
+    (let data (__alloc (* 8 n)))
+    (let flag (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
+    (let out (__alloc 16))
     {
       (parallel p (
         (a (mpWriter data flag ctr n mode))
@@ -308,17 +313,17 @@
         (+ a b))
       (println (concat (fmtInt (__load64 out 0)) (concat " " (fmtInt (__load64 out 1)))))
       0
-    }))
+    }
+  })
 
 ; ---- add -----------------------------------------------------------
 ; mode 0 sc, 1 split, 2 cas. Answers the failed swaps (cas) or 0.
 (:: addThread (-> Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (addThread cell n mode)
-  (let (
-    (mut i 0)
-    (mut failed 0)
-  )
+  {
+    (let mut i 0)
+    (let mut failed 0)
     {
       (while (< i n)
         {
@@ -326,16 +331,19 @@
             (__atomic_add cell 1)
             (if (== mode 1)
               (__atomic_store cell (+ (__atomic_load cell) 1))
-              (let ((mut old (__atomic_load cell)))
+              {
+                (let mut old (__atomic_load cell))
                 (while (!= (__atomic_cas cell old (+ old 1)) old)
                   {
                     (set failed (+ failed 1))
                     (set old (__atomic_load cell))
-                  }))))
+                  })
+              }))
           (set i (+ i 1))
         })
       failed
-    }))
+    }
+  })
 
 (:: runAdd (-> Int Int Int))
 ;@axiom:effect(io)
@@ -343,22 +351,26 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runAdd mode n)
-  (let ((cell (__alloc 8)))
+  {
+    (let cell (__alloc 8))
     (parallel p (
       (a (addThread cell n mode))
       (b (addThread cell n mode))
     )
       {
-        (let ((lost (- (* 2 n) (__atomic_load cell))))
+        {
+          (let lost (- (* 2 n) (__atomic_load cell)))
           (println
             (concat (fmtInt lost)
               (concat " "
                 (fmtInt
                   (if (== mode 2)
                     (+ a b)
-                    (* 2 n)))))))
+                    (* 2 n))))))
+        }
         0
-      })))
+      })
+  })
 
 ; One result line, `<forbidden> <witnessed>`.
 (:: report (-> Int Int Int))
@@ -376,23 +388,28 @@
 (:: lbThread (-> Int Int Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (lbThread src dst res ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
           (arrive ctr i)
           (if (== mode 0)
-            (let ((r (__atomic_load (+ src (* 8 i)))))
+            {
+              (let r (__atomic_load (+ src (* 8 i))))
               {
                 (__atomic_store (+ dst (* 8 i)) 1)
                 (__store64 res i r)
-              })
+              }
+            }
             (if (== mode 1)
-              (let ((r (__load64 src i)))
+              {
+                (let r (__load64 src i))
                 {
                   (__store64 dst i 1)
                   (__store64 res i r)
-                })
+                }
+              }
               {
                 (__atomic_store (+ dst (* 8 i)) 1)
                 (__store64 res i (__atomic_load (+ src (* 8 i))))
@@ -400,7 +417,8 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; Forbidden is both loads answering 1; the witness is the rounds in
 ; which both answered 0, so both loads ran before either store landed.
@@ -410,16 +428,15 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runLb mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (ys (__alloc (* 8 n)))
-    (r0 (__alloc (* 8 n)))
-    (r1 (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-    (mut i 0)
-    (mut weak 0)
-    (mut both 0)
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let ys (__alloc (* 8 n)))
+    (let r0 (__alloc (* 8 n)))
+    (let r1 (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
+    (let mut i 0)
+    (let mut weak 0)
+    (let mut both 0)
     {
       (parallel p (
         (a (lbThread xs ys r0 ctr n mode))
@@ -428,15 +445,18 @@
         (+ a b))
       (while (< i n)
         {
-          (let ((s (+ (__load64 r0 i) (__load64 r1 i))))
+          {
+            (let s (+ (__load64 r0 i) (__load64 r1 i)))
             (if (== s 2)
               (set weak (+ weak 1))
               (if (== s 0)
-                (set both (+ both 1)))))
+                (set both (+ both 1))))
+          }
           (set i (+ i 1))
         })
       (report weak both)
-    }))
+    }
+  })
 
 ; ---- 2+2w ----------------------------------------------------------
 ; mode 0 sc, 1 plain, 3 reorder. Stores 1 to round i's word of `first`,
@@ -445,7 +465,8 @@
 (:: twoThread (-> Int Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (twoThread first second ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
@@ -467,7 +488,8 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; T0 stores x 1 then y 2, T1 stores y 1 then x 2. Read after the join,
 ; forbidden is x 1 with y 1; the witness is x 2 with y 2, the rounds in
@@ -478,14 +500,13 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runTwo mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (ys (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-    (mut i 0)
-    (mut weak 0)
-    (mut both 0)
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let ys (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
+    (let mut i 0)
+    (let mut weak 0)
+    (let mut both 0)
     {
       (parallel p (
         (a (twoThread xs ys ctr n mode))
@@ -494,18 +515,19 @@
         (+ a b))
       (while (< i n)
         {
-          (let (
-            (x (__load64 xs i))
-            (y (__load64 ys i))
-          )
+          {
+            (let x (__load64 xs i))
+            (let y (__load64 ys i))
             (if (&& (== x 1) (== y 1))
               (set weak (+ weak 1))
               (if (&& (== x 2) (== y 2))
-                (set both (+ both 1)))))
+                (set both (+ both 1))))
+          }
           (set i (+ i 1))
         })
       (report weak both)
-    }))
+    }
+  })
 
 ; ---- iriw ----------------------------------------------------------
 ; Arrive at round `round`'s barrier and wait until all `parties` have.
@@ -519,22 +541,24 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (arriveAll ctr round parties)
-  (let (
-    (mut spins 0)
-    (want (* parties (+ round 1)))
-  )
+  {
+    (let mut spins 0)
+    (let want (* parties (+ round 1)))
     {
       (__atomic_add ctr 1)
-      (let ((mut seen (__atomic_load ctr)))
+      {
+        (let mut seen (__atomic_load ctr))
         (while (< seen want)
           {
             (set spins (+ spins 1))
             (if (> spins 2048)
               (sysWaitWordTimeout ctr seen 2000))
             (set seen (__atomic_load ctr))
-          }))
+          })
+      }
       spins
-    }))
+    }
+  })
 
 ; How long `reorder`'s writers pause between a word's two copies.
 (:: pauseSpins Int)
@@ -551,21 +575,22 @@
 (:: waitStored (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (waitStored w k)
-  (let ((mut j 0))
+  {
+    (let mut j 0)
     {
       (while (&& (< j k) (== (__atomic_load w) 0))
         (set j (+ j 1)))
       j
-    }))
+    }
+  })
 
 ; Spin `k` atomic loads of `w`, which the optimiser cannot remove.
 (:: pause (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (pause w k)
-  (let (
-    (mut j 0)
-    (mut sum 0)
-  )
+  {
+    (let mut j 0)
+    (let mut sum 0)
     {
       (while (< j k)
         {
@@ -573,7 +598,8 @@
           (set j (+ j 1))
         })
       sum
-    }))
+    }
+  })
 
 ; mode 0 sc, 1 plain, 3 reorder. Stores 1 to round i's word of `near`.
 ; `reorder` then pauses and stores 1 to `far`'s too: one write reaching
@@ -583,7 +609,8 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (iriwWriter near far ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
@@ -600,7 +627,8 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; mode 1 plain; every other mode with the atomic loads. Loads round i's
 ; word of `first`, then of `second`, and writes 2 * first + second to
@@ -610,28 +638,33 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (iriwReader first second res ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
           (arriveAll ctr i 4)
           (if (== mode 1)
-            (let ((f (__load64 first i)))
-              (__store64 res i (+ (* 2 f) (__load64 second i))))
-            (let ((f (__atomic_load (+ first (* 8 i)))))
-              (__store64 res i (+ (* 2 f) (__atomic_load (+ second (* 8 i)))))))
+            {
+              (let f (__load64 first i))
+              (__store64 res i (+ (* 2 f) (__load64 second i)))
+            }
+            {
+              (let f (__atomic_load (+ first (* 8 i))))
+              (__store64 res i (+ (* 2 f) (__atomic_load (+ second (* 8 i)))))
+            })
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 (:: count2 (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (count2 res n)
-  (let (
-    (mut i 0)
-    (mut c 0)
-  )
+  {
+    (let mut i 0)
+    (let mut c 0)
     {
       (while (< i n)
         {
@@ -640,7 +673,8 @@
           (set i (+ i 1))
         })
       c
-    }))
+    }
+  })
 
 ; Four bindings: W0 stores x, W1 stores y, R2 loads x then y, R3 loads
 ; y then x. Forbidden is R2 seeing x without y while R3 sees y without
@@ -655,21 +689,22 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runIriw mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (ys (__alloc (* 8 n)))
-    (xFar (if (== mode 3)
-      (__alloc (* 8 n))
-      xs))
-    (yFar (if (== mode 3)
-      (__alloc (* 8 n))
-      ys))
-    (ra (__alloc (* 8 n)))
-    (rb (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-    (mut i 0)
-    (mut weak 0)
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let ys (__alloc (* 8 n)))
+    (let xFar
+      (if (== mode 3)
+        (__alloc (* 8 n))
+        xs))
+    (let yFar
+      (if (== mode 3)
+        (__alloc (* 8 n))
+        ys))
+    (let ra (__alloc (* 8 n)))
+    (let rb (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
+    (let mut i 0)
+    (let mut weak 0)
     {
       (parallel p (
         (a (iriwWriter xs xFar ctr n mode))
@@ -684,15 +719,16 @@
             (set weak (+ weak 1)))
           (set i (+ i 1))
         })
-      (let (
-        (ha (count2 ra n))
-        (hb (count2 rb n))
-      )
+      {
+        (let ha (count2 ra n))
+        (let hb (count2 rb n))
         (report weak
           (if (< ha hb)
             ha
-            hb)))
-    }))
+            hb))
+      }
+    }
+  })
 
 ; ---- wrc and isa2 ----------------------------------------------------
 ; mode 1 plain, 0 sc, 3 reorder. Stores 1 to round i's word of `first`,
@@ -703,7 +739,8 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (chainWriter first second ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
@@ -728,7 +765,8 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; Loads round i's word of `src` into res[i], then stores 1 to `dst`'s.
 (:: chainRelay (-> Int Int Int Int Int Int Int))
@@ -736,26 +774,32 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (chainRelay src dst res ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
           (arriveAll ctr i 3)
           (if (== mode 1)
-            (let ((v (__load64 src i)))
+            {
+              (let v (__load64 src i))
               {
                 (__store64 dst i 1)
                 (__store64 res i v)
-              })
-            (let ((v (__atomic_load (+ src (* 8 i)))))
+              }
+            }
+            {
+              (let v (__atomic_load (+ src (* 8 i))))
               {
                 (__atomic_store (+ dst (* 8 i)) 1)
                 (__store64 res i v)
-              }))
+              }
+            })
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; Loads round i's word of `first` into rf[i], then `second`'s into
 ; rs[i]. `reorder` loads `second` first, then waits for `first` to be
@@ -768,33 +812,41 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (chainReader first second rf rs ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
           (arriveAll ctr i 3)
           (if (== mode 1)
-            (let ((a (__load64 first i)))
+            {
+              (let a (__load64 first i))
               {
                 (__store64 rs i (__load64 second i))
                 (__store64 rf i a)
-              })
+              }
+            }
             (if (== mode 3)
-              (let ((b (__atomic_load (+ second (* 8 i)))))
+              {
+                (let b (__atomic_load (+ second (* 8 i))))
                 {
                   (waitStored (+ first (* 8 i)) waitSpins)
                   (__store64 rf i (__atomic_load (+ first (* 8 i))))
                   (__store64 rs i b)
-                })
-              (let ((a (__atomic_load (+ first (* 8 i)))))
+                }
+              }
+              {
+                (let a (__atomic_load (+ first (* 8 i))))
                 {
                   (__store64 rs i (__atomic_load (+ second (* 8 i))))
                   (__store64 rf i a)
-                })))
+                }
+              }))
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; Counts the rounds in which r1 and r2 both answered 1 (the chain), and
 ; among them the rounds in which r3 answered 0 (forbidden).
@@ -802,11 +854,10 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (chainTally r1 r2 r3 n)
-  (let (
-    (mut i 0)
-    (mut weak 0)
-    (mut chain 0)
-  )
+  {
+    (let mut i 0)
+    (let mut weak 0)
+    (let mut chain 0)
     {
       (while (< i n)
         {
@@ -819,7 +870,8 @@
           (set i (+ i 1))
         })
       (report weak chain)
-    }))
+    }
+  })
 
 ; W stores x; R1 loads x, stores y; R2 loads y, then x. `reorder` is
 ; R2's: it loads x first.
@@ -829,14 +881,13 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runWrc mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (ys (__alloc (* 8 n)))
-    (r1 (__alloc (* 8 n)))
-    (r2 (__alloc (* 8 n)))
-    (r3 (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let ys (__alloc (* 8 n)))
+    (let r1 (__alloc (* 8 n)))
+    (let r2 (__alloc (* 8 n)))
+    (let r3 (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
     {
       (parallel p (
         (a (chainWriter xs 0 ctr n mode))
@@ -845,7 +896,8 @@
       )
         (+ a (+ b c)))
       (chainTally r1 r2 r3 n)
-    }))
+    }
+  })
 
 ; W stores x, then y; R1 loads y, stores z; R2 loads z, then x.
 ; `reorder` is W's and R2's: W stores y first and x after a pause, and
@@ -861,15 +913,14 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runIsa2 mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (ys (__alloc (* 8 n)))
-    (zs (__alloc (* 8 n)))
-    (r1 (__alloc (* 8 n)))
-    (r2 (__alloc (* 8 n)))
-    (r3 (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let ys (__alloc (* 8 n)))
+    (let zs (__alloc (* 8 n)))
+    (let r1 (__alloc (* 8 n)))
+    (let r2 (__alloc (* 8 n)))
+    (let r3 (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
     {
       (parallel p (
         (a (chainWriter xs ys ctr n mode))
@@ -878,7 +929,8 @@
       )
         (+ a (+ b c)))
       (chainTally r1 r2 r3 n)
-    }))
+    }
+  })
 
 ; ---- coherence --------------------------------------------------------
 ; Round i's word of x: a plain load under mode 1, otherwise an atomic one.
@@ -905,15 +957,16 @@
 ; store. mode 1 plain, 0 sc, 3 reorder.
 (:: cohWriter (-> Int Int Int Int Int Int Int))
 (fn (cohWriter x v w ctr n mode)
-  (let (
-    (mut i 0)
-    (first (if (&& (== mode 3) (!= w 0))
-      w
-      v))
-    (second (if (&& (== mode 3) (!= w 0))
-      v
-      w))
-  )
+  {
+    (let mut i 0)
+    (let first
+      (if (&& (== mode 3) (!= w 0))
+        w
+        v))
+    (let second
+      (if (&& (== mode 3) (!= w 0))
+        v
+        w))
     {
       (while (< i n)
         {
@@ -927,22 +980,26 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; Two loads of round i's word of x, a pause apart, into r1[i] then
 ; r2[i]; `swap` 1 reports the later load as r1, corr's reordering.
 (:: cohReader (-> Int Int Int Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (cohReader x r1 r2 swap ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
           (arrive ctr i)
-          (let ((a (loadAt x i mode)))
+          {
+            (let a (loadAt x i mode))
             {
               (pause ctr pauseSpins)
-              (let ((b (loadAt x i mode)))
+              {
+                (let b (loadAt x i mode))
                 (if (== swap 1)
                   {
                     (__store64 r1 i b)
@@ -951,12 +1008,15 @@
                   {
                     (__store64 r1 i a)
                     (__store64 r2 i b)
-                  }))
-            })
+                  })
+              }
+            }
+          }
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; One store of 1 and one load of round i's word of x, a pause apart,
 ; the load's answer into r1[i]. `own` 1 stores then loads (cowr), 0
@@ -964,16 +1024,16 @@
 (:: cohSelf (-> Int Int Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (cohSelf x r1 own ctr n mode)
-  (let (
-    (mut i 0)
-    (storeFirst (if (== own 1)
-      (if (== mode 3)
-        0
-        1)
-      (if (== mode 3)
-        1
-        0)))
-  )
+  {
+    (let mut i 0)
+    (let storeFirst
+      (if (== own 1)
+        (if (== mode 3)
+          0
+          1)
+        (if (== mode 3)
+          1
+          0)))
     {
       (while (< i n)
         {
@@ -984,16 +1044,19 @@
               (pause ctr pauseSpins)
               (__store64 r1 i (loadAt x i mode))
             }
-            (let ((a (loadAt x i mode)))
+            {
+              (let a (loadAt x i mode))
               {
                 (pause ctr pauseSpins)
                 (storeAt x i 1 mode)
                 (__store64 r1 i a)
-              }))
+              }
+            })
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; corr: W stores 1; R loads twice. Forbidden 1 then 0; witness 0 then 1.
 (:: runCorr (-> Int Int Int))
@@ -1002,15 +1065,14 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runCorr mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (r1 (__alloc (* 8 n)))
-    (r2 (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-    (mut i 0)
-    (mut weak 0)
-    (mut both 0)
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let r1 (__alloc (* 8 n)))
+    (let r2 (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
+    (let mut i 0)
+    (let mut weak 0)
+    (let mut both 0)
     {
       (parallel p (
         (a (cohWriter xs 1 0 ctr n mode))
@@ -1023,18 +1085,19 @@
         (+ a b))
       (while (< i n)
         {
-          (let (
-            (a (__load64 r1 i))
-            (b (__load64 r2 i))
-          )
+          {
+            (let a (__load64 r1 i))
+            (let b (__load64 r2 i))
             (if (&& (== a 1) (== b 0))
               (set weak (+ weak 1))
               (if (&& (== a 0) (== b 1))
-                (set both (+ both 1)))))
+                (set both (+ both 1))))
+          }
           (set i (+ i 1))
         })
       (report weak both)
-    }))
+    }
+  })
 
 ; coww: W stores 1 then 2; R loads twice. Forbidden R seeing 2 then 1,
 ; or x not ending with W's last store; witness R seeing x change.
@@ -1044,15 +1107,14 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runCoww mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (r1 (__alloc (* 8 n)))
-    (r2 (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-    (mut i 0)
-    (mut weak 0)
-    (mut moved 0)
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let r1 (__alloc (* 8 n)))
+    (let r2 (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
+    (let mut i 0)
+    (let mut weak 0)
+    (let mut moved 0)
     {
       (parallel p (
         (a (cohWriter xs 1 2 ctr n mode))
@@ -1061,10 +1123,9 @@
         (+ a b))
       (while (< i n)
         {
-          (let (
-            (a (__load64 r1 i))
-            (b (__load64 r2 i))
-          )
+          {
+            (let a (__load64 r1 i))
+            (let b (__load64 r2 i))
             {
               ; Keep the original final-store expectation in the control.
               ; Its reversed writes must fail even if the reader misses them.
@@ -1072,11 +1133,13 @@
                 (set weak (+ weak 1)))
               (if (!= a b)
                 (set moved (+ moved 1)))
-            })
+            }
+          }
           (set i (+ i 1))
         })
       (report weak moved)
-    }))
+    }
+  })
 
 ; cowr (own 1) and corw (own 0): W stores 1 and loads, in the order
 ; `own` says; O stores 2. Forbidden: W's load answering what coherence
@@ -1089,20 +1152,21 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runCoSelf own mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (r1 (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-    (ownBad (if (== own 1)
-      0
-      1))
-    (endBad (if (== own 1)
-      1
-      2))
-    (mut i 0)
-    (mut weak 0)
-    (mut saw 0)
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let r1 (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
+    (let ownBad
+      (if (== own 1)
+        0
+        1))
+    (let endBad
+      (if (== own 1)
+        1
+        2))
+    (let mut i 0)
+    (let mut weak 0)
+    (let mut saw 0)
     {
       (parallel p (
         (a (cohSelf xs r1 own ctr n mode))
@@ -1111,17 +1175,20 @@
         (+ a b))
       (while (< i n)
         {
-          (let ((r (__load64 r1 i)))
+          {
+            (let r (__load64 r1 i))
             {
               (if (|| (&& (== r 2) (== (__load64 xs i) endBad)) (&& (!= mode 3) (== r ownBad)))
                 (set weak (+ weak 1)))
               (if (== r 2)
                 (set saw (+ saw 1)))
-            })
+            }
+          }
           (set i (+ i 1))
         })
       (report weak saw)
-    }))
+    }
+  })
 
 ; ---- r and s -----------------------------------------------------------
 ; T0 of both: stores `v` to round i's word of `first`, then `w` to
@@ -1130,7 +1197,8 @@
 (:: pairWriter (-> Int Int Int Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (pairWriter first v second w ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
@@ -1153,7 +1221,8 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; r's T1: stores 2 to round i's word of y, then loads x's into res[i].
 ; `reorder` loads x first, then stores 2 once T0's store to y is
@@ -1161,7 +1230,8 @@
 (:: rThread (-> Int Int Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (rThread xs ys res ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
@@ -1178,12 +1248,14 @@
                 (__store64 res i (__load64 xs i))
               }
               (if (== mode 3)
-                (let ((r (__atomic_load (+ xs (* 8 i)))))
+                {
+                  (let r (__atomic_load (+ xs (* 8 i))))
                   {
                     (waitStored (+ ys (* 8 i)) waitSpins)
                     (__atomic_store (+ ys (* 8 i)) 2)
                     (__store64 res i r)
-                  })
+                  }
+                }
                 {
                   (__atomic_store (+ ys (* 8 i)) 2)
                   (__store64 res i (__atomic_load (+ xs (* 8 i))))
@@ -1191,7 +1263,8 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; s's T1: loads round i's word of y into res[i], then stores 1 to x's.
 ; `reorder` stores x first, then loads y once T0's store to it is
@@ -1199,39 +1272,47 @@
 (:: sThread (-> Int Int Int Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (sThread xs ys res ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
           (arrive ctr i)
           (if (== mode 1)
-            (let ((r (__load64 ys i)))
+            {
+              (let r (__load64 ys i))
               {
                 (__store64 xs i 1)
                 (__store64 res i r)
-              })
+              }
+            }
             (if (== mode 2)
-              (let ((r (__load64 ys i)))
+              {
+                (let r (__load64 ys i))
                 {
                   __fence
                   (__store64 xs i 1)
                   (__store64 res i r)
-                })
+                }
+              }
               (if (== mode 3)
                 {
                   (__atomic_store (+ xs (* 8 i)) 1)
                   (waitStored (+ ys (* 8 i)) waitSpins)
                   (__store64 res i (__atomic_load (+ ys (* 8 i))))
                 }
-                (let ((r (__atomic_load (+ ys (* 8 i)))))
+                {
+                  (let r (__atomic_load (+ ys (* 8 i))))
                   {
                     (__atomic_store (+ xs (* 8 i)) 1)
                     (__store64 res i r)
-                  }))))
+                  }
+                })))
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; Counts the rounds in which `fin`'s word ended `fv` and res[i] answered
 ; `rv` (forbidden), and those in which they ended `wf` and `wr`
@@ -1240,26 +1321,26 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (pairTally fin res fv rv wf wr n)
-  (let (
-    (mut i 0)
-    (mut weak 0)
-    (mut both 0)
-  )
+  {
+    (let mut i 0)
+    (let mut weak 0)
+    (let mut both 0)
     {
       (while (< i n)
         {
-          (let (
-            (f (__load64 fin i))
-            (r (__load64 res i))
-          )
+          {
+            (let f (__load64 fin i))
+            (let r (__load64 res i))
             (if (&& (== f fv) (== r rv))
               (set weak (+ weak 1))
               (if (&& (== f wf) (== r wr))
-                (set both (+ both 1)))))
+                (set both (+ both 1))))
+          }
           (set i (+ i 1))
         })
       (report weak both)
-    }))
+    }
+  })
 
 ; r: T0 stores x then y; T1 stores 2 to y, then loads x. Forbidden is y
 ; ending 2 with T1's load answering 0; the witness is y ending 1 with
@@ -1270,12 +1351,11 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runR mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (ys (__alloc (* 8 n)))
-    (res (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let ys (__alloc (* 8 n)))
+    (let res (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
     {
       (parallel p (
         (a (pairWriter xs 1 ys 1 ctr n mode))
@@ -1283,7 +1363,8 @@
       )
         (+ a b))
       (pairTally ys res 2 0 1 1 n)
-    }))
+    }
+  })
 
 ; s: T0 stores 2 to x, then 1 to y; T1 loads y, then stores 1 to x.
 ; Forbidden is x ending 2 with T1's load answering 1; the witness is x
@@ -1295,12 +1376,11 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runS mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (ys (__alloc (* 8 n)))
-    (res (__alloc (* 8 n)))
-    (ctr (__alloc 8))
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let ys (__alloc (* 8 n)))
+    (let res (__alloc (* 8 n)))
+    (let ctr (__alloc 8))
     {
       (parallel p (
         (a (pairWriter xs 2 ys 1 ctr n mode))
@@ -1308,7 +1388,8 @@
       )
         (+ a b))
       (pairTally xs res 2 1 1 0 n)
-    }))
+    }
+  })
 
 ; ---- 3.sb --------------------------------------------------------------
 ; Load `w` until it reaches `want`, at most `k` times. Answers the loads
@@ -1316,12 +1397,14 @@
 (:: waitCount (-> Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (waitCount w want k)
-  (let ((mut j 0))
+  {
+    (let mut j 0)
     {
       (while (&& (< j k) (< (__atomic_load w) want))
         (set j (+ j 1)))
       j
-    }))
+    }
+  })
 
 ; mode 0 sc, 1 plain, 3 reorder. Stores 1 to round i's word of `mine`,
 ; then loads `next`'s into res[i]. `reorder` loads first, adds 1 to
@@ -1332,7 +1415,8 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (sb3Thread mine next res gate ctr n mode)
-  (let ((mut i 0))
+  {
+    (let mut i 0)
     {
       (while (< i n)
         {
@@ -1343,13 +1427,15 @@
               (__store64 res i (__load64 next i))
             }
             (if (== mode 3)
-              (let ((r (__atomic_load (+ next (* 8 i)))))
+              {
+                (let r (__atomic_load (+ next (* 8 i))))
                 {
                   (__atomic_add (+ gate (* 8 i)) 1)
                   (waitCount (+ gate (* 8 i)) 3 waitSpins)
                   (__atomic_store (+ mine (* 8 i)) 1)
                   (__store64 res i r)
-                })
+                }
+              }
               {
                 (__atomic_store (+ mine (* 8 i)) 1)
                 (__store64 res i (__atomic_load (+ next (* 8 i))))
@@ -1357,7 +1443,8 @@
           (set i (+ i 1))
         })
       0
-    }))
+    }
+  })
 
 ; T0 stores x, loads y; T1 stores y, loads z; T2 stores z, loads x.
 ; Forbidden is all three loads answering 0; the witness is all three
@@ -1368,21 +1455,21 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (runSb3 mode n)
-  (let (
-    (xs (__alloc (* 8 n)))
-    (ys (__alloc (* 8 n)))
-    (zs (__alloc (* 8 n)))
-    (r0 (__alloc (* 8 n)))
-    (r1 (__alloc (* 8 n)))
-    (r2 (__alloc (* 8 n)))
-    (gate (if (== mode 3)
-      (__alloc (* 8 n))
-      0))
-    (ctr (__alloc 8))
-    (mut i 0)
-    (mut weak 0)
-    (mut full 0)
-  )
+  {
+    (let xs (__alloc (* 8 n)))
+    (let ys (__alloc (* 8 n)))
+    (let zs (__alloc (* 8 n)))
+    (let r0 (__alloc (* 8 n)))
+    (let r1 (__alloc (* 8 n)))
+    (let r2 (__alloc (* 8 n)))
+    (let gate
+      (if (== mode 3)
+        (__alloc (* 8 n))
+        0))
+    (let ctr (__alloc 8))
+    (let mut i 0)
+    (let mut weak 0)
+    (let mut full 0)
     {
       (parallel p (
         (a (sb3Thread xs ys r0 gate ctr n mode))
@@ -1392,15 +1479,18 @@
         (+ a (+ b c)))
       (while (< i n)
         {
-          (let ((s (+ (__load64 r0 i) (+ (__load64 r1 i) (__load64 r2 i)))))
+          {
+            (let s (+ (__load64 r0 i) (+ (__load64 r1 i) (__load64 r2 i))))
             (if (== s 0)
               (set weak (+ weak 1))
               (if (== s 3)
-                (set full (+ full 1)))))
+                (set full (+ full 1))))
+          }
           (set i (+ i 1))
         })
       (report weak full)
-    }))
+    }
+  })
 
 (:: modeOf (-> String Int))
 (fn (modeOf s)
@@ -1428,14 +1518,14 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (family (sysArg 1))
-    (mode (modeOf (sysArg 2)))
-    (n (if (|| (strEq family "iriw")
-             (|| (strEq family "wrc") (|| (strEq family "isa2") (strEq family "3.sb"))))
-      200000
-      500000))
-  )
+  {
+    (let family (sysArg 1))
+    (let mode (modeOf (sysArg 2)))
+    (let n
+      (if (|| (strEq family "iriw")
+            (|| (strEq family "wrc") (|| (strEq family "isa2") (strEq family "3.sb"))))
+        200000
+        500000))
     (if (< mode 0)
       (usage)
       (if (&& (strEq family "sb") (< mode 3))
@@ -1470,4 +1560,5 @@
                                     (runCoSelf 1 mode n)
                                     (if (strEq family "corw")
                                       (runCoSelf 0 mode n)
-                                      (usage))))))))))))))))))))
+                                      (usage))))))))))))))))))
+  })

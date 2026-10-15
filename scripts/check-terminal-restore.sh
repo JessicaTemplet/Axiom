@@ -148,11 +148,11 @@ cat > "$work/probe.ax" <<'AX'
   (match (termRaw stdin keep)
     ((Err e) (- 0 e.code))
     ((Ok g)
-      (let ((live (memAlloc termiosBytes)))
+      { (let live (memAlloc termiosBytes))
         {
           (getAttr live)
           (if (== (memCmp save live termiosBytes) 0) 0 1)
-        }))))
+        }})))
 
 (:: errInt (-> (Result Int Error) Int))
 
@@ -162,13 +162,13 @@ cat > "$work/probe.ax" <<'AX'
 
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (keep (strEq (sysArg 1) "1"))
-    (save (memAlloc termiosBytes))
-    (live (memAlloc termiosBytes))
-    (after (memAlloc termiosBytes))
-    (key (readBufferNew 1))
-  )
+  {
+    (let keep (strEq (sysArg 1) "1"))
+    (let save (memAlloc termiosBytes))
+    (let live (memAlloc termiosBytes))
+    (let after (memAlloc termiosBytes))
+    (let key (readBufferNew 1))
+
     {
       (kvInt "STATE_BYTES" termiosBytes)
       (kvInt "KEEPSIGNALS" (if keep 1 0))
@@ -206,14 +206,14 @@ cat > "$work/probe.ax" <<'AX'
       ; The guard's last share going restores the terminal too: raw mode
       ; is entered in a function that returns without restoring.
       (kvInt "SCOPE_RAW_DIFFERS" (scopedRaw keep save))
-      (let ((again (memAlloc termiosBytes)))
+      { (let again (memAlloc termiosBytes))
         {
           (getAttr again)
           (kvInt "SCOPE_RESTORED" (if (== (memCmp save again termiosBytes) 0) 1 0))
-        })
+        }}
       (println "PROBE_DONE=1")
     }
-  )
+  }
 )
 AX
 

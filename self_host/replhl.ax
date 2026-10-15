@@ -290,7 +290,7 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: mkHlSpan (-> Int Int Int Int))
 (pub fn (mkHlSpan cls start end)
-  (as (HlSpan cls start end) Int))
+  (as (HlSpan :cls cls :start start :end end) Int))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: hlSpanCls (-> Int Int))
@@ -325,7 +325,7 @@
 (pub :: mkHlBrk (-> Int Int Int Int Int Int))
 ;@axiom:pre((&& (&& (>= open 0) (<= open 1)) (&& (>= fam 0) (<= fam 2))))
 (pub fn (mkHlBrk pos open fam partner span)
-  (as (HlBrk pos (as open UInt8) (as fam UInt8) partner span) Int))
+  (as (HlBrk :pos pos :open (as open UInt8) :fam (as fam UInt8) :partner partner :span span) Int))
 
 ; Accessors require a live handle returned by mkHlBrk. The typed view
 ; borrows that block and follows its declared byte layout.
@@ -333,41 +333,46 @@
 (pub :: hlBrkPos (-> Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (hlBrkPos b)
-  (let ((view
-    (as b HlBrk)))
-    view.pos))
+  {
+    (let view (as b HlBrk))
+    view.pos
+  })
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: hlBrkOpen (-> Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (hlBrkOpen b)
-  (let ((view
-    (as b HlBrk)))
-    (as view.open Int)))
+  {
+    (let view (as b HlBrk))
+    (as view.open Int)
+  })
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: hlBrkFam (-> Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (hlBrkFam b)
-  (let ((view
-    (as b HlBrk)))
-    (as view.fam Int)))
+  {
+    (let view (as b HlBrk))
+    (as view.fam Int)
+  })
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: hlBrkPartner (-> Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (hlBrkPartner b)
-  (let ((view
-    (as b HlBrk)))
-    view.partner))
+  {
+    (let view (as b HlBrk))
+    view.partner
+  })
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: hlBrkSpan (-> Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (hlBrkSpan b)
-  (let ((view
-    (as b HlBrk)))
-    view.span))
+  {
+    (let view (as b HlBrk))
+    view.span
+  })
 
 ; The result of one lex: the classified spans, and the brackets.
 ; Returned together because they come from ONE `lex` call - painting a
@@ -381,7 +386,7 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: mkHlScan (-> (Vec Int) (Vec Int) Int))
 (pub fn (mkHlScan spans brks)
-  (as (HlScan spans brks) Int))
+  (as (HlScan :spans spans :brks brks) Int))
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: hlScanSpans (-> Int (Vec Int)))
@@ -488,33 +493,42 @@
 ;@axiom:restrict(no-io,no-foreign)
 (:: hlGap (-> String Int Int (Vec Int) (Vec Int)))
 (fn (hlGap src a b out)
-  (let ((mut q a))
+  {
+    (let mut q a)
     {
       (while (< q b)
-        (let ((c (strByte src q)))
+        {
+          (let c (strByte src q))
           (if (== c 59)
-            (let ((r (skipLineComment src (+ q 1) b)))
-              (let ((e
-                (if (&& (> r q) (== (strByte src (- r 1)) 10))
-                  (- r 1)
-                  r)))
+            {
+              (let r (skipLineComment src (+ q 1) b))
+              {
+                (let e
+                  (if (&& (> r q) (== (strByte src (- r 1)) 10))
+                    (- r 1)
+                    r))
                 {
                   (hlPush out (hlCommentClass src q e) q e)
                   (set q (if (> e q)
                     e
                     (+ q 1)))
-                }))
+                }
+              }
+            }
             (if (isBlockOpen src q b)
-              (let ((r (skipBlockComment src (+ q 2) b)))
+              {
+                (let r (skipBlockComment src (+ q 2) b))
                 {
                   (hlPush out HL_COMMENT q r)
                   (set q (if (> r q)
                     r
                     (+ q 1)))
-                })
+                }
+              }
               ; Residue: whitespace, or program text stranded by a bad
               ; escape. One span per run rather than one per byte.
-              (let ((mut r (+ q 1)))
+              {
+                (let mut r (+ q 1))
                 {
                   (while (&& (< r b)
                            (&& (!= (strByte src r) 59)
@@ -524,9 +538,12 @@
                     (set r (+ r 1)))
                   (hlPush out HL_PLAIN q r)
                   (set q r)
-                })))))
+                }
+              }))
+        })
       out
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; One token to one class.
@@ -586,10 +603,9 @@
 ;@axiom:restrict(no-io,no-foreign)
 (:: hlClassOf (-> Int Bool Bool Int Int))
 (fn (hlClassOf t isHead isBinder n)
-  (let (
-    (k (kindInt (tokenKind t)))
-    (lx (tokenLexeme t))
-  )
+  {
+    (let k (kindInt (tokenKind t)))
+    (let lx (tokenLexeme t))
     (if (|| (== k (kindInt TK_LPAREN))
           (|| (== k (kindInt TK_RPAREN))
             (|| (== k (kindInt TK_LBRACE))
@@ -622,16 +638,19 @@
                     HL_CALL
                     HL_IDENT)))
               (if (== k (kindInt TK_ERROR))
-                (let ((b0
-                  (if (> (strLen lx) 0)
-                    (strByte lx 0)
-                    0)))
+                {
+                  (let b0
+                    (if (> (strLen lx) 0)
+                      (strByte lx 0)
+                      0))
                   (if (&& (== (spanEnd (tokenSpan t)) n) (|| (== b0 34) (== b0 39)))
                     HL_PEND
-                    HL_ERROR))
+                    HL_ERROR)
+                }
                 (if (== k (kindInt TK_ERROR_ESC))
                   HL_ERROR
-                  HL_PLAIN)))))))))
+                  HL_PLAIN)))))))
+  })
 
 ; The bracket family of a token kind: 0 `()`, 1 `{}`, 2 `[]`, -1 not a
 ; bracket.
@@ -670,7 +689,8 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (:: hlForNext (-> Int Int Bool String Int))
 (fn (hlForNext st k isHead lx)
-  (let ((ident (== k (kindInt TK_IDENT))))
+  {
+    (let ident (== k (kindInt TK_IDENT)))
     (if (&& isHead (&& ident (strEq lx "for")))
       1
       (if (== st 1)
@@ -685,7 +705,8 @@
             5
             (if (&& (== st 5) (== k (kindInt TK_RPAREN)))
               3
-              0)))))))
+              0)))))
+  })
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (:: hlIsForIn (-> Int Int String Bool))
@@ -714,13 +735,13 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (:: hlRangeNext (-> Int Int Int Int Int))
 (fn (hlRangeNext st k depth forD)
-  (let (
-    (isDot (== k (kindInt TK_DOT)))
-    (closer (if (>= (hlFamOf k) 0)
-      (! (hlIsOpener k))
-      false))
-    (opener (hlIsOpener k))
-  )
+  {
+    (let isDot (== k (kindInt TK_DOT)))
+    (let closer
+      (if (>= (hlFamOf k) 0)
+        (! (hlIsOpener k))
+        false))
+    (let opener (hlIsOpener k))
     (if (&& closer (<= depth forD))
       0
       (if (== st 6)
@@ -745,7 +766,8 @@
                 0)
               (if (&& (== st 10) (== k (kindInt TK_IDENT)))
                 8
-                0))))))))
+                0))))))
+  })
 
 ; Contextual roles for the flat local spelling and colon labels.
 ; `ordinal` counts operands after the head, including this token.
@@ -810,45 +832,47 @@
   ; it has opened so far, and each form's ordinal among its
   ; siblings. `hlBinderContext` reads them to tell a call from a
   ; binder.
-  (let (
-    (toks (lex src))
-    (n (strLen src))
-    (spans vecNew)
-    (brks vecNew)
-    (mut i 0)
-    (mut p 0)
-    (mut prevLP false)
-    (mut forSt 0)
-    (mut forD 0)
-    (mut depth 0)
-    (heads vecNew)
-    (kids vecNew)
-    (ords vecNew)
-    (seen vecNew)
-    (firsts vecNew)
-  )
+  {
+    (let toks (lex src))
+    (let n (strLen src))
+    (let spans vecNew)
+    (let brks vecNew)
+    (let mut i 0)
+    (let mut p 0)
+    (let mut prevLP false)
+    (let mut forSt 0)
+    (let mut forD 0)
+    (let mut depth 0)
+    (let heads vecNew)
+    (let kids vecNew)
+    (let ords vecNew)
+    (let seen vecNew)
+    (let firsts vecNew)
     {
       (while (< i (vecLen toks))
         {
-          (let ((t (vecGet toks i)))
-            (let ((k (kindInt (tokenKind t))))
+          {
+            (let t (vecGet toks i))
+            {
+              (let k (kindInt (tokenKind t)))
               (if (! (== k (kindInt TK_EOF)))
-                (let (
-                  (s0 (spanStart (tokenSpan t)))
-                  (e0 (spanEnd (tokenSpan t)))
-                )
-                  (let ((s
-                    (if (< s0 p)
-                      p
-                      (if (> s0 n)
-                        n
-                        s0))))
-                    (let ((e
-                      (if (> e0 n)
-                        n
-                        (if (< e0 s)
-                          s
-                          e0))))
+                {
+                  (let s0 (spanStart (tokenSpan t)))
+                  (let e0 (spanEnd (tokenSpan t)))
+                  {
+                    (let s
+                      (if (< s0 p)
+                        p
+                        (if (> s0 n)
+                          n
+                          s0)))
+                    {
+                      (let e
+                        (if (> e0 n)
+                          n
+                          (if (< e0 s)
+                            s
+                            e0)))
                       {
                         (if (> s p)
                           (hlGap src p s spans)
@@ -907,20 +931,21 @@
                                     false
                                     true)))
                             (hlStackSet seen (- depth 1) (+ (vecGet seen (- depth 1)) 1))))
-                        (let ((contextClass
-                          (hlContextClass t
-                            (if (> i 0)
-                              (vecGet toks (- i 1))
-                              0)
-                            (if (> depth 0)
-                              (vecGetStr heads (- depth 1))
-                              "")
-                            (if (> depth 1)
-                              (vecGetStr heads (- depth 2))
-                              "")
-                            (if (> depth 0)
-                              (vecGet seen (- depth 1))
-                              0))))
+                        {
+                          (let contextClass
+                            (hlContextClass t
+                              (if (> i 0)
+                                (vecGet toks (- i 1))
+                                0)
+                              (if (> depth 0)
+                                (vecGetStr heads (- depth 1))
+                                "")
+                              (if (> depth 1)
+                                (vecGetStr heads (- depth 2))
+                                "")
+                              (if (> depth 0)
+                                (vecGet seen (- depth 1))
+                                0)))
                           (hlPush spans
                             (if (>= contextClass 0)
                               contextClass
@@ -936,13 +961,16 @@
                                       (vecGet ords (- depth 1)) (== (vecGet firsts (- depth 1)) 1))
                                     false)
                                   n)))
-                            s e))
-                        (let ((next (hlForStep forSt k prevLP (tokenLexeme t) depth forD)))
+                            s e)
+                        }
+                        {
+                          (let next (hlForStep forSt k prevLP (tokenLexeme t) depth forD))
                           {
                             (if (&& (== next 6) (!= forSt 6))
                               (set forD depth))
                             (set forSt next)
-                          })
+                          }
+                        }
                         (set depth (if (hlIsOpener k)
                           (+ depth 1)
                           (if (&& (>= (hlFamOf k) 0) (> depth 0))
@@ -950,7 +978,12 @@
                             depth)))
                         (set prevLP (== k (kindInt TK_LPAREN)))
                         (set p e)
-                      }))))))
+                      }
+                    }
+                  }
+                })
+            }
+          }
           (set i (+ i 1))
         })
       (if (< p n)
@@ -958,7 +991,8 @@
         spans)
       (hlPair src spans brks)
       (mkHlScan spans brks)
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Fill in every bracket's `partner`, with a typed stack.
@@ -982,37 +1016,45 @@
 ;@axiom:restrict(no-io,no-foreign)
 (:: hlSetPartner (-> (Vec Int) Int Int (Vec Int)))
 (fn (hlSetPartner brks i partner)
-  (let ((b (vecGet brks i)))
-    (vecSet brks i (mkHlBrk (hlBrkPos b) (hlBrkOpen b) (hlBrkFam b) partner (hlBrkSpan b)))))
+  {
+    (let b (vecGet brks i))
+    (vecSet brks i (mkHlBrk (hlBrkPos b) (hlBrkOpen b) (hlBrkFam b) partner (hlBrkSpan b)))
+  })
 
 ;@axiom:restrict(no-io,no-foreign)
 (:: hlPair (-> String (Vec Int) (Vec Int) (Vec Int)))
 (fn (hlPair src spans brks)
-  (let (
-    (n (vecLen brks))
-    (stack vecNew)
-    (mut i 0)
-  )
+  {
+    (let n (vecLen brks))
+    (let stack vecNew)
+    (let mut i 0)
     {
       (while (< i n)
         {
-          (let ((b (vecGet brks i)))
+          {
+            (let b (vecGet brks i))
             (if (== (hlBrkOpen b) 1)
               (vecPush stack i)
               (if (== (vecLen stack) 0)
                 brks
-                (let ((j (vecPop stack)))
-                  (let ((o (vecGet brks j)))
+                {
+                  (let j (vecPop stack))
+                  {
+                    (let o (vecGet brks j))
                     (if (== (hlBrkFam o) (hlBrkFam b))
                       {
                         (hlSetPartner brks j (hlBrkPos b))
                         (hlSetPartner brks i (hlBrkPos o))
                       }
-                      brks))))))
+                      brks)
+                  }
+                }))
+          }
           (set i (+ i 1))
         })
       brks
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; The bracket the cursor is ON, as an index into `brks`, or -1.
@@ -1025,16 +1067,16 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: hlBrkAt (-> (Vec Int) Int Int))
 (pub fn (hlBrkAt brks cursor)
-  (let (
-    (n (vecLen brks))
-    (mut i 0)
-    (mut before (- 0 1))
-    (mut on (- 0 1))
-  )
+  {
+    (let n (vecLen brks))
+    (let mut i 0)
+    (let mut before (- 0 1))
+    (let mut on (- 0 1))
     {
       (while (< i n)
         {
-          (let ((p (hlBrkPos (vecGet brks i))))
+          {
+            (let p (hlBrkPos (vecGet brks i)))
             {
               (set before (if (== p (- cursor 1))
                 i
@@ -1042,13 +1084,15 @@
               (set on (if (== p cursor)
                 i
                 on))
-            })
+            }
+          }
           (set i (+ i 1))
         })
       (if (>= before 0)
         before
         on)
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Recolour the cursor's bracket and its partner in place.
@@ -1062,19 +1106,25 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: hlMarkPair (-> (Vec Int) (Vec Int) Int (Vec Int)))
 (pub fn (hlMarkPair spans brks cursor)
-  (let ((i (hlBrkAt brks cursor)))
+  {
+    (let i (hlBrkAt brks cursor))
     (if (< i 0)
       spans
-      (let ((b (vecGet brks i)))
+      {
+        (let b (vecGet brks i))
         (if (< (hlBrkPartner b) 0)
           (hlRecolour spans (hlBrkSpan b) HL_MISMATCH)
-          (let ((j (hlBrkIndexAt brks (hlBrkPartner b))))
+          {
+            (let j (hlBrkIndexAt brks (hlBrkPartner b)))
             {
               (hlRecolour spans (hlBrkSpan b) HL_MATCH)
               (if (>= j 0)
                 (hlRecolour spans (hlBrkSpan (vecGet brks j)) HL_MATCH)
                 spans)
-            }))))))
+            }
+          })
+      })
+  })
 
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (:: hlBrkIndexAt (-> (Vec Int) Int Int))
@@ -1082,11 +1132,10 @@
 ; reusing `hlBrkAt`, whose cursor rule prefers the bracket that ENDS
 ; at its argument: correct there, needless indirection here.
 (fn (hlBrkIndexAt brks pos)
-  (let (
-    (n (vecLen brks))
-    (mut i 0)
-    (mut got (- 0 1))
-  )
+  {
+    (let n (vecLen brks))
+    (let mut i 0)
+    (let mut got (- 0 1))
     {
       (while (< i n)
         {
@@ -1096,15 +1145,18 @@
           (set i (+ i 1))
         })
       got
-    }))
+    }
+  })
 
 ;@axiom:restrict(no-io,no-foreign)
 (:: hlRecolour (-> (Vec Int) Int Int (Vec Int)))
 (fn (hlRecolour spans i cls)
   (if (|| (< i 0) (>= i (vecLen spans)))
     spans
-    (let ((s (vecGet spans i)))
-      (vecSet spans i (mkHlSpan cls (hlSpanStart s) (hlSpanEnd s))))))
+    {
+      (let s (vecGet spans i))
+      (vecSet spans i (mkHlSpan cls (hlSpanStart s) (hlSpanEnd s)))
+    }))
 
 ; ------------------------------------------------------------------
 ; PUBLIC SURFACE. Four pure functions; the editor needs no others.
@@ -1132,15 +1184,13 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: replHlClass (-> String Int String))
 (pub fn (replHlClass src cursor)
-  (let (
-    (sc (hlScan src))
-    (n (strLen src))
-  )
-    (let (
-      (spans (hlMarkPair (hlScanSpans sc) (hlScanBrks sc) cursor))
-      (out (strAlloc n))
-      (mut i 0)
-    )
+  {
+    (let sc (hlScan src))
+    (let n (strLen src))
+    {
+      (let spans (hlMarkPair (hlScanSpans sc) (hlScanBrks sc) cursor))
+      (let out (strAlloc n))
+      (let mut i 0)
       {
         (while (< i n)
           {
@@ -1150,21 +1200,25 @@
         (set i 0)
         (while (< i (vecLen spans))
           {
-            (let ((s (vecGet spans i)))
-              (let (
-                (b (hlLetter (hlSpanCls s)))
-                (mut q (hlSpanStart s))
-              )
+            {
+              (let s (vecGet spans i))
+              {
+                (let b (hlLetter (hlSpanCls s)))
+                (let mut q (hlSpanStart s))
                 (while (< q (hlSpanEnd s))
                   {
                     (if (&& (>= q 0) (< q n))
                       (memPutByte (strData out) q b))
                     (set q (+ q 1))
-                  })))
+                  })
+              }
+            }
             (set i (+ i 1))
           })
         out
-      })))
+      }
+    }
+  })
 
 ; Source, cursor and the byte offset the visible line starts at, to
 ; the painted bytes for [from, end).
@@ -1186,36 +1240,41 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: replHlPaint (-> String Int Int String))
 (pub fn (replHlPaint src cursor from)
-  (let (
-    (sc (hlScan src))
-    (n (strLen src))
-    (parts vecNew)
-    (mut i 0)
-  )
-    (let ((spans (hlMarkPair (hlScanSpans sc) (hlScanBrks sc) cursor)))
+  {
+    (let sc (hlScan src))
+    (let n (strLen src))
+    (let parts vecNew)
+    (let mut i 0)
+    {
+      (let spans (hlMarkPair (hlScanSpans sc) (hlScanBrks sc) cursor))
       {
         (while (< i (vecLen spans))
           {
-            (let ((s (vecGet spans i)))
-              (let (
-                (a (if (< (hlSpanStart s) from)
-                  from
-                  (hlSpanStart s)))
-                (b (hlSpanEnd s))
-              )
+            {
+              (let s (vecGet spans i))
+              {
+                (let a
+                  (if (< (hlSpanStart s) from)
+                    from
+                    (hlSpanStart s)))
+                (let b (hlSpanEnd s))
                 (if (< a b)
-                  (let (
-                    (txt (strSlice src a (- b a)))
-                    (sgr (hlSgr (hlSpanCls s)))
-                  )
+                  {
+                    (let txt (strSlice src a (- b a)))
+                    (let sgr (hlSgr (hlSpanCls s)))
                     (if (> (strLen sgr) 0)
                       (vecPush parts (paint sgr txt))
-                      (vecPush parts txt)))
-                  parts)))
+                      (vecPush parts txt))
+                  }
+                  parts)
+              }
+            }
             (set i (+ i 1))
           })
         (catStrs parts)
-      })))
+      }
+    }
+  })
 
 ; Source and cursor to the byte offset of the MATCHING delimiter.
 ;
@@ -1232,14 +1291,20 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: replHlMatch (-> String Int Int))
 (pub fn (replHlMatch src cursor)
-  (let ((brks (hlScanBrks (hlScan src))))
-    (let ((i (hlBrkAt brks cursor)))
+  {
+    (let brks (hlScanBrks (hlScan src)))
+    {
+      (let i (hlBrkAt brks cursor))
       (if (< i 0)
         (- 0 1)
-        (let ((p (hlBrkPartner (vecGet brks i))))
+        {
+          (let p (hlBrkPartner (vecGet brks i)))
           (if (< p 0)
             (- 0 2)
-            p))))))
+            p)
+        })
+    }
+  })
 
 ; The plain +1/-1 bracket count, recovered from the typed walk.
 ;
@@ -1252,11 +1317,10 @@
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: replHlDepth (-> String Int))
 (pub fn (replHlDepth src)
-  (let (
-    (brks (hlScanBrks (hlScan src)))
-    (mut i 0)
-    (mut d 0)
-  )
+  {
+    (let brks (hlScanBrks (hlScan src)))
+    (let mut i 0)
+    (let mut d 0)
     {
       (while (< i (vecLen brks))
         {
@@ -1266,4 +1330,5 @@
           (set i (+ i 1))
         })
       d
-    }))
+    }
+  })

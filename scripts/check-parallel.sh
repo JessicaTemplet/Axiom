@@ -498,27 +498,27 @@ cat > "$work/width.ax" <<'WIDTH'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (main)
-  (let (
-    (cmds vecNew)
-    (mut i 0)
-    (w (match (strParseInt (sysArg 1)) ((Some n) n) (None 1)))
-  )
+  {
+    (let cmds vecNew)
+    (let mut i 0)
+    (let w (match (strParseInt (sysArg 1)) ((Some n) n) (None 1)))
+
     {
       (while (< i 8)
         {
-          (let ((v vecNew))
+          { (let v vecNew)
             {
               (vecPush v "/bin/sh")
               (vecPush v "-c")
               (vecPush v "sleep 0.2")
               (vecPush cmds v)
-            })
+            }}
           (set i (+ i 1))
         })
       (println (vecLen (taskRunCommands cmds w)))
       0
     }
-  )
+  }
 )
 WIDTH
 now() { python3 -c 'import time;print(time.time())'; }
@@ -778,13 +778,13 @@ cat > "$work/nrpar.ax" <<'NRPAR'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((cell (memAlloc 8)))
-    (let ((h (__par_spawn (lambda (w) (+ w 41)) 1)))
-      (let ((ans (__par_join_nr h cell)))
+  { (let cell (memAlloc 8))
+    { (let h (__par_spawn (lambda (w) (+ w 41)) 1))
+      { (let ans (__par_join_nr h cell))
         {
           (println (as ans Int))
           (println (as (memGetWord cell 0) Int))
-        }))))
+        }}}})
 NRPAR
 cat > "$work/nrtrap.ax" <<'NRTRAP'
 (import IO)
@@ -797,13 +797,13 @@ cat > "$work/nrtrap.ax" <<'NRTRAP'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((cell (memAlloc 8)))
-    (let ((h (__par_spawn (lambda (w) (/ 10 w)) 0)))
-      (let ((ans (__par_join_nr h cell)))
+  { (let cell (memAlloc 8))
+    { (let h (__par_spawn (lambda (w) (/ 10 w)) 0))
+      { (let ans (__par_join_nr h cell))
         {
           (println (as ans Int))
           (println (as (memGetWord cell 0) Int))
-        }))))
+        }}}})
 NRTRAP
 if run_case "$work/nrpar.ax" "" nrpar-p && run_case "$work/nrpar.ax" "--threads" nrpar-t; then
   if [[ "$(cat "$work/nrpar-p.out")" == "$(printf '42\n0')" && "$(cat "$work/nrpar-t.out")" == "$(cat "$work/nrpar-p.out")" \
@@ -917,11 +917,11 @@ cat > "$work/arena.ax" <<'ARENA'
 (:: build (-> Int Int))
 
 (fn (build n)
-  (let (
-    (v vecNew)
-    (mut i 0)
-    (mut acc 0)
-  )
+  {
+    (let v vecNew)
+    (let mut i 0)
+    (let mut acc 0)
+
     {
       (while (< i n)
         {
@@ -936,16 +936,16 @@ cat > "$work/arena.ax" <<'ARENA'
         })
       acc
     }
-  )
+  }
 )
 
 (:: strwork (-> Int Int))
 
 (fn (strwork n)
-  (let (
-    (mut i 0)
-    (mut s "")
-  )
+  {
+    (let mut i 0)
+    (let mut s "")
+
     {
       (while (< i n)
         {
@@ -954,7 +954,7 @@ cat > "$work/arena.ax" <<'ARENA'
         })
       (strLen s)
     }
-  )
+  }
 )
 
 (:: main ())
@@ -1052,10 +1052,10 @@ cat > "$work/traps.ax" <<'TRAPS'
 (:: slowZero (-> Int Int))
 
 (fn (slowZero n)
-  (let (
-    (mut i 0)
-    (mut acc 0)
-  )
+  {
+    (let mut i 0)
+    (let mut acc 0)
+
     {
       (while (< i n)
         {
@@ -1064,18 +1064,18 @@ cat > "$work/traps.ax" <<'TRAPS'
         })
       (% acc 1)
     }
-  )
+  }
 )
 
 (:: slowIndex (-> Int Int))
 
 (fn (slowIndex n)
-  (let ((v vecNew))
+  { (let v vecNew)
     {
       (vecPush v 1)
       (vecGet v (+ 5 (slowZero n)))
     }
-  )
+  }
 )
 
 (:: fastDiv (-> Int Int))
@@ -1088,10 +1088,10 @@ cat > "$work/traps.ax" <<'TRAPS'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (zero 0)
-    (order (match (strParseInt (sysArg 1)) ((Some n) n) (None 0)))
-  )
+  {
+    (let zero 0)
+    (let order (match (strParseInt (sysArg 1)) ((Some n) n) (None 0)))
+
     {
       (println "before")
       (if (== order 0)
@@ -1101,7 +1101,7 @@ cat > "$work/traps.ax" <<'TRAPS'
           (println (+ a b))))
       (println "UNREACHABLE")
     }
-  )
+  }
 )
 TRAPS
 if "$axc" build --input "$work/traps.ax" --output "$work/traps-p.bin" > "$work/traps.build" 2>&1 \
@@ -1273,8 +1273,8 @@ cat > "$work/opaque-cond.ax" <<'OPAQUE'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((s "hello"))
-    (__par_join (__par_spawn (if (== 1 1) (lambda (w) (+ w (strLen s))) (lambda (w) w)) 0))))
+  { (let s "hello")
+    (__par_join (__par_spawn (if (== 1 1) (lambda (w) (+ w (strLen s))) (lambda (w) w)) 0))})
 OPAQUE
 cat > "$work/opaque-call.ax" <<'OPAQUE'
 (import Str)
@@ -1285,8 +1285,8 @@ cat > "$work/opaque-call.ax" <<'OPAQUE'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((s "hello"))
-    (__par_join (__par_spawn (mk s) 0))))
+  { (let s "hello")
+    (__par_join (__par_spawn (mk s) 0))})
 OPAQUE
 cat > "$work/opaque-word.ax" <<'OPAQUE'
 (:: main Int)
@@ -1294,8 +1294,8 @@ cat > "$work/opaque-word.ax" <<'OPAQUE'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((n 40))
-    (__par_join (__par_spawn (if (== 1 1) (lambda (w) (+ w n)) (lambda (w) w)) 0))))
+  { (let n 40)
+    (__par_join (__par_spawn (if (== 1 1) (lambda (w) (+ w n)) (lambda (w) w)) 0))})
 OPAQUE
 cat > "$work/opaque-proc.ax" <<'OPAQUE'
 (import Str)
@@ -1306,8 +1306,8 @@ cat > "$work/opaque-proc.ax" <<'OPAQUE'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((s "hello"))
-    (__proc_join (__proc_spawn (mk s) 0))))
+  { (let s "hello")
+    (__proc_join (__proc_spawn (mk s) 0))})
 OPAQUE
 check3064 "$work/opaque-cond.ax" 1 "a conditional hiding a captured String"
 check3064 "$work/opaque-call.ax" 1 "a call-result thunk"
@@ -1330,8 +1330,8 @@ cat > "$work/accept-foreign.ax" <<'FOREIGN'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((p (counterNew 0)))
-    (__par_join (__par_spawn (lambda (w) { p w }) 0))))
+  { (let p (counterNew 0))
+    (__par_join (__par_spawn (lambda (w) { p w }) 0))})
 FOREIGN
 cat > "$work/refuse-handle.ax" <<'HANDLE'
 (import Ffi)
@@ -1341,8 +1341,8 @@ cat > "$work/refuse-handle.ax" <<'HANDLE'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((h (ffiHandleNew 0 0)))
-    (__par_join (__par_spawn (lambda (w) { h w }) 0))))
+  { (let h (ffiHandleNew 0 0))
+    (__par_join (__par_spawn (lambda (w) { h w }) 0))})
 HANDLE
 checkok "$work/accept-foreign.ax" "a captured Foreign"
 check3064 "$work/refuse-handle.ax" 1 "a captured Handle"
@@ -1369,12 +1369,12 @@ if [[ "$(uname -s)" == Linux ]]; then
 
 (:: work (-> Int Int))
 (fn (work i)
-  (let ((v vecNew))
+  { (let v vecNew)
     {
       (for k in 0..100
         (vecPush v k))
       (vecLen v)
-    }))
+    }})
 
 (:: loop (-> Int Int Int))
 ;@axiom:effect(io)
@@ -1460,16 +1460,16 @@ cat > "$work/orphan.ax" <<'ORPHAN'
     (match (writeFile path (fmtInt sysPid))
       ((Ok n) n)
       ((Err e) 0))
-    (let (
-      (buf (memAlloc 16))
-      (start (nowUs (memAlloc 16)))
-      (mut spins 0)
-    )
+    {
+      (let buf (memAlloc 16))
+      (let start (nowUs (memAlloc 16)))
+      (let mut spins 0)
+
       {
         (while (< (- (nowUs buf) start) 120000000)
           (set spins (+ spins 1)))
         spins
-      })
+      }}
   })
 
 (:: boom (-> Int Int))
@@ -1482,17 +1482,17 @@ cat > "$work/orphan.ax" <<'ORPHAN'
 (:: started (-> String Bool))
 ;@axiom:effect(io)
 (fn (started path)
-  (let (
-    (buf (memAlloc 16))
-    (start (nowUs buf))
-  )
+  {
+    (let buf (memAlloc 16))
+    (let start (nowUs buf))
+
     {
       (while (&&
         (== (region r (strLen (unwrapOr (readFile path) ""))) 0)
         (< (- (nowUs buf) start) 5000000))
         0)
       (> (strLen (unwrapOr (readFile path) "")) 0)
-    }))
+    }})
 
 ; Join the failing child while its sibling is live. A parallel form
 ; whose FIRST binding sleeps would wait two minutes before observing
@@ -1513,13 +1513,13 @@ cat > "$work/orphan.ax" <<'ORPHAN'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((mode (sysArg 1)))
+  { (let mode (sysArg 1))
     (if (strEq mode "abort")
       {
-        (let ((st (__axiom_recover
+        { (let st (__axiom_recover
           __axiom_arena_mark
-          (lambda (x) (failWithSibling "pid-abort")))))
-          (println "recovered {st}"))
+          (lambda (x) (failWithSibling "pid-abort"))))
+          (println "recovered {st}")}
         0
       }
       (if (strEq mode "trap")
@@ -1530,7 +1530,7 @@ cat > "$work/orphan.ax" <<'ORPHAN'
           (if (started "pid-main")
             { (println "main returns") 0 }
             99)
-        }))))
+        }))})
 ORPHAN
 if "$axc" build --input "$work/orphan.ax" --output "$work/orphan" > "$work/orphan.build" 2>&1; then
   for mode in abort trap main; do
@@ -1589,23 +1589,23 @@ for kind in proc thread; do
 ;@axiom:effect(block)
 ;@axiom:effect(unsafe)
 (fn (main)
-  (let (
-    (cell (memAlloc 8))
-    (_ (memSetWord cell 0 123))
-    (h (__${kind}_spawn (lambda (x) 42) 0))
-    (hw (as h Int))
-    (other (__thread_spawn
+  {
+    (let cell (memAlloc 8))
+    (let _ (memSetWord cell 0 123))
+    (let h (__${kind}_spawn (lambda (x) 42) 0))
+    (let hw (as h Int))
+    (let other (__thread_spawn
       (lambda (x)
         (__axiom_recover __axiom_arena_mark
           (lambda (y) $join_expr))) 0))
-    (foreign (__thread_join other))
-    (status (memGetWord cell 0))
-    (answer (__${kind}_join h))
-  )
+    (let foreign (__thread_join other))
+    (let status (memGetWord cell 0))
+    (let answer (__${kind}_join h))
+
     {
       (println "foreign {foreign} status {status} answer {answer}")
       0
-    }))
+    }})
 OWNER
     if "$axc" build --input "$work/$tag.ax" --output "$work/$tag" > "$work/$tag.build" 2>&1; then
       gate_timeout 20 "$work/$tag" > "$work/$tag.out" 2> "$work/$tag.err"
@@ -1656,10 +1656,10 @@ cat > "$work/refuse.ax" <<'AX'
 (fn (main)
   {
     (println "before")
-    (let ((st (__axiom_recover
+    { (let st (__axiom_recover
       __axiom_arena_mark
-      (lambda (x) (pair x)))))
-      (println "recovered {st}"))
+      (lambda (x) (pair x))))
+      (println "recovered {st}")}
     (println (pair 1))
     (println "NOT REACHED")
   })

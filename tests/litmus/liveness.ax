@@ -80,29 +80,33 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (contend m res k ms)
-  (let (
-    (buf (memAlloc 16))
-    (mut count 0)
-    (mut worst 0)
-    (mut going 1)
-  )
+  {
+    (let buf (memAlloc 16))
+    (let mut count 0)
+    (let mut worst 0)
+    (let mut going 1)
     {
       (arrive (+ res 120) 4)
-      (let ((end (+ (sysTimeoutMicros buf) (* ms 1000))))
+      {
+        (let end (+ (sysTimeoutMicros buf) (* ms 1000)))
         (while (== going 1)
-          (let ((t0 (sysTimeoutMicros buf)))
-            (let ((waited
-              (match (mutexLock m)
-                ; The critical section is the guard's arm: the lock is let
-                ; go as the arm ends, before the bookkeeping.
-                ((Ok g)
-                  (let ((w (- (sysTimeoutMicros buf) t0)))
+          {
+            (let t0 (sysTimeoutMicros buf))
+            {
+              (let waited
+                (match (mutexLock m)
+                  ; The critical section is the guard's arm: the lock is let
+                  ; go as the arm ends, before the bookkeeping.
+                  ((Ok g)
                     {
-                      (memSetWord res 0 (+ (memGetWord res 0) 1))
-                      w
-                    })
-                )
-                ((Err e) (- 0 1)))))
+                      (let w (- (sysTimeoutMicros buf) t0))
+                      {
+                        (memSetWord res 0 (+ (memGetWord res 0) 1))
+                        w
+                      }
+                    }
+                  )
+                  ((Err e) (- 0 1))))
               (if (< waited 0)
                 (set going 0)
                 {
@@ -112,11 +116,15 @@
                   (tallyWait res k waited)
                   (if (>= (sysTimeoutMicros buf) end)
                     (set going 0))
-                })))))
+                })
+            }
+          })
+      }
       (memSetWord res (+ 1 (* 2 k)) count)
       (memSetWord res (+ 2 (* 2 k)) worst)
       0
-    }))
+    }
+  })
 
 ; Which of five lengths a wait of `us` microseconds was.
 (:: bucketOf (-> Int Int))
@@ -133,45 +141,49 @@
 
 (:: tallyWait (-> Int Int Int Int))
 (fn (tallyWait res k us)
-  (let ((w (+ 16 (+ (* 8 k) (bucketOf us)))))
+  {
+    (let w (+ 16 (+ (* 8 k) (bucketOf us))))
     {
       (memSetWord res w (+ (memGetWord res w) 1))
       0
-    }))
+    }
+  })
 
 (:: shares (-> Int Int))
 ;@axiom:effect(io)
 (fn (shares res)
-  (let (
-    (mut k 0)
-    (mut total 0)
-  )
+  {
+    (let mut k 0)
+    (let mut total 0)
     {
       (while (< k 4)
-        (let (
-          (a (memGetWord res (+ 1 (* 2 k))))
-          (w (memGetWord res (+ 2 (* 2 k))))
-          (h (+ 16 (* 8 k)))
-        )
+        {
+          (let a (memGetWord res (+ 1 (* 2 k))))
+          (let w (memGetWord res (+ 2 (* 2 k))))
+          (let h (+ 16 (* 8 k)))
           {
-            (let (
-              (b0 (memGetWord res h))
-              (b1 (memGetWord res (+ h 1)))
-              (b2 (memGetWord res (+ h 2)))
-              (b3 (memGetWord res (+ h 3)))
-              (b4 (memGetWord res (+ h 4)))
-            )
+            {
+              (let b0 (memGetWord res h))
+              (let b1 (memGetWord res (+ h 1)))
+              (let b2 (memGetWord res (+ h 2)))
+              (let b3 (memGetWord res (+ h 3)))
+              (let b4 (memGetWord res (+ h 4)))
               (println
-                "binding {k} acquisitions {a} worst-wait-us {w} waits {b0} {b1} {b2} {b3} {b4}"))
+                "binding {k} acquisitions {a} worst-wait-us {w} waits {b0} {b1} {b2} {b3} {b4}")
+            }
             (set total (+ total a))
             (set k (+ k 1))
-          }))
-      (let ((c (memGetWord res 0)))
+          }
+        })
+      {
+        (let c (memGetWord res 0))
         (if (== c total)
           (println "count {c} of {total} ok")
-          (println "count {c} of {total}")))
+          (println "count {c} of {total}"))
+      }
       0
-    }))
+    }
+  })
 
 (:: starve (-> Int Int))
 ;@axiom:effect(io)
@@ -215,26 +227,32 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (inverted k first second bar ms)
-  (let ((buf (memAlloc 16)))
+  {
+    (let buf (memAlloc 16))
     (match (mutexLock first)
       ((Ok g)
         {
           (println "side {k} holds")
           (arrive bar 2)
-          (let ((t0 (sysTimeoutMicros buf)))
-            (let ((r (lockWithin second ms)))
+          {
+            (let t0 (sysTimeoutMicros buf))
+            {
+              (let r (lockWithin second ms))
               {
-                (let (
-                  (code (codeOf r))
-                  (us (- (sysTimeoutMicros buf) t0))
-                )
-                  (println "side {k} {code} {us}"))
+                {
+                  (let code (codeOf r))
+                  (let us (- (sysTimeoutMicros buf) t0))
+                  (println "side {k} {code} {us}")
+                }
                 (arrive (+ bar 8) 2)
                 0
-              }))
+              }
+            }
+          }
         }
       )
-      ((Err e) 1))))
+      ((Err e) 1))
+  })
 
 ; Both sides take `a` and then `b`, the order that cannot deadlock.
 (:: ordered (-> Mutex Mutex Int))
@@ -289,18 +307,23 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (waitFor k mine theirs ms)
-  (let ((buf (memAlloc 16)))
+  {
+    (let buf (memAlloc 16))
     (if (> ms 0)
-      (let ((t0 (sysTimeoutMicros buf)))
-        (let ((r (chanRecvTimeout mine (* ms 1000000))))
-          (let (
-            (code (recvCode r))
-            (us (- (sysTimeoutMicros buf) t0))
-          )
+      {
+        (let t0 (sysTimeoutMicros buf))
+        {
+          (let r (chanRecvTimeout mine (* ms 1000000)))
+          {
+            (let code (recvCode r))
+            (let us (- (sysTimeoutMicros buf) t0))
             {
               (println "side {k} {code} {us}")
               0
-            })))
+            }
+          }
+        }
+      }
       {
         (println "side {k} waits")
         (match (chanRecv mine)
@@ -310,7 +333,8 @@
               1)
           )
           ((None) 0))
-      })))
+      })
+  })
 
 ; The control: this side sends first, then receives the answer.
 (:: sendFirst (-> Chan Chan Int))
@@ -367,10 +391,9 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (mode (sysArg 1))
-    (how (howOf (sysArg 2)))
-  )
+  {
+    (let mode (sysArg 1))
+    (let how (howOf (sysArg 2)))
     (if (strEq mode "starve")
       (starve (argInt 2))
       (if (&& (strEq mode "inversion") (>= how 0))
@@ -386,4 +409,5 @@
           {
             (println "usage: liveness starve MS | (inversion|pair) (timed MS|untimed|ordered)")
             2
-          })))))
+          })))
+  })

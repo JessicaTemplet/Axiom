@@ -406,21 +406,25 @@
 
 (pub :: mlcFresh (-> MLC Int))
 (pub fn (mlcFresh lc)
-  (let ((r lc.nreg))
+  {
+    (let r lc.nreg)
     {
       (set lc.nreg (+ r 1))
       r
-    }))
+    }
+  })
 
 ; A new block, numbered by its position, appended and answered. The
 ; caller decides when `cur` moves to it.
 (pub :: mlcBlock (-> MLC (Vec Int) MBlock))
 (pub fn (mlcBlock lc ps)
-  (let ((b (MBlock (vecLen lc.blocks) ps vecNew vecNew)))
+  {
+    (let b (MBlock :id (vecLen lc.blocks) :params ps :instrs vecNew :term vecNew))
     {
       (vecPush lc.blocks b)
       b
-    }))
+    }
+  })
 
 (pub :: mlcEmit (-> MLC MInst Int))
 (pub fn (mlcEmit lc n)
@@ -445,20 +449,24 @@
 
 (pub :: mSingleton (-> Int (Vec Int)))
 (pub fn (mSingleton r)
-  (let ((v vecNew))
+  {
+    (let v vecNew)
     {
       (vecPush v r)
       v
-    }))
+    }
+  })
 
 (pub :: mEnvLook (-> (Vec MBind) String Int Int))
 (pub fn (mEnvLook env name i)
   (if (< i 0)
     (- 0 1)
-    (let ((bnd (vecGet env i)))
+    {
+      (let bnd (vecGet env i))
       (if (strEq bnd.name name)
         bnd.reg
-        (mEnvLook env name (- i 1))))))
+        (mEnvLook env name (- i 1)))
+    }))
 
 (pub :: mEnvFind (-> (Vec MBind) String Int))
 (pub fn (mEnvFind env name)
@@ -473,10 +481,12 @@
 (pub fn (mEnvLookMut env name i)
   (if (< i 0)
     (- 0 1)
-    (let ((bnd (vecGet env i)))
+    {
+      (let bnd (vecGet env i))
       (if (strEq bnd.name name)
         bnd.isMut
-        (mEnvLookMut env name (- i 1))))))
+        (mEnvLookMut env name (- i 1)))
+    }))
 
 (pub :: mEnvMut (-> (Vec MBind) String Int))
 (pub fn (mEnvMut env name)
@@ -506,13 +516,15 @@
 (pub fn (mEnvDropScan env nm i keep)
   (if (>= i (vecLen env))
     keep
-    (let ((bnd (vecGet env i)))
+    {
+      (let bnd (vecGet env i))
       (if (strEq bnd.name nm)
         (mEnvDropScan env nm (+ i 1) keep)
         {
           (vecSet env keep bnd)
           (mEnvDropScan env nm (+ i 1) (+ keep 1))
-        }))))
+        })
+    }))
 
 (pub :: mEnvDropName (-> (Vec MBind) String Int Int))
 (pub fn (mEnvDropName env nm base)
@@ -639,22 +651,34 @@
 (pub fn (mLowArgs lc env args i out)
   (if (>= i (vecLen args))
     true
-    (let ((r (mLower lc env (vecGet args i))))
+    {
+      (let r (mLower lc env (vecGet args i)))
       (if (< r 0)
         false
         {
           (vecPush out r)
           (mLowArgs lc env args (+ i 1) out)
-        }))))
+        })
+    }))
 
 ; Lower one expression. Answers the register holding its value, or a
 ; NEGATIVE number when the expression is outside the subset. Every
 ; caller checks; nothing here answers a register it did not define.
 (pub :: mLower (-> MLC (Vec MBind) Int Int))
 (pub fn (mLower lc env e)
-  (let ((t (nodeTag e)))
+  {
+    (let t (nodeTag e))
     (if (== t TAG_E_INT)
-      (mlcEmit lc (MInst MO_CONST (mlcFresh lc) (nodeA e) 0 "" vecNew 0 0))
+      (mlcEmit lc
+        (MInst
+          :op MO_CONST
+          :dst (mlcFresh lc)
+          :a (nodeA e)
+          :b 0
+          :name ""
+          :args vecNew
+          :tgt 0
+          :alt 0))
       (if (== t TAG_E_VAR)
         ; A name the environment does not hold is a global - a
         ; nullary function, a constant, an imported binding - and
@@ -669,14 +693,34 @@
         ; consults its symbol table first, so a shadowing binding -
         ; to the extent the checker lets one stand - reads the same
         ; register on both paths.
-        (let ((r (mEnvFind env (nodeAName e))))
+        {
+          (let r (mEnvFind env (nodeAName e)))
           (if (>= r 0)
             r
             (if (strEq (nodeAName e) "true")
-              (mlcEmit lc (MInst MO_CONST (mlcFresh lc) 1 0 "" vecNew 0 0))
+              (mlcEmit lc
+                (MInst
+                  :op MO_CONST
+                  :dst (mlcFresh lc)
+                  :a 1
+                  :b 0
+                  :name ""
+                  :args vecNew
+                  :tgt 0
+                  :alt 0))
               (if (strEq (nodeAName e) "false")
-                (mlcEmit lc (MInst MO_CONST (mlcFresh lc) 0 0 "" vecNew 0 0))
-                (- 0 1)))))
+                (mlcEmit lc
+                  (MInst
+                    :op MO_CONST
+                    :dst (mlcFresh lc)
+                    :a 0
+                    :b 0
+                    :name ""
+                    :args vecNew
+                    :tgt 0
+                    :alt 0))
+                (- 0 1))))
+        }
         (if (== t TAG_E_LET)
           (mLowerLet lc env e 0)
           (if (== t TAG_E_LETM)
@@ -691,7 +735,8 @@
                     (mLowerSeq lc env (nodeAVec e) 0 (- 0 1))
                     (if (== t TAG_E_APP)
                       (mLowerApp lc env e)
-                      (- 0 1))))))))))))
+                      (- 0 1))))))))))
+  })
 
 ; `TAG_E_LET` binds exactly one name per node (parser.ax builds it
 ; that way and codegen relies on it), so there is no binding list to
@@ -707,20 +752,22 @@
 ; the scope would read a register no live binding answers.
 (pub :: mLowerLet (-> MLC (Vec MBind) Int Int Int))
 (pub fn (mLowerLet lc env e mut)
-  (let (
-    (rv (mLower lc env (nodeB e)))
-    (base (vecLen env))
-  )
+  {
+    (let rv (mLower lc env (nodeB e)))
+    (let base (vecLen env))
     (if (< rv 0)
       (- 0 1)
       {
-        (vecPush env (MBind (nodeAName e) rv mut))
-        (let ((rb (mLower lc env (nodeC e))))
+        (vecPush env (MBind :name (nodeAName e) :reg rv :isMut mut))
+        {
+          (let rb (mLower lc env (nodeC e)))
           {
             (mEnvDropName env (nodeAName e) base)
             rb
-          })
-      })))
+          }
+        }
+      })
+  })
 
 ; `set` stores by REBINDING: the value lowers, a fresh binding for
 ; the target shadows the old one, and the answer is the value's own
@@ -738,18 +785,22 @@
 (pub fn (mLowerSet lc env e)
   (if (!= lc.cond 0)
     (- 0 1)
-    (let ((m (mEnvMut env (nodeAName e))))
+    {
+      (let m (mEnvMut env (nodeAName e)))
       (if (< m 0)
         (- 0 1)
         (if (== m 0)
           (- 0 1)
-          (let ((rv (mLower lc env (nodeB e))))
+          {
+            (let rv (mLower lc env (nodeB e)))
             (if (< rv 0)
               (- 0 1)
               {
-                (vecPush env (MBind (nodeAName e) rv 1))
+                (vecPush env (MBind :name (nodeAName e) :reg rv :isMut 1))
                 rv
-              })))))))
+              })
+          }))
+    }))
 
 ; The loop-carried set: every `mut` binding in scope at the loop's
 ; entry, innermost shadowing outermost. Scanned from the END so the
@@ -761,7 +812,8 @@
 (pub fn (mCarryLoop env i seen names regs)
   (if (< i 0)
     0
-    (let ((bnd (vecGet env i)))
+    {
+      (let bnd (vecGet env i))
       (if (mStrMem seen bnd.name 0)
         (mCarryLoop env (- i 1) seen names regs)
         {
@@ -772,7 +824,8 @@
               (vecPush regs bnd.reg)
             })
           (mCarryLoop env (- i 1) seen names regs)
-        }))))
+        })
+    }))
 
 ; `n` fresh registers onto `v`.
 (pub :: mFreshN (-> MLC (Vec Int) Int Int))
@@ -793,7 +846,7 @@
   (if (>= i (vecLen names))
     0
     {
-      (vecPush env (MBind (vecGet names i) (vecGet regs i) 1))
+      (vecPush env (MBind :name (vecGet names i) :reg (vecGet regs i) :isMut 1))
       (mRebind env names regs (+ i 1))
     }))
 
@@ -836,33 +889,32 @@
 ; instead of needing its own case.
 (pub :: mLowerWhile (-> MLC (Vec MBind) Int Int))
 (pub fn (mLowerWhile lc env e)
-  (let (
-    (names vecNew)
-    (entryRegs vecNew)
-    (seen vecNew)
-    (base (vecLen env))
-  )
+  {
+    (let names vecNew)
+    (let entryRegs vecNew)
+    (let seen vecNew)
+    (let base (vecLen env))
     {
       (mCarryLoop env (- base 1) seen names entryRegs)
-      (let (
-        (ph vecNew)
-        (pd vecNew)
-        (px vecNew)
-      )
+      {
+        (let ph vecNew)
+        (let pd vecNew)
+        (let px vecNew)
         {
           (mFreshN lc ph (vecLen names))
           (mFreshN lc pd (vecLen names))
           (mFreshN lc px (vecLen names))
-          (let (
-            (hd (mlcBlock lc ph))
-            (bd (mlcBlock lc pd))
-            (bx (mlcBlock lc px))
-          )
+          {
+            (let hd (mlcBlock lc ph))
+            (let bd (mlcBlock lc pd))
+            (let bx (mlcBlock lc px))
             {
-              (mlcTerm lc (MInst MT_BR (- 0 1) 0 0 "" entryRegs hd.id 0))
+              (mlcTerm lc
+                (MInst :op MT_BR :dst (- 0 1) :a 0 :b 0 :name "" :args entryRegs :tgt hd.id :alt 0))
               (set lc.cur hd)
               (mRebind env names ph 0)
-              (let ((rc (mLower lc env (nodeA e))))
+              {
+                (let rc (mLower lc env (nodeA e)))
                 (if (< rc 0)
                   (- 0 1)
                   {
@@ -871,24 +923,56 @@
                     ; after `mlcBlock` takes it, so the list the branch
                     ; passes and the list the header declares are one
                     ; list, and cannot disagree.
-                    (mlcTerm lc (MInst MT_CONDBR (- 0 1) rc 0 "" ph bd.id bx.id))
+                    (mlcTerm lc
+                      (MInst
+                        :op MT_CONDBR
+                        :dst (- 0 1)
+                        :a rc
+                        :b 0
+                        :name ""
+                        :args ph
+                        :tgt bd.id
+                        :alt bx.id))
                     (set lc.cur bd)
                     (mRebind env names pd 0)
-                    (let ((bodyVal (mLowerSeq lc env (nodeBVec e) 0 (- 0 1))))
+                    {
+                      (let bodyVal (mLowerSeq lc env (nodeBVec e) 0 (- 0 1)))
                       (if (< bodyVal 0)
                         (- 0 1)
                         {
                           (mlcTerm lc
-                            (MInst MT_BR (- 0 1) 0 0 "" (mCurRegs env names 0 vecNew) hd.id 0))
+                            (MInst
+                              :op MT_BR
+                              :dst (- 0 1)
+                              :a 0
+                              :b 0
+                              :name ""
+                              :args (mCurRegs env names 0 vecNew)
+                              :tgt hd.id
+                              :alt 0))
                           (set lc.cur bx)
                           (mEnvTrunc env base)
                           (mRebind env names px 0)
-                          (mlcEmit lc (MInst MO_CONST (mlcFresh lc) 0 0 "" vecNew 0 0))
-                        }))
-                  }))
-            })
-        })
-    }))
+                          (mlcEmit lc
+                            (MInst
+                              :op MO_CONST
+                              :dst (mlcFresh lc)
+                              :a 0
+                              :b 0
+                              :name ""
+                              :args vecNew
+                              :tgt 0
+                              :alt 0))
+                        })
+                    }
+                  })
+              }
+            }
+          }
+        }
+      }
+    }
+  })
 
 ; `if` is three new blocks and a join parameter. The join block is
 ; created BEFORE either arm is lowered, so a nested `if` inside an
@@ -900,41 +984,76 @@
 ; than the block it started in.
 (pub :: mLowerIf (-> MLC (Vec MBind) Int Int))
 (pub fn (mLowerIf lc env e)
-  (let ((rc (mLower lc env (nodeA e))))
+  {
+    (let rc (mLower lc env (nodeA e)))
     (if (< rc 0)
       (- 0 1)
-      (let (
-        (bt (mlcBlock lc vecNew))
-        (bf (mlcBlock lc vecNew))
-        (pj (mlcFresh lc))
-        (outer lc.cond)
-      )
-        (let ((bj (mlcBlock lc (mSingleton pj))))
+      {
+        (let bt (mlcBlock lc vecNew))
+        (let bf (mlcBlock lc vecNew))
+        (let pj (mlcFresh lc))
+        (let outer lc.cond)
+        {
+          (let bj (mlcBlock lc (mSingleton pj)))
           {
-            (mlcTerm lc (MInst MT_CONDBR (- 0 1) rc 0 "" vecNew bt.id bf.id))
+            (mlcTerm lc
+              (MInst
+                :op MT_CONDBR
+                :dst (- 0 1)
+                :a rc
+                :b 0
+                :name ""
+                :args vecNew
+                :tgt bt.id
+                :alt bf.id))
             (set lc.cur bt)
             ; Arms are conditional; the condition above is not. A
             ; `set` under this flag refuses, and the flag restores
             ; past the join - saved, because an `if` nests inside
             ; an arm as well as above one.
             (set lc.cond 1)
-            (let ((r1 (mLower lc env (nodeB e))))
+            {
+              (let r1 (mLower lc env (nodeB e)))
               (if (< r1 0)
                 (- 0 1)
                 {
-                  (mlcTerm lc (MInst MT_BR (- 0 1) 0 0 "" (mSingleton r1) bj.id 0))
+                  (mlcTerm lc
+                    (MInst
+                      :op MT_BR
+                      :dst (- 0 1)
+                      :a 0
+                      :b 0
+                      :name ""
+                      :args (mSingleton r1)
+                      :tgt bj.id
+                      :alt 0))
                   (set lc.cur bf)
-                  (let ((r2 (mLower lc env (nodeC e))))
+                  {
+                    (let r2 (mLower lc env (nodeC e)))
                     (if (< r2 0)
                       (- 0 1)
                       {
-                        (mlcTerm lc (MInst MT_BR (- 0 1) 0 0 "" (mSingleton r2) bj.id 0))
+                        (mlcTerm lc
+                          (MInst
+                            :op MT_BR
+                            :dst (- 0 1)
+                            :a 0
+                            :b 0
+                            :name ""
+                            :args (mSingleton r2)
+                            :tgt bj.id
+                            :alt 0))
                         (set lc.cond outer)
                         (set lc.cur bj)
                         pj
-                      }))
-                }))
-          })))))
+                      })
+                  }
+                })
+            }
+          }
+        }
+      })
+  })
 
 ; A `begin` is its elements in order, answering the last. An EMPTY
 ; one has no value to answer, so it refuses rather than inventing a
@@ -944,10 +1063,12 @@
 (pub fn (mLowerSeq lc env v i last)
   (if (>= i (vecLen v))
     last
-    (let ((r (mLower lc env (vecGet v i))))
+    {
+      (let r (mLower lc env (vecGet v i)))
       (if (< r 0)
         (- 0 1)
-        (mLowerSeq lc env v (+ i 1) r)))))
+        (mLowerSeq lc env v (+ i 1) r))
+    }))
 
 ; An application is one of exactly two things here: a binary operator
 ; on two lowered arguments, or a direct call of a TOP-LEVEL function.
@@ -984,18 +1105,36 @@
 (pub :: mLowerDivGuard (-> MLC String Int Int Int))
 (pub fn (mLowerDivGuard lc bop dividend divisor)
   (if (mIsDivOp bop)
-    (let (
-      (bt (mlcBlock lc vecNew))
-      (bk (mlcBlock lc vecNew))
-    )
+    {
+      (let bt (mlcBlock lc vecNew))
+      (let bk (mlcBlock lc vecNew))
       {
-        (mlcTerm lc (MInst MT_TRAPZ (- 0 1) divisor 0 "" vecNew bt.id bk.id))
+        (mlcTerm lc
+          (MInst
+            :op MT_TRAPZ
+            :dst (- 0 1)
+            :a divisor
+            :b 0
+            :name ""
+            :args vecNew
+            :tgt bt.id
+            :alt bk.id))
         (set lc.cur bt)
-        (mlcTerm lc (MInst MT_TRAP (- 0 1) (- 0 1) 0 "__axiom_div_by_zero" vecNew 0 0))
+        (mlcTerm lc
+          (MInst
+            :op MT_TRAP
+            :dst (- 0 1)
+            :a (- 0 1)
+            :b 0
+            :name "__axiom_div_by_zero"
+            :args vecNew
+            :tgt 0
+            :alt 0))
         (set lc.cur bk)
         (mLowerDivOverflow lc dividend divisor)
         0
-      })
+      }
+    }
     0))
 
 ; One constant / one binary instruction, answering the fresh register.
@@ -1003,11 +1142,12 @@
 ; each already).
 (pub :: mEmitConst (-> MLC Int Int))
 (pub fn (mEmitConst lc v)
-  (mlcEmit lc (MInst MO_CONST (mlcFresh lc) v 0 "" vecNew 0 0)))
+  (mlcEmit lc
+    (MInst :op MO_CONST :dst (mlcFresh lc) :a v :b 0 :name "" :args vecNew :tgt 0 :alt 0)))
 
 (pub :: mEmitBin (-> MLC String Int Int Int))
 (pub fn (mEmitBin lc bop a b)
-  (mlcEmit lc (MInst MO_BIN (mlcFresh lc) a b bop vecNew 0 0)))
+  (mlcEmit lc (MInst :op MO_BIN :dst (mlcFresh lc) :a a :b b :name bop :args vecNew :tgt 0 :alt 0)))
 
 ; MM-VAL-3b's first corner in the IR: trap when the dividend is
 ; `INT_MIN` and the divisor is `-1`. Four value instructions and the
@@ -1018,24 +1158,56 @@
 ; literal does not parse (`stdlib/Err.ax`'s `intMin` says the same).
 (pub :: mLowerDivOverflow (-> MLC Int Int Int))
 (pub fn (mLowerDivOverflow lc dividend divisor)
-  (let ((kMin (mEmitConst lc (- (- 0 9223372036854775807) 1))))
-    (let ((kNeg1 (mEmitConst lc (- 0 1))))
-      (let ((kOne (mEmitConst lc 1)))
-        (let ((t1 (mEmitBin lc "eq" dividend kMin)))
-          (let ((t2 (mEmitBin lc "eq" divisor kNeg1)))
-            (let ((t3 (mEmitBin lc "and" t1 t2)))
-              (let ((t4 (mEmitBin lc "xor" t3 kOne)))
-                (let (
-                  (bt (mlcBlock lc vecNew))
-                  (bk (mlcBlock lc vecNew))
-                )
+  {
+    (let kMin (mEmitConst lc (- (- 0 9223372036854775807) 1)))
+    {
+      (let kNeg1 (mEmitConst lc (- 0 1)))
+      {
+        (let kOne (mEmitConst lc 1))
+        {
+          (let t1 (mEmitBin lc "eq" dividend kMin))
+          {
+            (let t2 (mEmitBin lc "eq" divisor kNeg1))
+            {
+              (let t3 (mEmitBin lc "and" t1 t2))
+              {
+                (let t4 (mEmitBin lc "xor" t3 kOne))
+                {
+                  (let bt (mlcBlock lc vecNew))
+                  (let bk (mlcBlock lc vecNew))
                   {
-                    (mlcTerm lc (MInst MT_TRAPZ (- 0 1) t4 0 "" vecNew bt.id bk.id))
+                    (mlcTerm lc
+                      (MInst
+                        :op MT_TRAPZ
+                        :dst (- 0 1)
+                        :a t4
+                        :b 0
+                        :name ""
+                        :args vecNew
+                        :tgt bt.id
+                        :alt bk.id))
                     (set lc.cur bt)
-                    (mlcTerm lc (MInst MT_TRAP (- 0 1) (- 0 1) 0 "__axiom_div_overflow" vecNew 0 0))
+                    (mlcTerm lc
+                      (MInst
+                        :op MT_TRAP
+                        :dst (- 0 1)
+                        :a (- 0 1)
+                        :b 0
+                        :name "__axiom_div_overflow"
+                        :args vecNew
+                        :tgt 0
+                        :alt 0))
                     (set lc.cur bk)
                     0
-                  })))))))))
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  })
 
 (pub :: mIsShiftOp (-> String Bool))
 (pub fn (mIsShiftOp bop)
@@ -1046,30 +1218,62 @@
 (pub :: mLowerShiftGuard (-> MLC String Int Int))
 (pub fn (mLowerShiftGuard lc bop amount)
   (if (mIsShiftOp bop)
-    (let ((k0 (mEmitConst lc 0)))
-      (let ((k64 (mEmitConst lc 64)))
-        (let ((kOne (mEmitConst lc 1)))
-          (let ((t1 (mEmitBin lc "slt" amount k0)))
-            (let ((t2 (mEmitBin lc "sge" amount k64)))
-              (let ((t3 (mEmitBin lc "or" t1 t2)))
-                (let ((t4 (mEmitBin lc "xor" t3 kOne)))
-                  (let (
-                    (bt (mlcBlock lc vecNew))
-                    (bk (mlcBlock lc vecNew))
-                  )
+    {
+      (let k0 (mEmitConst lc 0))
+      {
+        (let k64 (mEmitConst lc 64))
+        {
+          (let kOne (mEmitConst lc 1))
+          {
+            (let t1 (mEmitBin lc "slt" amount k0))
+            {
+              (let t2 (mEmitBin lc "sge" amount k64))
+              {
+                (let t3 (mEmitBin lc "or" t1 t2))
+                {
+                  (let t4 (mEmitBin lc "xor" t3 kOne))
+                  {
+                    (let bt (mlcBlock lc vecNew))
+                    (let bk (mlcBlock lc vecNew))
                     {
-                      (mlcTerm lc (MInst MT_TRAPZ (- 0 1) t4 0 "" vecNew bt.id bk.id))
+                      (mlcTerm lc
+                        (MInst
+                          :op MT_TRAPZ
+                          :dst (- 0 1)
+                          :a t4
+                          :b 0
+                          :name ""
+                          :args vecNew
+                          :tgt bt.id
+                          :alt bk.id))
                       (set lc.cur bt)
                       (mlcTerm lc
-                        (MInst MT_TRAP (- 0 1) (- 0 1) 0 "__axiom_shift_out_of_range" vecNew 0 0))
+                        (MInst
+                          :op MT_TRAP
+                          :dst (- 0 1)
+                          :a (- 0 1)
+                          :b 0
+                          :name "__axiom_shift_out_of_range"
+                          :args vecNew
+                          :tgt 0
+                          :alt 0))
                       (set lc.cur bk)
                       0
-                    }))))))))
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
     0))
 
 (pub :: mLowerApp (-> MLC (Vec MBind) Int Int))
 (pub fn (mLowerApp lc env e)
-  (let ((hd (mSpineHead e)))
+  {
+    (let hd (mSpineHead e))
     (if (|| (!= (nodeTag hd) TAG_E_VAR) (!= (nodeC hd) 0))
       (- 0 1)
       ; `cast` erases: the walk evaluates the value and answers it
@@ -1087,18 +1291,19 @@
       ; any destination. Checked subtype conversions never reach
       ; here as applications - the checker rewrites them to
       ; TAG_E_SUBCHECK, which has no arm below and refuses.
-      (let (
-        (nm (nodeAName hd))
-        (args (spineArgVec e vecNew))
-        (out vecNew)
-      )
+      {
+        (let nm (nodeAName hd))
+        (let args (spineArgVec e vecNew))
+        (let out vecNew)
         (if (&& (strEq nm "cast") (== (vecLen args) 2))
           (if (>= (mEnvFind env nm) 0)
             (- 0 1)
-            (let ((dst (vecGet args 0)))
+            {
+              (let dst (vecGet args 0))
               (if (&& (== (nodeTag dst) TAG_E_VAR) (strEq (nodeAName dst) "Float"))
                 (- 0 1)
-                (mLower lc env (vecGet args 1)))))
+                (mLower lc env (vecGet args 1)))
+            })
           ; `&&` and `||` dispatch on the HEAD, before any argument
           ; is lowered. Short-circuit means the right-hand side must
           ; not be evaluated in the current block, so it must not be
@@ -1109,7 +1314,8 @@
           (if (mIsAndOr nm)
             (mLowerAndOr lc env nm args)
             (if (mLowArgs lc env args 0 out)
-              (let ((bop (mBinOp nm)))
+              {
+                (let bop (mBinOp nm))
                 (if (> (strLen bop) 0)
                   (if (== (vecLen out) 2)
                     {
@@ -1123,13 +1329,33 @@
                       (mLowerDivGuard lc bop (vecGet out 0) (vecGet out 1))
                       (mLowerShiftGuard lc bop (vecGet out 1))
                       (mlcEmit lc
-                        (MInst MO_BIN (mlcFresh lc) (vecGet out 0) (vecGet out 1) bop vecNew 0 0))
+                        (MInst
+                          :op MO_BIN
+                          :dst (mlcFresh lc)
+                          :a (vecGet out 0)
+                          :b (vecGet out 1)
+                          :name bop
+                          :args vecNew
+                          :tgt 0
+                          :alt 0))
                     }
                     (- 0 1))
                   (if (>= (mEnvFind env nm) 0)
                     (- 0 1)
-                    (mlcEmit lc (MInst MO_CALL (mlcFresh lc) 0 0 nm out 0 0)))))
-              (- 0 1))))))))
+                    (mlcEmit lc
+                      (MInst
+                        :op MO_CALL
+                        :dst (mlcFresh lc)
+                        :a 0
+                        :b 0
+                        :name nm
+                        :args out
+                        :tgt 0
+                        :alt 0))))
+              }
+              (- 0 1))))
+      })
+  })
 
 ; `&&` and `||` as the walk emits them: a test of the left side,
 ; the right side lowered in one arm only, and a join answering 0/1.
@@ -1144,68 +1370,131 @@
 (pub fn (mLowerAndOr lc env nm args)
   (if (!= (vecLen args) 2)
     (- 0 1)
-    (let ((ra (mLower lc env (vecGet args 0))))
+    {
+      (let ra (mLower lc env (vecGet args 0)))
       (if (< ra 0)
         (- 0 1)
-        (let (
-          (isAnd (strEq nm "&&"))
-          (brhs (mlcBlock lc vecNew))
-          (bshort (mlcBlock lc vecNew))
-          (pj (mlcFresh lc))
-          (outer lc.cond)
-        )
-          (let ((bj (mlcBlock lc (mSingleton pj))))
+        {
+          (let isAnd (strEq nm "&&"))
+          (let brhs (mlcBlock lc vecNew))
+          (let bshort (mlcBlock lc vecNew))
+          (let pj (mlcFresh lc))
+          (let outer lc.cond)
+          {
+            (let bj (mlcBlock lc (mSingleton pj)))
             {
               (mlcTerm lc
-                (MInst MT_CONDBR (- 0 1) ra 0 "" vecNew
-                  (if isAnd
-                    brhs.id
-                    bshort.id)
-                  (if isAnd
-                    bshort.id
-                    brhs.id)))
+                (MInst
+                  :op MT_CONDBR
+                  :dst (- 0 1)
+                  :a ra
+                  :b 0
+                  :name ""
+                  :args vecNew
+                  :tgt
+                    (if isAnd
+                      brhs.id
+                      bshort.id)
+                  :alt
+                    (if isAnd
+                      bshort.id
+                      brhs.id)))
               (set lc.cur brhs)
               ; The right-hand side is conditional - short-circuit
               ; means it may never run - so a `set` under it refuses,
               ; exactly as under an `if` arm. The left side above is
               ; not, and lowers with the flag as it arrived.
               (set lc.cond 1)
-              (let ((rb (mLower lc env (vecGet args 1))))
+              {
+                (let rb (mLower lc env (vecGet args 1)))
                 (if (< rb 0)
                   (- 0 1)
-                  (let (
-                    (zero (mlcEmit lc (MInst MO_CONST (mlcFresh lc) 0 0 "" vecNew 0 0)))
-                    (t (mlcEmit lc (MInst MO_BIN (mlcFresh lc) rb zero "ne" vecNew 0 0)))
-                  )
+                  {
+                    (let zero
+                      (mlcEmit lc
+                        (MInst
+                          :op MO_CONST
+                          :dst (mlcFresh lc)
+                          :a 0
+                          :b 0
+                          :name ""
+                          :args vecNew
+                          :tgt 0
+                          :alt 0)))
+                    (let t
+                      (mlcEmit lc
+                        (MInst
+                          :op MO_BIN
+                          :dst (mlcFresh lc)
+                          :a rb
+                          :b zero
+                          :name "ne"
+                          :args vecNew
+                          :tgt 0
+                          :alt 0)))
                     {
-                      (mlcTerm lc (MInst MT_BR (- 0 1) 0 0 "" (mSingleton t) bj.id 0))
+                      (mlcTerm lc
+                        (MInst
+                          :op MT_BR
+                          :dst (- 0 1)
+                          :a 0
+                          :b 0
+                          :name ""
+                          :args (mSingleton t)
+                          :tgt bj.id
+                          :alt 0))
                       (set lc.cur bshort)
-                      (let ((sv
-                        (mlcEmit lc
-                          (MInst MO_CONST (mlcFresh lc)
-                            (if isAnd
-                              0
-                              1)
-                            0 "" vecNew 0 0))))
+                      {
+                        (let sv
+                          (mlcEmit lc
+                            (MInst
+                              :op MO_CONST
+                              :dst (mlcFresh lc)
+                              :a
+                                (if isAnd
+                                  0
+                                  1)
+                              :b 0
+                              :name ""
+                              :args vecNew
+                              :tgt 0
+                              :alt 0)))
                         {
-                          (mlcTerm lc (MInst MT_BR (- 0 1) 0 0 "" (mSingleton sv) bj.id 0))
+                          (mlcTerm lc
+                            (MInst
+                              :op MT_BR
+                              :dst (- 0 1)
+                              :a 0
+                              :b 0
+                              :name ""
+                              :args (mSingleton sv)
+                              :tgt bj.id
+                              :alt 0))
                           (set lc.cond outer)
                           (set lc.cur bj)
                           pj
-                        })
-                    })))
-            }))))))
+                        }
+                      }
+                    }
+                  })
+              }
+            }
+          }
+        })
+    }))
 
 (pub :: mBindParams (-> MLC (Vec MBind) (Vec String) Int (Vec Int) Int))
 (pub fn (mBindParams lc env ps i out)
   (if (>= i (vecLen ps))
     0
-    (let ((r (mlcFresh lc)))
+    {
+      (let r (mlcFresh lc))
       {
         (vecPush out r)
-        (vecPush env (MBind (vecGet ps i) r 0))
+        (vecPush env (MBind :name (vecGet ps i) :reg r :isMut 0))
         (mBindParams lc env ps (+ i 1) out)
-      })))
+      }
+    }))
 
 ; Lower one `TAG_D_FN`.
 ;
@@ -1217,28 +1506,39 @@
 ; is.
 (pub :: mLowerFn (-> Int (Vec MFunc)))
 (pub fn (mLowerFn d)
-  (let (
-    (entry (MBlock 0 vecNew vecNew vecNew))
-    (out vecNew)
-  )
-    (let ((lc (MLC 0 vecNew entry 0)))
+  {
+    (let entry (MBlock :id 0 :params vecNew :instrs vecNew :term vecNew))
+    (let out vecNew)
+    {
+      (let lc (MLC :nreg 0 :blocks vecNew :cur entry :cond 0))
       {
         (vecPush lc.blocks entry)
-        (let (
-          (env vecNew)
-          (pregs vecNew)
-        )
+        {
+          (let env vecNew)
+          (let pregs vecNew)
           {
             (mBindParams lc env (nodeBVec d) 0 pregs)
-            (let ((r (mLower lc env (nodeC d))))
+            {
+              (let r (mLower lc env (nodeC d)))
               (if (! (< r 0))
                 {
-                  (mlcTerm lc (MInst MT_RET (- 0 1) r 0 "" vecNew 0 0))
-                  (vecPush out (MFunc (nodeAName d) pregs (nodeBVec d) lc.blocks lc.nreg))
-                }))
-          })
+                  (mlcTerm lc
+                    (MInst :op MT_RET :dst (- 0 1) :a r :b 0 :name "" :args vecNew :tgt 0 :alt 0))
+                  (vecPush out
+                    (MFunc
+                      :name (nodeAName d)
+                      :params pregs
+                      :pnames (nodeBVec d)
+                      :blocks lc.blocks
+                      :nreg lc.nreg))
+                })
+            }
+          }
+        }
         out
-      })))
+      }
+    }
+  })
 
 ; Walk a declaration list, lowering every `TAG_D_FN`. Lowered
 ; functions land on `out` in source order; the names of the ones that
@@ -1249,15 +1549,19 @@
 (pub fn (mLowerDecls ds out refused i)
   (if (>= i (vecLen ds))
     0
-    (let ((d (vecGet ds i)))
+    {
+      (let d (vecGet ds i))
       {
         (if (== (nodeTag d) TAG_D_FN)
-          (let ((got (mLowerFn d)))
+          {
+            (let got (mLowerFn d))
             (if (== (vecLen got) 0)
               (vecPush refused (nodeAName d))
-              (vecPush out (vecGet got 0)))))
+              (vecPush out (vecGet got 0)))
+          })
         (mLowerDecls ds out refused (+ i 1))
-      })))
+      }
+    }))
 
 ; ------------------------------------------------------------------
 ; The verifier.
@@ -1325,7 +1629,8 @@
 (pub fn (mSuccs b out)
   (if (== (vecLen b.term) 0)
     out
-    (let ((t (vecGet b.term 0)))
+    {
+      (let t (vecGet b.term 0))
       (if (== t.op MT_BR)
         {
           (vecPush out t.tgt)
@@ -1339,7 +1644,8 @@
           }
           ; `MT_TRAP` falls here and answers empty, which is what
           ; `MT_RET` already does - a trap block leaves the function.
-          out)))))
+          out))
+    }))
 
 ; Mark every block reachable from `b`, depth first. `seen` is one
 ; word per block.
@@ -1367,21 +1673,25 @@
 ; does not exist names no predecessor: check 5 reports it.
 (pub :: mPredsAll (-> MFunc (Vec (Vec Int))))
 (pub fn (mPredsAll f)
-  (let (
-    (n (vecLen f.blocks))
-    (preds vecNew)
-  )
+  {
+    (let n (vecLen f.blocks))
+    (let preds vecNew)
     {
       (for b in 0..n
         (vecPush preds vecNew))
       (for p in 0..n
-        (let ((ss (mSuccs (vecGet f.blocks p) vecNew)))
+        {
+          (let ss (mSuccs (vecGet f.blocks p) vecNew))
           (for i in 0..(vecLen ss)
-            (let ((s (vecGet ss i)))
+            {
+              (let s (vecGet ss i))
               (if (&& (>= s 0) (< s n))
-                (vecPush (vecGet preds s) p))))))
+                (vecPush (vecGet preds s) p))
+            })
+        })
       preds
-    }))
+    }
+  })
 
 ; The blocks reached from `b`, in depth-first postorder, onto `post`.
 ; `seen` is one word per block, and a branch to a block that does not
@@ -1392,14 +1702,16 @@
     0
     (if (== (vecGet seen b) 1)
       0
-      (let ((ss (mSuccs (vecGet f.blocks b) vecNew)))
+      {
+        (let ss (mSuccs (vecGet f.blocks b) vecNew))
         {
           (vecSet seen b 1)
           (for i in 0..(vecLen ss)
             (mPostOrder f seen post (vecGet ss i)))
           (vecPush post b)
           0
-        }))))
+        }
+      })))
 
 ; The nearest block that dominates both `a` and `b`: climb from
 ; whichever has the lower postorder number until the two meet.
@@ -1418,33 +1730,35 @@
 ; Answers how many blocks moved.
 (pub :: mIdomPass (-> (Vec (Vec Int)) (Vec Int) (Vec Int) (Vec Int) Int))
 (pub fn (mIdomPass preds post idom po)
-  (let (
-    (mut moved 0)
-    (mut k (- (vecLen post) 2))
-  )
+  {
+    (let mut moved 0)
+    (let mut k (- (vecLen post) 2))
     {
       (while (>= k 0)
-        (let (
-          (b (vecGet post k))
-          (ps (vecGet preds b))
-          (mut nd (- 0 1))
-        )
+        {
+          (let b (vecGet post k))
+          (let ps (vecGet preds b))
+          (let mut nd (- 0 1))
           {
             (for i in 0..(vecLen ps)
-              (let ((p (vecGet ps i)))
+              {
+                (let p (vecGet ps i))
                 (if (! (< (vecGet idom p) 0))
                   (set nd (if (< nd 0)
                     p
-                    (mDomIntersect idom po p nd))))))
+                    (mDomIntersect idom po p nd))))
+              })
             (if (! (== nd (vecGet idom b)))
               {
                 (vecSet idom b nd)
                 (set moved (+ moved 1))
               })
             (set k (- k 1))
-          }))
+          }
+        })
       moved
-    }))
+    }
+  })
 
 (pub :: mIdomFix (-> (Vec (Vec Int)) (Vec Int) (Vec Int) (Vec Int) Int Int))
 (pub fn (mIdomFix preds post idom po fuel)
@@ -1459,30 +1773,29 @@
 ; free number.
 (pub :: mDomNumber (-> (Vec (Vec Int)) (Vec Int) Int Int Int Int))
 (pub fn (mDomNumber kids dom n x clock)
-  (let (
-    (ks (vecGet kids x))
-    (mut c (+ clock 1))
-  )
+  {
+    (let ks (vecGet kids x))
+    (let mut c (+ clock 1))
     {
       (vecSet dom x clock)
       (for i in 0..(vecLen ks)
         (set c (mDomNumber kids dom n (vecGet ks i) c)))
       (vecSet dom (+ n x) c)
       (+ c 1)
-    }))
+    }
+  })
 
 ; The numbered dominator tree `mDomAt` reads.
 (pub :: mDominators (-> MFunc (Vec Int)))
 (pub fn (mDominators f)
-  (let (
-    (n (vecLen f.blocks))
-    (preds (mPredsAll f))
-    (post vecNew)
-    (po (mFill vecNew n (- 0 1)))
-    (idom (mFill vecNew n (- 0 1)))
-    (kids vecNew)
-    (dom (mFill vecNew (* 2 n) (- 0 1)))
-  )
+  {
+    (let n (vecLen f.blocks))
+    (let preds (mPredsAll f))
+    (let post vecNew)
+    (let po (mFill vecNew n (- 0 1)))
+    (let idom (mFill vecNew n (- 0 1)))
+    (let kids vecNew)
+    (let dom (mFill vecNew (* 2 n) (- 0 1)))
     {
       (mPostOrder f (mFill vecNew n 0) post 0)
       (for k in 0..(vecLen post)
@@ -1496,7 +1809,8 @@
           (vecPush (vecGet kids (vecGet idom x)) x)))
       (mDomNumber kids dom n 0 0)
       dom
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; The complaint list, and the definition tables checks 3, 4 and 9
@@ -1535,7 +1849,8 @@
 (pub fn (mvUse f dom defBlk defIdx out what r blk idx)
   (if (|| (< r 0) (>= r (vecLen defBlk)))
     (mvSay out (concat what (concat " uses out-of-range register " (mirReg r))))
-    (let ((db (vecGet defBlk r)))
+    {
+      (let db (vecGet defBlk r))
       (if (< db 0)
         (mvSay out (concat what (concat " uses " (concat (mirReg r) " which is never defined"))))
         (if (== db blk)
@@ -1548,7 +1863,8 @@
               (concat (concat what " uses ")
                 (concat (mirReg r)
                   (concat " whose definition in "
-                    (concat (mirBB db) " does not dominate the use")))))))))))
+                    (concat (mirBB db) " does not dominate the use"))))))))
+    }))
 
 (pub :: mvWhere (-> Int String))
 (pub fn (mvWhere b)
@@ -1558,12 +1874,14 @@
 (pub fn (mvCollectDefs f defBlk defIdx out i)
   (if (>= i (vecLen f.blocks))
     0
-    (let ((b (vecGet f.blocks i)))
+    {
+      (let b (vecGet f.blocks i))
       {
         (mvDefsParams defBlk defIdx out b.params b.id 0)
         (mvDefsInsts defBlk defIdx out b.instrs b.id 0)
         (mvCollectDefs f defBlk defIdx out (+ i 1))
-      })))
+      }
+    }))
 
 (pub :: mvDefsParams (-> (Vec Int) (Vec Int) (Vec String) (Vec Int) Int Int Int))
 (pub fn (mvDefsParams defBlk defIdx out ps blk i)
@@ -1578,11 +1896,13 @@
 (pub fn (mvDefsInsts defBlk defIdx out insts blk i)
   (if (>= i (vecLen insts))
     0
-    (let ((n (vecGet insts i)))
+    {
+      (let n (vecGet insts i))
       {
         (mvDefine defBlk defIdx out (mvWhere blk) n.dst blk i)
         (mvDefsInsts defBlk defIdx out insts blk (+ i 1))
-      })))
+      }
+    }))
 
 (pub :: mvUseList
   (-> MFunc (Vec Int) (Vec Int) (Vec Int) (Vec String) String (Vec Int) Int Int Int Int))
@@ -1596,7 +1916,8 @@
 
 (pub :: mvCheckInst (-> MFunc (Vec Int) (Vec Int) (Vec Int) (Vec String) MInst Int Int Int))
 (pub fn (mvCheckInst f dom defBlk defIdx out n blk idx)
-  (let ((what (mvWhere blk)))
+  {
+    (let what (mvWhere blk))
     (if (== n.op MO_BIN)
       {
         (if (! (mIsBinSpelling n.name))
@@ -1624,8 +1945,8 @@
           ; header claims this function refuses exactly that. It does now.
           (mvSay out
             (concat what
-              (concat " holds opcode "
-                (concat (fmtInt n.op) ", which is not an instruction")))))))))
+              (concat " holds opcode " (concat (fmtInt n.op) ", which is not an instruction")))))))
+  })
 
 (pub :: mvCheckInsts (-> MFunc (Vec Int) (Vec Int) (Vec Int) (Vec String) (Vec MInst) Int Int Int))
 (pub fn (mvCheckInsts f dom defBlk defIdx out insts blk i)
@@ -1640,8 +1961,10 @@
 (pub fn (mvBlockAt f id)
   (if (|| (< id 0) (>= id (vecLen f.blocks)))
     (- 0 1)
-    (let ((b (vecGet f.blocks id)))
-      (vecLen b.params))))
+    {
+      (let b (vecGet f.blocks id))
+      (vecLen b.params)
+    }))
 
 (pub :: mvCheckTerm (-> MFunc (Vec Int) (Vec Int) (Vec Int) (Vec String) MBlock Int))
 (pub fn (mvCheckTerm f dom defBlk defIdx out b)
@@ -1649,15 +1972,15 @@
     (mvSay out
       (concat (mvWhere b.id)
         (concat " has " (concat (fmtInt (vecLen b.term)) " terminators, want exactly 1"))))
-    (let (
-      (t (vecGet b.term 0))
-      (idx (vecLen b.instrs))
-      (what (mvWhere b.id))
-    )
+    {
+      (let t (vecGet b.term 0))
+      (let idx (vecLen b.instrs))
+      (let what (mvWhere b.id))
       (if (== t.op MT_RET)
         (mvUse f dom defBlk defIdx out what t.a b.id idx)
         (if (== t.op MT_BR)
-          (let ((np (mvBlockAt f t.tgt)))
+          {
+            (let np (mvBlockAt f t.tgt))
             (if (< np 0)
               (mvSay out
                 (concat what
@@ -1669,7 +1992,8 @@
                       (concat (concat " arguments to " (concat (mirBB t.tgt) ", which takes "))
                         (fmtInt np)))))
                 (mvUseList f dom defBlk defIdx out what t.args b.id idx 0)
-              }))
+              })
+          }
           (if (== t.op MT_CONDBR)
             {
               (mvUse f dom defBlk defIdx out what t.a b.id idx)
@@ -1690,7 +2014,8 @@
                 (mvSay out
                   (concat what
                     (concat " ends in opcode "
-                      (concat (fmtInt t.op) ", which is not a terminator"))))))))))))
+                      (concat (fmtInt t.op) ", which is not a terminator")))))))))
+    }))
 
 ; A `condbr`/`trapz` successor must exist and take exactly the
 ; arguments it is passed - `want` of them. The complaint mirrors
@@ -1698,7 +2023,8 @@
 ; the target declares what the list lands in.
 (pub :: mvCondTarget (-> MFunc (Vec String) String Int Int Int))
 (pub fn (mvCondTarget f out what id want)
-  (let ((np (mvBlockAt f id)))
+  {
+    (let np (mvBlockAt f id))
     (if (< np 0)
       (mvSay out
         (concat what (concat " branches to " (concat (mirBB id) ", which does not exist"))))
@@ -1706,13 +2032,15 @@
         (mvSay out
           (concat (concat what (concat " passes " (fmtInt want)))
             (concat (concat " arguments to " (concat (mirBB id) ", which takes ")) (fmtInt np))))
-        0))))
+        0))
+  })
 
 (pub :: mvCheckBlocks (-> MFunc (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec String) Int Int))
 (pub fn (mvCheckBlocks f dom defBlk defIdx seen out i)
   (if (>= i (vecLen f.blocks))
     0
-    (let ((b (vecGet f.blocks i)))
+    {
+      (let b (vecGet f.blocks i))
       {
         (if (!= b.id i)
           (mvSay out
@@ -1723,11 +2051,13 @@
         (mvCheckInsts f dom defBlk defIdx out b.instrs b.id 0)
         (mvCheckTerm f dom defBlk defIdx out b)
         (mvCheckBlocks f dom defBlk defIdx seen out (+ i 1))
-      })))
+      }
+    }))
 
 (pub :: mirVerify (-> MFunc (Vec String)))
 (pub fn (mirVerify f)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     (if (== (vecLen f.blocks) 0)
       {
         (mvSay out (concat f.name " has no blocks"))
@@ -1736,16 +2066,17 @@
       ; The function's own parameters are defined on entry, which
       ; is bb0's parameter position: `defIdx` -1 puts them before
       ; instruction 0 of block 0.
-      (let (
-        (defBlk (mFill vecNew f.nreg (- 0 1)))
-        (defIdx (mFill vecNew f.nreg (- 0 1)))
-        (seen (mFill vecNew (vecLen f.blocks) 0))
-        (dom (mDominators f))
-      )
+      {
+        (let defBlk (mFill vecNew f.nreg (- 0 1)))
+        (let defIdx (mFill vecNew f.nreg (- 0 1)))
+        (let seen (mFill vecNew (vecLen f.blocks) 0))
+        (let dom (mDominators f))
         {
           (mvDefsParams defBlk defIdx out f.params 0 0)
           (mvCollectDefs f defBlk defIdx out 0)
           (mReach f seen 0)
           (mvCheckBlocks f dom defBlk defIdx seen out 0)
           out
-        }))))
+        }
+      })
+  })

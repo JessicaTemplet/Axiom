@@ -228,8 +228,10 @@ interface Frame {
   header: boolean
   /** `(a e)` after `data`/`struct`: a type-parameter list. */
   tyvars: boolean
+  /** `(let mut name value)`: the local binder follows `mut`. */
+  localMutable: boolean
   /** What this form declares, for the frames nested inside it. */
-  declKind: 'data' | 'struct' | 'match' | 'let' | 'effect' | 'arm' | null
+  declKind: 'data' | 'struct' | 'match' | 'effect' | 'arm' | null
 }
 
 function newFrame(open: string): Frame {
@@ -242,6 +244,7 @@ function newFrame(open: string): Frame {
     open,
     header: false,
     tyvars: false,
+    localMutable: false,
     declKind: null,
   }
 }
@@ -261,6 +264,8 @@ function classifyAtom(text: string, frame: Frame, parent: Frame | undefined): Ca
   if (DELIMITERS.has(text)) return 'punctuation.delimiter'
   if (text === 'pub' && frame.index === 0) return 'keyword'
   if (text === 'mut') return 'keyword.modifier'
+  if (/^:[A-Za-z_][A-Za-z0-9_']*$/.test(text)) return 'variable.member'
+  if (frame.head === 'let' && arg === (frame.localMutable ? 2 : 1)) return 'variable'
 
   // A removed construct in head position is what the compiler answers
   // AX2004 for, and highlights.scm paints it as an error.
@@ -308,8 +313,6 @@ function classifyAtom(text: string, frame: Frame, parent: Frame | undefined): Ca
     if (parent.declKind === 'effect' && parentArg >= 2 && head) {
       return 'function.method'
     }
-    // A binder in a `let` binding list.
-    if (parent.declKind === 'let' && head && !upper) return 'variable'
   }
 
   // --- type position ---------------------------------------------------
@@ -416,9 +419,6 @@ export function highlight(source: string): Token[] {
         if (frame.declKind === 'match' && arg >= 2) child.declKind = 'arm'
         if (frame.declKind === 'arm' && frame.index === 0) child.patternCtx = true
 
-        // `(let ((x 1) (y 2)) …)`: the binding list, then each binder.
-        if (frame.head === 'let' && arg === 1) child.declKind = 'let'
-
         frame.index++
         stack.push(child)
         continue
@@ -445,7 +445,6 @@ export function highlight(source: string): Token[] {
             case 'data': frame.declKind = 'data'; break
             case 'struct': frame.declKind = 'struct'; break
             case 'match': frame.declKind = 'match'; break
-            case 'let': frame.declKind = 'let'; break
             case 'effect': frame.declKind = 'effect'; break
             default: break
           }
@@ -471,6 +470,7 @@ export function highlight(source: string): Token[] {
 
         const capture = classifyAtom(raw.text, frame, parent)
         tokens.push({ text: raw.text, capture })
+        if (frame.head === 'let' && arg === 1 && raw.text === 'mut') frame.localMutable = true
 
         // After the head of a constructor form or the `:` of a field
         // form, the rest of the form is type position.

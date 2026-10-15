@@ -47,13 +47,15 @@
 ; ------------------------------------------------------------------
 (:: jsonMake (-> Int a b Int))
 (fn (jsonMake tag a b)
-  (let ((v (memAlloc 24)))
+  {
+    (let v (memAlloc 24))
     {
       (memSetWord v 0 tag)
       (memSetWord v 1 a)
       (memSetWord v 2 b)
       v
-    }))
+    }
+  })
 
 ;; The JSON `null` value.
 (pub :: jsonNull Int)
@@ -236,19 +238,22 @@
 ; ------------------------------------------------------------------
 (:: jsonJoin (-> (Vec a) String))
 (fn (jsonJoin pieces)
-  (let ((total (jsonJoinLen pieces)))
-    (let ((out (strAlloc total)))
+  {
+    (let total (jsonJoinLen pieces))
+    {
+      (let out (strAlloc total))
       {
         (jsonJoinFill pieces out)
         out
-      })))
+      }
+    }
+  })
 
 (:: jsonJoinLen (-> (Vec a) Int))
 (fn (jsonJoinLen pieces)
-  (let (
-    (mut k 0)
-    (mut n 0)
-  )
+  {
+    (let mut k 0)
+    (let mut n 0)
     {
       (while (< k (vecLen pieces))
         {
@@ -256,20 +261,25 @@
           (set k (+ k 1))
         })
       n
-    }))
+    }
+  })
 
 (:: jsonJoinFill (-> (Vec a) String Int))
 (fn (jsonJoinFill pieces out)
-  (let ((mut off 0))
+  {
+    (let mut off 0)
     {
       (for k in 0..(vecLen pieces)
-        (let ((p (vecGetStr pieces k)))
+        {
+          (let p (vecGetStr pieces k))
           {
             (memCopy (+ (strData out) off) (strData p) (strLen p))
             (set off (+ off (strLen p)))
-          }))
+          }
+        })
       off
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; String escaping
@@ -307,31 +317,36 @@
 
 (:: jsonEscape (-> String String))
 (fn (jsonEscape s)
-  (let ((total (jsonEscapeLen s)))
+  {
+    (let total (jsonEscapeLen s))
     (if (== total (strLen s))
       s
-      (let ((out (strAlloc total)))
+      {
+        (let out (strAlloc total))
         {
           (jsonEscapeFill s out)
           out
-        }))))
+        }
+      })
+  })
 
 (:: jsonEscapeLen (-> String Int))
 (fn (jsonEscapeLen s)
-  (let (
-    (mut n 0)
-    (mut k 0)
-    (len (strLen s))
-  )
+  {
+    (let mut n 0)
+    (let mut k 0)
+    (let len (strLen s))
     {
       (while (< k len)
-        (let ((b (strByte s k)))
+        {
+          (let b (strByte s k))
           (if (< b 128)
             {
               (set n (+ n (jsonEscLen b)))
               (set k (+ k 1))
             }
-            (let ((w (utf8WellFormedAt s k len)))
+            {
+              (let w (utf8WellFormedAt s k len))
               (if (== w 0)
                 {
                   (set n (+ n 6))
@@ -340,9 +355,12 @@
                 {
                   (set n (+ n w))
                   (set k (+ k w))
-                })))))
+                })
+            })
+        })
       n
-    }))
+    }
+  })
 
 ; The lower-case hex digit for the low nibble of `b`.
 (:: jsonHexDigit (-> Int Int))
@@ -354,29 +372,30 @@
 (:: jsonEscapeFill (-> String String Int))
 ;@axiom:effect(unsafe)
 (fn (jsonEscapeFill s out)
-  (let (
-    (mut off 0)
-    (mut skip 0)
-    (len (strLen s))
-    (d (strData out))
-  )
+  {
+    (let mut off 0)
+    (let mut skip 0)
+    (let len (strLen s))
+    (let d (strData out))
     {
       ; `skip` counts the continuation bytes still owed to a
       ; well-formed sequence whose lead byte was just copied; they are
       ; copied as they come. A byte that begins no well-formed sequence
       ; is `�` - the rule `jsonEscapeLen` sized the buffer by.
       (for k in 0..len
-        (let ((b (strByte s k)))
+        {
+          (let b (strByte s k))
           (if (> skip 0)
             {
               (__store8 d off b)
               (set off (+ off 1))
               (set skip (- skip 1))
             }
-            (let ((w
-              (if (< b 128)
-                1
-                (utf8WellFormedAt s k len))))
+            {
+              (let w
+                (if (< b 128)
+                  1
+                  (utf8WellFormedAt s k len)))
               (if (== w 0)
                 {
                   (__store8 d off 92)
@@ -391,15 +410,19 @@
                   (set skip (- w 1))
                   (jsonEscapeOne d off b)
                   (set off (+ off (jsonEscLen b)))
-                })))))
+                })
+            })
+        })
       off
-    }))
+    }
+  })
 
 ; One byte that is text: its escape, or itself, written at `off`.
 (:: jsonEscapeOne (-> Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (jsonEscapeOne d off0 b)
-  (let ((mut off off0))
+  {
+    (let mut off off0)
     {
       (if (== b 34)
         {
@@ -458,7 +481,8 @@
                         (set off (+ off 1))
                       }))))))))
       off
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Serialisation
@@ -467,15 +491,18 @@
 ;; as JSON requires.
 (pub :: jsonWrite (-> Int String))
 (pub fn (jsonWrite v)
-  (let ((pieces vecNew))
+  {
+    (let pieces vecNew)
     {
       (jsonWriteInto v pieces)
       (jsonJoin pieces)
-    }))
+    }
+  })
 
 (:: jsonWriteInto (-> Int (Vec String) (Vec String)))
 (fn (jsonWriteInto v pieces)
-  (let ((t (jsonTag v)))
+  {
+    (let t (jsonTag v))
     (if (== t JNULL)
       (vecPush pieces "null")
       (if (== t JBOOL)
@@ -493,12 +520,14 @@
             }
             (if (== t JARR)
               (jsonWriteArr v pieces)
-              (jsonWriteObj v pieces))))))))
+              (jsonWriteObj v pieces))))))
+  })
 
 (:: jsonWriteArr (-> Int (Vec String) (Vec String)))
 ;@axiom:effect(unsafe)
 (fn (jsonWriteArr v pieces)
-  (let ((items (memGetWordVec v 1)))
+  {
+    (let items (memGetWordVec v 1))
     {
       (vecPush pieces "[")
       (for i in 0..(vecLen items)
@@ -509,15 +538,15 @@
           (jsonWriteInto (vecGet items i) pieces)
         })
       (vecPush pieces "]")
-    }))
+    }
+  })
 
 (:: jsonWriteObj (-> Int (Vec String) (Vec String)))
 ;@axiom:effect(unsafe)
 (fn (jsonWriteObj v pieces)
-  (let (
-    (keys (memGetWordVec v 1))
-    (vals (memGetWordVec v 2))
-  )
+  {
+    (let keys (memGetWordVec v 1))
+    (let vals (memGetWordVec v 2))
     {
       (vecPush pieces "{")
       (for i in 0..(vecLen keys)
@@ -531,7 +560,8 @@
           (jsonWriteInto (vecGet vals i) pieces)
         })
       (vecPush pieces "}")
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Parsing
@@ -547,7 +577,7 @@
 
 (:: jcNew CjCursor)
 (fn (jcNew)
-  (CjCursor 0 0))
+  (CjCursor :pos 0 :bad 0))
 
 (:: jcPos (-> CjCursor Int))
 (fn (jcPos c)
@@ -580,7 +610,8 @@
 
 (:: jcSkipWs (-> String CjCursor Int))
 (fn (jcSkipWs src c)
-  (let ((mut p (jcPos c)))
+  {
+    (let mut p (jcPos c))
     {
       (while (&& (< p (strLen src)) (strIsSpace (strByte src p)))
         (set p (+ p 1)))
@@ -588,20 +619,25 @@
       ; and CR - the same four bytes `strIsSpace` names, and
       ; this used to say so a fourth time in its own idiom.
       (jcSetPos c p)
-    }))
+    }
+  })
 
 ;; Parse a whole document: one value, then nothing but whitespace.
 ;; Answers 0 on any error, which is why every accessor tolerates 0.
 (pub :: jsonParse (-> String Int))
 (pub fn (jsonParse src)
-  (let ((c jcNew))
-    (let ((v (jpValue src c 0)))
+  {
+    (let c jcNew)
+    {
+      (let v (jpValue src c 0))
       {
         (jcSkipWs src c)
         (if (|| (jcBad c) (< (jcPos c) (strLen src)))
           0
           v)
-      })))
+      }
+    }
+  })
 
 (:: jpValue (-> String CjCursor Int Int))
 (fn (jpValue src c depth)
@@ -614,7 +650,8 @@
           (jcFail c)
           0
         }
-        (let ((b (jcPeek src c)))
+        {
+          (let b (jcPeek src c))
           (if (== b 123)
             (jpObject src c depth)
             (if (== b 91)
@@ -632,7 +669,8 @@
                         {
                           (jcFail c)
                           0
-                        }))))))))))
+                        })))))))
+        }))
   })
 
 (:: jpLit (-> String CjCursor String Int Int))
@@ -662,13 +700,13 @@
 ; text but do not contribute to the integer - see the header note.
 (:: jpNumber (-> String CjCursor Int))
 (fn (jpNumber src c)
-  (let ((start (jcPos c)))
-    (let (
-      (mut p start)
-      (mut neg 0)
-      (mut val 0)
-      (mut digits 0)
-    )
+  {
+    (let start (jcPos c))
+    {
+      (let mut p start)
+      (let mut neg 0)
+      (let mut val 0)
+      (let mut digits 0)
       {
         (if (== (jcPeek src c) 45)
           {
@@ -692,26 +730,30 @@
         (if (&& (< p (strLen src)) (== (strByte src p) 46))
           {
             (set p (+ p 1))
-            (let ((fraction p))
+            {
+              (let fraction p)
               {
                 (while (&& (< p (strLen src)) (&& (>= (strByte src p) 48) (<= (strByte src p) 57)))
                   (set p (+ p 1)))
                 (if (== p fraction)
                   (jcFail c))
-              })
+              }
+            }
           })
         (if (&& (< p (strLen src)) (|| (== (strByte src p) 101) (== (strByte src p) 69)))
           {
             (set p (+ p 1))
             (if (&& (< p (strLen src)) (|| (== (strByte src p) 43) (== (strByte src p) 45)))
               (set p (+ p 1)))
-            (let ((exponent p))
+            {
+              (let exponent p)
               {
                 (while (&& (< p (strLen src)) (&& (>= (strByte src p) 48) (<= (strByte src p) 57)))
                   (set p (+ p 1)))
                 (if (== p exponent)
                   (jcFail c))
-              })
+              }
+            }
           })
         (jcSetPos c p)
         (if (jcBad c)
@@ -721,7 +763,9 @@
               (- 0 val)
               val)
             (strSlice src start (- p start))))
-      })))
+      }
+    }
+  })
 
 ; A string literal, answering its DECODED bytes. The cursor is left
 ; after the closing quote.
@@ -737,12 +781,11 @@
       (jcFail c)
       ""
     }
-    (let (
-      (pieces vecNew)
-      (mut p (+ (jcPos c) 1))
-      (mut run (+ (jcPos c) 1))
-      (mut done 0)
-    )
+    {
+      (let pieces vecNew)
+      (let mut p (+ (jcPos c) 1))
+      (let mut run (+ (jcPos c) 1))
+      (let mut done 0)
       {
         (while (== done 0)
           (if (>= p (strLen src))
@@ -750,7 +793,8 @@
               (jcFail c)
               (set done 1)
             }
-            (let ((b (strByte src p)))
+            {
+              (let b (strByte src p))
               (if (== b 34)
                 {
                   (if (> p run)
@@ -779,12 +823,14 @@
                       (jcFail c)
                       (set done 1)
                     }
-                    (set p (+ p 1))))))))
+                    (set p (+ p 1)))))
+            }))
         (jcSetPos c p)
         (if (jcBad c)
           ""
           (jsonJoin pieces))
-      })))
+      }
+    }))
 
 ; Decode one escape whose backslash was at `p - 1`, pushing its bytes.
 ; Answers the offset just past the escape.
@@ -795,7 +841,8 @@
       (jcFail c)
       p
     }
-    (let ((b (strByte src p)))
+    {
+      (let b (strByte src p))
       (if (== b 34)
         {
           (vecPush pieces "\"")
@@ -845,7 +892,8 @@
                         {
                           (jcFail c)
                           p
-                        }))))))))))))
+                        })))))))))
+    }))
 
 ; `\uXXXX`, including the surrogate pair a code point above the BMP is
 ; written with. An unpaired surrogate is replaced by U+FFFD rather than
@@ -853,14 +901,16 @@
 ; over one bad character is the less useful of the two failures.
 (:: jpUnicode (-> String CjCursor Int (Vec String) Int))
 (fn (jpUnicode src c p pieces)
-  (let ((hi (jpHex4 src c p)))
+  {
+    (let hi (jpHex4 src c p))
     (if (jcBad c)
       p
       (if (&& (>= hi 55296) (<= hi 56319))
         ; A high surrogate. A `\uXXXX` low surrogate must follow.
         (if (&& (< (+ p 6) (strLen src))
               (&& (== (strByte src (+ p 4)) 92) (== (strByte src (+ p 5)) 117)))
-          (let ((lo (jpHex4 src c (+ p 6))))
+          {
+            (let lo (jpHex4 src c (+ p 6)))
             (if (jcBad c)
               p
               (if (&& (>= lo 56320) (<= lo 57343))
@@ -871,7 +921,8 @@
                 {
                   (vecPush pieces (utf8FromChar utf8Replacement))
                   (+ p 4)
-                })))
+                }))
+          }
           {
             (vecPush pieces (utf8FromChar utf8Replacement))
             (+ p 4)
@@ -885,7 +936,8 @@
           {
             (vecPush pieces (utf8FromChar hi))
             (+ p 4)
-          })))))
+          })))
+  })
 
 (:: jpHex4 (-> String CjCursor Int Int))
 (fn (jpHex4 src c p)
@@ -927,11 +979,10 @@
 
 (:: jpArray (-> String CjCursor Int Int))
 (fn (jpArray src c depth)
-  (let (
-    (v jsonArr)
-    (mut done 0)
-    (mut first 1)
-  )
+  {
+    (let v jsonArr)
+    (let mut done 0)
+    (let mut first 1)
     {
       (jcSetPos c (+ (jcPos c) 1))
       (while (== done 0)
@@ -939,7 +990,8 @@
           (jcSkipWs src c)
           (if (jcBad c)
             (set done 1)
-            (let ((b (jcPeek src c)))
+            {
+              (let b (jcPeek src c))
               (if (== b 93)
                 {
                   (jcSetPos c (+ (jcPos c) 1))
@@ -962,27 +1014,30 @@
                           (set done 1)
                         }))
                     (if (== done 0)
-                      (let ((x (jpValue src c (+ depth 1))))
+                      {
+                        (let x (jpValue src c (+ depth 1)))
                         {
                           (if (jcBad c)
                             (set done 1)
                             (jsonArrPush v x))
                           (set first 0)
-                        }))
-                  }))))
+                        }
+                      })
+                  }))
+            })
         })
       (if (jcBad c)
         0
         v)
-    }))
+    }
+  })
 
 (:: jpObject (-> String CjCursor Int Int))
 (fn (jpObject src c depth)
-  (let (
-    (v jsonObj)
-    (mut done 0)
-    (mut first 1)
-  )
+  {
+    (let v jsonObj)
+    (let mut done 0)
+    (let mut first 1)
     {
       (jcSetPos c (+ (jcPos c) 1))
       (while (== done 0)
@@ -990,7 +1045,8 @@
           (jcSkipWs src c)
           (if (jcBad c)
             (set done 1)
-            (let ((b (jcPeek src c)))
+            {
+              (let b (jcPeek src c))
               (if (== b 125)
                 {
                   (jcSetPos c (+ (jcPos c) 1))
@@ -1012,7 +1068,8 @@
                     (if (== done 0)
                       {
                         (jcSkipWs src c)
-                        (let ((k (jpString src c)))
+                        {
+                          (let k (jpString src c))
                           {
                             (jcSkipWs src c)
                             (if (jcBad c)
@@ -1024,20 +1081,25 @@
                                 }
                                 {
                                   (jcSetPos c (+ (jcPos c) 1))
-                                  (let ((x (jpValue src c (+ depth 1))))
+                                  {
+                                    (let x (jpValue src c (+ depth 1)))
                                     (if (jcBad c)
                                       (set done 1)
-                                      (jsonObjPut v k x)))
+                                      (jsonObjPut v k x))
+                                  }
                                 }))
                             (set first 0)
-                          })
+                          }
+                        }
                       })
-                  }))))
+                  }))
+            })
         })
       (if (jcBad c)
         0
         v)
-    }))
+    }
+  })
 
 ; The typed tree is shared by every codec. CNumber keeps exact decimal
 ; text when a JSON number is fractional or outside Axiom's Int range.
@@ -1082,7 +1144,7 @@
 ;; The default limits: depth 64, one MiB of input, 100000 nodes.
 (pub :: cerealLimits CerealLimits)
 (pub fn (cerealLimits)
-  (CerealLimits 64 1048576 100000))
+  (CerealLimits :depth 64 :bytes 1048576 :nodes 100000))
 
 (:: cerealError (-> String (Result a Error)))
 (fn (cerealError message)
@@ -1096,43 +1158,47 @@
 
 (:: cerealValidUtf8 (-> String Bool))
 (fn (cerealValidUtf8 s)
-  (let (
-    (mut i 0)
-    (mut valid true)
-    (len (strLen s))
-  )
+  {
+    (let mut i 0)
+    (let mut valid true)
+    (let len (strLen s))
     {
       (while (&& valid (< i len))
-        (let ((w (utf8WellFormedAt s i len)))
+        {
+          (let w (utf8WellFormedAt s i len))
           (if (== w 0)
             {
               (set valid false)
               ()
             }
-            (set i (+ i w)))))
+            (set i (+ i w)))
+        })
       valid
-    }))
+    }
+  })
 
 (:: cerealDecimalDigits (-> String Int Int))
 (fn (cerealDecimalDigits text start)
-  (let ((mut p start))
+  {
+    (let mut p start)
     {
       (while (&& (< p (strLen text)) (strIsDigit (strByte text p)))
         (set p (+ p 1)))
       p
-    }))
+    }
+  })
 
 (:: cerealNumberValid (-> String Bool))
 (fn (cerealNumberValid text)
-  (let (
-    (len (strLen text))
-    (mut p 0)
-    (mut valid true)
-  )
+  {
+    (let len (strLen text))
+    (let mut p 0)
+    (let mut valid true)
     {
       (if (== (strByte text p) 45)
         (set p 1))
-      (let ((start p))
+      {
+        (let start p)
         {
           (set p (cerealDecimalDigits text p))
           (if (|| (== p start) (&& (> (- p start) 1) (== (strByte text start) 48)))
@@ -1140,11 +1206,13 @@
               (set valid false)
               ()
             })
-        })
+        }
+      }
       (if (== (strByte text p) 46)
         {
           (set p (+ p 1))
-          (let ((start p))
+          {
+            (let start p)
             {
               (set p (cerealDecimalDigits text p))
               (if (== p start)
@@ -1153,14 +1221,16 @@
                   ()
                 }
                 ())
-            })
+            }
+          }
         })
       (if (|| (== (strByte text p) 101) (== (strByte text p) 69))
         {
           (set p (+ p 1))
           (if (|| (== (strByte text p) 43) (== (strByte text p) 45))
             (set p (+ p 1)))
-          (let ((start p))
+          {
+            (let start p)
             {
               (set p (cerealDecimalDigits text p))
               (if (== p start)
@@ -1169,10 +1239,12 @@
                   ()
                 }
                 ())
-            })
+            }
+          }
         })
       (&& valid (== p len))
-    }))
+    }
+  })
 
 (:: cerealNumberValue (-> String (Result CerealValue Error)))
 (fn (cerealNumberValue text)
@@ -1194,10 +1266,12 @@
 (fn (cerealMemberGet members key i)
   (if (>= i (vecLen members))
     None
-    (let ((member (vecGet members i)))
+    {
+      (let member (vecGet members i))
       (if (strEq member.key key)
         (Some member.value)
-        (cerealMemberGet members key (+ i 1))))))
+        (cerealMemberGet members key (+ i 1)))
+    }))
 
 ;; The member under `key` of a `CObject`, or `Err` naming the missing
 ;; key.
@@ -1288,11 +1362,10 @@
 
 (:: cerealVecToValue (-> (Codec a) (Vec a) (Result CerealValue Error)))
 (fn (cerealVecToValue codec items)
-  (let (
-    (out vecNew)
-    (mut i 0)
-    (mut problem "")
-  )
+  {
+    (let out vecNew)
+    (let mut i 0)
+    (let mut problem "")
     {
       (while (&& (< i (vecLen items)) (strEq problem ""))
         {
@@ -1309,17 +1382,17 @@
       (if (strEq problem "")
         (Ok (CArray out))
         (cerealError problem))
-    }))
+    }
+  })
 
 (:: cerealVecFromValue (-> (Codec a) CerealValue (Result (Vec a) Error)))
 (fn (cerealVecFromValue codec value)
   (match value
     ((CArray items)
-      (let (
-        (out vecNew)
-        (mut i 0)
-        (mut problem "")
-      )
+      {
+        (let out vecNew)
+        (let mut i 0)
+        (let mut problem "")
         {
           (while (&& (< i (vecLen items)) (strEq problem ""))
             {
@@ -1336,7 +1409,8 @@
           (if (strEq problem "")
             (Ok out)
             (cerealError problem))
-        })
+        }
+      }
     )
     (_ (cerealError "expected an array"))))
 
@@ -1371,20 +1445,25 @@
 ;; Include the field name in a record codec's error context.
 (pub :: cerealField (-> (Codec a) CerealValue String (Result a Error)))
 (pub fn (cerealField codec value key)
-  (let ((answer
-    (match (cerealRequired value key)
-      ((Err error) (Err error))
-      ((Ok member) (cerealFromValue codec member)))))
+  {
+    (let answer
+      (match (cerealRequired value key)
+        ((Err error) (Err error))
+        ((Ok member) (cerealFromValue codec member))))
     (match answer
       ((Ok item) (Ok item))
       ((Err error)
         (Err
-          (Error error.code error.message
-            (concat key
-              (if (strEq error.context "")
-                ""
-                (concat "." error.context)))))
-      ))))
+          (Error
+            :code error.code
+            :message error.message
+            :context
+              (concat key
+                (if (strEq error.context "")
+                  ""
+                  (concat "." error.context)))))
+      ))
+  })
 
 (struct CerealCheck
   (limits : CerealLimits)
@@ -1438,22 +1517,28 @@
         )
         ((CText s) (ccString check s))
         ((CArray items)
-          (let ((mut i 0))
+          {
+            (let mut i 0)
             (while (&& (< i (vecLen items)) (strEq check.problem ""))
               {
                 (ccValue check (vecGet items i) (+ depth 1))
                 (set i (+ i 1))
-              }))
+              })
+          }
         )
         ((CObject members)
-          (let ((mut i 0))
+          {
+            (let mut i 0)
             (while (&& (< i (vecLen members)) (strEq check.problem ""))
-              (let ((member (vecGet members i)))
+              {
+                (let member (vecGet members i))
                 {
                   (ccString check member.key)
                   (ccValue check member.value (+ depth 1))
                   (set i (+ i 1))
-                })))
+                }
+              })
+          }
         )))
     0
   })
@@ -1521,14 +1606,16 @@
         {
           (cwText writer "{")
           (for i in 0..(vecLen members)
-            (let ((member (vecGet members i)))
+            {
+              (let member (vecGet members i))
               {
                 (if (> i 0)
                   (cwText writer ","))
                 (cwQuote writer member.key)
                 (cwText writer ":")
                 (cjWrite member.value writer (+ depth 1))
-              }))
+              }
+            })
           (cwText writer "}")
         }
       ))))
@@ -1565,13 +1652,15 @@
 
 (:: cjString (-> String CjCursor CerealCheck String))
 (fn (cjString source cursor check)
-  (let ((text (jpString source cursor)))
+  {
+    (let text (jpString source cursor))
     (if (!= cursor.bad 0)
       {
         (cjFail cursor check "malformed JSON string")
         ""
       }
-      (strDup text))))
+      (strDup text))
+  })
 
 (:: cjLiteral (-> String CjCursor CerealCheck String CerealValue CerealValue))
 (fn (cjLiteral source cursor check word value)
@@ -1587,7 +1676,8 @@
 
 (:: cjTypedNumber (-> String CjCursor CerealCheck CerealValue))
 (fn (cjTypedNumber source cursor check)
-  (let ((start cursor.pos))
+  {
+    (let start cursor.pos)
     {
       (while (&& (< cursor.pos (strLen source))
                (&& (! (strIsSpace (cjPeek source cursor)))
@@ -1602,7 +1692,8 @@
             CNull
           }
         ))
-    }))
+    }
+  })
 
 (:: cjTypedValue (-> String CjCursor CerealCheck Int CerealValue))
 (fn (cjTypedValue source cursor check depth)
@@ -1611,7 +1702,8 @@
     (ccVisit check depth)
     (if (|| (!= cursor.bad 0) (! (strEq check.problem "")))
       CNull
-      (let ((b (cjPeek source cursor)))
+      {
+        (let b (cjPeek source cursor))
         (if (== b 123)
           (cjTypedObject source cursor check depth)
           (if (== b 91)
@@ -1629,15 +1721,15 @@
                       {
                         (cjFail cursor check "expected a JSON value")
                         CNull
-                      })))))))))
+                      })))))))
+      })
   })
 
 (:: cjTypedArray (-> String CjCursor CerealCheck Int CerealValue))
 (fn (cjTypedArray source cursor check depth)
-  (let (
-    (items vecNew)
-    (mut done false)
-  )
+  {
+    (let items vecNew)
+    (let mut done false)
     {
       (set cursor.pos (+ cursor.pos 1))
       (cjSkip source cursor)
@@ -1661,14 +1753,14 @@
               (cjFail cursor check "expected comma or closing JSON bracket")))
         })
       (CArray items)
-    }))
+    }
+  })
 
 (:: cjTypedObject (-> String CjCursor CerealCheck Int CerealValue))
 (fn (cjTypedObject source cursor check depth)
-  (let (
-    (members vecNew)
-    (mut done false)
-  )
+  {
+    (let members vecNew)
+    (let mut done false)
     {
       (set cursor.pos (+ cursor.pos 1))
       (cjSkip source cursor)
@@ -1681,15 +1773,19 @@
       (while (&& (! done) (&& (== cursor.bad 0) (strEq check.problem "")))
         {
           (cjSkip source cursor)
-          (let ((key (cjString source cursor check)))
+          {
+            (let key (cjString source cursor check))
             {
               (cjSkip source cursor)
               (if (!= (cjPeek source cursor) 58)
                 (cjFail cursor check "expected colon after JSON key")
                 (set cursor.pos (+ cursor.pos 1)))
-              (let ((value (cjTypedValue source cursor check (+ depth 1))))
-                (vecPush members (CerealMember key value)))
-            })
+              {
+                (let value (cjTypedValue source cursor check (+ depth 1)))
+                (vecPush members (CerealMember :key key :value value))
+              }
+            }
+          }
           (cjSkip source cursor)
           (if (== (cjPeek source cursor) 125)
             {
@@ -1701,15 +1797,16 @@
               (cjFail cursor check "expected comma or closing JSON brace")))
         })
       (CObject members)
-    }))
+    }
+  })
 
 (:: cjDecode (-> String CerealLimits (Result CerealValue Error)))
 (fn (cjDecode source limits)
-  (let (
-    (cursor (CjCursor 0 0))
-    (check (CerealCheck limits 0 ""))
-  )
-    (let ((value (cjTypedValue source cursor check 0)))
+  {
+    (let cursor (CjCursor :pos 0 :bad 0))
+    (let check (CerealCheck :limits limits :nodes 0 :problem ""))
+    {
+      (let value (cjTypedValue source cursor check 0))
       {
         (cjSkip source cursor)
         (if (&& (== cursor.bad 0) (&& (strEq check.problem "") (== cursor.pos (strLen source))))
@@ -1718,7 +1815,9 @@
             (if (strEq check.problem "")
               "unexpected text after JSON value"
               check.problem)))
-      })))
+      }
+    }
+  })
 
 ; TOML 1.0 subset: single-line basic/literal strings, booleans, signed
 ; decimal integers/floats, arrays, inline tables, dotted keys and tables.
@@ -1767,16 +1866,16 @@
 
 (:: ctString (-> CtParser String))
 (fn (ctString parser)
-  (let (
-    (quote (ctPeek parser))
-    (start parser.pos)
-    (mut escaped false)
-    (mut closed false)
-  )
+  {
+    (let quote (ctPeek parser))
+    (let start parser.pos)
+    (let mut escaped false)
+    (let mut closed false)
     {
       (set parser.pos (+ parser.pos 1))
       (while (&& (< parser.pos (strLen parser.source)) (! closed))
-        (let ((b (ctPeek parser)))
+        {
+          (let b (ctPeek parser))
           {
             (if (&& (! escaped) (== b quote))
               (set closed true)
@@ -1784,18 +1883,19 @@
                 (set escaped true)
                 (set escaped false)))
             (set parser.pos (+ parser.pos 1))
-          }))
+          }
+        })
       (if (! closed)
         {
           (ctFail parser "unterminated TOML string")
           ""
         }
-        (let ((raw (strSlice parser.source start (- parser.pos start))))
+        {
+          (let raw (strSlice parser.source start (- parser.pos start)))
           (if (== quote 39)
-            (let (
-              (mut i 1)
-              (mut bad false)
-            )
+            {
+              (let mut i 1)
+              (let mut bad false)
               {
                 (while (< i (- (strLen raw) 1))
                   {
@@ -1813,22 +1913,24 @@
                     ""
                   }
                   (strDup (strSlice raw 1 (- (strLen raw) 2))))
-              })
-            (let ((decoded (jsonParse raw)))
+              }
+            }
+            {
+              (let decoded (jsonParse raw))
               (if (|| (== decoded 0) (!= (jsonTag decoded) JSTR))
                 {
                   (ctFail parser "unsupported or malformed TOML string escape")
                   ""
                 }
-                (let (
-                  (mut i 1)
-                  (mut bad false)
-                )
+                {
+                  (let mut i 1)
+                  (let mut bad false)
                   {
                     ; TOML does not admit JSON's escaped slash or lone
                     ; surrogate replacement, nor a raw DEL character.
                     (while (&& (< i (- (strLen raw) 1)) (! bad))
-                      (let ((b (strByte raw i)))
+                      {
+                        (let b (strByte raw i))
                         {
                           (if (== b 127)
                             {
@@ -1836,7 +1938,8 @@
                               ()
                             })
                           (if (== b 92)
-                            (let ((next (strByte raw (+ i 1))))
+                            {
+                              (let next (strByte raw (+ i 1)))
                               {
                                 (if (|| (== next 47) (== next 85))
                                   {
@@ -1844,7 +1947,8 @@
                                     ()
                                   })
                                 (if (== next 117)
-                                  (let ((hex (jpHexDigits raw (+ i 2))))
+                                  {
+                                    (let hex (jpHexDigits raw (+ i 2)))
                                     (match hex
                                       ((None)
                                         (set bad true)
@@ -1856,22 +1960,29 @@
                                             ()
                                           }
                                           ())
-                                      ))))
+                                      ))
+                                  })
                                 (set i (+ i
                                          (if (== next 117)
                                            6
                                            2)))
-                              })
+                              }
+                            }
                             (set i (+ i 1)))
-                        }))
+                        }
+                      })
                     (if bad
                       {
                         (ctFail parser "unsupported TOML escape or invalid Unicode scalar")
                         ""
                       }
                       (strDup (jsonStrVal decoded)))
-                  }))))))
-    }))
+                  }
+                })
+            })
+        })
+    }
+  })
 
 (:: ctKeyPart (-> CtParser String))
 (fn (ctKeyPart parser)
@@ -1879,22 +1990,23 @@
     (ctSkip parser)
     (if (|| (== (ctPeek parser) 34) (== (ctPeek parser) 39))
       (ctString parser)
-      (let ((start parser.pos))
+      {
+        (let start parser.pos)
         {
           (while (&& (< parser.pos (strLen parser.source)) (ctBareKey (ctPeek parser)))
             (set parser.pos (+ parser.pos 1)))
           (if (== parser.pos start)
             (ctFail parser "expected a TOML key"))
           (strDup (strSlice parser.source start (- parser.pos start)))
-        }))
+        }
+      })
   })
 
 (:: ctKeyPath (-> CtParser (Vec String)))
 (fn (ctKeyPath parser)
-  (let (
-    (parts vecNew)
-    (mut done false)
-  )
+  {
+    (let parts vecNew)
+    (let mut done false)
     {
       (vecPush parts (ctKeyPart parser))
       (while (&& (! done) (strEq parser.problem ""))
@@ -1913,7 +2025,8 @@
             (set done true))
         })
       parts
-    }))
+    }
+  })
 
 (:: ctPut (-> CerealValue (Vec String) Int CerealValue (Result Int Error)))
 (fn (ctPut object path i value)
@@ -1921,25 +2034,29 @@
     (cerealError "empty TOML key path")
     (match object
       ((CObject members)
-        (let ((key (vecGet path i)))
+        {
+          (let key (vecGet path i))
           (match (cerealMemberGet members key 0)
             ((None)
               (if (== (+ i 1) (vecLen path))
                 {
-                  (vecPush members (CerealMember key value))
+                  (vecPush members (CerealMember :key key :value value))
                   (Ok 0)
                 }
-                (let ((child (CObject vecNew)))
+                {
+                  (let child (CObject vecNew))
                   {
-                    (vecPush members (CerealMember key child))
+                    (vecPush members (CerealMember :key key :value child))
                     (ctPut child path (+ i 1) value)
-                  }))
+                  }
+                })
             )
             ((Some prior)
               (if (== (+ i 1) (vecLen path))
                 (cerealError "duplicate TOML key")
                 (ctPut prior path (+ i 1) value))
-            )))
+            ))
+        }
       )
       (_ (cerealError "TOML key extends a scalar or array")))))
 
@@ -1949,31 +2066,35 @@
     (Ok object)
     (match object
       ((CObject members)
-        (let ((key (vecGet path i)))
+        {
+          (let key (vecGet path i))
           (match (cerealMemberGet members key 0)
             ((None)
-              (let ((child (CObject vecNew)))
+              {
+                (let child (CObject vecNew))
                 {
-                  (vecPush members (CerealMember key child))
+                  (vecPush members (CerealMember :key key :value child))
                   (ctTable child path (+ i 1))
-                })
+                }
+              }
             )
             ((Some child)
               (match child
                 ((CObject entries) (ctTable child path (+ i 1)))
                 (_ (cerealError "TOML table conflicts with an existing value")))
-            )))
+            ))
+        }
       )
       (_ (cerealError "expected a TOML table")))))
 
 (:: ctIntegerText (-> String Bool))
 (fn (ctIntegerText text)
-  (let (
-    (mut i (if (== (strByte text 0) 45)
-      1
-      0))
-    (mut integer true)
-  )
+  {
+    (let mut i
+      (if (== (strByte text 0) 45)
+        1
+        0))
+    (let mut integer true)
     {
       (while (< i (strLen text))
         {
@@ -1985,18 +2106,19 @@
           (set i (+ i 1))
         })
       integer
-    }))
+    }
+  })
 
 (:: ctNumber (-> CtParser String CerealValue))
 (fn (ctNumber parser raw)
-  (let (
-    (pieces vecNew)
-    (mut valid true)
-    (mut i 0)
-  )
+  {
+    (let pieces vecNew)
+    (let mut valid true)
+    (let mut i 0)
     {
       (while (< i (strLen raw))
-        (let ((b (strByte raw i)))
+        {
+          (let b (strByte raw i))
           {
             (if (== b 95)
               (if (! (&& (strIsDigit (strByte raw (- i 1))) (strIsDigit (strByte raw (+ i 1)))))
@@ -2006,13 +2128,14 @@
                 })
               (vecPush pieces (strSlice raw i 1)))
             (set i (+ i 1))
-          }))
-      (let (
-        (joined (jsonJoin pieces))
-        (text (if (strStartsWith joined "+")
-          (strSlice joined 1 (- (strLen joined) 1))
-          joined))
-      )
+          }
+        })
+      {
+        (let joined (jsonJoin pieces))
+        (let text
+          (if (strStartsWith joined "+")
+            (strSlice joined 1 (- (strLen joined) 1))
+            joined))
         (if (! valid)
           {
             (ctFail parser "invalid underscore in TOML number")
@@ -2036,8 +2159,10 @@
                 (ctFail parser "unsupported or malformed TOML number")
                 CNull
               }
-            ))))
-    }))
+            )))
+      }
+    }
+  })
 
 (:: ctValue (-> CtParser Int CerealValue))
 (fn (ctValue parser depth)
@@ -2050,35 +2175,40 @@
     (set parser.nodes (+ parser.nodes 1))
     (if (! (strEq parser.problem ""))
       CNull
-      (let ((b (ctPeek parser)))
+      {
+        (let b (ctPeek parser))
         (if (|| (== b 34) (== b 39))
           (CText (ctString parser))
           (if (== b 91)
             (ctArray parser depth)
             (if (== b 123)
               (ctInline parser depth)
-              (let ((start parser.pos))
+              {
+                (let start parser.pos)
                 {
                   (while (&& (< parser.pos (strLen parser.source))
                            (&& (! (strIsSpace (ctPeek parser)))
                              (&& (!= (ctPeek parser) 44)
                                (&& (!= (ctPeek parser) 93) (!= (ctPeek parser) 125)))))
                     (set parser.pos (+ parser.pos 1)))
-                  (let ((word (strSlice parser.source start (- parser.pos start))))
+                  {
+                    (let word (strSlice parser.source start (- parser.pos start)))
                     (if (strEq word "true")
                       (CBool true)
                       (if (strEq word "false")
                         (CBool false)
-                        (ctNumber parser word))))
-                }))))))
+                        (ctNumber parser word)))
+                  }
+                }
+              })))
+      })
   })
 
 (:: ctArray (-> CtParser Int CerealValue))
 (fn (ctArray parser depth)
-  (let (
-    (items vecNew)
-    (mut done false)
-  )
+  {
+    (let items vecNew)
+    (let mut done false)
     {
       (set parser.pos (+ parser.pos 1))
       (ctSkip parser)
@@ -2111,15 +2241,15 @@
               (ctFail parser "expected comma or closing bracket in TOML array")))
         })
       (CArray items)
-    }))
+    }
+  })
 
 (:: ctInline (-> CtParser Int CerealValue))
 (fn (ctInline parser depth)
-  (let (
-    (object (CObject vecNew))
-    (closed vecNew)
-    (mut done false)
-  )
+  {
+    (let object (CObject vecNew))
+    (let closed vecNew)
+    (let mut done false)
     {
       (set parser.pos (+ parser.pos 1))
       (ctSkip parser)
@@ -2130,12 +2260,14 @@
           ()
         })
       (while (&& (! done) (strEq parser.problem ""))
-        (let ((path (ctKeyPath parser)))
+        {
+          (let path (ctKeyPath parser))
           {
             (if (!= (ctPeek parser) 61)
               (ctFail parser "expected equals in TOML inline table")
               (set parser.pos (+ parser.pos 1)))
-            (let ((value (ctValue parser (+ depth 1))))
+            {
+              (let value (ctValue parser (+ depth 1)))
               {
                 (if (ctClosedPrefix closed path)
                   (ctFail parser "TOML inline value extends a closed definition")
@@ -2144,7 +2276,8 @@
                   (match (ctPut object path 0 value)
                     ((Ok n) (vecPush closed (ctPathKey path)))
                     ((Err e) (ctFail parser e.message))))
-              })
+              }
+            }
             (ctSkip parser)
             (if (== (ctPeek parser) 125)
               {
@@ -2159,21 +2292,23 @@
                     (ctFail parser "TOML inline table has a trailing comma"))
                 }
                 (ctFail parser "expected comma or closing brace in TOML inline table")))
-          }))
+          }
+        })
       object
-    }))
+    }
+  })
 
 (:: ctStripComment (-> String String))
 (fn (ctStripComment line)
-  (let (
-    (mut i 0)
-    (mut quote 0)
-    (mut escaped false)
-    (mut end (strLen line))
-  )
+  {
+    (let mut i 0)
+    (let mut quote 0)
+    (let mut escaped false)
+    (let mut end (strLen line))
     {
       (while (< i end)
-        (let ((b (strByte line i)))
+        {
+          (let b (strByte line i))
           {
             (if (== quote 0)
               (if (== b 35)
@@ -2195,13 +2330,16 @@
               }
               (set escaped false))
             (set i (+ i 1))
-          }))
+          }
+        })
       (strTrim (strSlice line 0 end))
-    }))
+    }
+  })
 
 (:: ctPathKey (-> (Vec String) String))
 (fn (ctPathKey path)
-  (let ((pieces vecNew))
+  {
+    (let pieces vecNew)
     {
       (for i in 0..(vecLen path)
         {
@@ -2210,23 +2348,25 @@
           (vecPush pieces "\"/")
         })
       (jsonJoin pieces)
-    }))
+    }
+  })
 
 (:: ctPathPrefix (-> (Vec String) Int (Vec String)))
 (fn (ctPathPrefix path count)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (for i in 0..count
         (vecPush out (vecGet path i)))
       out
-    }))
+    }
+  })
 
 (:: ctClosedPrefix (-> (Vec String) (Vec String) Bool))
 (fn (ctClosedPrefix closed path)
-  (let (
-    (mut i 1)
-    (mut found false)
-  )
+  {
+    (let mut i 1)
+    (let mut found false)
     {
       (while (&& (<= i (vecLen path)) (! found))
         {
@@ -2238,33 +2378,36 @@
           (set i (+ i 1))
         })
       found
-    }))
+    }
+  })
 
 (:: ctDecode (-> String CerealLimits (Result CerealValue Error)))
 (fn (ctDecode source limits)
-  (let (
-    (root (CObject vecNew))
-    (lines (strSplit source 10))
-    (declared vecNew)
-    (closed vecNew)
-    (mut table vecNew)
-    (mut problem "")
-    (mut nodes 1)
-    (mut i 0)
-  )
+  {
+    (let root (CObject vecNew))
+    (let lines (strSplit source 10))
+    (let declared vecNew)
+    (let closed vecNew)
+    (let mut table vecNew)
+    (let mut problem "")
+    (let mut nodes 1)
+    (let mut i 0)
     {
       (while (&& (< i (vecLen lines)) (strEq problem ""))
-        (let ((line (ctStripComment (vecGet lines i))))
+        {
+          (let line (ctStripComment (vecGet lines i)))
           {
             (if (> (strLen line) 0)
-              (let ((parser (CtParser line limits 0 nodes "")))
+              {
+                (let parser (CtParser :source line :limits limits :pos 0 :nodes nodes :problem ""))
                 {
                   (if (== (ctPeek parser) 91)
                     {
                       (set parser.pos 1)
                       (if (== (ctPeek parser) 91)
                         (ctFail parser "TOML array tables are not supported"))
-                      (let ((path (ctKeyPath parser)))
+                      {
+                        (let path (ctKeyPath parser))
                         {
                           (ctSkip parser)
                           (if (!= (ctPeek parser) 93)
@@ -2285,19 +2428,23 @@
                                 }
                               )
                               ((Err e) (ctFail parser e.message))))
-                        })
+                        }
+                      }
                     }
-                    (let ((path (ctKeyPath parser)))
+                    {
+                      (let path (ctKeyPath parser))
                       {
                         (if (!= (ctPeek parser) 61)
                           (ctFail parser "expected equals after TOML key")
                           (set parser.pos (+ parser.pos 1)))
-                        (let ((value (ctValue parser 1)))
+                        {
+                          (let value (ctValue parser 1))
                           {
                             (ctSkip parser)
                             (if (!= parser.pos (strLen line))
                               (ctFail parser "unexpected text after TOML value"))
-                            (let ((full vecNew))
+                            {
+                              (let full vecNew)
                               {
                                 (for j in 0..(vecLen table)
                                   (vecPush full (vecGet table j)))
@@ -2313,16 +2460,21 @@
                                       {
                                         (vecPush closed (ctPathKey full))
                                         (for k in 1..(vecLen full)
-                                          (let ((prefix (ctPathKey (ctPathPrefix full k))))
+                                          {
+                                            (let prefix (ctPathKey (ctPathPrefix full k)))
                                             (if (< (cerealStringIndex declared prefix 0) 0)
                                               (vecPush declared prefix)
-                                              declared)))
+                                              declared)
+                                          })
                                       }
                                     )
                                     ((Err e) (ctFail parser e.message))))
-                              })
-                          })
-                      }))
+                              }
+                            }
+                          }
+                        }
+                      }
+                    })
                   (set nodes parser.nodes)
                   (if (! (strEq parser.problem ""))
                     {
@@ -2330,23 +2482,26 @@
                       ()
                     }
                     ())
-                }))
+                }
+              })
             (set i (+ i 1))
-          }))
+          }
+        })
       (if (strEq problem "")
         (Ok root)
         (cerealError problem))
-    }))
+    }
+  })
 
 (:: ctValidSource (-> String Bool))
 (fn (ctValidSource source)
-  (let (
-    (mut i 0)
-    (mut valid true)
-  )
+  {
+    (let mut i 0)
+    (let mut valid true)
     {
       (while (&& valid (< i (strLen source)))
-        (let ((b (strByte source i)))
+        {
+          (let b (strByte source i))
           {
             (if (|| (|| (== b 127) (&& (< b 32) (! (|| (== b 9) (|| (== b 10) (== b 13))))))
                   (&& (== b 13) (!= (strByte source (+ i 1)) 10)))
@@ -2355,19 +2510,20 @@
                 ()
               })
             (set i (+ i 1))
-          }))
+          }
+        })
       valid
-    }))
+    }
+  })
 
 ; TOML also requires DEL to be escaped. Size the entire quoted value
 ; before allocating any escaped substring.
 (:: cwTomlQuote (-> CerealWriter String Int))
 (fn (cwTomlQuote writer text)
-  (let (
-    (mut count 0)
-    (mut i 0)
-    (mut start 0)
-  )
+  {
+    (let mut count 0)
+    (let mut i 0)
+    (let mut start 0)
     {
       (for k in 0..(strLen text)
         (if (== (strByte text k) 127)
@@ -2390,7 +2546,8 @@
           (cwText writer "\"")
         })
       0
-    }))
+    }
+  })
 
 (:: ctWriteValue (-> CerealValue CerealWriter Int Int))
 (fn (ctWriteValue value writer depth)
@@ -2437,14 +2594,16 @@
       {
         (cwText writer "{")
         (for i in 0..(vecLen members)
-          (let ((member (vecGet members i)))
+          {
+            (let member (vecGet members i))
             {
               (if (> i 0)
                 (cwText writer ", "))
               (cwTomlQuote writer member.key)
               (cwText writer " = ")
               (ctWriteValue member.value writer (+ depth 1))
-            }))
+            }
+          })
         (cwText writer "}")
       }
     )))
@@ -2455,13 +2614,15 @@
     ((CObject members)
       {
         (for i in 0..(vecLen members)
-          (let ((member (vecGet members i)))
+          {
+            (let member (vecGet members i))
             {
               (cwTomlQuote writer member.key)
               (cwText writer " = ")
               (ctWriteValue member.value writer (+ depth 1))
               (cwText writer "\n")
-            }))
+            }
+          })
         0
       }
     )
@@ -2486,12 +2647,14 @@
 (pub fn (cerealEncodeWith format limits value)
   (if (! (cerealLimitsValid limits))
     (cerealError "limits require depth 1..64, bytes 1..16777216 and nodes 1..1000000")
-    (let ((check (CerealCheck limits 0 "")))
+    {
+      (let check (CerealCheck :limits limits :nodes 0 :problem ""))
       {
         (ccValue check value 0)
         (if (! (strEq check.problem ""))
           (cerealError check.problem)
-          (let ((writer (CerealWriter limits vecNew 0 "")))
+          {
+            (let writer (CerealWriter :limits limits :pieces vecNew :size 0 :problem ""))
             {
               (match format
                 ((CerealJson) (cjWrite value writer 0))
@@ -2508,8 +2671,10 @@
               (if (strEq writer.problem "")
                 (Ok (jsonJoin writer.pieces))
                 (cerealError writer.problem))
-            }))
-      })))
+            }
+          })
+      }
+    }))
 
 ;; Write a `CerealValue` tree in `format` under the default limits.
 (pub :: cerealEncode (-> CerealFormat CerealValue (Result String Error)))
@@ -2526,26 +2691,30 @@
       (cerealError "input byte limit exceeded")
       (if (! (cerealValidUtf8 source))
         (cerealError "invalid UTF-8 input")
-        (let ((parsed
-          (match format
-            ((CerealJson) (cjDecode source limits))
-            ((CerealToml)
-              (if (ctValidSource source)
-                (ctDecode source limits)
-                (cerealError "control character or lone CR in TOML input"))
-            )
-            ((CerealYaml) (cyDecode source limits)))))
+        {
+          (let parsed
+            (match format
+              ((CerealJson) (cjDecode source limits))
+              ((CerealToml)
+                (if (ctValidSource source)
+                  (ctDecode source limits)
+                  (cerealError "control character or lone CR in TOML input"))
+              )
+              ((CerealYaml) (cyDecode source limits))))
           (match parsed
             ((Err e) (Err e))
             ((Ok value)
-              (let ((check (CerealCheck limits 0 "")))
+              {
+                (let check (CerealCheck :limits limits :nodes 0 :problem ""))
                 {
                   (ccValue check value 0)
                   (if (strEq check.problem "")
                     (Ok value)
                     (cerealError check.problem))
-                })
-            )))))))
+                }
+              }
+            ))
+        }))))
 
 ;; Parse `source` in `format` into a `CerealValue` tree under the
 ;; default limits.
@@ -2599,24 +2768,26 @@
 ; colon requires following whitespace, so URLs remain plain strings.
 (:: cyQuoteStart (-> String Int Bool))
 (fn (cyQuoteStart text at)
-  (let ((mut i (- at 1)))
+  {
+    (let mut i (- at 1))
     {
       (while (&& (>= i 0) (cySpace (strByte text i)))
         (set i (- i 1)))
       (|| (< i 0) (|| (== (strByte text i) 58) (&& (== i 0) (== (strByte text i) 45))))
-    }))
+    }
+  })
 
 (:: cyScan (-> String Bool Int))
 (fn (cyScan text comment)
-  (let (
-    (mut i 0)
-    (mut quote 0)
-    (mut flow 0)
-    (mut found (- 0 1))
-  )
+  {
+    (let mut i 0)
+    (let mut quote 0)
+    (let mut flow 0)
+    (let mut found (- 0 1))
     {
       (while (&& (< i (strLen text)) (< found 0))
-        (let ((b (strByte text i)))
+        {
+          (let b (strByte text i))
           {
             (if (== quote 34)
               (if (== b 92)
@@ -2643,9 +2814,11 @@
                                     (cySpace (strByte text (+ i 1)))))))
                           (set found i))))))))
             (set i (+ i 1))
-          }))
+          }
+        })
       found
-    }))
+    }
+  })
 
 (:: cyDash (-> String Bool))
 (fn (cyDash text)
@@ -2653,16 +2826,16 @@
 
 (:: cyAddLine (-> (Vec CYLine) Int String Int))
 (fn (cyAddLine lines indent text)
-  (let (
-    (mut current text)
-    (mut col indent)
-    (mut done false)
-    (mut bad 0)
-  )
+  {
+    (let mut current text)
+    (let mut col indent)
+    (let mut done false)
+    (let mut bad 0)
     {
       (while (! done)
         (if (&& (cyDash current) (> (strLen current) 2))
-          (let ((rest (strTrim (strSlice current 2 (- (strLen current) 2)))))
+          {
+            (let rest (strTrim (strSlice current 2 (- (strLen current) 2))))
             (if (|| (cyDash rest) (>= (cyScan rest false) 0))
               (if (|| (!= (strByte current 1) 32) (cySpace (strByte current 2)))
                 {
@@ -2670,38 +2843,38 @@
                   (set done true)
                 }
                 {
-                  (vecPush lines (CYLine col "-"))
+                  (vecPush lines (CYLine :indent col :text "-"))
                   (set current rest)
                   (set col (+ col 2))
                 })
               {
-                (vecPush lines (CYLine col current))
+                (vecPush lines (CYLine :indent col :text current))
                 (set done true)
-              }))
+              })
+          }
           {
-            (vecPush lines (CYLine col current))
+            (vecPush lines (CYLine :indent col :text current))
             (set done true)
           }))
       bad
-    }))
+    }
+  })
 
 (:: cyLines (-> String (Result (Vec CYLine) Error)))
 (fn (cyLines source)
-  (let (
-    (raw (strSplit source 10))
-    (lines vecNew)
-    (mut problem "")
-    (mut opened false)
-    (mut ended false)
-    (mut i 0)
-  )
+  {
+    (let raw (strSplit source 10))
+    (let lines vecNew)
+    (let mut problem "")
+    (let mut opened false)
+    (let mut ended false)
+    (let mut i 0)
     {
       (while (&& (< i (vecLen raw)) (strEq problem ""))
-        (let (
-          (line (vecGet raw i))
-          (mut start 0)
-          (mut end (strLen line))
-        )
+        {
+          (let line (vecGet raw i))
+          (let mut start 0)
+          (let mut end (strLen line))
           {
             (if (&& (== i 0)
                   (&& (>= end 3)
@@ -2710,11 +2883,10 @@
               (set start 3))
             (if (&& (> end start) (== (strByte line (- end 1)) 13))
               (set end (- end 1)))
-            (let (
-              (mut n start)
-              (mut col 0)
-              (mut j start)
-            )
+            {
+              (let mut n start)
+              (let mut col 0)
+              (let mut j start)
               {
                 (while (&& (< n end) (== (strByte line n) 32))
                   {
@@ -2736,15 +2908,15 @@
                       })
                     (set j (+ j 1))
                   })
-                (let (
-                  (content (strSlice line n (- end n)))
-                  (cut (cyScan content true))
-                )
-                  (let ((text
-                    (strTrim
-                      (if (< cut 0)
-                        content
-                        (strSlice content 0 cut)))))
+                {
+                  (let content (strSlice line n (- end n)))
+                  (let cut (cyScan content true))
+                  {
+                    (let text
+                      (strTrim
+                        (if (< cut 0)
+                          content
+                          (strSlice content 0 cut))))
                     (if (! (== (strLen text) 0))
                       (if ended
                         (set problem "content after YAML document end")
@@ -2762,24 +2934,28 @@
                                 {
                                   (set problem "compact YAML collections require one space after the dash")
                                   ()
-                                }))))))))
-              })
+                                }))))))
+                  }
+                }
+              }
+            }
             (set i (+ i 1))
-          }))
+          }
+        })
       (if (strEq problem "")
         (Ok lines)
         (cerealError problem))
-    }))
+    }
+  })
 
 (:: cySingle (-> String (Result String Error)))
 (fn (cySingle text)
-  (let (
-    (pieces vecNew)
-    (mut i 1)
-    (mut start 1)
-    (mut closed false)
-    (mut problem "")
-  )
+  {
+    (let pieces vecNew)
+    (let mut i 1)
+    (let mut start 1)
+    (let mut closed false)
+    (let mut problem "")
     {
       (while (&& (< i (strLen text)) (! closed))
         (if (== (strByte text i) 39)
@@ -2800,16 +2976,17 @@
       (if (|| (! closed) (!= i (strLen text)))
         (cerealError "invalid or multiline single-quoted YAML scalar")
         (Ok (jsonJoin pieces)))
-    }))
+    }
+  })
 
 (:: cyNumericExtension (-> String Bool))
 (fn (cyNumericExtension text)
-  (let (
-    (lower (strLower text))
-    (at (if (|| (== (strByte text 0) 45) (== (strByte text 0) 43))
-      1
-      0))
-  )
+  {
+    (let lower (strLower text))
+    (let at
+      (if (|| (== (strByte text 0) 45) (== (strByte text 0) 43))
+        1
+        0))
     (||
       (|| (strEq lower ".nan")
         (|| (strEq lower ".inf") (|| (strEq lower "-.inf") (strEq lower "+.inf"))))
@@ -2817,18 +2994,19 @@
         (|| (strStartsWith (strSlice lower at (- (strLen lower) at)) "0o")
           (|| (&& (== (strByte text 0) 43) (strIsDigit (strByte text 1)))
             (|| (&& (== (strByte text at) 46) (strIsDigit (strByte text (+ at 1))))
-              (&& (== (strByte text at) 48) (strIsDigit (strByte text (+ at 1)))))))))))
+              (&& (== (strByte text at) 48) (strIsDigit (strByte text (+ at 1)))))))))
+  })
 
 (:: cyFiniteNumber (-> String Bool))
 (fn (cyFiniteNumber text)
-  (let (
-    (mut i (if (|| (== (strByte text 0) 43) (== (strByte text 0) 45))
-      1
-      0))
-    (mut digits 0)
-    (mut exponent false)
-    (mut expDigits 0)
-  )
+  {
+    (let mut i
+      (if (|| (== (strByte text 0) 43) (== (strByte text 0) 45))
+        1
+        0))
+    (let mut digits 0)
+    (let mut exponent false)
+    (let mut expDigits 0)
     {
       (while (&& (< i (strLen text)) (strIsDigit (strByte text i)))
         {
@@ -2859,11 +3037,13 @@
           ()
         })
       (&& (&& (> digits 0) (== i (strLen text))) (|| (! exponent) (> expDigits 0)))
-    }))
+    }
+  })
 
 (:: cyPlain (-> String (Result CerealValue Error)))
 (fn (cyPlain text)
-  (let ((first (strByte text 0)))
+  {
+    (let first (strByte text 0))
     (if (== (strLen text) 0)
       (Ok CNull)
       (if (|| (strEq text "null")
@@ -2896,38 +3076,42 @@
                           (cerealError "non-JSON YAML number is unsupported")
                           (Ok (CText (strDup text))))
                       ))
-                    (Ok (CText (strDup text)))))))))))))
+                    (Ok (CText (strDup text)))))))))))
+  })
 
 (:: cerealDistinctKeys (-> (Vec CerealMember) Bool))
 (fn (cerealDistinctKeys members)
-  (let (
-    (keys vecNew)
-    (scratch vecNew)
-    (size (vecLen members))
-    (mut width 1)
-  )
+  {
+    (let keys vecNew)
+    (let scratch vecNew)
+    (let size (vecLen members))
+    (let mut width 1)
     {
       (for i in 0..size
-        (let ((member (vecGet members i)))
+        {
+          (let member (vecGet members i))
           {
             (vecPush keys member.key)
             (vecPush scratch "")
-          }))
+          }
+        })
       (while (< width size)
-        (let ((mut start 0))
+        {
+          (let mut start 0)
           {
             (while (< start size)
-              (let (
-                (middle (if (< (+ start width) size)
-                  (+ start width)
-                  size))
-                (end (if (< (+ start (* width 2)) size)
-                  (+ start (* width 2))
-                  size))
-                (mut left start)
-                (mut right middle)
-                (mut at start)
-              )
+              {
+                (let middle
+                  (if (< (+ start width) size)
+                    (+ start width)
+                    size))
+                (let end
+                  (if (< (+ start (* width 2)) size)
+                    (+ start (* width 2))
+                    size))
+                (let mut left start)
+                (let mut right middle)
+                (let mut at start)
                 {
                   (while (< at end)
                     {
@@ -2945,15 +3129,16 @@
                       (set at (+ at 1))
                     })
                   (set start end)
-                }))
+                }
+              })
             (for i in 0..size
               (vecSet keys i (vecGet scratch i)))
             (set width (* width 2))
-          }))
-      (let (
-        (mut i 1)
-        (mut distinct true)
-      )
+          }
+        })
+      {
+        (let mut i 1)
+        (let mut distinct true)
         {
           (while (&& distinct (< i size))
             {
@@ -2965,18 +3150,19 @@
               (set i (+ i 1))
             })
           distinct
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; YAML and TOML require unique dictionary keys, including nested ones.
 (:: cyUniqueKeys (-> CerealValue Bool))
 (fn (cyUniqueKeys value)
   (match value
     ((CArray items)
-      (let (
-        (mut i 0)
-        (mut valid true)
-      )
+      {
+        (let mut i 0)
+        (let mut valid true)
         {
           (while (&& valid (< i (vecLen items)))
             {
@@ -2984,32 +3170,37 @@
               (set i (+ i 1))
             })
           valid
-        })
+        }
+      }
     )
     ((CObject members)
-      (let (
-        (mut i 0)
-        (mut valid (cerealDistinctKeys members))
-      )
+      {
+        (let mut i 0)
+        (let mut valid (cerealDistinctKeys members))
         {
           (while (&& valid (< i (vecLen members)))
-            (let ((member (vecGet members i)))
+            {
+              (let member (vecGet members i))
               {
                 (set valid (cyUniqueKeys member.value))
                 (set i (+ i 1))
-              }))
+              }
+            })
           valid
-        })
+        }
+      }
     )
     (_ true)))
 
 (:: cyFlow (-> CYState String Int (Result CerealValue Error)))
 (fn (cyFlow state text depth)
-  (let (
-    (check state.check)
-    (limits (CerealLimits (- state.check.limits.depth depth) state.check.limits.bytes
-              (- state.check.limits.nodes state.check.nodes)))
-  )
+  {
+    (let check state.check)
+    (let limits
+      (CerealLimits
+        :depth (- state.check.limits.depth depth)
+        :bytes state.check.limits.bytes
+        :nodes (- state.check.limits.nodes state.check.nodes)))
     (if (|| (< limits.depth 0) (< limits.nodes 1))
       (cerealError "YAML resource limit exceeded")
       (match (cjDecode text limits)
@@ -3023,11 +3214,13 @@
                 (Ok value)
                 (cerealError "duplicate YAML mapping key")))
           }
-        )))))
+        )))
+  })
 
 (:: cyScalar (-> CYState String Int (Result CerealValue Error)))
 (fn (cyScalar state text depth)
-  (let ((first (strByte text 0)))
+  {
+    (let first (strByte text 0))
     (if (|| (== first 91) (|| (== first 123) (== first 34)))
       (cyFlow state text depth)
       {
@@ -3039,13 +3232,15 @@
               ((Err error) (Err error))
               ((Ok value) (Ok (CText value))))
             (cyPlain text)))
-      })))
+      })
+  })
 
 (:: cyKey (-> String (Result String Error)))
 (fn (cyKey text)
   (if (strEq text "<<")
     (cerealError "YAML merge keys are unsupported")
-    (let ((first (strByte text 0)))
+    {
+      (let first (strByte text 0))
       (if (== first 39)
         (cySingle text)
         (if (== first 34)
@@ -3062,12 +3257,15 @@
               (match value
                 ((CText key) (Ok key))
                 (_ (cerealError "YAML mapping keys must be strings")))
-            )))))))
+            ))))
+    }))
 
 (:: cyIndent (-> CYState Int))
 (fn (cyIndent state)
-  (let ((line (vecGet state.lines state.at)))
-    line.indent))
+  {
+    (let line (vecGet state.lines state.at))
+    line.indent
+  })
 
 (:: cyChild (-> CYState String Int Int (Result CerealValue Error)))
 (fn (cyChild state inline indent depth)
@@ -3079,20 +3277,21 @@
 
 (:: cySequence (-> CYState Int Int (Result CerealValue Error)))
 (fn (cySequence state indent depth)
-  (let (
-    (items vecNew)
-    (mut done false)
-    (mut problem "")
-  )
+  {
+    (let items vecNew)
+    (let mut done false)
+    (let mut problem "")
     {
       (ccVisit state.check depth)
       (while (&& (! done) (&& (< state.at (vecLen state.lines)) (strEq problem "")))
-        (let ((line (vecGet state.lines state.at)))
+        {
+          (let line (vecGet state.lines state.at))
           (if (|| (!= line.indent indent) (! (cyDash line.text)))
             (set done true)
             {
               (set state.at (+ state.at 1))
-              (let ((inline (strTrim (strSlice line.text 1 (- (strLen line.text) 1)))))
+              {
+                (let inline (strTrim (strSlice line.text 1 (- (strLen line.text) 1))))
                 (match (cyChild state inline indent (+ depth 1))
                   ((Ok value) (vecPush items value))
                   ((Err error)
@@ -3100,34 +3299,35 @@
                       (set problem error.message)
                       items
                     }
-                  )))
+                  ))
+              }
               (if (&& (< state.at (vecLen state.lines)) (> (cyIndent state) indent))
                 {
                   (set problem "unexpected YAML indentation after a sequence value")
                   ()
                 })
-            })))
+            })
+        })
       (if (! (strEq state.check.problem ""))
         (cerealError state.check.problem)
         (if (strEq problem "")
           (Ok (CArray items))
           (cerealError problem)))
-    }))
+    }
+  })
 
 (:: cyMapping (-> CYState Int Int (Result CerealValue Error)))
 (fn (cyMapping state indent depth)
-  (let (
-    (members vecNew)
-    (mut done false)
-    (mut problem "")
-  )
+  {
+    (let members vecNew)
+    (let mut done false)
+    (let mut problem "")
     {
       (ccVisit state.check depth)
       (while (&& (! done) (&& (< state.at (vecLen state.lines)) (strEq problem "")))
-        (let (
-          (line (vecGet state.lines state.at))
-          (colon (cyScan line.text false))
-        )
+        {
+          (let line (vecGet state.lines state.at))
+          (let colon (cyScan line.text false))
           (if (|| (!= line.indent indent) (< colon 0))
             (set done true)
             {
@@ -3145,14 +3345,16 @@
                       }
                     )
                     ((None)
-                      (let ((inline (strTrim
-                                      (strSlice line.text (+ colon 1)
-                                        (- (strLen line.text) (+ colon 1))))))
+                      {
+                        (let inline
+                          (strTrim
+                            (strSlice line.text (+ colon 1) (- (strLen line.text) (+ colon 1)))))
                         (match (cyChild state inline indent (+ depth 1))
-                          ((Ok value) (vecPush members (CerealMember key value)))
+                          ((Ok value) (vecPush members (CerealMember :key key :value value)))
                           ((Err error)
                             (set problem error.message)
-                          )))
+                          ))
+                      }
                     ))
                 ))
               (if (&& (< state.at (vecLen state.lines)) (> (cyIndent state) indent))
@@ -3160,19 +3362,22 @@
                   (set problem "unexpected YAML indentation after a mapping value")
                   ()
                 })
-            })))
+            })
+        })
       (if (! (strEq state.check.problem ""))
         (cerealError state.check.problem)
         (if (strEq problem "")
           (Ok (CObject members))
           (cerealError problem)))
-    }))
+    }
+  })
 
 (:: cyBlock (-> CYState Int Int (Result CerealValue Error)))
 (fn (cyBlock state indent depth)
   (if (> depth state.check.limits.depth)
     (cerealError "YAML nesting limit exceeded")
-    (let ((line (vecGet state.lines state.at)))
+    {
+      (let line (vecGet state.lines state.at))
       (if (cyDash line.text)
         (cySequence state indent depth)
         (if (>= (cyScan line.text false) 0)
@@ -3180,14 +3385,14 @@
           {
             (set state.at (+ state.at 1))
             (cyScalar state line.text depth)
-          })))))
+          }))
+    }))
 
 (:: cyPrintable (-> String Bool))
 (fn (cyPrintable source)
-  (let (
-    (mut i 0)
-    (mut valid true)
-  )
+  {
+    (let mut i 0)
+    (let mut valid true)
     {
       (while (&& valid (< i (strLen source)))
         {
@@ -3208,14 +3413,17 @@
           (set i (utf8Next source i))
         })
       valid
-    }))
+    }
+  })
 
 (:: cyBlockDocument (-> String CerealLimits (Result CerealValue Error)))
 (fn (cyBlockDocument source limits)
   (match (cyLines source)
     ((Err error) (Err error))
     ((Ok lines)
-      (let ((state (CYState lines (CerealCheck limits 0 "") 0)))
+      {
+        (let state
+          (CYState :lines lines :check (CerealCheck :limits limits :nodes 0 :problem "") :at 0))
         (if (== (vecLen lines) 0)
           (cyScalar state "" 0)
           (if (!= (cyIndent state) 0)
@@ -3226,7 +3434,8 @@
                 (if (!= state.at (vecLen lines))
                   (cerealError "inconsistent YAML indentation or trailing content")
                   (Ok value))
-              )))))
+              ))))
+      }
     )))
 
 (:: cyDecode (-> String CerealLimits (Result CerealValue Error)))
@@ -3239,16 +3448,22 @@
         (cerealError "invalid UTF-8 YAML input")
         (if (! (cyPrintable source))
           (cerealError "non-printable YAML character")
-          (let (
-            (trimmed (strTrim source))
-            (first (strByte (strTrim source) 0))
-          )
+          {
+            (let trimmed (strTrim source))
+            (let first (strByte (strTrim source) 0))
             (if (|| (== first 91) (|| (== first 123) (== first 34)))
-              (let ((state (CYState vecNew (CerealCheck limits 0 "") 0)))
+              {
+                (let state
+                  (CYState
+                    :lines vecNew
+                    :check (CerealCheck :limits limits :nodes 0 :problem "")
+                    :at 0))
                 (match (cyFlow state trimmed 0)
                   ((Ok value) (Ok value))
-                  ((Err error) (cyBlockDocument source limits))))
-              (cyBlockDocument source limits))))))))
+                  ((Err error) (cyBlockDocument source limits)))
+              }
+              (cyBlockDocument source limits))
+          })))))
 
 (:: cyWrite (-> CerealValue CerealWriter Int Int))
 (fn (cyWrite value writer depth)

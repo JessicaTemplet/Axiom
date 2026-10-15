@@ -29,9 +29,9 @@ SOURCE = """(import IO)
   (match taskTokenNew
     ((Err error) (sysExitWith 1))
     ((Ok token)
-      (let ((results (taskMapWith (lambda (i) (fmtInt i)) 64
-                      (taskWithToken (taskOpts 32 32) token))))
-        (let ((started (taskTestStartCount token)))
+      { (let results (taskMapWith (lambda (i) (fmtInt i)) 64
+                      (taskWithToken (taskOpts 32 32) token)))
+        { (let started (taskTestStartCount token))
           {
             (if (!= (vecLen results) 64) (sysExitWith 2))
             (for i in 0..64
@@ -44,9 +44,9 @@ SOURCE = """(import IO)
               (match (sysKill (taskTestPid token i) 0)
                 ((Ok value) (sysExitWith 5))
                 ((Err error) (if (!= error.code 3) (sysExitWith 6)))))
-            (println "{started} ordered results, all children reaped")
+            (println \"{started} ordered results, all children reaped\")
             0
-          }))
+          }}}
     )))
 """
 HELPERS = """

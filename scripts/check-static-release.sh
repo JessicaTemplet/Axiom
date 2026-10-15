@@ -83,11 +83,11 @@ cat > "$work/lit.ax" <<'AX'
 
 (:: boxOf (-> Int Int))
 
-(fn (boxOf n) (as (Box "in field position" n) Int))
+(fn (boxOf n) (as (Box :label "in field position" :n n) Int))
 
 (:: letOf (-> Int Int))
 
-(fn (letOf n) (let ((s "in let position")) (strLen s)))
+(fn (letOf n) { (let s "in let position") (strLen s)})
 
 (:: tailOf (-> Int String Int))
 

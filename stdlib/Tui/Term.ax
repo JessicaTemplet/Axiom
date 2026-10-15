@@ -119,27 +119,38 @@
 ;@axiom:effect(io)
 (pub fn (mkKeyIn in active)
   (if (== active 0)
-    (KeyIn in (readBufferNew 1) "" 0 0 None None 0 0 0)
     (KeyIn
-      in
-      (readBufferNew termBufBytes)
-      ""
-      0
-      0
-      (match (pollerNew 4)
-        ; A poller that cannot be made, or cannot watch `in`, is `None`:
-        ; the fill below then blocks on the read, which is the degraded
-        ; path it already takes for a refused wait.
-        ((Err e) None)
-        ((Ok p)
-          (match (pollerAdd p in 0)
-            ((Err e) None)
-            ((Ok _) (Some p)))
-        ))
-      None
-      0
-      0
-      0)))
+      :in in
+      :rb (readBufferNew 1)
+      :view ""
+      :len 0
+      :pos 0
+      :poller None
+      :guard None
+      :rows 0
+      :cols 0
+      :eof 0)
+    (KeyIn
+      :in in
+      :rb (readBufferNew termBufBytes)
+      :view ""
+      :len 0
+      :pos 0
+      :poller
+        (match (pollerNew 4)
+          ; A poller that cannot be made, or cannot watch `in`, is `None`:
+          ; the fill below then blocks on the read, which is the degraded
+          ; path it already takes for a refused wait.
+          ((Err e) None)
+          ((Ok p)
+            (match (pollerAdd p in 0)
+              ((Err e) None)
+              ((Ok _) (Some p)))
+          ))
+      :guard None
+      :rows 0
+      :cols 0
+      :eof 0)))
 
 ;; Bytes read but not yet consumed. The redraw coalescing asks this.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
@@ -166,27 +177,30 @@
 (pub :: keyInFill (-> KeyIn Int Int))
 ;@axiom:effect(io)
 (pub fn (keyInFill kin timeoutMs)
-  (let ((pending (- kin.len kin.pos)))
+  {
+    (let pending (- kin.len kin.pos))
     (if (== kin.eof 1)
       (- 0 1)
       (if (>= pending (readBufferLen kin.rb))
         (- 0 2)
-        (let ((ready
-          (if (>= timeoutMs 0)
-            (match kin.poller
-              ((Some p)
-                (match (pollerWait p timeoutMs)
-                  ((Ok k) k)
-                  ((Err e) (- 0 (errCode e))))
-              )
-              ((None) 1))
-            1)))
+        {
+          (let ready
+            (if (>= timeoutMs 0)
+              (match kin.poller
+                ((Some p)
+                  (match (pollerWait p timeoutMs)
+                    ((Ok k) k)
+                    ((Err e) (- 0 (errCode e))))
+                )
+                ((None) 1))
+              1))
           (if (== ready 0)
             0
-            (let ((n
-              (match (fileRead kin.in kin.rb 0 (- (readBufferLen kin.rb) pending))
-                ((Ok k) k)
-                ((Err e) (- 0 (errCode e))))))
+            {
+              (let n
+                (match (fileRead kin.in kin.rb 0 (- (readBufferLen kin.rb) pending))
+                  ((Ok k) k)
+                  ((Err e) (- 0 (errCode e)))))
               (if (<= n 0)
                 {
                   (set kin.eof 1)
@@ -201,7 +215,10 @@
                   (set kin.len (+ pending n))
                   (set kin.pos 0)
                   n
-                }))))))))
+                })
+            })
+        }))
+  })
 
 ; ------------------------------------------------------------------
 ; One event, never KEY_MORE. The only function here that both reads
@@ -224,45 +241,53 @@
 (pub :: keyNext (-> KeyIn KeyEv))
 ;@axiom:effect(io)
 (pub fn (keyNext kin)
-  (let (
-    (mut kind KEY_NONE)
-    (mut cp 0)
-    (mut mods 0)
-    (mut done 0)
-  )
+  {
+    (let mut kind KEY_NONE)
+    (let mut cp 0)
+    (let mut mods 0)
+    (let mut done 0)
     {
       (while (== done 0)
-        (let ((ev (keyScan kin.view kin.len kin.pos)))
+        {
+          (let ev (keyScan kin.view kin.len kin.pos))
           (if (== ev.kind KEY_MORE)
-            (let ((pending (- kin.len kin.pos)))
-              (let ((n
-                (keyInFill kin
-                  (if (== pending 0)
-                    (- 0 1)
-                    keyEscTimeoutMs))))
+            {
+              (let pending (- kin.len kin.pos))
+              {
+                (let n
+                  (keyInFill kin
+                    (if (== pending 0)
+                      (- 0 1)
+                      keyEscTimeoutMs)))
                 (if (! (> n 0))
                   (if (== pending 0)
                     {
                       (set kind KEY_EOF)
                       (set done 1)
                     }
-                    (let ((r (keyResolve kin.view kin.len kin.pos)))
+                    {
+                      (let r (keyResolve kin.view kin.len kin.pos))
                       {
                         (set kin.pos (+ kin.pos r.used))
                         (set kind r.kind)
                         (set cp r.cp)
                         (set mods r.mods)
                         (set done 1)
-                      })))))
+                      }
+                    }))
+              }
+            }
             {
               (set kin.pos (+ kin.pos ev.used))
               (set kind ev.kind)
               (set cp ev.cp)
               (set mods ev.mods)
               (set done 1)
-            })))
-      (KeyEv kind cp mods 0)
-    }))
+            })
+        })
+      (KeyEv :kind kind :cp cp :mods mods :used 0)
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Terminal geometry and raw mode.
@@ -357,12 +382,14 @@
 (pub fn (termFlush out)
   (if (== (vecLen out) 0)
     0
-    (let ((s (tuiCat out)))
+    {
+      (let s (tuiCat out))
       {
         (writeStr stdout s)
         (vecClear out)
         0
-      })))
+      }
+    }))
 
 ; ------------------------------------------------------------------
 ; The loop. Answers the line WITHOUT its newline, or None at end of
@@ -384,22 +411,23 @@
 (pub :: termEditLoop (-> KeyIn LineEd String (Option String)))
 ;@axiom:effect(io)
 (pub fn (termEditLoop kin ed prompt)
-  (let (
-    (out vecNew)
-    (mut state 0)
-    (mut got "")
-  )
+  {
+    (let out vecNew)
+    (let mut state 0)
+    (let mut got "")
     {
       (termReadSize kin)
       (ledReset ed prompt (termWsCols kin) (termWsRows kin))
       (ledRefresh ed out)
       (termFlush out)
       (while (== state 0)
-        (let ((ev (keyNext kin)))
+        {
+          (let ev (keyNext kin))
           (if (== ev.kind KEY_EOF)
             (set state 2)
             (if (! (== ev.kind KEY_NONE))
-              (let ((d (ledApply ed ev out)))
+              {
+                (let d (ledApply ed ev out))
                 (if (== d LED_DONE)
                   {
                     (vecPush out "\r\n")
@@ -430,8 +458,11 @@
                             (ledRefresh ed out)
                           })
                         (termFlush out)
-                      }))))))))
+                      })))
+              }))
+        })
       (if (== state 1)
         (Some got)
         None)
-    }))
+    }
+  })

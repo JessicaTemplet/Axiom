@@ -22,7 +22,7 @@ pub enum Ex {
     App(Vec<Ex>),
     /// `(as e Type)`.
     Cast(String, Box<Ex>),
-    /// `(let (bindings...) body)`; bindings are `(name init)`.
+    /// A lexical brace block with sequential `(let name init)` declarations.
     Let(Vec<(String, Ex)>, Box<Ex>),
     /// `(if cond then else)`. Never simple, so it always breaks: the
     /// condition stays on the `if` line and each branch takes its own
@@ -192,36 +192,27 @@ fn print_shape(e: &Ex, level: usize, suffix: usize, out: &mut String) {
             out.push(')');
         }
         Ex::Let(binds, body) => {
-            out.push_str("(let (");
-            if binds.len() == 1 {
-                let (name, init) = &binds[0];
-                out.push('(');
+            out.push_str("{\n");
+            for (name, init) in binds {
+                out.push_str(&ind(level + 2));
+                out.push_str("(let ");
                 out.push_str(name);
-                if init.is_simple() {
+                let mut flat = String::new();
+                if print_flat(init, &mut flat) && column(out) + flat.len() + 2 <= WIDTH {
                     out.push(' ');
-                    print_shape(init, level, 2, out);
+                    out.push_str(&flat);
                 } else {
                     out.push('\n');
-                    out.push_str(&ind(level + 2));
-                    print_shape(init, level + 2, 2, out);
+                    out.push_str(&ind(level + 4));
+                    print_shape(init, level + 4, 1, out);
                 }
-                out.push(')');
-            } else {
-                out.push('\n');
-                for (name, init) in binds {
-                    out.push_str(&ind(level + 2));
-                    out.push('(');
-                    out.push_str(name);
-                    out.push(' ');
-                    print_shape(init, level + 2, 1, out);
-                    out.push_str(")\n");
-                }
-                out.push_str(&ind(level));
+                out.push_str(")\n");
             }
-            out.push_str(")\n");
             out.push_str(&ind(level + 2));
-            print_shape(body, level + 2, suffix + 1, out);
-            out.push(')');
+            print_shape(body, level + 2, 0, out);
+            out.push('\n');
+            out.push_str(&ind(level));
+            out.push('}');
         }
         Ex::If(c, t, f) => {
             out.push_str("(if ");
@@ -463,7 +454,7 @@ mod tests {
             0,
             &mut s,
         );
-        assert_eq!(s, "(let ((x 1))\n  x)");
+        assert_eq!(s, "{\n  (let x 1)\n  x\n}");
         let mut s = String::new();
         print(
             &Ex::Let(
@@ -473,7 +464,7 @@ mod tests {
             2,
             &mut s,
         );
-        assert_eq!(s, "(let (\n    (x 1)\n    (y 2)\n  )\n    x)");
+        assert_eq!(s, "{\n    (let x 1)\n    (let y 2)\n    x\n  }");
     }
 
     #[test]

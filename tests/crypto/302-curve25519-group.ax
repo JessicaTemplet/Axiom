@@ -15,52 +15,57 @@
 
 (:: encP2 (-> Int String))
 (fn (encP2 h)
-  (let ((s (bytesNew 32)))
+  {
+    (let s (bytesNew 32))
     {
       (ge25519ToBytes (strData s) h)
       s
-    }))
+    }
+  })
 
 (:: encFe (-> Int String))
 (fn (encFe c)
-  (let ((s (bytesNew 32)))
+  {
+    (let s (bytesNew 32))
     {
       (fe25519ToBytes (strData s) c)
       s
-    }))
+    }
+  })
 
 ; [k]B.
 (:: base (-> String String))
 (fn (base k)
-  (let ((h (memAlloc ge25519P3Bytes)))
+  {
+    (let h (memAlloc ge25519P3Bytes))
     {
       (ge25519ScalarMultBase h (strData k))
       (encP2 h)
-    }))
+    }
+  })
 
 ; [a]A + [b]B, or a message when A does not decode.
 (:: double (-> String String String String))
 (fn (double a enc b)
-  (let (
-    (pa (memAlloc ge25519P3Bytes))
-    (r (memAlloc ge25519P2Bytes))
-  )
+  {
+    (let pa (memAlloc ge25519P3Bytes))
+    (let r (memAlloc ge25519P2Bytes))
     (if (!= (ge25519FromBytesVartime pa (strData enc)) 0)
       "A does not decode"
       {
         (ge25519DoubleScalarMultVartime r (strData a) pa (strData b))
         (encP2 r)
-      })))
+      })
+  })
 
 ; 01 when `enc` decodes and re-encodes to itself, 00 when decoding
 ; refuses it, 02 when it decodes to something else.
 (:: decode (-> String String))
 ;@axiom:effect(unsafe)
 (fn (decode enc)
-  (let (
-    (h (memAlloc ge25519P3Bytes))
-    (s (bytesNew 1))
-  )
+  {
+    (let h (memAlloc ge25519P3Bytes))
+    (let s (bytesNew 1))
     {
       (__store8 (strData s) 0
         (if (!= (ge25519FromBytesVartime h (strData enc)) 0)
@@ -69,24 +74,23 @@
           1
           2))
       s
-    }))
+    }
+  })
 
 ; The encoding of comb entry `j`, after checking its third coordinate
 ; is 2dxy.
 (:: combEntry (-> Int String))
 (fn (combEntry j)
-  (let (
-    (tbl (memAlloc 3840))
-    (p (memAlloc ge25519P2Bytes))
-    (w (memAlloc 320))
-  )
-    (let (
-      (e (+ tbl (* j 240)))
-      (lhs w)
-      (rhs (+ w 80))
-      (k (+ w 160))
-      (xy (+ w 240))
-    )
+  {
+    (let tbl (memAlloc 3840))
+    (let p (memAlloc ge25519P2Bytes))
+    (let w (memAlloc 320))
+    {
+      (let e (+ tbl (* j 240)))
+      (let lhs w)
+      (let rhs (+ w 80))
+      (let k (+ w 160))
+      (let xy (+ w 240))
       {
         (ge25519CombTable tbl)
         ; (y+x) - (y-x) = 2x, (y+x) + (y-x) = 2y, over Z = 2
@@ -102,20 +106,24 @@
         (if (strEq (encFe lhs) (encFe rhs))
           (encP2 p)
           "the 2dxy coordinate is wrong")
-      })))
+      }
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((t (tallyNew "curve25519-group")))
+  {
+    (let t (tallyNew "curve25519-group"))
     {
       (for line in (katLines "curve25519-points.txt")
-        (let ((f (katFields line)))
-          (let (
-            (op (katText f 0))
-            (want (katBytes f 4))
-          )
-            (let ((label (concat op (concat " " (katText f 1)))))
+        {
+          (let f (katFields line))
+          {
+            (let op (katText f 0))
+            (let want (katBytes f 4))
+            {
+              (let label (concat op (concat " " (katText f 1))))
               (if (strEq op "base")
                 (tallyBytes t want (base (katBytes f 1)) label)
                 (strEq op "double")
@@ -124,6 +132,10 @@
                 (tallyBytes t want (decode (katBytes f 1)) label)
                 (strEq op "comb")
                 (tallyBytes t want (combEntry (strByte (katBytes f 1) 0)) label)
-                (tallyCheck t false (concat "unknown operation " op)))))))
+                (tallyCheck t false (concat "unknown operation " op)))
+            }
+          }
+        })
       (tallyReport t)
-    }))
+    }
+  })

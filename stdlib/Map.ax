@@ -78,8 +78,9 @@
 ; is the fixture.
 ;
 ; NOT `pub`, deliberately. A `pub struct` exports its CONSTRUCTOR, and
-; `(Map 0 8 0 0 0 0 0)` from a user file builds a header with shape word
-; 16 - bitmap 0 - putting the three array words OUTSIDE the block's
+; `(Map :len 0 :cap 8 :keys 0 :vals 0 :states 0 :used 0 :refs 0)`
+; builds a header with shape word 16 - bitmap 0 - putting the three
+; array words OUTSIDE the block's
 ; reference map, where the collector cannot see them; `mapLen` then
 ; answers 0 with no complaint. Private makes that call AX3001 while
 ; leaving the TYPE name usable in another module's signatures, which is
@@ -195,9 +196,13 @@
 ; hash - but it is worth knowing when reading pinned values in tests.
 (pub :: mapHash (-> Int Int))
 (pub fn (mapHash key)
-  (let ((a (* (^ key (mapShr33 key)) mapMixC1)))
-    (let ((b (* (^ a (mapShr33 a)) mapMixC2)))
-      (& (^ b (mapShr33 b)) 9223372036854775807))))
+  {
+    (let a (* (^ key (mapShr33 key)) mapMixC1))
+    {
+      (let b (* (^ a (mapShr33 a)) mapMixC2))
+      (& (^ b (mapShr33 b)) 9223372036854775807)
+    }
+  })
 
 ;; The slot `key` probes first, in [0, cap).
 ;
@@ -215,10 +220,12 @@
 ; receives.
 (pub :: mapSlotOf (-> Int Int Int))
 (pub fn (mapSlotOf key cap)
-  (let ((h (& (mapHash key) (- cap 1))))
+  {
+    (let h (& (mapHash key) (- cap 1)))
     (if (< h 0)
       (+ h cap)
-      h)))
+      h)
+  })
 
 ; ------------------------------------------------------------------
 ; Slot states
@@ -323,7 +330,7 @@
   ; steps over zero.
   ;
   ; THE HEADER IS NOT RETAINED HERE, and that is not an oversight.
-  ; `(cast (Map v) m)` at the return below is a cast to a REFERENCE type in
+  ; `(as m (Map v))` at the return below is a cast to a REFERENCE type in
   ; return position, which codegen retains - so the share this function
   ; hands its caller is already taken. Retaining `m` here as well leaves
   ; the header permanently at 2 and makes a release a no-op. MEASURED,
@@ -332,12 +339,11 @@
   ; filed; this one alone gives 1/1/1 and a release files it. The
   ; container-reclaim fixture separates the two at 83.1 MiB against
   ; 1.30 MiB max RSS.
-  (let (
-    (m (memAllocMapped 56 28))
-    (keys (memAlloc (* cap 8)))
-    (vals (memAlloc (* cap 8)))
-    (states (memAlloc cap))
-  )
+  {
+    (let m (memAllocMapped 56 28))
+    (let keys (memAlloc (* cap 8)))
+    (let vals (memAlloc (* cap 8)))
+    (let states (memAlloc cap))
     {
       (__retain keys)
       (__retain vals)
@@ -356,7 +362,8 @@
       ; itself. Seven words in an eight-word block; word 7 is spare.
       (memSetWord m 6 0)
       (as m (Map v))
-    }))
+    }
+  })
 
 ; ------------------------------------------------------------------
 ; Accessors
@@ -383,15 +390,15 @@
 ;@axiom:effect(unsafe)
 (fn (mapDropVal m i)
   (if (mapOwnsVals m)
-    (let (
-      (vals m.vals)
-      (old (memGetWord m.vals i))
-    )
+    {
+      (let vals m.vals)
+      (let old (memGetWord m.vals i))
       {
         (memSetWord vals i 0)
         (__release old)
         0
-      })
+      }
+    }
     0))
 
 ;; Whether the map holds a share of every value, which it does when its
@@ -524,26 +531,31 @@
 ; caller; the call survives only for keys that actually collide.
 (:: mapFindSlot (-> (Map v) Int Int))
 (fn (mapFindSlot m key)
-  (let (
-    (cap (mapCap m))
-    (states m.states)
-    (keys m.keys)
-  )
-    (let ((h (mapSlotOf key cap)))
-      (let ((st (memGetByte states h)))
+  {
+    (let cap (mapCap m))
+    (let states m.states)
+    (let keys m.keys)
+    {
+      (let h (mapSlotOf key cap))
+      {
+        (let st (memGetByte states h))
         (if (== st mapStateEmpty)
           (- 0 1)
           (if (== st mapStateLive)
             (if (== (memGetWord keys h) key)
               h
               (mapFindLoop states keys cap key (mapNextSlot h cap) (- cap 1)))
-            (mapFindLoop states keys cap key (mapNextSlot h cap) (- cap 1))))))))
+            (mapFindLoop states keys cap key (mapNextSlot h cap) (- cap 1))))
+      }
+    }
+  })
 
 (:: mapFindLoop (-> Int Int Int Int Int Int Int))
 (fn (mapFindLoop states keys cap key i left)
   (if (<= left 0)
     (- 0 1)
-    (let ((st (memGetByte states i)))
+    {
+      (let st (memGetByte states i))
       (if (== st mapStateEmpty)
         (- 0 1)
         (if (== st mapStateLive)
@@ -553,7 +565,8 @@
           ; A tombstone: keep going. Treating it as empty here
           ; would make every entry displaced past a removed one
           ; unreachable.
-          (mapFindLoop states keys cap key (mapNextSlot i cap) (- left 1)))))))
+          (mapFindLoop states keys cap key (mapNextSlot i cap) (- left 1))))
+    }))
 
 ; ------------------------------------------------------------------
 ; Reading
@@ -569,10 +582,12 @@
 ; must be distinguished from a stored value equal to the default.
 (pub :: mapGet (-> (Map v) Int v v))
 (pub fn (mapGet m key dflt)
-  (let ((i (mapFindSlot m key)))
+  {
+    (let i (mapFindSlot m key))
     (if (< i 0)
       dflt
-      (mapValAt m i))))
+      (mapValAt m i))
+  })
 
 ; ------------------------------------------------------------------
 ; Writing
@@ -645,7 +660,8 @@
 ; the module comment). The paths below store the bare word.
 (pub :: mapInsert (-> (Map v) Int v Int))
 (pub fn (mapInsert m key value)
-  (let ((counted (__retainref value)))
+  {
+    (let counted (__retainref value))
     {
       (if (mapNeedsGrow m)
         (mapRehash m (mapRehashCap m)))
@@ -662,7 +678,8 @@
             (set m.refs 2)
           }))
       (mapInsertNoGrow m key (as value Int))
-    }))
+    }
+  })
 
 ; Insert or overwrite, assuming there is room. Answers 0; see
 ; `mapInsert` for why no mutator here answers the handle.
@@ -681,14 +698,15 @@
 ; the reuse rule is exactly the loop's.
 (:: mapInsertNoGrow (-> (Map v) Int Int Int))
 (fn (mapInsertNoGrow m key value)
-  (let (
-    (cap (mapCap m))
-    (keys m.keys)
-    (vals m.vals)
-    (states m.states)
-  )
-    (let ((h (mapSlotOf key cap)))
-      (let ((st (memGetByte states h)))
+  {
+    (let cap (mapCap m))
+    (let keys m.keys)
+    (let vals m.vals)
+    (let states m.states)
+    {
+      (let h (mapSlotOf key cap))
+      {
+        (let st (memGetByte states h))
         (if (== st mapStateEmpty)
           (mapFillAt m keys vals states h key value 1)
           (if (== st mapStateLive)
@@ -700,13 +718,17 @@
               }
               (mapInsertLoop m keys vals states cap key value (mapNextSlot h cap) (- 0 1)
                 (- cap 1)))
-            (mapInsertLoop m keys vals states cap key value (mapNextSlot h cap) h (- cap 1))))))))
+            (mapInsertLoop m keys vals states cap key value (mapNextSlot h cap) h (- cap 1))))
+      }
+    }
+  })
 
 (:: mapInsertLoop (-> (Map v) Int Int Int Int Int Int Int Int Int Int))
 (fn (mapInsertLoop m keys vals states cap key value i firstTomb left)
   (if (<= left 0)
     0
-    (let ((state (memGetByte states i)))
+    {
+      (let state (memGetByte states i))
       (if (== state mapStateEmpty)
         ; End of the run. Prefer the remembered tombstone, so that
         ; insert/remove churn reuses slots instead of consuming a
@@ -736,7 +758,8 @@
             (if (< firstTomb 0)
               i
               firstTomb)
-            (- left 1)))))))
+            (- left 1))))
+    }))
 
 ; Write a new entry into slot `i` and account for it.
 ;
@@ -777,7 +800,8 @@
 ; probe as a stopping point, and only a rehash reclaims it.
 (pub :: mapRemove (-> (Map v) Int Int))
 (pub fn (mapRemove m key)
-  (let ((i (mapFindSlot m key)))
+  {
+    (let i (mapFindSlot m key))
     (if (< i 0)
       0
       ; The slot's value is dropped HERE rather than left for the
@@ -791,7 +815,8 @@
         (memPutByte m.states i mapStateTomb)
         (set m.len (- (mapLen m) 1))
         0
-      })))
+      })
+  })
 
 ; ------------------------------------------------------------------
 ; Rehashing
@@ -816,17 +841,15 @@
 ;@axiom:effect(unsafe)
 ;@axiom:pre((&& (> newCap 0) (== (& newCap (- newCap 1)) 0)))
 (fn (mapRehash m newCap)
-  (let (
-    (oldCap (mapCap m))
-    (oldKeys m.keys)
-    (oldVals m.vals)
-    (oldStates m.states)
-  )
-    (let (
-      (newKeys (memAlloc (* newCap 8)))
-      (newVals (memAlloc (* newCap 8)))
-      (newStates (memAlloc newCap))
-    )
+  {
+    (let oldCap (mapCap m))
+    (let oldKeys m.keys)
+    (let oldVals m.vals)
+    (let oldStates m.states)
+    {
+      (let newKeys (memAlloc (* newCap 8)))
+      (let newVals (memAlloc (* newCap 8)))
+      (let newStates (memAlloc newCap))
       {
         (__retain newKeys)
         (__retain newVals)
@@ -838,8 +861,9 @@
         (set m.keys newKeys)
         (set m.vals newVals)
         (set m.states newStates)
-        (let ((n (mapReinsertLoop newKeys newVals newStates newCap oldKeys oldVals oldStates oldCap
-                   0 0)))
+        {
+          (let n
+            (mapReinsertLoop newKeys newVals newStates newCap oldKeys oldVals oldStates oldCap 0 0))
           {
             (set m.len n)
             (set m.used n)
@@ -853,8 +877,11 @@
             (__release oldVals)
             (__release oldStates)
             0
-          })
-      })))
+          }
+        }
+      }
+    }
+  })
 
 ; Walk the old arrays, placing every live entry into the new ones.
 ; Returns how many were placed.

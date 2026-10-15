@@ -172,31 +172,76 @@
 ;; or `memory` bound, and the default stack.
 (pub :: taskOpts (-> Int Int TaskOpts))
 (pub fn (taskOpts width limit)
-  (TaskOpts width limit 0 100000000 false None 0 0 0))
+  (TaskOpts
+    :width width
+    :limit limit
+    :deadline 0
+    :grace 100000000
+    :failFast false
+    :token None
+    :keep 0
+    :memory 0
+    :stack 0))
 
 ;; The options with a deadline of `nanos` nanoseconds for each task,
 ;; measured from that task's spawn.
 (pub :: taskWithDeadline (-> TaskOpts Int TaskOpts))
 (pub fn (taskWithDeadline o nanos)
-  (TaskOpts o.width o.limit nanos o.grace o.failFast o.token o.keep o.memory o.stack))
+  (TaskOpts
+    :width o.width
+    :limit o.limit
+    :deadline nanos
+    :grace o.grace
+    :failFast o.failFast
+    :token o.token
+    :keep o.keep
+    :memory o.memory
+    :stack o.stack))
 
 ;; The options with `nanos` nanoseconds of grace after cancellation
 ;; before a task is abandoned.
 (pub :: taskWithGrace (-> TaskOpts Int TaskOpts))
 (pub fn (taskWithGrace o nanos)
-  (TaskOpts o.width o.limit o.deadline nanos o.failFast o.token o.keep o.memory o.stack))
+  (TaskOpts
+    :width o.width
+    :limit o.limit
+    :deadline o.deadline
+    :grace nanos
+    :failFast o.failFast
+    :token o.token
+    :keep o.keep
+    :memory o.memory
+    :stack o.stack))
 
 ;; The options with fail-fast `on` or off: when on, the first failure
 ;; cancels the rest.
 (pub :: taskWithFailFast (-> TaskOpts Bool TaskOpts))
 (pub fn (taskWithFailFast o on)
-  (TaskOpts o.width o.limit o.deadline o.grace on o.token o.keep o.memory o.stack))
+  (TaskOpts
+    :width o.width
+    :limit o.limit
+    :deadline o.deadline
+    :grace o.grace
+    :failFast on
+    :token o.token
+    :keep o.keep
+    :memory o.memory
+    :stack o.stack))
 
 ;; The options with `tok` as the cancel token: cancelling it cancels
 ;; the run.
 (pub :: taskWithToken (-> TaskOpts CancelToken TaskOpts))
 (pub fn (taskWithToken o tok)
-  (TaskOpts o.width o.limit o.deadline o.grace o.failFast (Some tok) o.keep o.memory o.stack))
+  (TaskOpts
+    :width o.width
+    :limit o.limit
+    :deadline o.deadline
+    :grace o.grace
+    :failFast o.failFast
+    :token (Some tok)
+    :keep o.keep
+    :memory o.memory
+    :stack o.stack))
 
 ;; The options with a `keep` budget of `bytes`: the answers one call
 ;; holds may total at most that many bytes. The answer that would pass
@@ -205,7 +250,16 @@
 ;; so the budget doesn't bound it. 0 is no bound.
 (pub :: taskWithKeep (-> TaskOpts Int TaskOpts))
 (pub fn (taskWithKeep o bytes)
-  (TaskOpts o.width o.limit o.deadline o.grace o.failFast o.token bytes o.memory o.stack))
+  (TaskOpts
+    :width o.width
+    :limit o.limit
+    :deadline o.deadline
+    :grace o.grace
+    :failFast o.failFast
+    :token o.token
+    :keep bytes
+    :memory o.memory
+    :stack o.stack))
 
 ;; The options with a `memory` budget of `bytes`: each task's arena may
 ;; map at most that many bytes beyond what its process began with. A
@@ -213,7 +267,16 @@
 ;; `Err 70`; its siblings and the caller are untouched. 0 is no bound.
 (pub :: taskWithMemory (-> TaskOpts Int TaskOpts))
 (pub fn (taskWithMemory o bytes)
-  (TaskOpts o.width o.limit o.deadline o.grace o.failFast o.token o.keep bytes o.stack))
+  (TaskOpts
+    :width o.width
+    :limit o.limit
+    :deadline o.deadline
+    :grace o.grace
+    :failFast o.failFast
+    :token o.token
+    :keep o.keep
+    :memory bytes
+    :stack o.stack))
 
 ;; The options with a `stack` budget of `bytes`: each task runs on a
 ;; stack of that many bytes, rounded up to 64 KiB, mapped in its own
@@ -223,7 +286,16 @@
 ;; `taskStackDefault`.
 (pub :: taskWithStack (-> TaskOpts Int TaskOpts))
 (pub fn (taskWithStack o bytes)
-  (TaskOpts o.width o.limit o.deadline o.grace o.failFast o.token o.keep o.memory bytes))
+  (TaskOpts
+    :width o.width
+    :limit o.limit
+    :deadline o.deadline
+    :grace o.grace
+    :failFast o.failFast
+    :token o.token
+    :keep o.keep
+    :memory o.memory
+    :stack bytes))
 
 ;; The stack a task runs on when its options name none: 8 MiB, what
 ;; Linux and Darwin give a main thread by default.
@@ -309,11 +381,13 @@
 (:: taskScratch (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (taskScratch n)
-  (let ((b (memAlloc n)))
+  {
+    (let b (memAlloc n))
     {
       (__retain b)
       b
-    }))
+    }
+  })
 
 (:: taskScratchDone (-> Int Int))
 ;@axiom:effect(unsafe)
@@ -350,7 +424,7 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (taskTokenOwned page)
-  (CancelToken (__resource_new taskTokenDrop page)))
+  (CancelToken :owner (__resource_new taskTokenDrop page)))
 
 ; The cleanup of a token's last owner in this address space: unmap this
 ; address space's view of the page. Answers 0, or the negated errno of
@@ -406,11 +480,13 @@
 (:: taskCapArena (-> Int Int))
 (fn (taskCapArena bytes)
   (if (> bytes 0)
-    (let ((now (__axiom_mem_stat 2)))
+    {
+      (let now (__axiom_mem_stat 2))
       (__axiom_arena_cap
         (if (> bytes (- 9223372036854775807 now))
           9223372036854775807
-          (+ now bytes))))
+          (+ now bytes)))
+    }
     0))
 
 ; A slot of the slab: word 0 the state (1 running, 2 answered, 3 over
@@ -430,20 +506,24 @@
 (:: taskChild (-> (-> Int String) Int Int Int Int Int Int Int Int Int))
 ;@axiom:effect(io)
 (fn (taskChild f slab slotBytes limit tok w memory stack arg)
-  (let ((slot (+ slab (* (% arg w) slotBytes))))
+  {
+    (let slot (+ slab (* (% arg w) slotBytes)))
     {
       (memSetWord slot 2 sysPid)
       (taskCapArena memory)
       (__axiom_stack_run stack (lambda (i) (taskAnswer f slot limit tok i)) arg)
-    }))
+    }
+  })
 
 ; Run task `i` and write its answer into `slot`: the length, then the
 ; bytes and the answered state, or the over-the-limit state alone.
 (:: taskAnswer (-> (-> Int String) Int Int Int Int Int))
 ;@axiom:effect(io)
 (fn (taskAnswer f slot limit tok i)
-  (let ((r (f i)))
-    (let ((len (strLen r)))
+  {
+    (let r (f i))
+    {
+      (let len (strLen r))
       {
         (memSetWord slot 1 len)
         (if (> len limit)
@@ -454,7 +534,9 @@
           })
         (taskBump tok)
         0
-      })))
+      }
+    }
+  })
 
 ; ---- the parent's half ---------------------------------------------------
 ; Per slot, three words of `st`: the deadline (microseconds on
@@ -480,11 +562,11 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (taskJoin st hs s cell slab slotBytes why)
-  (let ((w (__proc_join_nr (vecGet hs s) cell)))
-    (let (
-      (status (memGetWord cell 0))
-      (state (taskLoadAt (+ slab (* s slotBytes))))
-    )
+  {
+    (let w (__proc_join_nr (vecGet hs s) cell))
+    {
+      (let status (memGetWord cell 0))
+      (let state (taskLoadAt (+ slab (* s slotBytes))))
       {
         (taskSetSt st s 1 status)
         (taskSetSt st s 2 why)
@@ -496,7 +578,9 @@
           (if (&& (== state 2) (|| (== status 0) (&& (== status 137) (>= why 2))))
             0
             1))
-      })))
+      }
+    }
+  })
 
 ; Kill slot `s`'s child and join it.
 (:: taskKillJoin (-> (Vec Int) (Vec Spawn) Int Int Int Int Int Int))
@@ -516,10 +600,9 @@
 ; and `status` is the refusal's.
 (:: taskResultAt (-> Int Int Int (Result String Error)))
 (fn (taskResultAt slot status why)
-  (let (
-    (state (taskLoadAt slot))
-    (finished (|| (== status 0) (&& (== status 137) (>= why 2))))
-  )
+  {
+    (let state (taskLoadAt slot))
+    (let finished (|| (== status 0) (&& (== status 137) (>= why 2))))
     (if (== why 4)
       (Err (mkError status "task not started: its spawn was refused"))
       (if (&& finished (== state 2))
@@ -536,30 +619,35 @@
                   (Err (mkError 70 "task out of memory"))
                   (if (== status 86)
                     (Err (mkError 86 "task out of stack"))
-                    (Err (mkError status "task trapped"))))))))))))
+                    (Err (mkError status "task trapped"))))))))))
+  })
 
 ; The bytes slot `s`'s answer keeps once delivered: its length when it
 ; is an `Ok` (`taskResultAt`'s test), else 0.
 (:: taskOkBytes (-> (Vec Int) Int Int Int Int))
 (fn (taskOkBytes st s slab slotBytes)
-  (let (
-    (slot (+ slab (* s slotBytes)))
-    (status (taskSt st s 1))
-    (why (taskSt st s 2))
-  )
+  {
+    (let slot (+ slab (* s slotBytes)))
+    (let status (taskSt st s 1))
+    (let why (taskSt st s 2))
     (if (&& (!= why 4)
           (&& (|| (== status 0) (&& (== status 137) (>= why 2))) (== (taskLoadAt slot) 2)))
       (memGetWord slot 1)
-      0)))
+      0)
+  })
 
 (:: taskCopyOut (-> Int String))
 (fn (taskCopyOut slot)
-  (let ((len (memGetWord slot 1)))
-    (let ((s (strAlloc len)))
+  {
+    (let len (memGetWord slot 1))
+    {
+      (let s (strAlloc len))
       {
         (memCopy (strData s) (+ slot 32) len)
         s
-      })))
+      }
+    }
+  })
 
 ; `scoped` is zero for retained answers, or a retained four-word
 ; mark cell for taskFold. The pool and its captures predate each mark.
@@ -569,18 +657,18 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (taskDeliver sink scoped st s slab slotBytes)
-  (let (
-    (slot (+ slab (* s slotBytes)))
-    (status (taskSt st s 1))
-    (why (taskSt st s 2))
-  )
+  {
+    (let slot (+ slab (* s slotBytes)))
+    (let status (taskSt st s 1))
+    (let why (taskSt st s 2))
     (if (!= scoped 0)
       {
         (__axiom_arena_mark_into scoped)
         (sink (taskResultAt slot status why))
         (__axiom_arena_reset scoped)
       }
-      (sink (taskResultAt slot status why)))))
+      (sink (taskResultAt slot status why)))
+  })
 
 ; Deliver slot `s` against the `keep` budget: `kept` is what the call
 ; holds so far, or -1 once an answer passed the budget. An answer that
@@ -595,7 +683,8 @@
       (taskDeliver sink scoped st s slab slotBytes)
       kept
     }
-    (let ((n (taskOkBytes st s slab slotBytes)))
+    {
+      (let n (taskOkBytes st s slab slotBytes))
       (if (== n 0)
         {
           (taskDeliver sink scoped st s slab slotBytes)
@@ -609,7 +698,8 @@
           {
             (taskDeliver sink scoped st s slab slotBytes)
             (+ kept n)
-          })))))
+          }))
+    }))
 
 (:: taskDeliverCancelled (-> (-> (Result String Error) Int) Int Int))
 ;@axiom:effect(io)
@@ -631,34 +721,41 @@
 ; `taskLoop` keeps.
 (:: taskWakeBy (-> (Vec Int) Int Int Int Int Int Int Int Int Int Int Int))
 (fn (taskWakeBy st head next w now canPoll cancelling graceEnd slab slotBytes nap)
-  (let (
-    (mut wake (if (== cancelling 1)
-      graceEnd
-      (- 0 1)))
-    (mut running 0)
-    (mut answered 0)
-  )
+  {
+    (let mut wake
+      (if (== cancelling 1)
+        graceEnd
+        (- 0 1)))
+    (let mut running 0)
+    (let mut answered 0)
     {
       (for t in head..next
-        (let ((s (% t w)))
+        {
+          (let s (% t w))
           (if (== (taskSt st s 2) 0)
             {
               (set running 1)
               (if (>= (taskLoadAt (+ slab (* s slotBytes))) 2)
                 (set answered 1))
-              (let ((d (taskSt st s 0)))
+              {
+                (let d (taskSt st s 0))
                 (if (&& (> d 0) (|| (< wake 0) (< d wake)))
-                  (set wake d)))
-            })))
+                  (set wake d))
+              }
+            })
+        })
       (if (== running 0)
         (- 0 1)
         (if (== canPoll 1)
-          (let ((p (+ now (/ (taskPollPeriod answered nap) 1000))))
+          {
+            (let p (+ now (/ (taskPollPeriod answered nap) 1000)))
             (if (|| (< wake 0) (< p wake))
               p
-              wake))
+              wake)
+          }
           wake))
-    }))
+    }
+  })
 
 ; Has slot `s`'s child ended? 1 yes - the kernel says it has exited, or
 ; it answered and there is no look to ask - 2 it answered but has not
@@ -674,7 +771,8 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (taskEnded hs s slab slotBytes pbuf canPoll)
-  (let ((answered (>= (taskLoadAt (+ slab (* s slotBytes))) 2)))
+  {
+    (let answered (>= (taskLoadAt (+ slab (* s slotBytes))) 2))
     (if (== canPoll 1)
       (match (sysChildExited (taskHandlePid (vecGet hs s)) pbuf)
         ((Ok b)
@@ -691,7 +789,8 @@
         ))
       (if answered
         1
-        0))))
+        0))
+  })
 
 ; Look at running slot `s` once, at `now`: join it if it ended, kill
 ; and join it if its deadline or a cancellation's grace has run out.
@@ -701,7 +800,8 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (taskCheck st hs s now cancelling graceEnd canPoll cell slab slotBytes pbuf)
-  (let ((ended (taskEnded hs s slab slotBytes pbuf canPoll)))
+  {
+    (let ended (taskEnded hs s slab slotBytes pbuf canPoll))
     (if (== ended 1)
       (taskJoin st hs s cell slab slotBytes 1)
       (if (&& (> (taskSt st s 0) 0) (>= now (taskSt st s 0)))
@@ -710,7 +810,8 @@
           (taskKillJoin st hs s cell slab slotBytes 3)
           (if (== ended (- 0 1))
             (- 0 2)
-            (- 0 1)))))))
+            (- 0 1)))))
+  })
 
 ; Spawn `wrapper` on `arg` inside a recovery point of its own, so a
 ; refused spawn comes back here as a status rather than trapping past
@@ -780,23 +881,25 @@
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 (fn (taskStart st hs wrapper mark t w slab slotBytes clk deadlineUs)
-  (let (
-    (s (% t w))
-    (slot (+ slab (* (% t w) slotBytes)))
-  )
+  {
+    (let s (% t w))
+    (let slot (+ slab (* (% t w) slotBytes)))
     {
       (taskStoreAt slot 1)
       (memSetWord slot 1 0)
       (memSetWord slot 2 0)
       ; The child derives its ring slot from the index. Packing both
       ; into one word would overflow for large indices or widths.
-      (let ((hw (taskSpawn wrapper t mark)))
+      {
+        (let hw (taskSpawn wrapper t mark))
         (if (taskSpawned hw)
           {
-            (let ((h (taskHandleOf hw)))
+            {
+              (let h (taskHandleOf hw))
               (if (< t w)
                 (vecPush hs h)
-                (vecSet hs s h)))
+                (vecSet hs s h))
+            }
             (taskSetSt st s 0
               (if (> deadlineUs 0)
                 (+ (sysTimeoutMicros clk) deadlineUs)
@@ -810,8 +913,10 @@
             (taskSetSt st s 1 hw)
             (taskSetSt st s 2 4)
             hw
-          }))
-    }))
+          })
+      }
+    }
+  })
 
 ; Nanoseconds from `now` to `wake` (microseconds), at least one, and at
 ; most 2^62: the product must not wrap into a negative sleep.
@@ -841,42 +946,43 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (taskLoop f n opts sink scoped w limit slotBytes tok slab)
-  (let (
-    (st (vecWithCapacity (* 3 w)))
-    (hs (vecWithCapacity w))
-    (cell (taskScratch 8))
-    (clk (taskScratch 16))
-    (pbuf (taskScratch sysChildPollBytes))
-    (memory opts.memory)
-    (stack (if (> opts.stack 0)
-      opts.stack
-      taskStackDefault))
-    (keep (if (< opts.keep 0)
-      0
-      opts.keep))
-    (wrapper (lambda (arg) (taskChild f slab slotBytes limit tok w memory stack arg)))
-    (spawnMark (if (== scoped 0)
-      (taskScratch 32)
-      0))
-    (deadlineUs (taskMicros opts.deadline))
-    (graceUs (taskMicros opts.grace))
-    (mut kept 0)
-    (mut next 0)
-    (mut head 0)
-    (mut cancelling 0)
-    (mut graceEnd 0)
-    (mut canPoll 1)
-    (mut progress 0)
-    (mut nap taskExitNapFirst)
-  )
+  {
+    (let st (vecWithCapacity (* 3 w)))
+    (let hs (vecWithCapacity w))
+    (let cell (taskScratch 8))
+    (let clk (taskScratch 16))
+    (let pbuf (taskScratch sysChildPollBytes))
+    (let memory opts.memory)
+    (let stack
+      (if (> opts.stack 0)
+        opts.stack
+        taskStackDefault))
+    (let keep
+      (if (< opts.keep 0)
+        0
+        opts.keep))
+    (let wrapper (lambda (arg) (taskChild f slab slotBytes limit tok w memory stack arg)))
+    (let spawnMark
+      (if (== scoped 0)
+        (taskScratch 32)
+        0))
+    (let deadlineUs (taskMicros opts.deadline))
+    (let graceUs (taskMicros opts.grace))
+    (let mut kept 0)
+    (let mut next 0)
+    (let mut head 0)
+    (let mut cancelling 0)
+    (let mut graceEnd 0)
+    (let mut canPoll 1)
+    (let mut progress 0)
+    (let mut nap taskExitNapFirst)
     {
       (for i in 0..(* 3 w)
         (vecPush st 0))
       (while (< head n)
-        (let (
-          (seen (taskEvent tok))
-          (now (sysTimeoutMicros clk))
-        )
+        {
+          (let seen (taskEvent tok))
+          (let now (sysTimeoutMicros clk))
           {
             (set progress 0)
             ; A cancellation seen for the first time.
@@ -909,10 +1015,12 @@
               })
             ; Join what has ended; kill and join what ran out of time.
             (for t in head..next
-              (let ((s (% t w)))
+              {
+                (let s (% t w))
                 (if (== (taskSt st s 2) 0)
-                  (let ((r (taskCheck st hs s now cancelling graceEnd canPoll cell slab slotBytes
-                             pbuf)))
+                  {
+                    (let r
+                      (taskCheck st hs s now cancelling graceEnd canPoll cell slab slotBytes pbuf))
                     (if (== r (- 0 2))
                       (set canPoll 0)
                       (if (>= r 0)
@@ -920,13 +1028,16 @@
                           (set progress 1)
                           (if (&& (== r 1) opts.failFast)
                             (taskCancelAt tok))
-                        }))))))
+                        }))
+                  })
+              })
             ; Deliver, in submit order, what has been joined. An answer
             ; past the `keep` budget cancels the pool as a refused spawn
             ; does, and leaves the token alone.
             (while (&& (< head next) (!= (taskSt st (% head w) 2) 0))
               {
-                (let ((k (taskDeliverKept sink scoped st (% head w) slab slotBytes keep kept)))
+                {
+                  (let k (taskDeliverKept sink scoped st (% head w) slab slotBytes keep kept))
                   {
                     (if (&& (< k 0) (&& (>= kept 0) (== cancelling 0)))
                       {
@@ -934,7 +1045,8 @@
                         (set graceEnd (+ (sysTimeoutMicros clk) graceUs))
                       })
                     (set kept k)
-                  })
+                  }
+                }
                 (set head (+ head 1))
                 (set progress 1)
               })
@@ -949,8 +1061,9 @@
             ; Nothing moved: sleep until something can. The exit backoff
             ; grows with each empty look and starts again on progress.
             (if (== progress 0)
-              (let ((wake (taskWakeBy st head next w now canPoll cancelling graceEnd slab slotBytes
-                            nap)))
+              {
+                (let wake
+                  (taskWakeBy st head next w now canPoll cancelling graceEnd slab slotBytes nap))
                 {
                   (set nap (taskNapNext nap))
                   (if (>= wake 0)
@@ -958,19 +1071,24 @@
                     ; No clock can end the wait and no look at a child
                     ; exists: block on the oldest running task's join.
                     (if (&& (< head next) (== (taskSt st (% head w) 2) 0))
-                      (let ((r (taskJoin st hs (% head w) cell slab slotBytes 1)))
+                      {
+                        (let r (taskJoin st hs (% head w) cell slab slotBytes 1))
                         (if (&& (== r 1) opts.failFast)
-                          (taskCancelAt tok)))))
-                })
+                          (taskCancelAt tok))
+                      }))
+                }
+              }
               (set nap taskExitNapFirst))
-          }))
+          }
+        })
       (taskScratchDone cell)
       (taskScratchDone clk)
       (taskScratchDone pbuf)
       (if (!= spawnMark 0)
         (taskScratchDone spawnMark))
       head
-    }))
+    }
+  })
 
 ; Every task answers `e`: the pool could not be set up.
 (:: taskAllFailed (-> Int Error (-> (Result String Error) Int) Int Int))
@@ -997,15 +1115,19 @@
 (fn (taskWithSlab f n opts sink scoped w limit slotBytes tok)
   (if (> w (/ 9223372036854775807 slotBytes))
     (taskAllFailed n (mkError 22 "task slab size exceeds Int range") sink scoped)
-    (let ((bytes (* w slotBytes)))
+    {
+      (let bytes (* w slotBytes))
       (match (sysMapShared bytes)
         ((Err e) (taskAllFailed n e sink scoped))
         ((Ok slab)
-          (let ((done (taskLoop f n opts sink scoped w limit slotBytes tok slab)))
+          {
+            (let done (taskLoop f n opts sink scoped w limit slotBytes tok slab))
             (match (sysUnmapShared slab bytes)
               ((Ok z) done)
-              ((Err e) done)))
-        )))))
+              ((Err e) done))
+          }
+        ))
+    }))
 
 ; The token the pool sleeps on: the caller's, or a fresh one.
 (:: taskTokenFor (-> (Option CancelToken) (Result CancelToken Error)))
@@ -1032,12 +1154,12 @@
 (fn (taskRun f n opts sink scoped)
   (if (<= n 0)
     0
-    (let (
-      (w (taskWidth opts.width n))
-      (limit (if (< opts.limit 0)
-        0
-        opts.limit))
-    )
+    {
+      (let w (taskWidth opts.width n))
+      (let limit
+        (if (< opts.limit 0)
+          0
+          opts.limit))
       (if (> limit 1099511627776)
         (taskAllFailed n (mkError 22 "task limit over 2^40 bytes") sink scoped)
         (match (taskTokenFor opts.token)
@@ -1047,10 +1169,14 @@
           ; with this arm. The call is not in tail position, so no jump
           ; ends the arm's scope before the pool does.
           ((Ok tok)
-            (let ((done (taskWithSlab f n opts sink scoped w limit (+ 32 (* 8 (/ (+ limit 7) 8)))
-                          (taskTokenAt tok))))
-              done)
-          ))))))
+            {
+              (let done
+                (taskWithSlab f n opts sink scoped w limit (+ 32 (* 8 (/ (+ limit 7) 8)))
+                  (taskTokenAt tok)))
+              done
+            }
+          )))
+    }))
 
 ; ---- the entries ---------------------------------------------------------
 ;; `f i` for every `i` in `0 .. n`, at most `width` at once, each answer
@@ -1069,7 +1195,8 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (taskMapWith f n opts)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (taskRun f n opts
         (lambda (r)
@@ -1080,7 +1207,8 @@
         )
         0)
       out
-    }))
+    }
+  })
 
 ;; Run `worker start end` on contiguous half-open ranges covering
 ;; `0 .. count`. `grain` is the maximum items per range, clamped to one.
@@ -1094,21 +1222,27 @@
 (pub fn (taskMapRanges worker count grain opts)
   (if (<= count 0)
     vecNew
-    (let ((size
-      (if (< grain 1)
-        1
-        grain)))
+    {
+      (let size
+        (if (< grain 1)
+          1
+          grain))
       (taskMapWith
         (lambda (i)
-          (let ((start (* i size)))
-            (let ((remaining (- count start)))
+          {
+            (let start (* i size))
+            {
+              (let remaining (- count start))
               (worker start
                 (+ start
                   (if (< remaining size)
                     remaining
-                    size)))))
+                    size)))
+            }
+          }
         )
-        (+ 1 (/ (- count 1) size)) opts))))
+        (+ 1 (/ (- count 1) size)) opts)
+    }))
 
 ;; Decode each successful answer in the parent, in submit order. Task
 ;; failures pass through unchanged and never call `decode`. The encoded
@@ -1132,7 +1266,8 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (taskMapDecodedWith f decode n opts)
-  (let ((out vecNew))
+  {
+    (let out vecNew)
     {
       (taskRun f n opts
         (lambda (r)
@@ -1143,7 +1278,8 @@
         )
         0)
       out
-    }))
+    }
+  })
 
 (:: taskDecodeResult (-> (-> String (Result a Error)) (Result String Error) (Result a Error)))
 (fn (taskDecodeResult decode r)
@@ -1168,32 +1304,38 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (taskFold f n opts init step)
-  (let (
-    (acc (taskScratch 16))
-    (mark (taskScratch 32))
-  )
+  {
+    (let acc (taskScratch 16))
+    (let mark (taskScratch 32))
     {
       (memSetWord acc 0 init)
       (memSetWord acc 1 0)
       (taskRun f n opts (lambda (r) (taskFoldOne acc step r)) mark)
-      (let ((v (memGetWord acc 0)))
+      {
+        (let v (memGetWord acc 0))
         {
           (taskScratchDone acc)
           (taskScratchDone mark)
           v
-        })
-    }))
+        }
+      }
+    }
+  })
 
 ; One step: word 0 of `acc` is the scalar accumulator, word 1 the
 ; submit-order index. Neither word may retain a scoped allocation.
 (:: taskFoldOne (-> Int (-> Int Int (Result String Error) Int) (Result String Error) Int))
 (fn (taskFoldOne acc step r)
-  (let ((i (memGetWord acc 1)))
-    (let ((g (step (memGetWord acc 0) i)))
+  {
+    (let i (memGetWord acc 1))
+    {
+      (let g (step (memGetWord acc 0) i))
       {
         (memSetWord acc 1 (+ i 1))
         (memSetWord acc 0 (g r))
-      })))
+      }
+    }
+  })
 
 ; ---- word results and external commands ------------------------------------
 ;; Run `f i` for every `i` in `0 .. n`, at most `width` at once,
@@ -1214,17 +1356,18 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (taskMapWords f n width)
-  (let (
-    (w (if (< width 1)
-      1
-      width))
-    (hs (vecWithCapacity
-          (if (< n w)
-            n
-            w)))
-    (out vecNew)
-    (mut joined 0)
-  )
+  {
+    (let w
+      (if (< width 1)
+        1
+        width))
+    (let hs
+      (vecWithCapacity
+        (if (< n w)
+          n
+          w)))
+    (let out vecNew)
+    (let mut joined 0)
     {
       (for i in 0..n
         {
@@ -1236,10 +1379,12 @@
               (vecPush out (__proc_join (vecGet hs (% joined w))))
               (set joined (+ joined 1))
             })
-          (let ((h (__proc_spawn f i)))
+          {
+            (let h (__proc_spawn f i))
             (if (< i w)
               (vecPush hs h)
-              (vecSet hs (% i w) h)))
+              (vecSet hs (% i w) h))
+          }
         })
       ; The drain continues the submission count left by the fill loop.
       ; Ring length is only its capacity, not the number submitted.
@@ -1249,7 +1394,8 @@
           (set joined (+ joined 1))
         })
       out
-    }))
+    }
+  })
 
 ; Join one `__proc_spawn` handle WITHOUT re-raising: `Ok` the thunk's
 ; word when the child exits 0, `Err` the child's wait status otherwise.
@@ -1264,11 +1410,15 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (taskWordsJoinChecked h cell)
-  (let ((w (__proc_join_nr h cell)))
-    (let ((st (memGetWord cell 0)))
+  {
+    (let w (__proc_join_nr h cell))
+    {
+      (let st (memGetWord cell 0))
       (if (== st 0)
         (Ok w)
-        (Err (mkError st "parallel slot trapped"))))))
+        (Err (mkError st "parallel slot trapped")))
+    }
+  })
 
 ; Spawn `f` on `i` inside a recovery point of its own, so a refused
 ; spawn comes back here as a status rather than raising past the pool
@@ -1299,11 +1449,15 @@
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (taskWordsJoinKilled h cell)
-  (let ((w (__proc_join_nr h cell)))
-    (let ((st (memGetWord cell 0)))
+  {
+    (let w (__proc_join_nr h cell))
+    {
+      (let st (memGetWord cell 0))
       (if (== st 0)
         (Ok w)
-        (Err (mkError st "parallel slot killed: a later spawn was refused"))))))
+        (Err (mkError st "parallel slot killed: a later spawn was refused")))
+    }
+  })
 
 ;; Run `f i` for every `i` in `0 .. n`, at most `width` at once,
 ;; answering one `Result` per slot in SUBMIT order: `Ok` the thunk's
@@ -1329,20 +1483,21 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (taskMapWordsChecked f n width)
-  (let (
-    (w (if (< width 1)
-      1
-      width))
-    (hs (vecWithCapacity
-          (if (< n w)
-            n
-            w)))
-    (out vecNew)
-    (cell (memAlloc 8))
-    (mut joined 0)
-    (mut next 0)
-    (mut refused 0)
-  )
+  {
+    (let w
+      (if (< width 1)
+        1
+        width))
+    (let hs
+      (vecWithCapacity
+        (if (< n w)
+          n
+          w)))
+    (let out vecNew)
+    (let cell (memAlloc 8))
+    (let mut joined 0)
+    (let mut next 0)
+    (let mut refused 0)
     {
       (__retain cell)
       (while (&& (< next n) (== refused 0))
@@ -1352,16 +1507,20 @@
               (vecPush out (taskWordsJoinChecked (vecGet hs (% joined w)) cell))
               (set joined (+ joined 1))
             })
-          (let ((hw (taskWordsSpawn f next)))
+          {
+            (let hw (taskWordsSpawn f next))
             (if (taskSpawned hw)
               {
-                (let ((h (taskHandleOf hw)))
+                {
+                  (let h (taskHandleOf hw))
                   (if (< next w)
                     (vecPush hs h)
-                    (vecSet hs (% next w) h)))
+                    (vecSet hs (% next w) h))
+                }
                 (set next (+ next 1))
               }
-              (set refused hw)))
+              (set refused hw))
+          }
         })
       (if (== refused 0)
         (while (< joined n)
@@ -1383,21 +1542,26 @@
         })
       (__release cell)
       out
-    }))
+    }
+  })
 
 ;; A null-terminated argv for `execve` or `posix_spawn`. Every string
 ;; passes through `strCStr`, which copies a slice when it needs a
 ;; terminator. The array lives in the caller's arena.
 (pub :: taskArgvVector (-> (Vec String) Int))
 (pub fn (taskArgvVector argv)
-  (let ((n (vecLen argv)))
-    (let ((v (memAlloc (* 8 (+ n 1)))))
+  {
+    (let n (vecLen argv))
+    {
+      (let v (memAlloc (* 8 (+ n 1))))
       {
         (for i in 0..n
           (memSetWord v i (strCStr (vecGetStr argv i))))
         (memSetWord v n 0)
         v
-      })))
+      }
+    }
+  })
 
 ;; Run one argument vector. Element 0 is the program, looked up on
 ;; `PATH`. An empty vector answers `Err` 2 without starting a process.
@@ -1451,11 +1615,13 @@
 (:: taskComputeEncode (-> Int String))
 ;@axiom:effect(unsafe)
 (fn (taskComputeEncode word)
-  (let ((bytes (strAlloc 8)))
+  {
+    (let bytes (strAlloc 8))
     {
       (__store64 (strData bytes) 0 word)
       bytes
-    }))
+    }
+  })
 
 (:: taskComputeDecode (-> String (Result Int Error)))
 ;@axiom:effect(unsafe)

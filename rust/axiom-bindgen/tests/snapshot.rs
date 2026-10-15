@@ -109,7 +109,7 @@ fn nested_fixture_shape() {
         fresh.contains(";@axiom:effect(io)\n;@axiom:effect(unsafe)\n(pub fn (doubleInPlace xs)")
     );
     assert!(fresh.contains(";@axiom:effect(io)\n;@axiom:effect(unsafe)\n(pub fn (thingGet t)"));
-    assert!(fresh.contains("(__st (echoRaw cell __c))"));
+    assert!(fresh.contains("(let __st (echoRaw cell __c))"));
     // The Rust type's handle stays in the declaring module.
     assert!(fresh.contains("(pub struct Thing sealed\n  (handle : Handle))"));
     assert!(fresh.contains("(ffiHandlePtr t.handle)"));
@@ -121,7 +121,7 @@ fn nested_fixture_shape() {
     // Option and Result wrappers.
     assert!(fresh.contains("(pub :: check (-> Bool (Option Bool)))"));
     assert!(fresh.contains("(pub :: thingTry (-> Int (Result Thing String)))"));
-    assert!(fresh.contains("(Ok (Thing (ffiHandleNew __p thingDropFn)))"));
+    assert!(fresh.contains("(Ok (Thing :handle (ffiHandleNew __p thingDropFn)))"));
     // Callbacks carry their arrow type on the raw item and the wrapper,
     // and pass straight through.
     assert!(fresh.contains("(mapTwice :: (-> (-> Int Int) Int Int) (symbol \"axffi_map_twice\"))"));
@@ -130,7 +130,7 @@ fn nested_fixture_shape() {
     ));
     assert!(fresh
         .contains("(pub :: combine (-> (-> Int Int Int) (-> Int Int Int Int) Int (Option Int)))"));
-    assert!(fresh.contains("(__st (combineRaw f g seed __c))"));
+    assert!(fresh.contains("(let __st (combineRaw f g seed __c))"));
     // A `Vec<i64>` / `Vec<String>` return is a `(Vec Int)` / `(Vec
     // String)` built by Ffi.ax and freed on the Rust side. A `&[i64]`
     // parameter is that same `(Vec Int)` on the wrapper - the `extern`
@@ -138,14 +138,14 @@ fn nested_fixture_shape() {
     // its word and the wrapper is what casts it. That is why `total`,
     // which returns a plain scalar, still has a `Raw` item under it.
     assert!(fresh.contains("(pub :: evens (-> Int (Vec Int)))"));
-    assert!(fresh.contains("(__v (ffiWordsToVec __p __n))"));
+    assert!(fresh.contains("(let __v (ffiWordsToVec __p __n))"));
     assert!(fresh.contains("(ffiFreeWords __p __n)"));
     assert!(fresh.contains("(pub :: pieces (-> String (Vec String)))"));
-    assert!(fresh.contains("(__v (ffiStrsToVec __p __n))"));
+    assert!(fresh.contains("(let __v (ffiStrsToVec __p __n))"));
     assert!(fresh.contains("(ffiFreeStrList __p __n)"));
     assert!(fresh.contains("(totalRaw :: (-> Int Int) (symbol \"axffi_total\"))"));
     assert!(fresh.contains("(pub :: total (-> (Vec Int) Int))"));
-    assert!(fresh.contains("(__r\n    (totalRaw (as xs Int))))\n    __r))"));
+    assert!(fresh.contains("(let __r (totalRaw (as xs Int)))\n    __r\n  })"));
     assert!(fresh.contains("(pub :: tryEvens (-> Int (Result (Vec Int) String)))"));
     assert!(fresh.contains("(pub :: maybePieces (-> String (Option (Vec String))))"));
     // A record is a `data` with one positional field per Rust field,
@@ -158,14 +158,12 @@ fn nested_fixture_shape() {
     assert!(fresh.contains("(pixelBrightnessRaw :: (-> Int Float Bool Float Float) (symbol \"axffi_pixel_brightness\"))"));
     assert!(fresh.contains("(pub :: pixelBrightness (-> Pixel Float Float))"));
     assert!(fresh.contains(
-        "((Pixel __f0 __f1 __f2)\n      (let ((__r (pixelBrightnessRaw __f0 __f1 __f2 gain)))"
+        "((Pixel __f0 __f1 __f2)\n      {\n        (let __r (pixelBrightnessRaw __f0 __f1 __f2 gain))"
     ));
     assert!(fresh.contains("(pixelOffRaw :: (-> Int Int) (symbol \"axffi_pixel_off\"))"));
     assert!(fresh.contains("(pub :: pixelOff Pixel)"));
     assert!(fresh.contains(
-        "(__c (ffiCellNewN 3))\n    (__st (pixelOffRaw __c))\n    (__w0 (ffiCellWord __c 0))\n    \
-         (__w1 (__floatFromBits (ffiCellWord __c 1)))\n    (__w2 (as (ffiCellWord __c 2) Bool))\n    \
-         (__r (Pixel __w0 __w1 __w2))"
+        "(let __c (ffiCellNewN 3))\n    (let __st (pixelOffRaw __c))\n    (let __w0 (ffiCellWord __c 0))\n    (let __w1 (__floatFromBits (ffiCellWord __c 1)))\n    (let __w2 (as (ffiCellWord __c 2) Bool))\n    (let __r (Pixel __w0 __w1 __w2))"
     ));
     // Two records and a handle in one call: fields numbered across the
     // signature, the raw item flattened, the Option rebuilt from the cell.
@@ -197,19 +195,16 @@ fn nested_fixture_shape() {
     assert!(fresh.contains(";   `charsOf` answers a Vec of Char (code points);"));
     assert!(fresh.contains(";   `fromChars` reads `cs` as a Vec of Char (code points);"));
     assert!(fresh.contains("(pub :: maybeChar (-> Char (Option Char)))"));
-    assert!(fresh.contains("(__ch (as __p Char))"));
+    assert!(fresh.contains("(let __ch (as __p Char))"));
     assert!(fresh.contains("(Some __ch)"));
     assert!(fresh.contains("(pub data Glyph\n  (Glyph Char Int))"));
-    assert!(fresh.contains("(__w0 (as (ffiCellWord __c 0) Char))\n    (__w1 (ffiCellWord __c 1))\n    (__r (Glyph __w0 __w1))"));
+    assert!(fresh.contains("(let __w0 (as (ffiCellWord __c 0) Char))\n    (let __w1 (ffiCellWord __c 1))\n    (let __r (Glyph __w0 __w1))"));
     // Records in Vecs: the module's own loops, the flattened argument,
     // the rebuild over `vecWithCapacity`, the `n * ARITY` free.
     assert!(fresh.contains("(import Vec)"));
     assert!(fresh.contains("(:: __pixelFromWords (-> (Vec Pixel) Int Int Int (Vec Pixel)))"));
     assert!(fresh.contains(
-        "(fn (__pixelFromWords __v __p __n __i)\n  (if (>= __i __n)\n    __v\n    (let (\n      \
-         (__w0 (ffiWordAt __p (* __i 3)))\n      (__w1 (__floatFromBits (ffiWordAt __p (+ (* __i 3) 1))))\n      \
-         (__w2 (as (ffiWordAt __p (+ (* __i 3) 2)) Bool))\n    )\n      {\n        \
-         (vecPush __v (Pixel __w0 __w1 __w2))\n        (__pixelFromWords __v __p __n (+ __i 1))\n      })))"
+        "(fn (__pixelFromWords __v __p __n __i)\n  (if (>= __i __n)\n    __v\n    {\n      (let __w0 (ffiWordAt __p (* __i 3)))\n      (let __w1 (__floatFromBits (ffiWordAt __p (+ (* __i 3) 1))))\n      (let __w2 (as (ffiWordAt __p (+ (* __i 3) 2)) Bool))\n      {\n        (vecPush __v (Pixel __w0 __w1 __w2))\n        (__pixelFromWords __v __p __n (+ __i 1))\n      }\n    }))"
     ));
     // `__ps` carries `Pixel`, so the scrutinee needs no `as` and the
     // pattern is checked against the real type. The flattened vector is
@@ -225,9 +220,9 @@ fn nested_fixture_shape() {
     ));
     assert!(fresh.contains("(pixelsDimRaw :: (-> Int Int Int Int) (symbol \"axffi_pixels_dim\"))"));
     assert!(fresh.contains("(pub :: pixelsDim (-> (Vec Pixel) Int (Vec Pixel)))"));
-    assert!(fresh.contains("(__a0 (__pixelToWords ps (vecWithCapacity (* (vecLen ps) 3)) 0))"));
-    assert!(fresh.contains("(__st (pixelsDimRaw (as __a0 Int) by __c))"));
-    assert!(fresh.contains("(__v (__pixelFromWords (vecWithCapacity __n) __p __n 0))"));
+    assert!(fresh.contains("(let __a0 (__pixelToWords ps (vecWithCapacity (* (vecLen ps) 3)) 0))"));
+    assert!(fresh.contains("(let __st (pixelsDimRaw (as __a0 Int) by __c))"));
+    assert!(fresh.contains("(let __v (__pixelFromWords (vecWithCapacity __n) __p __n 0))"));
     assert!(fresh.contains("(ffiFreeWords __p (* __n 3))"));
     assert!(fresh.contains("(pub :: pixelsTry (-> (Vec Pixel) (Result (Vec Pixel) String)))"));
     assert!(fresh.contains("(pub :: glyphsMaybe (-> Int (Option (Vec Glyph))))"));
@@ -239,7 +234,7 @@ fn nested_fixture_shape() {
     // `(Vec (Vec Int))` on both sides; a `&mut [i64]` is the same
     // `(Vec Int)` the reader takes, and it is still written in place.
     assert!(fresh.contains("(pub :: grid (-> Int (Vec (Vec Int))))"));
-    assert!(fresh.contains("(__v (ffiWordListsToVec __p __n))"));
+    assert!(fresh.contains("(let __v (ffiWordListsToVec __p __n))"));
     assert!(fresh.contains("(ffiFreeWordLists __p __n)"));
     assert!(fresh.contains("(sumRowsRaw :: (-> Int Int) (symbol \"axffi_sum_rows\"))"));
     assert!(fresh.contains("(pub :: sumRows (-> (Vec (Vec Int)) Int))"));
@@ -256,7 +251,7 @@ fn nested_fixture_shape() {
     assert!(fresh.contains("(Ok (Some __p))"));
     assert!(fresh.contains("(if (== __st ffiStatusNone)\n        {\n          (ffiCellFree __c)\n          (Ok None)\n        }"));
     assert!(fresh.contains("(pub :: lookup (-> Int (Option (Result Thing String))))"));
-    assert!(fresh.contains("(Some (Ok (Thing (ffiHandleNew __p thingDropFn))))"));
+    assert!(fresh.contains("(Some (Ok (Thing :handle (ffiHandleNew __p thingDropFn))))"));
     assert!(fresh.contains("(Some (Err __m))"));
     assert!(fresh.contains("(pub :: maybePixelTry (-> Int (Result (Option Pixel) String)))"));
     assert!(fresh.contains("(Ok (Some __r))"));

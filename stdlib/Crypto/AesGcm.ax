@@ -1,12 +1,17 @@
 ;;! Crypto.AesGcm - AES-128-GCM and AES-256-GCM authenticated
 ;;! encryption (SP 800-38D), one message at a time.
 ;;!
-;;!     (let ((key (unwrapOr (aes256GcmKeyGenerate) ...))
-;;!           (nonce (unwrapOr (aeadNonceRandom) ...)))
+;;!     {
+;;!       (let key (unwrapOr (aes256GcmKeyGenerate) ...))
+;;!       (let nonce (unwrapOr (aeadNonceRandom) ...))
 ;;!       (match (aes256GcmSeal key nonce "header" "attack at dawn")
-;;!         ((Ok sealed)                       ; ciphertext || 16-byte tag
-;;!           (aes256GcmOpen key nonce "header" sealed))   ; (Ok "attack at dawn")
-;;!         ((Err e) (Err e))))
+;;!         ((Ok sealed)
+;;!           ; ciphertext || 16-byte tag
+;;!           (aes256GcmOpen key nonce "header" sealed)
+;;!         )
+;;!         ; (Ok "attack at dawn")
+;;!         ((Err e) (Err e)))
+;;!     }
 ;
 ; WHAT IT GUARANTEES. `...Seal` encrypts the plaintext and
 ; authenticates it together with the associated data (a header that
@@ -101,18 +106,20 @@
 (:: gcmKeySetup (-> Int Int Int))
 ;@axiom:ct(*a)
 (fn (gcmKeySetup a keyLen)
-  (let (
-    (work (strAlloc aesKeyWorkBytes))
-    (q (strAlloc aesStateBytes))
-    (sched (+ a (+ keyLen 16)))
-    (h (+ a keyLen))
-  )
-    (let ((nr (aesKeyExpand sched a keyLen (strData work))))
+  {
+    (let work (strAlloc aesKeyWorkBytes))
+    (let q (strAlloc aesStateBytes))
+    (let sched (+ a (+ keyLen 16)))
+    (let h (+ a keyLen))
+    {
+      (let nr (aesKeyExpand sched a keyLen (strData work)))
       {
         (ctWipe h 16)
         (aesEncryptBlocks sched nr h h 1 (strData q))
         (ctWipe (strData q) aesStateBytes)
-      })))
+      }
+    }
+  })
 
 ; A fresh key block of kind `kind` holding a copy of the `keyLen`
 ; bytes at `p`, set up. Answers the handle word.
@@ -122,12 +129,14 @@
   (match (secretBlockNew kind (gcmKeyBlockBytes keyLen))
     ((Err e) (Err e))
     ((Ok h)
-      (let ((a (secretBlockAddr kind h)))
+      {
+        (let a (secretBlockAddr kind h))
         {
           (ctCopy a p keyLen)
           (gcmKeySetup a keyLen)
           (Ok h)
-        })
+        }
+      }
     )))
 
 ; A fresh key block of kind `kind` with `keyLen` random bytes.
@@ -138,7 +147,8 @@
   (match (secretBlockNew kind (gcmKeyBlockBytes keyLen))
     ((Err e) (Err e))
     ((Ok h)
-      (let ((a (secretBlockAddr kind h)))
+      {
+        (let a (secretBlockAddr kind h))
         (match (randomFill a keyLen)
           ((Err e)
             {
@@ -151,7 +161,8 @@
               (gcmKeySetup a keyLen)
               (Ok h)
             }
-          )))
+          ))
+      }
     )))
 
 ; ------------------------------------------------------------------
@@ -163,7 +174,7 @@
 ;@axiom:effect(entropy)
 (pub fn (aes128GcmKeyGenerate)
   (match (gcmKeyRandom aes128GcmKind 16)
-    ((Ok h) (Ok (Aes128GcmKey h)))
+    ((Ok h) (Ok (Aes128GcmKey :slot h)))
     ((Err e) (Err e))))
 
 ;; A fresh random AES-256-GCM key from the kernel's entropy source.
@@ -172,7 +183,7 @@
 ;@axiom:effect(entropy)
 (pub fn (aes256GcmKeyGenerate)
   (match (gcmKeyRandom aes256GcmKind 32)
-    ((Ok h) (Ok (Aes256GcmKey h)))
+    ((Ok h) (Ok (Aes256GcmKey :slot h)))
     ((Err e) (Err e))))
 
 ;; An AES-128-GCM key holding a copy of `s`, which must be 16 bytes.
@@ -184,7 +195,7 @@
   (if (!= (secretLen s) 16)
     (cryptoLengthErr "an AES-128-GCM key is 16 bytes" "aes128GcmKeyFromSecret")
     (match (gcmKeyFrom aes128GcmKind 16 (secretAddr s))
-      ((Ok h) (Ok (Aes128GcmKey h)))
+      ((Ok h) (Ok (Aes128GcmKey :slot h)))
       ((Err e) (Err e)))))
 
 ;; An AES-256-GCM key holding a copy of `s`, which must be 32 bytes.
@@ -194,7 +205,7 @@
   (if (!= (secretLen s) 32)
     (cryptoLengthErr "an AES-256-GCM key is 32 bytes" "aes256GcmKeyFromSecret")
     (match (gcmKeyFrom aes256GcmKind 32 (secretAddr s))
-      ((Ok h) (Ok (Aes256GcmKey h)))
+      ((Ok h) (Ok (Aes256GcmKey :slot h)))
       ((Err e) (Err e)))))
 
 ;; The key's 16 bytes as a new `SecretBytes`, for storing it somewhere
@@ -253,14 +264,13 @@
 ;@axiom:ct(*a, *work)
 ;@axiom:effect(unsafe)
 (fn (gcmTag a keyLen work nonce aad aadLen ct ctLen tag)
-  (let (
-    (sched (+ a (+ keyLen 16)))
-    (nr (aesRounds keyLen))
-    (h (+ a keyLen))
-    (ekj0 (+ work 128))
-    (y (+ work 144))
-    (lens (+ work 160))
-  )
+  {
+    (let sched (+ a (+ keyLen 16)))
+    (let nr (aesRounds keyLen))
+    (let h (+ a keyLen))
+    (let ekj0 (+ work 128))
+    (let y (+ work 144))
+    (let lens (+ work 160))
     {
       (aesCtr32Xor sched nr work nonce 1 ekj0 ekj0 16)
       (ghashUpdate y h aad aadLen)
@@ -271,7 +281,8 @@
       (for i in 0..16
         (__store8 tag i (^ (__load8 y i) (__load8 ekj0 i))))
       0
-    }))
+    }
+  })
 
 ; Whether the 16 bytes at `a` and `b` match, in time that does not
 ; depend on where they differ.
@@ -283,66 +294,72 @@
 (:: gcmSeal (-> Int Int AeadNonce String String String (Result String Error)))
 ;@axiom:ct(*a)
 (fn (gcmSeal a keyLen nonce aad pt where)
-  (let (
-    (n nonce.bytes)
-    (ptLen (strLen pt))
-    (aadLen (strLen aad))
-  )
+  {
+    (let n nonce.bytes)
+    (let ptLen (strLen pt))
+    (let aadLen (strLen aad))
     (if (!= (strLen n) 12)
       (cryptoLengthErr "a nonce must be 12 bytes" where)
       (if (> ptLen gcmMaxText)
         (cryptoErr cryptoLimitExceeded "a GCM plaintext is at most 2^36 - 32 bytes" where)
         (if (>= aadLen gcmMaxAad)
           (cryptoErr cryptoLimitExceeded "GCM associated data is under 2^61 bytes" where)
-          (let (
-            (out (strAlloc (+ ptLen 16)))
-            (work (strAlloc gcmWorkBytes))
-          )
-            (let (
-              (o (strData out))
-              (w (strData work))
-            )
+          {
+            (let out (strAlloc (+ ptLen 16)))
+            (let work (strAlloc gcmWorkBytes))
+            {
+              (let o (strData out))
+              (let w (strData work))
               {
                 (aesCtr32Xor (+ a (+ keyLen 16)) (aesRounds keyLen) w (strData n) 2 (strData pt) o
                   ptLen)
                 (gcmTag a keyLen w (strData n) (strData aad) aadLen o ptLen (+ o ptLen))
                 (ctWipe w gcmWorkBytes)
                 (Ok out)
-              })))))))
+              }
+            }
+          })))
+  })
 
 (:: gcmOpen (-> Int Int AeadNonce String String String (Result String Error)))
 ;@axiom:ct(*a)
 (fn (gcmOpen a keyLen nonce aad sealed where)
-  (let (
-    (n nonce.bytes)
-    (sLen (strLen sealed))
-    (aadLen (strLen aad))
-  )
+  {
+    (let n nonce.bytes)
+    (let sLen (strLen sealed))
+    (let aadLen (strLen aad))
     (if (|| (!= (strLen n) 12) (< sLen 16))
       (cryptoAuthErr where)
-      (let ((ctLen (- sLen 16)))
+      {
+        (let ctLen (- sLen 16))
         (if (|| (> ctLen gcmMaxText) (>= aadLen gcmMaxAad))
           (cryptoAuthErr where)
-          (let ((work (strAlloc gcmWorkBytes)))
-            (let (
-              (w (strData work))
-              (s (strData sealed))
-            )
+          {
+            (let work (strAlloc gcmWorkBytes))
+            {
+              (let w (strData work))
+              (let s (strData sealed))
               {
                 (gcmTag a keyLen w (strData n) (strData aad) aadLen s ctLen (+ w 176))
                 (if (gcmTagMatches (+ w 176) (+ s ctLen))
-                  (let ((out (strAlloc ctLen)))
+                  {
+                    (let out (strAlloc ctLen))
                     {
                       (aesCtr32Xor (+ a (+ keyLen 16)) (aesRounds keyLen) w (strData n) 2 s
                         (strData out) ctLen)
                       (ctWipe w gcmWorkBytes)
                       (Ok out)
-                    })
+                    }
+                  }
                   {
                     (ctWipe w gcmWorkBytes)
                     (cryptoAuthErr where)
                   })
-              })))))))
+              }
+            }
+          })
+      })
+  })
 
 ; ------------------------------------------------------------------
 ; Sealing and opening.

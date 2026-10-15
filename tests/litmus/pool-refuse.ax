@@ -69,14 +69,16 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (fn (stubborn page)
-  (let ((me sysPid))
+  {
+    (let me sysPid)
     {
       (println "pid {me}")
       (__atomic_add (+ page 8) 1)
       (for i in 0..600
         (nap page 100))
       0
-    }))
+    }
+  })
 
 ; Task `i` of the kernel round: the first answers at once, and every
 ; other is stubborn.
@@ -94,11 +96,11 @@
   (match r
     ((Ok s) (println "{i} ok {s}"))
     ((Err e)
-      (let (
-        (c (errCode e))
-        (m (errMessage e))
-      )
-        (println "{i} err {c} {m}"))
+      {
+        (let c (errCode e))
+        (let m (errMessage e))
+        (println "{i} err {c} {m}")
+      }
     )))
 
 (:: showWord (-> Int (Result Int Error) Int))
@@ -107,11 +109,11 @@
   (match r
     ((Ok v) (println "{i} ok {v}"))
     ((Err e)
-      (let (
-        (c (errCode e))
-        (m (errMessage e))
-      )
-        (println "{i} err {c} {m}"))
+      {
+        (let c (errCode e))
+        (let m (errMessage e))
+        (println "{i} err {c} {m}")
+      }
     )))
 
 ; ---- the handle table --------------------------------------------------
@@ -128,21 +130,23 @@
 ; Take every free slot; answer how many that was.
 (:: fillAll (-> (Vec Int) Int))
 (fn (fillAll hs)
-  (let (
-    (mut added 0)
-    (mut going 1)
-  )
+  {
+    (let mut added 0)
+    (let mut going 1)
     {
       (while (== going 1)
-        (let ((h (newH (* (+ (vecLen hs) 1) 16))))
+        {
+          (let h (newH (* (+ (vecLen hs) 1) 16)))
           (if (== h 0)
             (set going 0)
             {
               (vecPush hs h)
               (set added (+ added 1))
-            })))
+            })
+        })
       added
-    }))
+    }
+  })
 
 ; Give `k` slots back.
 (:: freeSome (-> (Vec Int) Int Int))
@@ -163,20 +167,22 @@
 (fn (taskRound x)
   (match (sysMapShared 4096)
     ((Ok page)
-      (let ((rs
-        (taskMap
-          (lambda (i)
-            {
-              (stubborn page)
-              "late"
-            }
-          )
-          (argInt 3) (argInt 4) (argInt 6))))
+      {
+        (let rs
+          (taskMap
+            (lambda (i)
+              {
+                (stubborn page)
+                "late"
+              }
+            )
+            (argInt 3) (argInt 4) (argInt 6)))
         {
           (for i in 0..(vecLen rs)
             (showResult i (vecGet rs i)))
           (+ 1000 (vecLen rs))
-        })
+        }
+      }
     )
     ((Err e) 2)))
 
@@ -187,13 +193,14 @@
 (fn (checkedRound x)
   (match (sysMapShared 4096)
     ((Ok page)
-      (let ((rs
-        (taskMapWordsChecked (lambda (i) (stubborn page)) (argInt 3) (argInt 4))))
+      {
+        (let rs (taskMapWordsChecked (lambda (i) (stubborn page)) (argInt 3) (argInt 4)))
         {
           (for i in 0..(vecLen rs)
             (showWord i (vecGet rs i)))
           (+ 1000 (vecLen rs))
-        })
+        }
+      }
     )
     ((Err e) 2)))
 
@@ -204,9 +211,10 @@
 (fn (raisingRound x)
   (match (sysMapShared 4096)
     ((Ok page)
-      (let ((rs
-        (taskMapWords (lambda (i) (stubborn page)) (argInt 3) (argInt 4))))
-        (+ 1000 (vecLen rs)))
+      {
+        (let rs (taskMapWords (lambda (i) (stubborn page)) (argInt 3) (argInt 4)))
+        (+ 1000 (vecLen rs))
+      }
     )
     ((Err e) 2)))
 
@@ -216,12 +224,14 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (oneRound x)
-  (let ((mode (sysArg 1)))
+  {
+    (let mode (sysArg 1))
     (if (strEq mode "task")
       (taskRound x)
       (if (strEq mode "checked")
         (checkedRound x)
-        (raisingRound x)))))
+        (raisingRound x)))
+  })
 
 ; `n` rounds, each with `k` handle slots free, or with the table
 ; untouched when `k` is below 0.
@@ -230,7 +240,8 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (rounds k n)
-  (let ((hs (vecWithCapacity 65536)))
+  {
+    (let hs (vecWithCapacity 65536))
     {
       (for r in 0..n
         {
@@ -239,15 +250,20 @@
               (fillAll hs)
               (freeSome hs k)
             })
-          (let ((st (__axiom_recover __axiom_arena_mark oneRound)))
-            (let ((free
-              (if (>= k 0)
-                (fillAll hs)
-                0)))
-              (println "round {r} status {st} free {free}")))
+          {
+            (let st (__axiom_recover __axiom_arena_mark oneRound))
+            {
+              (let free
+                (if (>= k 0)
+                  (fillAll hs)
+                  0))
+              (println "round {r} status {st} free {free}")
+            }
+          }
         })
       0
-    }))
+    }
+  })
 
 ; ---- kernel ----------------------------------------------------------------
 ; Lower resource `res` to 1, keeping its hard limit: getrlimit into a
@@ -255,13 +271,15 @@
 (:: lowerLimit (-> Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (lowerLimit get set res)
-  (let ((buf (memAlloc 16)))
+  {
+    (let buf (memAlloc 16))
     (if (== (__syscall2 get res buf) 0)
       {
         (memSetWord buf 0 1)
         (__syscall2 set res buf)
       }
-      (- 0 1))))
+      (- 0 1))
+  })
 
 (:: kernelStep (-> Int Int Int Int Int (Result String Error) Int))
 ;@axiom:effect(io)
@@ -269,8 +287,10 @@
   {
     (showResult i r)
     (if (== i 0)
-      (let ((rc (lowerLimit get set res)))
-        (println "limit lowered {rc}")))
+      {
+        (let rc (lowerLimit get set res))
+        (println "limit lowered {rc}")
+      })
     (+ acc 1)
   })
 
@@ -281,11 +301,10 @@
 (fn (kernelRound x)
   (match (sysMapShared 4096)
     ((Ok page)
-      (let (
-        (get (argInt 2))
-        (set (argInt 3))
-        (res (argInt 4))
-      )
+      {
+        (let get (argInt 2))
+        (let set (argInt 3))
+        (let res (argInt 4))
         (+ 1000
           (taskFold
             (lambda (i)
@@ -293,7 +312,8 @@
                 "first"
                 "late")
             )
-            4 (taskOpts 2 64) 0 (lambda (acc i r) (kernelStep get set res acc i r)))))
+            4 (taskOpts 2 64) 0 (lambda (acc i r) (kernelStep get set res acc i r))))
+      }
     )
     ((Err e) 2)))
 
@@ -302,7 +322,8 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((mode (sysArg 1)))
+  {
+    (let mode (sysArg 1))
     (match (sysMapShared 4096)
       ((Ok idle)
         {
@@ -313,20 +334,27 @@
               (if (strEq mode "raising")
                 (rounds (argInt 2) 1)
                 (if (strEq mode "kernel")
-                  (let ((st (__axiom_recover __axiom_arena_mark kernelRound)))
-                    (println "round 0 status {st} free 0"))
+                  {
+                    (let st (__axiom_recover __axiom_arena_mark kernelRound))
+                    (println "round 0 status {st} free 0")
+                  }
                   (println
                     "usage: pool-refuse task K N W R L S | checked K N W S | raising K N W S | kernel GET SET RES S")))))
-          (let ((me sysPid))
-            (println "ready {me}"))
-          (let ((s
-            (argInt
-              (if (strEq mode "task")
-                7
-                5))))
+          {
+            (let me sysPid)
+            (println "ready {me}")
+          }
+          {
+            (let s
+              (argInt
+                (if (strEq mode "task")
+                  7
+                  5)))
             (for i in 0..(* s 10)
-              (nap idle 100)))
+              (nap idle 100))
+          }
           0
         }
       )
-      ((Err e) 1))))
+      ((Err e) 1))
+  })

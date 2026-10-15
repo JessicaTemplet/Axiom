@@ -537,8 +537,8 @@ import sys, os
 root, kind = sys.argv[1], sys.argv[2]
 cuts = {
   "lock": [("Sync.ax",
-    "    (if (== (syncLoad m 3) 1)\n      (Err (mkError syncOwnerDead \"mutexLock: the holder died holding it\"))\n      (let ((me syncMe))\n        (if (== (syncCas m 0 me) 0)",
-    "    (if (== (syncLoad m 3) 1)\n      (Err (mkError syncOwnerDead \"mutexLock: the holder died holding it\"))\n      (let ((me syncMe))\n        (if (== 0 0)")],
+    "              (if (== (syncCas m 0 (+ me 1)) 0)",
+    "              (if (== 0 0)")],
   "chan": [("Chan.ax", ";@axiom:effect(unsafe)\n;@axiom:effect(block)\n(fn (chanLock ch me b timed)\n  (if (== (__atomic_cas ch 0 me) 0)", ";@axiom:effect(block)\n(fn (chanLock ch me b timed)\n  (if (== 0 0)"),
            ("Chan.ax", "(fn (chanUnlock ch me)\n  (if (== (__atomic_cas ch me 0) me)", "(fn (chanUnlock ch me)\n  (if (== me me)")],
 }[kind]
@@ -686,15 +686,15 @@ else
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (k (argInt 2))
-    (p (if (strEq (sysArg 1) "heap")
+  {
+    (let k (argInt 2))
+    (let p (if (strEq (sysArg 1) "heap")
       (memAlloc 16)
       (as "abcdefghijklmnop" Int)))
-  )
+
     {
       (println (fmtInt (peek p k)))
-    }))
+    }})
 AX
   abin="$work/overread"
   if (cd "$work" && "$axc" emit-llvm overread.ax -o "$abin.ll") > "$abin.log" 2>&1 \

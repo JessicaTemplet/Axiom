@@ -74,14 +74,14 @@
 (:: serve (-> TcpListener Int))
 ;@axiom:effect(io)
 (fn (serve lsn)
-  (let ((byte (readBufferNew 1)))
+  {
+    (let byte (readBufferNew 1))
     (match (pollerNew 8)
       ((Err e) (sysExitWith 255))
       ((Ok p)
-        (let (
-          (mut served 0)
-          (mut running 1)
-        )
+        {
+          (let mut served 0)
+          (let mut running 1)
           {
             (if (isErr (pollerAddListener p lsn 1))
               (sysExitWith 255))
@@ -91,16 +91,18 @@
             (if (isErr (pollerAddSignals p (sysSigBit sigTerm) 2))
               (sysExitWith 255))
             (while (== running 1)
-              (let ((n
-                (match (pollerWait p 5000)
-                  ((Ok k) k)
-                  ((Err e) (- 0 e.code)))))
+              {
+                (let n
+                  (match (pollerWait p 5000)
+                    ((Ok k) k)
+                    ((Err e) (- 0 e.code))))
                 (if (< n 1)
                   ; The timeout is a safety net and not the mechanism: if
                   ; the parent died without saying stop, this worker
                   ; leaves rather than hanging the gate forever.
                   (set running 0)
-                  (let ((mut e 0))
+                  {
+                    (let mut e 0)
                     (while (< e n)
                       {
                         (match (pollerSignal p e)
@@ -123,53 +125,69 @@
                                           ((Ok k) k)
                                           ((Err e) (- 0 e.code)))
                                         1)
-                                    (let ((_ (tcpWrite con (readBufferText byte 0 1))))
-                                      ()))
-                                  (let ((_ (tcpClose con)))
-                                    ())
+                                    {
+                                      (let _ (tcpWrite con (readBufferText byte 0 1)))
+                                      ()
+                                    })
+                                  {
+                                    (let _ (tcpClose con))
+                                    ()
+                                  }
                                   (set served (+ served 1))
                                 }
                               ))
                           ))
                         (set e (+ e 1))
-                      })))))
+                      })
+                  })
+              })
             served
-          })
-      ))))
+          }
+        }
+      ))
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let (
-    (port (+ 20000 (% sysPid 9000)))
-    (setbuf (memAlloc 16))
-    (pids vecNew)
-  )
-    (let ((addr (socketAddrNew ipLocalhostV4 port)))
+  {
+    (let port (+ 20000 (% sysPid 9000)))
+    (let setbuf (memAlloc 16))
+    (let pids vecNew)
+    {
+      (let addr (socketAddrNew ipLocalhostV4 port))
       (match (tcpListenAddr addr)
         ((Err e) (die (concat "listen failed: " (errorText e)) 1))
         ((Ok lsn)
           {
-            (let ((_ (tcpListenerSetNonBlocking lsn true)))
-              ())
-            (let ((_ (sysSignalBlock (sysSigBit sigTerm) setbuf)))
-              ())
+            {
+              (let _ (tcpListenerSetNonBlocking lsn true))
+              ()
+            }
+            {
+              (let _ (sysSignalBlock (sysSigBit sigTerm) setbuf))
+              ()
+            }
             ; Block BEFORE forking so every worker inherits the mask and
             ; none of them can be killed by the shutdown signal before it
             ; has installed its watch.
             ; A child NEVER returns from here: it serves and exits, or it
             ; would fall through and become a second copy of this test.
-            (let ((mut w 0))
+            {
+              (let mut w 0)
               (while (< w workers)
                 {
-                  (let ((pid sysForkProcess))
+                  {
+                    (let pid sysForkProcess)
                     (if (== pid 0)
                       (sysExitWith (serve lsn))
-                      (vecPush pids pid)))
+                      (vecPush pids pid))
+                  }
                   (set w (+ w 1))
-                }))
+                })
+            }
             (say (== (vecLen pids) workers) "four workers were forked")
             ; CONNECTIONS GO OUT IN BATCHES rather than one at a time. A
             ; sequential client hands the first worker a connection, waits
@@ -177,17 +195,15 @@
             ; indistinguishable here from a listener that was not shared
             ; at all. With eight connections outstanding at once the
             ; kernel has to spread them.
-            (let (
-              (mut sent 0)
-              (mut good 0)
-              (back (readBufferNew 1))
-            )
+            {
+              (let mut sent 0)
+              (let mut good 0)
+              (let back (readBufferNew 1))
               {
                 (while (< sent total)
-                  (let (
-                    (batch vecNew)
-                    (want vecNew)
-                  )
+                  {
+                    (let batch vecNew)
+                    (let want vecNew)
                     {
                       ; `sent` advances on the failure path too: the loop's
                       ; condition is `sent < total`, so an arm that answers
@@ -200,18 +216,22 @@
                             ((Err e) ())
                             ((Ok c)
                               {
-                                (let ((_ (tcpWrite c (strFromByte (% sent 251)))))
-                                  ())
+                                {
+                                  (let _ (tcpWrite c (strFromByte (% sent 251))))
+                                  ()
+                                }
                                 (vecPush batch c)
                                 (vecPush want (% sent 251))
                               }
                             ))
                           (set sent (+ sent 1))
                         })
-                      (let ((mut j 0))
+                      {
+                        (let mut j 0)
                         (while (< j (vecLen batch))
                           {
-                            (let ((c (vecGet batch j)))
+                            {
+                              (let c (vecGet batch j))
                               {
                                 (if (&&
                                       (==
@@ -221,45 +241,63 @@
                                         1)
                                       (== (readBufferByte back 0) (vecGet want j)))
                                   (set good (+ good 1)))
-                                (let ((_ (tcpClose c)))
-                                  ())
-                              })
+                                {
+                                  (let _ (tcpClose c))
+                                  ()
+                                }
+                              }
+                            }
                             (set j (+ j 1))
-                          }))
-                    }))
+                          })
+                      }
+                    }
+                  })
                 (say (== good total) "every connection was echoed correctly")
-              })
-            (let ((_ (tcpListenerClose lsn)))
-              ())
+              }
+            }
+            {
+              (let _ (tcpListenerClose lsn))
+              ()
+            }
             ; Say stop, once per worker, and only after every answer is
             ; in - so no worker can leave while work remains.
-            (let ((mut k 0))
+            {
+              (let mut k 0)
               (while (< k (vecLen pids))
                 {
-                  (let ((_ (sysKill (vecGet pids k) sigTerm)))
-                    ())
+                  {
+                    (let _ (sysKill (vecGet pids k) sigTerm))
+                    ()
+                  }
                   (set k (+ k 1))
-                }))
-            (let (
-              (mut k2 0)
-              (mut sum 0)
-              (mut busy 0)
-            )
+                })
+            }
+            {
+              (let mut k2 0)
+              (let mut sum 0)
+              (let mut busy 0)
               {
                 (while (< k2 (vecLen pids))
-                  (let ((st (unwrapOr (sysWaitPid (vecGet pids k2)) 0)))
+                  {
+                    (let st (unwrapOr (sysWaitPid (vecGet pids k2)) 0))
                     {
                       ; 255 is the setup-failure code and is the only value
                       ; that is not a count, so it is kept out of the sum.
-                      (let ((code (sysExitCode st)))
+                      {
+                        (let code (sysExitCode st))
                         (if (== code 255)
                           (set busy (+ busy 1))
-                          (set sum (+ sum code))))
+                          (set sum (+ sum code)))
+                      }
                       (set k2 (+ k2 1))
-                    }))
+                    }
+                  })
                 (say (== sum total) "the workers served every connection between them")
                 (say (== busy 0) "every worker registered the inherited listener")
                 (say (== (vecLen pids) workers) "every worker shut down on the signal")
-              })
+              }
+            }
           }
-        )))))
+        ))
+    }
+  })
