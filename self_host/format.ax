@@ -1467,11 +1467,13 @@
   (frags : (Vec Int))
   (nl : Int)
   (indent : Int)
-  (bad : Int))
+  (bad : Int)
+  (trial : Int)
+  (bytes : Int))
 
 (pub :: mkFOut (-> Int Int))
 (pub fn (mkFOut _u)
-  (cast Int (FOut vecNew 0 0 0)))
+  (cast Int (FOut vecNew 0 0 0 0 0)))
 
 (pub :: foFrags (-> Int Int))
 (pub fn (foFrags o)
@@ -1508,10 +1510,17 @@
     o
   })
 
+(pub :: foTrial (-> Int Int))
+(pub fn (foTrial o)
+  (memGetWord o 4))
+
 (pub :: foPush (-> Int String Int))
 (pub fn (foPush o s)
   {
     (vecPush (foFragsVec o) s)
+    (memSetWord o 5 (+ (memGetWord o 5) (strLen s)))
+    (if (&& (== (foTrial o) 1) (> (memGetWord o 5) fmtWidth))
+      (foSetBad o))
     (memSetWord o 1 (+ (foNl o) (countNewlines s)))
     o
   })
@@ -3210,6 +3219,7 @@
       (let ((o2 (mkFOut 0)))
         (let ((p2 (mkFPr (fpSrc p) (fpStarts p) (mkFCq (cast Int vecNew)) o2)))
           {
+            (memSetWord o2 4 1)
             (fpP p2 "(")
             (fpExpr p2 (vecGet elems 0))
             (let ((mut j 1))
@@ -3329,12 +3339,12 @@
               ; call over atoms alone - a long string literal, say - stays
               ; on one line however wide, since breaking it would not
               ; shorten anything.
-              (let ((flat (fpAppFlat p n elems)))
+              (let ((flat (if (== (foTrial o) 1) "" (fpAppFlat p n elems))))
                 (if (&& (> (strLen flat) 0) (|| (&& inline (fpArgsAtoms elems 1)) (<= (+ (foColumn o) (strLen flat)) fmtWidth)))
                   (fpP p flat)
                 ; No one-line form could be built - a comment sits inside
                 ; the call - so the call keeps the layout it always had.
-                (if (&& inline (fqAnyWithin (fpQ p) (fnStart n) (fnEnd n)))
+                (if (|| (== (foTrial o) 1) (&& inline (|| (fpArgsAtoms elems 1) (fqAnyWithin (fpQ p) (fnStart n) (fnEnd n)))))
                   (let ((mut j 1))
                     {
                       (fpP p "(")
@@ -3399,7 +3409,16 @@
       })))
 
 (pub :: fpExpr (-> Int Int Int))
+; A failed width trial stops descending immediately. Trial applications
+; print directly, so asking whether a nested call fits never starts
+; another speculative layout of that call.
 (pub fn (fpExpr p n)
+  (if (&& (== (foTrial (fpOut p)) 1) (!= (foBad (fpOut p)) 0))
+    0
+    (fpExprLive p n)))
+
+(pub :: fpExprLive (-> Int Int Int))
+(pub fn (fpExprLive p n)
   (let (
     (k (fnKind n))
     (src (fpSrc p))

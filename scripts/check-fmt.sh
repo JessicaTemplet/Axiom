@@ -274,6 +274,29 @@ fi
 #   cp tests/fmt/syntax-zoo.ax tests/fmt/syntax-zoo.expected.ax
 #   .axiom-bin/axiom fmt tests/fmt/syntax-zoo.expected.ax
 # ---------------------------------------------------------------
+echo "== nested width trials finish and reach a fixed point =="
+if python3 - "$axiom" "$work" <<'PYTEST'
+import pathlib, subprocess, sys
+compiler, work = sys.argv[1:]
+for depth in (24, 96):
+    p = pathlib.Path(work) / ("deep-width-%d.ax" % depth)
+    p.write_text("(:: f (-> Int Int))\n(fn (f n) " + "(+ 1 " * depth + "n" + ")" * depth + ")\n")
+    try:
+        first = subprocess.run([compiler, "fmt", str(p)], capture_output=True, timeout=10)
+        once = p.read_bytes()
+        second = subprocess.run([compiler, "fmt", "--check", str(p)], capture_output=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        sys.exit("FAIL: nested width trials exceeded 10 seconds at depth %d" % depth)
+    if first.returncode or second.returncode or once != p.read_bytes():
+        sys.exit("FAIL: nested formatting refused or changed again at depth %d" % depth)
+    print("ok   width trials at depth %d finish within 10 seconds and are idempotent" % depth)
+PYTEST
+then
+  :
+else
+  failed=$((failed + 1))
+fi
+
 echo "== the zoo formats to the checked-in golden =="
 golden="$repo_root/tests/fmt/syntax-zoo.expected.ax"
 if [[ ! -f "$golden" ]]; then

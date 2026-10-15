@@ -129,14 +129,46 @@ fn app_flat(elems: &[Ex]) -> Option<String> {
         if i > 0 {
             s.push(' ');
         }
-        print(e, 0, &mut s);
+        if !print_flat(e, &mut s) {
+            return None;
+        }
     }
     s.push(')');
-    if s.contains('\n') {
-        None
-    } else {
-        Some(s)
+    (s.len() <= WIDTH).then_some(s)
+}
+
+// A width trial visits a node once and stops as soon as it cannot fit.
+// Calling the ordinary printer here would recursively start more trials.
+fn print_flat(e: &Ex, out: &mut String) -> bool {
+    if out.len() > WIDTH {
+        return false;
     }
+    match e {
+        Ex::Atom(s) => out.push_str(s),
+        Ex::Cast(ty, inner) => {
+            out.push_str("(cast ");
+            out.push_str(ty);
+            out.push(' ');
+            if !print_flat(inner, out) {
+                return false;
+            }
+            out.push(')');
+        }
+        Ex::App(elems) => {
+            out.push('(');
+            for (i, arg) in elems.iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                if !print_flat(arg, out) {
+                    return false;
+                }
+            }
+            out.push(')');
+        }
+        _ => return false,
+    }
+    out.len() <= WIDTH
 }
 
 /// Print `e` at `level`, assuming the cursor already sits at the
@@ -155,6 +187,17 @@ pub fn print(e: &Ex, level: usize, out: &mut String) {
             let head = &elems[0];
             let args = &elems[1..];
             let inline = head.is_simple() && args.len() <= 4 && args.iter().all(Ex::is_simple);
+            if inline && args.iter().all(|a| matches!(a, Ex::Atom(_))) {
+                out.push('(');
+                for (i, arg) in elems.iter().enumerate() {
+                    if i > 0 {
+                        out.push(' ');
+                    }
+                    print(arg, level, out);
+                }
+                out.push(')');
+                return;
+            }
             let flat = app_flat(elems);
             if let Some(f) = &flat {
                 let atoms = args.iter().all(|a| matches!(a, Ex::Atom(_)));
@@ -301,6 +344,19 @@ fn decl_fn_vis(public: bool, name: &str, params: &[String], body: &Ex) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_width_trials_finish() {
+        let mut e = atom("0");
+        for _ in 0..96 {
+            e = app(vec![atom("f"), e]);
+        }
+        let mut out = String::new();
+        print(&e, 0, &mut out);
+        assert_eq!(out.matches('(').count(), 96);
+        assert_eq!(out.matches(')').count(), 96);
+        assert!(out.contains('0'));
+    }
 
     #[test]
     fn inline_and_broken_applications() {
