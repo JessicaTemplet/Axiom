@@ -1683,18 +1683,24 @@
         declsSrc
       }
       (let ((decls (memGetWordVec dr 1)))
-        {
-          (if (== (vecLen decls) 0)
-            (replOut "OK\n")
-            (let ((d (vecGet decls 0)))
-              (let ((tag (nodeTag d)))
-                (if (|| (== tag TAG_D_FN) (== tag TAG_D_SIG))
-                  (replOut (concat (concat "OK: " (nodeAName d)) " defined\n"))
-                  (if (|| (== tag TAG_D_DATA) (== tag TAG_D_STRUCT))
-                    (replOut (concat (concat "OK: data " (nodeAName d)) " defined\n"))
-                    (replOut "OK\n"))))))
-          (concat (concat (replDeclsSrcDropping declsSrc decls) line) "\n")
-        }))))
+        (let ((candidate (concat (concat (replDeclsSrcDropping declsSrc decls) line) "\n")))
+          (if (== (memGetWord (parseDecls (lex candidate) 0 vecNew) 0) 0)
+            {
+              (replOut "Parse error: imports must precede all definitions; use :reset before starting a new import header\n")
+              declsSrc
+            }
+            {
+              (if (== (vecLen decls) 0)
+                (replOut "OK\n")
+                (let ((d (vecGet decls 0)))
+                  (let ((tag (nodeTag d)))
+                    (if (|| (== tag TAG_D_FN) (== tag TAG_D_SIG))
+                      (replOut (concat (concat "OK: " (nodeAName d)) " defined\n"))
+                      (if (|| (== tag TAG_D_DATA) (== tag TAG_D_STRUCT))
+                        (replOut (concat (concat "OK: data " (nodeAName d)) " defined\n"))
+                        (replOut "OK\n"))))))
+              candidate
+            }))))))
 
 ; ------------------------------------------------------------------
 ; Colon commands - stage0's surface exactly, minus what is recorded
@@ -1801,56 +1807,63 @@
               (replOut "Parse error: the file does not parse\n")
               declsSrc
             }
-            ; `:load` used to hand `decls` to `checkModule`
-            ; TWICE - as the entry file and as the whole
-            ; program - so a file's imports were never
-            ; resolved and every name they provide was
-            ; undefined. Measured before this line: 196 of the
-            ; 219 corpus files `check` accepts were refused by
-            ; `:load`, which is nearly all of them, because
-            ; almost every file imports something.
-            ;
-            ; The entry directory is the LOADED FILE's, not
-            ; the process's: `:load tests/selfhost/x.ax` has
-            ; to find the modules sitting beside it, the same
-            ; way `check` does. `replCompile` passes "." for
-            ; the opposite reason - its wrapper has no file.
-            ;
-            ; Expansion comes with it. A loaded file may
-            ; define macros and `impl`s, and checking the
-            ; unexpanded list reports an implementation's body
-            ; as undefined names.
-            (let (
-              (decls (memGetWordVec pr 1))
-              (tcode (checkedTargetCode hostTarget))
-              (bares vecNew)
-              (fulls vecNew)
-              (mods vecNew)
-              (units (let ((v vecNew))
-                {
-                  (vecPush v (cast Int (CUnit2 arg src (cast String 0))))
-                  v
-                }))
-            )
-              (let ((allDecls (resolveImports decls bares fulls mods tcode (pathDir arg) units)))
-                (let ((eds
-                  (let ((v vecNew))
-                    {
-                      (expandProgram decls allDecls v vecNew (cast (Vec Int) 0) bares fulls mods)
-                      v
-                    })))
-                  (let ((ds (orderDiags (expMergeInto eds (checkModule decls allDecls units)))))
-                    (if (> (countErrorDiags ds) 0)
+            (if (==
+                  (memGetWord (parseDecls (lex (concat (concat declsSrc src) "\n")) 0 vecNew) 0)
+                  0)
+              {
+                (replOut "Parse error: loaded imports must precede session definitions; use :reset before loading this module\n")
+                declsSrc
+              }
+              ; `:load` used to hand `decls` to `checkModule`
+              ; TWICE - as the entry file and as the whole
+              ; program - so a file's imports were never
+              ; resolved and every name they provide was
+              ; undefined. Measured before this line: 196 of the
+              ; 219 corpus files `check` accepts were refused by
+              ; `:load`, which is nearly all of them, because
+              ; almost every file imports something.
+              ;
+              ; The entry directory is the LOADED FILE's, not
+              ; the process's: `:load tests/selfhost/x.ax` has
+              ; to find the modules sitting beside it, the same
+              ; way `check` does. `replCompile` passes "." for
+              ; the opposite reason - its wrapper has no file.
+              ;
+              ; Expansion comes with it. A loaded file may
+              ; define macros and `impl`s, and checking the
+              ; unexpanded list reports an implementation's body
+              ; as undefined names.
+              (let (
+                (decls (memGetWordVec pr 1))
+                (tcode (checkedTargetCode hostTarget))
+                (bares vecNew)
+                (fulls vecNew)
+                (mods vecNew)
+                (units (let ((v vecNew))
+                  {
+                    (vecPush v (cast Int (CUnit2 arg src (cast String 0))))
+                    v
+                  }))
+              )
+                (let ((allDecls (resolveImports decls bares fulls mods tcode (pathDir arg) units)))
+                  (let ((eds
+                    (let ((v vecNew))
                       {
-                        (printTypeErrors ds 0)
-                        declsSrc
-                      }
-                      {
-                        (if (> (vecLen ds) 0)
-                          (printTypeErrors ds 0))
-                        (replOut (concat (concat "OK: Loaded '" arg) "'\n"))
-                        (concat (concat declsSrc src) "\n")
-                      })))))))))))
+                        (expandProgram decls allDecls v vecNew (cast (Vec Int) 0) bares fulls mods)
+                        v
+                      })))
+                    (let ((ds (orderDiags (expMergeInto eds (checkModule decls allDecls units)))))
+                      (if (> (countErrorDiags ds) 0)
+                        {
+                          (printTypeErrors ds 0)
+                          declsSrc
+                        }
+                        {
+                          (if (> (vecLen ds) 0)
+                            (printTypeErrors ds 0))
+                          (replOut (concat (concat "OK: Loaded '" arg) "'\n"))
+                          (concat (concat declsSrc src) "\n")
+                        }))))))))))))
 
 (pub :: replCmdLlvm (-> String String Int))
 ;@axiom:effect(io)

@@ -1181,6 +1181,24 @@
         d
       })))
 
+; Imports form the module header. Both late and nested imports keep
+; AX2001, with placement advice at the import keyword.
+(pub :: importPositionDiag (-> (Vec Int) Int String Int))
+(pub fn (importPositionDiag tokens pos code)
+  (diagSetLabel
+    (mkDiag
+      SEV_ERROR
+      "AX2001"
+      "unexpected-token"
+      (tokenSpan (vecGet tokens pos))
+      (if (strEq code "import-order")
+        "`import` must precede every other module declaration"
+        "`import` is only allowed in the module header")
+      0
+      ""
+      "move this import before the module's signatures, functions and other declarations, outside any function, block or lambda")
+    "imports belong at the start of the module"))
+
 (pub :: parseErrDiag (-> (Vec Int) Int String Int))
 (pub fn (parseErrDiag tokens r src)
   ; Tested on the CODE rather than inferred from the position: the
@@ -1191,122 +1209,124 @@
     (pos (memGetWord r 2))
     (exp (pResExp r))
   )
-    (if (strEq (pResCode r) "AX2005")
-      (ax2005Diag tokens pos)
-      (if (strEq (pResCode r) "for-in")
-        (forInDiag tokens pos)
-        ; AX2006 is tested before the EOF branch for the same reason
-        ; AX2005 is: the refusal happens at a real identifier token, so
-        ; every test below would step over it and report AX2001 with an
-        ; expectation the site never made.
-        (if (strEq (pResCode r) "AX2006")
-          (ax2006Diag tokens pos exp)
-          (if (strEq (pResCode r) "AX3047")
-            (ax3047Diag tokens pos exp)
-            (if (strEq (pResCode r) "AX3041")
-              (ax3041Diag tokens pos exp)
-              ; A stray `'`, refused where the token kind is still
-              ; known: the generic arms below read only the
-              ; expectation, which a quote never states, so without
-              ; this the reader gets a bare syntax error.
-              (if (strEq (pResCode r) "quote")
-                (quoteDiag tokens pos)
-                ; AX2002 is NOT "the position is at EOF" - stage0 emits it from
-                ; exactly one routine, the one that demands a SPECIFIC token kind
-                ; (`expect(RParen)` and friends), and reports AX2001 with a found
-                ; text of `EOF` from every site that wanted a CATEGORY. So the
-                ; distinction is already carried here: a site that named its
-                ; expectation gets AX2001 wherever it failed, and a site that did
-                ; not is the specific-token case, which at EOF is AX2002.
-                (if (&&
-                      (== (strLen exp) 0)
-                      (||
-                        (>= pos (vecLen tokens))
-                        (== (kindInt (tokenKind (vecGet tokens pos))) (kindInt TK_EOF))))
-                  (diagSetLabel
-                    (mkDiag
-                      SEV_ERROR
-                      "AX2002"
-                      "unexpected-eof"
-                      (mkSpan (strLen src) (strLen src))
-                      "unexpected end of file"
-                      0
-                      ""
-                      (concat "count `(`/`[`/`{` against `)`/`]`/`}` " "working backward from the end of the file"))
-                    "file ends here while a form is still open")
-                  (let ((tok (vecGet tokens pos)))
-                    (if (strEq (pResCode r) "AX2004")
-                      (diagSetLabel
-                        (mkDiag
-                          SEV_ERROR
-                          "AX2004"
-                          "removed-construct"
-                          (tokenSpan tok)
-                          (if (strEq exp "fn")
-                            ; `fn` and `struct` are still Axiom - they
-                            ; declare - so only their expression spelling is
-                            ; refused, and the heading says which.
-                            "`fn` in expression position is refused: an anonymous function is `lambda`"
-                            (if (strEq exp "struct")
-                              "`struct` in expression position is refused: a struct is built by calling its name"
-                              (if (strEq exp "deriving")
-                                ; Five of the eight get their own verb:
-                                ; union/foreign (and region, until it returned)
-                                ; once WORKED and were
-                                ; removed, but `deriving` never derived anything,
-                                ; `linear` never counted a use, `consume` never
-                                ; reclaimed a byte, and the list and tuple types
-                                ; never inhabited a value. Saying "no longer part of
-                                ; Axiom" about those five would claim a history
-                                ; they do not have, and the difference is the
-                                ; whole reason a reader is being told anything.
-                                "`deriving` parsed and derived nothing, and is now refused"
-                                (if (strEq exp "linear")
-                                  "`linear` parsed and enforced nothing, and is now refused"
-                                  (if (strEq exp "consume")
-                                    "`consume` parsed and reclaimed nothing, and is now refused"
-                                    (if (strEq exp "list")
-                                      "`[T]` checked as a type no value could inhabit, and is now refused"
-                                      (if (strEq exp "tuple")
-                                        "`(A B)` checked as a type no value could inhabit, and is now refused"
-                                        (concat (concat "`" exp) "` is no longer part of Axiom"))))))))
-                          0
-                          ""
-                          (removedHelp exp))
-                        (removedRationale exp))
-                      ; NO LABEL, deliberately, and the same for AX3067-AX3070, AX3011,
-                      ; AX3017 and AX3010. stage0 set a primary label on all
-                      ; twenty-seven of its diagnostics, but for these five the
-                      ; label WAS the heading - `message.clone()` at the call site -
-                      ; and ariadne fell back to the heading anyway when a label was
-                      ; empty, so its output always printed something under the
-                      ; caret, sometimes the same sentence twice. Printing nothing
-                      ; when there is nothing further to say is the better half of
-                      ; that behaviour, and it keeps `#` out of the AXDL line rather
-                      ; than putting a redundant field in it.
-                      (if (== (strLen exp) 0)
-                        (mkDiag
-                          SEV_ERROR
-                          "AX2003"
-                          "syntax-error"
-                          (tokenSpan tok)
-                          "syntax error"
-                          0
-                          ""
-                          0)
+    (if (|| (strEq (pResCode r) "import-order") (strEq (pResCode r) "import-position"))
+      (importPositionDiag tokens pos (pResCode r))
+      (if (strEq (pResCode r) "AX2005")
+        (ax2005Diag tokens pos)
+        (if (strEq (pResCode r) "for-in")
+          (forInDiag tokens pos)
+          ; AX2006 is tested before the EOF branch for the same reason
+          ; AX2005 is: the refusal happens at a real identifier token, so
+          ; every test below would step over it and report AX2001 with an
+          ; expectation the site never made.
+          (if (strEq (pResCode r) "AX2006")
+            (ax2006Diag tokens pos exp)
+            (if (strEq (pResCode r) "AX3047")
+              (ax3047Diag tokens pos exp)
+              (if (strEq (pResCode r) "AX3041")
+                (ax3041Diag tokens pos exp)
+                ; A stray `'`, refused where the token kind is still
+                ; known: the generic arms below read only the
+                ; expectation, which a quote never states, so without
+                ; this the reader gets a bare syntax error.
+                (if (strEq (pResCode r) "quote")
+                  (quoteDiag tokens pos)
+                  ; AX2002 is NOT "the position is at EOF" - stage0 emits it from
+                  ; exactly one routine, the one that demands a SPECIFIC token kind
+                  ; (`expect(RParen)` and friends), and reports AX2001 with a found
+                  ; text of `EOF` from every site that wanted a CATEGORY. So the
+                  ; distinction is already carried here: a site that named its
+                  ; expectation gets AX2001 wherever it failed, and a site that did
+                  ; not is the specific-token case, which at EOF is AX2002.
+                  (if (&&
+                        (== (strLen exp) 0)
+                        (||
+                          (>= pos (vecLen tokens))
+                          (== (kindInt (tokenKind (vecGet tokens pos))) (kindInt TK_EOF))))
+                    (diagSetLabel
+                      (mkDiag
+                        SEV_ERROR
+                        "AX2002"
+                        "unexpected-eof"
+                        (mkSpan (strLen src) (strLen src))
+                        "unexpected end of file"
+                        0
+                        ""
+                        (concat "count `(`/`[`/`{` against `)`/`]`/`}` " "working backward from the end of the file"))
+                      "file ends here while a form is still open")
+                    (let ((tok (vecGet tokens pos)))
+                      (if (strEq (pResCode r) "AX2004")
                         (diagSetLabel
                           (mkDiag
                             SEV_ERROR
-                            "AX2001"
-                            "unexpected-token"
+                            "AX2004"
+                            "removed-construct"
                             (tokenSpan tok)
-                            (concat
-                              (concat "expected " exp)
-                              (concat ", found `" (concat (foundText tok) "`")))
+                            (if (strEq exp "fn")
+                              ; `fn` and `struct` are still Axiom - they
+                              ; declare - so only their expression spelling is
+                              ; refused, and the heading says which.
+                              "`fn` in expression position is refused: an anonymous function is `lambda`"
+                              (if (strEq exp "struct")
+                                "`struct` in expression position is refused: a struct is built by calling its name"
+                                (if (strEq exp "deriving")
+                                  ; Five of the eight get their own verb:
+                                  ; union/foreign (and region, until it returned)
+                                  ; once WORKED and were
+                                  ; removed, but `deriving` never derived anything,
+                                  ; `linear` never counted a use, `consume` never
+                                  ; reclaimed a byte, and the list and tuple types
+                                  ; never inhabited a value. Saying "no longer part of
+                                  ; Axiom" about those five would claim a history
+                                  ; they do not have, and the difference is the
+                                  ; whole reason a reader is being told anything.
+                                  "`deriving` parsed and derived nothing, and is now refused"
+                                  (if (strEq exp "linear")
+                                    "`linear` parsed and enforced nothing, and is now refused"
+                                    (if (strEq exp "consume")
+                                      "`consume` parsed and reclaimed nothing, and is now refused"
+                                      (if (strEq exp "list")
+                                        "`[T]` checked as a type no value could inhabit, and is now refused"
+                                        (if (strEq exp "tuple")
+                                          "`(A B)` checked as a type no value could inhabit, and is now refused"
+                                          (concat (concat "`" exp) "` is no longer part of Axiom"))))))))
                             0
                             ""
-                            (concat (concat "Axiom expected " exp) " at this position"))
-                          (concat (concat "found `" (foundText tok)) "` here"))))))))))))))
+                            (removedHelp exp))
+                          (removedRationale exp))
+                        ; NO LABEL, deliberately, and the same for AX3067-AX3070, AX3011,
+                        ; AX3017 and AX3010. stage0 set a primary label on all
+                        ; twenty-seven of its diagnostics, but for these five the
+                        ; label WAS the heading - `message.clone()` at the call site -
+                        ; and ariadne fell back to the heading anyway when a label was
+                        ; empty, so its output always printed something under the
+                        ; caret, sometimes the same sentence twice. Printing nothing
+                        ; when there is nothing further to say is the better half of
+                        ; that behaviour, and it keeps `#` out of the AXDL line rather
+                        ; than putting a redundant field in it.
+                        (if (== (strLen exp) 0)
+                          (mkDiag
+                            SEV_ERROR
+                            "AX2003"
+                            "syntax-error"
+                            (tokenSpan tok)
+                            "syntax error"
+                            0
+                            ""
+                            0)
+                          (diagSetLabel
+                            (mkDiag
+                              SEV_ERROR
+                              "AX2001"
+                              "unexpected-token"
+                              (tokenSpan tok)
+                              (concat
+                                (concat "expected " exp)
+                                (concat ", found `" (concat (foundText tok) "`")))
+                              0
+                              ""
+                              (concat (concat "Axiom expected " exp) " at this position"))
+                            (concat (concat "found `" (foundText tok)) "` here")))))))))))))))
 
 ; The diagnostic for a LEXICAL error, or 0 when the token stream has
 ; none. Lexing happens before parsing, so this is asked first and a
@@ -4538,106 +4558,108 @@
     (if (peekIs tokens pos TK_IDENT)
       (let ((kw (vecGet tokens pos)))
         (let ((name (tokenLexeme kw)))
-          (if (kwEq name kwPub)
-            ; `pub` marks a top-level declaration. In an expression it
-            ; used to be skipped, so `(pub "x")` read as `("x")`.
-            (pErrExp pos "an expression")
-            ; An anonymous function is spelled `lambda`. `fn` declares a
-            ; named function at the top level, and in expression position
-            ; it is refused with that advice (AX2004).
-            (if (kwEq name kwFn)
-              (pErrRemoved pos "fn")
-              (if (kwEq name "lambda")
-                (parseLamExpr tokens (advance pos))
-                (if (kwEq name kwLet)
-                  (parseLetExpr tokens (advance pos))
-                  (if (kwEq name kwIf)
-                    (parseIfExpr tokens (advance pos))
-                    (if (kwEq name kwMatch)
-                      (parseMatchExpr tokens (advance pos))
-                      ; `cond` is REMOVED, not parsed. A variadic `if`
-                      ; takes its place - `(if t1 b1 t2 b2 ... els)` -
-                      ; and `match` takes the rest. The keyword stays
-                      ; reserved so old source gets `AX2004` with that
-                      ; advice instead of an application of an undefined
-                      ; variable, the way `begin` and `consume` do below.
-                      (if (kwEq name "cond")
-                        (pErrRemoved pos "cond")
-                        (if (kwEq name "while")
-                          (parseWhileExpr tokens (advance pos))
-                          ; `for` is a KEYWORD and not a macro, and `stdlib/Pre.ax`'s `range`
-                          ; header records why: an expression macro has exactly ONE shape
-                          ; (MAC-LANG-14 - the rule form's templates are DECLARATIONS), and
-                          ; `for` has four, counted with its step and its element-index
-                          ; pair. Measured, range and container cannot even
-                          ; coexist as two macros: `stdlib/Html.ax` exported its own
-                          ; `(for x in xs body)` and a program importing it beside a range `for`
-                          ; resolved to Html's and answered `AX3001: undefined variable i`
-                          ; in the body rather than an ambiguity at the import. The container
-                          ; half additionally needs an ELEMENT type, which arrived with the
-                          ; parameterised `Vec`; this is the container loop in `docs/reference.md`. The typed element
-                          ; accessor makes the desugaring possible.
-                          ;
-                          ; The keyword span is passed through rather than recovered, exactly
-                          ; as the `alloc` arm below does: `advance pos` loses the token.
-                          (if (kwEq name "for")
-                            (parseForExpr tokens (advance pos) (tokenSpan kw))
-                            ; The keyword span is passed through, as the
-                            ; `alloc` arm below does: `advance pos` loses
-                            ; the token.
-                            (if (kwEq name "region")
-                              (parseRegionExpr tokens (advance pos) (tokenSpan kw))
-                              ; `parallel` is a KEYWORD for the reason `for` and `while` are:
-                              ; it binds names, and its binding list is not an
-                              ; expression. Desugared by `parseParallelExpr` into
-                              ; `let`s over the `__par_spawn`/`__par_join`
-                              ; primitives, so no AST tag was added and no consumer
-                              ; of one moves. The keyword span is passed through,
-                              ; as the `alloc` arm below does.
-                              (if (kwEq name "parallel")
-                                (parseParallelExpr tokens (advance pos) (tokenSpan kw))
-                                (if (kwEq name "set")
-                                  (parseSetExpr tokens (advance pos))
-                                  ; `struct` declares a type. A struct is built by
-                                  ; calling its name, `(Pt 3 4)`, so the keyword in
-                                  ; expression position is refused with that advice
-                                  ; (AX2004) rather than read as an application.
-                                  (if (kwEq name kwStruct)
-                                    (pErrRemoved pos "struct")
-                                    ; `consume` is RESERVED, not parsed. It was a
-                                    ; parse-time IDENTITY that kept the `Linear`
-                                    ; wrapper: consuming twice was accepted and the
-                                    ; form reclaimed nothing. What reclaims is the
-                                    ; reference counting every heap block carries.
-                                    (if (kwEq name "consume")
-                                      (pErrRemoved pos "consume")
-                                      ; `begin` is RESERVED here for the same
-                                      ; reason the other five are: it was the
-                                      ; sequencing form, `{ }` replaced it, and
-                                      ; until now it fell through to an
-                                      ; application of a bare name and drew
-                                      ; `AX3001 undefined variable begin` - a
-                                      ; diagnostic that names no replacement and
-                                      ; reads like a typo. `CHANGELOG.md`'s 0.2.0
-                                      ; Compatibility section recorded exactly
-                                      ; that gap.
-                                      (if (kwEq name "begin")
-                                        (pErrRemoved pos "begin")
-                                        (if (kwEq name "alloc")
-                                          (pErrRemoved pos "alloc")
-                                          ; `define` is RESERVED in expression
-                                          ; position too: it was the old
-                                          ; spelling of `fn`, so old source
-                                          ; nests it, and falling through
-                                          ; would report `AX3001 undefined
-                                          ; variable define` - a typo read
-                                          ; on a keyword with a known
-                                          ; replacement.
-                                          (if (kwEq name kwDefine)
-                                            (pErrRemoved pos "define")
-                                            (if (kwEq name "handle")
-                                              (parseHandleExpr tokens (advance pos))
-                                              (parseAppForm tokens pos)))))))))))))))))))))
+          (if (kwEq name kwImport)
+            (pErrCode pos "import-position")
+            (if (kwEq name kwPub)
+              ; `pub` marks a top-level declaration. In an expression it
+              ; used to be skipped, so `(pub "x")` read as `("x")`.
+              (pErrExp pos "an expression")
+              ; An anonymous function is spelled `lambda`. `fn` declares a
+              ; named function at the top level, and in expression position
+              ; it is refused with that advice (AX2004).
+              (if (kwEq name kwFn)
+                (pErrRemoved pos "fn")
+                (if (kwEq name "lambda")
+                  (parseLamExpr tokens (advance pos))
+                  (if (kwEq name kwLet)
+                    (parseLetExpr tokens (advance pos))
+                    (if (kwEq name kwIf)
+                      (parseIfExpr tokens (advance pos))
+                      (if (kwEq name kwMatch)
+                        (parseMatchExpr tokens (advance pos))
+                        ; `cond` is REMOVED, not parsed. A variadic `if`
+                        ; takes its place - `(if t1 b1 t2 b2 ... els)` -
+                        ; and `match` takes the rest. The keyword stays
+                        ; reserved so old source gets `AX2004` with that
+                        ; advice instead of an application of an undefined
+                        ; variable, the way `begin` and `consume` do below.
+                        (if (kwEq name "cond")
+                          (pErrRemoved pos "cond")
+                          (if (kwEq name "while")
+                            (parseWhileExpr tokens (advance pos))
+                            ; `for` is a KEYWORD and not a macro, and `stdlib/Pre.ax`'s `range`
+                            ; header records why: an expression macro has exactly ONE shape
+                            ; (MAC-LANG-14 - the rule form's templates are DECLARATIONS), and
+                            ; `for` has four, counted with its step and its element-index
+                            ; pair. Measured, range and container cannot even
+                            ; coexist as two macros: `stdlib/Html.ax` exported its own
+                            ; `(for x in xs body)` and a program importing it beside a range `for`
+                            ; resolved to Html's and answered `AX3001: undefined variable i`
+                            ; in the body rather than an ambiguity at the import. The container
+                            ; half additionally needs an ELEMENT type, which arrived with the
+                            ; parameterised `Vec`; this is the container loop in `docs/reference.md`. The typed element
+                            ; accessor makes the desugaring possible.
+                            ;
+                            ; The keyword span is passed through rather than recovered, exactly
+                            ; as the `alloc` arm below does: `advance pos` loses the token.
+                            (if (kwEq name "for")
+                              (parseForExpr tokens (advance pos) (tokenSpan kw))
+                              ; The keyword span is passed through, as the
+                              ; `alloc` arm below does: `advance pos` loses
+                              ; the token.
+                              (if (kwEq name "region")
+                                (parseRegionExpr tokens (advance pos) (tokenSpan kw))
+                                ; `parallel` is a KEYWORD for the reason `for` and `while` are:
+                                ; it binds names, and its binding list is not an
+                                ; expression. Desugared by `parseParallelExpr` into
+                                ; `let`s over the `__par_spawn`/`__par_join`
+                                ; primitives, so no AST tag was added and no consumer
+                                ; of one moves. The keyword span is passed through,
+                                ; as the `alloc` arm below does.
+                                (if (kwEq name "parallel")
+                                  (parseParallelExpr tokens (advance pos) (tokenSpan kw))
+                                  (if (kwEq name "set")
+                                    (parseSetExpr tokens (advance pos))
+                                    ; `struct` declares a type. A struct is built by
+                                    ; calling its name, `(Pt 3 4)`, so the keyword in
+                                    ; expression position is refused with that advice
+                                    ; (AX2004) rather than read as an application.
+                                    (if (kwEq name kwStruct)
+                                      (pErrRemoved pos "struct")
+                                      ; `consume` is RESERVED, not parsed. It was a
+                                      ; parse-time IDENTITY that kept the `Linear`
+                                      ; wrapper: consuming twice was accepted and the
+                                      ; form reclaimed nothing. What reclaims is the
+                                      ; reference counting every heap block carries.
+                                      (if (kwEq name "consume")
+                                        (pErrRemoved pos "consume")
+                                        ; `begin` is RESERVED here for the same
+                                        ; reason the other five are: it was the
+                                        ; sequencing form, `{ }` replaced it, and
+                                        ; until now it fell through to an
+                                        ; application of a bare name and drew
+                                        ; `AX3001 undefined variable begin` - a
+                                        ; diagnostic that names no replacement and
+                                        ; reads like a typo. `CHANGELOG.md`'s 0.2.0
+                                        ; Compatibility section recorded exactly
+                                        ; that gap.
+                                        (if (kwEq name "begin")
+                                          (pErrRemoved pos "begin")
+                                          (if (kwEq name "alloc")
+                                            (pErrRemoved pos "alloc")
+                                            ; `define` is RESERVED in expression
+                                            ; position too: it was the old
+                                            ; spelling of `fn`, so old source
+                                            ; nests it, and falling through
+                                            ; would report `AX3001 undefined
+                                            ; variable define` - a typo read
+                                            ; on a keyword with a known
+                                            ; replacement.
+                                            (if (kwEq name kwDefine)
+                                              (pErrRemoved pos "define")
+                                              (if (kwEq name "handle")
+                                                (parseHandleExpr tokens (advance pos))
+                                                (parseAppForm tokens pos))))))))))))))))))))))
       (if (peekIs tokens pos TK_DOUBLE_COLON)
         (parseTypeSigExpr tokens (advance pos))
         (if (peekIs tokens pos TK_RPAREN)
@@ -6222,7 +6244,15 @@
       )
         (if (== val 0)
           (pOk acc nextPos)
-          (parseDecls tokens nextPos (vecPush acc val)))))))
+          (if (&&
+                (== (nodeTag val) TAG_D_IMPORT)
+                (&& (> (vecLen acc) 0) (!= (nodeTag (vecGet acc (- (vecLen acc) 1))) TAG_D_IMPORT)))
+            (pErrCode
+              (if (kwEq (tokenLexeme (vecGet tokens (+ pos 1))) kwPub)
+                (+ pos 2)
+                (+ pos 1))
+              "import-order")
+            (parseDecls tokens nextPos (vecPush acc val))))))))
 
 ; ------------------------------------------------------------------
 ; Top-level: parse a module.

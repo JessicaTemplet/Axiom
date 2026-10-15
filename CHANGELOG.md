@@ -16,6 +16,10 @@ its changelog too.
 
 ## Unreleased
 
+- Imports must form the module header, before every other declaration.
+  Late and nested imports draw AX2001; formatting refuses them without
+  rewriting the file. Cereal's imports now precede its declarations.
+
 - Formatting removes trailing layout whitespace and preserves declaration
   order, so a late import cannot displace preceding doc comments.
 - Restored Cereal's displaced documentation and added literal-preservation

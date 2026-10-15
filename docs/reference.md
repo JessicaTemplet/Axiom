@@ -926,6 +926,9 @@ Tested by `tests/diagnostics/1257-nolint-warning.ax` and
 
 ## Modules and imports
 
+Imports form the module header, before every signature, function and
+other declaration. An import cannot appear inside an expression.
+
 An imported module exports names marked `pub`. Import all public names
 with `(import Vec)`, selected names with `(import Vec (vecNew vecPush))`,
 or qualify access as `Vec::vecNew`. If two imported modules export the

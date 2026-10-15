@@ -297,18 +297,17 @@ else
   failed=$((failed + 1))
 fi
 
-echo "== comments stay with declarations around a late import =="
+echo "== late and nested imports are refused without changing the file =="
 if python3 - "$axiom" "$repo_root" "$work" <<'PYTEST'
 import pathlib, subprocess, sys
 compiler, root, work = sys.argv[1:]
-p = pathlib.Path(work) / "late-import.ax"
-p.write_bytes((pathlib.Path(root) / "tests/fmt/parity/243-late-import-comments.axp").read_bytes())
-subprocess.run([compiler, "fmt", str(p)], check=True, capture_output=True)
-s = p.read_text()
-assert (s.index(";; First function") < s.index("(:: first") < s.index("(import Str)")
-        < s.index(";; Second function") < s.index("(:: second")), s
-subprocess.run([compiler, "fmt", "--check", str(p)], check=True, capture_output=True)
-print("ok   imports keep source order and each declaration keeps its doc comment")
+for name in ["243-late-import-refused.axp", "245-nested-import-refused.axp"]:
+    original = (pathlib.Path(root) / "tests/fmt/parity" / name).read_bytes()
+    p = pathlib.Path(work) / "bad-import.ax"
+    p.write_bytes(original)
+    r = subprocess.run([compiler, "fmt", str(p)], capture_output=True)
+    assert r.returncode and p.read_bytes() == original, name
+print("ok   imports require a module header and refusal preserves every byte")
 PYTEST
 then
   :

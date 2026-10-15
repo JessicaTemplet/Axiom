@@ -86,6 +86,7 @@ integrator would still need.
 
 | Item | State | Where it's specified or tested |
 |---|---|---|
+| Imports form the module header and cannot appear later or inside expressions | Done | `tests/diagnostics/1400-late-import.axbad`, `tests/diagnostics/1401-nested-import.axbad`, `tests/diagnostics/1402-lambda-import.axbad` |
 | Editor and REPL completion exclude retired syntax | Done | `tests/lsp/drive.py`, `scripts/check-replcomp.sh` |
 | Legacy CLI and syntax removed: `axiom FILE`, expression `fn`, keyword struct construction, format aliases | Done | `compat/BREAKING` |
 | The precondition tag removed; contracts are `pre` and `post` | Done | `AX3095` |
@@ -128,7 +129,7 @@ integrator would still need.
 
 | Item | State |
 |---|---|
-| Formatting preserves declaration order, doc-comment attachment and literal contents, without trailing layout whitespace | Done |
+| Formatting preserves the import header, doc-comment attachment and literal contents, without trailing layout whitespace | Done |
 | Doc comments: `;;` documents the declaration below and `;;!` the module, and hover, the library reference and `axiom doc` read them | Done |
 | Hover explains every word of the language: keywords, builtin types, effects, operators, AXTAG keys and values, and imported modules | Done |
 | Every public standard library name carries a doc comment, and every module a `;;!` block | Done |
