@@ -76,9 +76,9 @@
 ; builtin words (`I64`, `Double`, ...) are ordinary type names to the
 ; compiler.
 ((builtin_type) @type.builtin
-  (#match? @type.builtin "^(Int|Float|Bool|Char|String)$"))
+  (#match? @type.builtin "^(Int|Int8|Int16|Int32|UInt8|UInt16|UInt32|UInt64|Float|Bool|Char|String|Foreign|Handle|Vec|Option|Result|Addr)$"))
 ((builtin_type) @type
-  (#not-match? @type "^(Int|Float|Bool|Char|String)$"))
+  (#not-match? @type "^(Int|Int8|Int16|Int32|UInt8|UInt16|UInt32|UInt64|Float|Bool|Char|String|Foreign|Handle|Vec|Option|Result|Addr)$"))
 (unit_type) @type.builtin
 
 ((type_constructor (constructor_identifier) @type.builtin)
@@ -210,7 +210,9 @@
 ((application . (identifier) @constructor)
   (#match? @constructor "^[A-Z]"))
 ((application . (identifier) @function.call)
-  (#not-match? @function.call "^([A-Z]|_$|syntax/|[.][.][.]$|[-+*/%<>=!&|^~]+$)"))
+  (#not-match? @function.call "^([A-Z]|_$|asm$|syntax/|[.][.][.]$|[-+*/%<>=!&|^~]+$)"))
+((application . (identifier) @keyword)
+  (#eq? @keyword "asm"))
 
 ([
   (application . (_) (identifier) @constructor)

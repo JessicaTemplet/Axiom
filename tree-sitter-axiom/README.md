@@ -88,11 +88,12 @@ the first does) colour alike.
 does. Tree-sitter's own highlighter and Helix read it for colour; Neovim
 reads it for navigation only, so there a parameter's uses are variables.
 
-Not yet: a use of a top-level function or macro outside its own body,
-or of a name from another module, is coloured by its syntax (a call, or
-a variable), where VS Code's server resolves it. A highlighter files a
-binding in the innermost scope it is written in, and a function's name
-is written inside the function. See the [roadmap](../docs/roadmap.md).
+A top-level signature gives later uses of its function the function
+colour. Macro templates keep their syntactic colours until expansion.
+
+Not yet: forward references, unsigned functions, macros and imported
+names are coloured by syntax where VS Code's server resolves them.
+See the [roadmap](../docs/roadmap.md).
 
 Tested by `scripts/check-highlight-parity.sh`, which compares the two,
 character by character, over the standard library, the examples and the

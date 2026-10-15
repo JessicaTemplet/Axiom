@@ -206,7 +206,6 @@ module.exports = grammar({
       $.effect_declaration,
       $.extern_declaration,
       $.macro_declaration,
-      $.syntax_for_declaration,
     ),
 
     // `(:: subject Type)`
@@ -873,6 +872,7 @@ module.exports = grammar({
       $.alignof_expression,
       $.as_expression,
       $.pipe_expression,
+      $.syntax_for_declaration,
       $.type_signature,
       $.block,
       $.list_literal,
@@ -1063,8 +1063,9 @@ module.exports = grammar({
 
     // `(syntax/for (f seq) decl...)` where a DECLARATION stands -
     // the iteration form one position up from syntax_for_arm,
-    // matching the compiler's parseTopForm hook: the interior is
-    // declarations, instantiated per element by phase D.
+    // matching the compiler's parseTopForm hook. In an expression
+    // template its interior contains expressions instead; both forms
+    // share the same binder and sequence syntax.
     syntax_for_declaration: $ => seq(
       '(', 'syntax/for',
       $._syntax_iter_binding,

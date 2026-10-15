@@ -231,7 +231,7 @@ ablate "cast-operand" typecheck.ax \
                 (&& (== (isCastLike (nodeAName head)) 1) (== (bsIsLocal bound (nodeAName head)) 0)))
             1
             0)" \
-  "0"
+  "0" run tests/selfhost/1023-type-operand-scope.ax
 ablate "param-first" codegen.ax \
   "(if (&& (isNullaryFnCg cg full) (! parameter))" \
   "(if (isNullaryFnCg cg full)"

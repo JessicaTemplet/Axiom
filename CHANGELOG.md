@@ -49,6 +49,20 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- Editor highlighting recognises discard locals, builtin types and
+  expression-template iteration. Top-level signatures colour later function
+  uses; macro templates keep their syntactic colours. Tree-sitter and
+  VS Code agree within the existing parity limits, with no duplicate captures.
+  Tested by `scripts/check-highlight-parity.sh` and
+  `editors/vscode/scripts/route-b-smoke.mjs`.
+
+- Task timing fault probes match the migrated wait implementation.
+  A direct type-operand regression keeps metamorphic checks sensitive
+  to unrelated value declarations. Generated malformed-query outputs
+  are removed from the repository root; their test remains in its corpus.
+  Tested by `scripts/check-task.sh` and
+  `tests/selfhost/1023-type-operand-scope.ax`.
+
 - The freestanding library subset includes `Float`, with a live call
   in the cross-target probe. Its imports stay inside the subset and
   add no host-service declarations. Interrupt-handler fault probes target

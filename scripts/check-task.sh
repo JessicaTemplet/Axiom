@@ -531,7 +531,7 @@ cuts = {
   "lock": [("Sync.ax",
     "              (if (== (syncCas m 0 (+ me 1)) 0)",
     "              (if (== 0 0)")],
-  "timed": [("Sys.ax", "      (/ (+ nanos 999) 1000))))", "      (/ (+ nanos 999) 10000))))"),
+  "timed": [("Sys.ax", "(/ (+ nanos 999) 1000)", "(/ (+ nanos 999) 10000)"),
             ("Sys.ax", "(memSetWord ts 0 (/ nanos 1000000000))", "(memSetWord ts 0 (/ (/ nanos 10) 1000000000))"),
             ("Sys.ax", "(memSetWord ts 1 (% nanos 1000000000))", "(memSetWord ts 1 (% (/ nanos 10) 1000000000))")],
   "holder": [("Sync.ax", "(if (== (errCode e) 3)", "(if (== (errCode e) 99999)")],

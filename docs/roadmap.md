@@ -174,7 +174,7 @@ including pattern matching, remain work to do.
 | The language server sends semantic tokens, so every editor colours keywords, functions, macros, constructors, fields and effects apart from variables | Done |
 | A VS Code extension ships in the repository, with a TextMate grammar and the language client (`editors/vscode/`) | Done |
 | Tree-sitter colours each token the way VS Code does, gated character by character | Done |
-| Tree-sitter colours a use of a top-level function or macro, or of an imported name, by what it resolves to | Not started |
+| Tree-sitter colours function and macro uses by their definitions, including forward and imported names | In progress | Later uses of signed functions are covered by `tree-sitter-axiom/test/highlight/locals-and-records.ax` |
 | The VS Code extension is published to the marketplace | Not started |
 | `axiom doc` renders the documentation and the library reference locally and opens them in your browser | Done |
 | Debug information (DWARF), a message on SIGSEGV, and inlined frames in backtraces | Not started |
