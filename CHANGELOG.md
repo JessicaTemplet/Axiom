@@ -34,6 +34,11 @@ and selected entry roots; they do not establish aviation or space certification.
 
 <!-- release-notes: end of highlights -->
 
+- Alias expansion reuses canonical type trees during repeated checks,
+  reducing self-compilation memory without changing the emitted IR.
+  Tested by `tests/selfhost/1020-canonical-type-space.ax` and
+  `scripts/check-bootstrap.sh`.
+
 - API generation reads complete multiline signatures and skips nested
   comments within them. Existing type cells stay complete after formatting.
   The source-signature probe in `scripts/check-stdlib-api.sh` checks exact
