@@ -498,8 +498,11 @@ jobs that need a compiler get it through the same composite action,
 1. **Tree-sitter grammar.** The checked-in grammar parses every `.ax`
    file in the repository.
 2. **Tests.** The gate battery above, on linux-aarch64 and
-   darwin-aarch64, the two supported targets. Each job provisions a
-   compiler from `bootstrap/` first. No Tests leg runs on a source-only
+   darwin-aarch64, the two supported targets. Four independent shards
+   run on each target. Each provisions a compiler from `bootstrap/`
+   first, and both Tests checks require every shard to pass.
+   Successful gates are reused only when their input fingerprints match.
+   No Tests leg runs on a source-only
    target (README's *Targets* section lists them).
    `scripts/check-release-targets.sh` refuses a target that is on the
    supported list and has an advisory (`continue-on-error`) leg.

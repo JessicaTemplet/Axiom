@@ -47,9 +47,9 @@
 
 export const BENCH_ENV = {
   machine: 'Apple M1, macOS 27.0.1, darwin-aarch64',
-  axiom: 'Axiom 0.7.9',
-  rust: 'rustc 1.98.1',
-  c: 'clang 23.1.2',
+  axiom: 'Axiom 0.7.9 (source d6cd8651)',
+  rust: 'rustc 1.99.0',
+  c: 'clang 23.1.3',
   answer: '428343467',
   timer: 'hyperfine 1.20.0',
 }
@@ -68,24 +68,24 @@ export const BENCH: BenchRow[] = [
   {
     metric: 'Run time',
     how: '3,000,000 Collatz sequences · hyperfine best of 20, interleaved',
-    axiom: '0.443 s',
-    rust: '0.448 s',
-    c: '0.444 s',
-    note: 'All three finish within five milliseconds of one another. Axiom emits LLVM IR, so a loop that is only arithmetic and branches gets the machine code the other two get.',
+    axiom: '0.426 s',
+    rust: '0.426 s',
+    c: '0.426 s',
+    note: 'All three round to 0.426 seconds on this arithmetic loop. This workload does not measure allocation-heavy code.',
   },
   {
     metric: 'Compile to a native binary',
     how: 'one file, cold · hyperfine best of 15, interleaved',
-    axiom: '0.166 s',
-    rust: '0.117 s',
-    c: '0.151 s',
-    note: 'Axiom is the slowest of the three, by forty-nine milliseconds against rustc at 1.42x, and fifteen behind clang at 1.10x. Published because it is what was measured, by the script beside the sources.',
+    axiom: '0.305 s',
+    rust: '0.098 s',
+    c: '0.143 s',
+    note: 'Axiom takes 0.305 seconds, against Rust’s 0.098 seconds (3.11×) and C’s 0.143 seconds (2.13×). These are whole-process builds of the same small program.',
   },
   {
     metric: 'Binary size',
     how: 'the executable on disk',
-    axiom: '35,784 B',
-    rust: '469,608 B',
+    axiom: '35,912 B',
+    rust: '471,000 B',
     c: '33,432 B',
     note: 'Thirteen times smaller than the Rust binary, and about seven percent larger than C, with no C runtime inside it at all.',
   },
@@ -100,6 +100,12 @@ export const BENCH: BenchRow[] = [
 ]
 
 /*
+ * Measured 2026-10-15 with `web/bench/run-bench.sh`, source d6cd8651
+ * and the current tool versions above. Interleaved best of 20 for runs,
+ * 15 for builds. Axiom/Rust/C: 0.426/0.426/0.426 seconds running,
+ * 0.305/0.098/0.143 seconds compiling, 35,912/471,000/33,432 bytes,
+ * and 0/70/1 undefined symbols. All print 428343467.
+ *
  * RE-MEASURED 2026-10-03 by `web/bench/run-bench.sh`, against the
  * freshly bootstrapped 0.7.8 compiler. Interleaved best of 20 for run
  * time and 15 for compilation, with the tool versions stated above.

@@ -23,6 +23,11 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 axiom="${AXIOM:-axiom}"
+# The benchmark runs in a scratch directory; resolve an explicit compiler
+# path before changing directories so AXIOM=.axiom-bin/axiom still works.
+if [[ "$axiom" == */* ]]; then
+  axiom="$(cd "$(dirname "$axiom")" && pwd)/$(basename "$axiom")"
+fi
 hyperfine="${HYPERFINE:-hyperfine}"
 RUN_REPS="${RUN_REPS:-20}"
 COMPILE_REPS="${COMPILE_REPS:-15}"

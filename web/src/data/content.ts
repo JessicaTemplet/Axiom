@@ -148,7 +148,7 @@ export interface StatusRow {
 }
 
 export const STATUS_SOLID: StatusRow[] = [
-  { feature: 'Functions & types', status: 'Complete', note: 'Curried signatures, rigid type variables, exact return types.' },
+  { feature: 'Functions & types', status: 'Complete', note: 'Curried signatures, checked generics, aliases and explicit numeric conversions.' },
   { feature: 'ADTs / data types', status: 'Complete', note: 'Sums with positional or named fields.' },
   { feature: 'Pattern matching (`match`)', status: 'Complete', note: 'Nested, exhaustive, checked in every function.' },
   { feature: 'Structs', status: 'Complete', note: 'Named construction, per-field `mut`, generic parameters, automatic rendering.' },
@@ -160,16 +160,16 @@ export const STATUS_SOLID: StatusRow[] = [
 ]
 
 export const STATUS_LIMITS: StatusRow[] = [
-  { feature: 'Effects', status: 'Enforced; two limits stated', note: 'Two inference gaps, both stated: unresolvable calls are marked incomplete, and constructor allocation is not counted.' },
+  { feature: 'Effects', status: 'Enforced; unresolved calls marked', note: 'Constructor allocation contributes Alloc; calls the compiler cannot resolve are marked incomplete.' },
   { feature: 'Macros', status: 'Partial', note: 'A template cannot generate `import` or a nested `macro`, or test two binders for sameness.' },
   { feature: 'Concurrency', status: 'Language form, two lowerings', note: '`parallel`, channels, a mutex and task pools; `taskFold` reclaims each delivered answer under an explicit scalar-only callback contract.' },
-  { feature: 'Region syntax', status: 'Checked lexical scopes and inferred escape checks', note: 'Scalars leave a region; typed promotion is planned.' },
+  { feature: 'Region syntax', status: 'Checked lexical scopes and inferred escape checks', note: 'Scalar results may leave a region; references stay within its lifetime.' },
   { feature: 'Resource ownership', status: 'Functional', note: 'Files, sockets, terminal modes, channels and mutexes close or free themselves when their last owner lets go.' },
   { feature: 'FFI', status: 'Functional', note: 'Rust through `extern` blocks, sealed owners and callbacks borrowed for the call.' },
   { feature: 'Standard library', status: 'Functional', note: 'Collections, cryptography, optional binary obfuscation, dates, JSON, networking and an embedded database.' },
   { feature: 'Contracts', status: 'Functional', note: 'Checked preconditions and postconditions, shown in editor tooltips and the library reference.' },
   { feature: 'Error handling', status: 'Functional; adopted at the syscall seam', note: '`Result`, the postfix `?`, and handlers that skip a bad record without unwinding.' },
-  { feature: 'Editor support', status: 'Functional', note: 'Language server plus a tree-sitter grammar.' },
+  { feature: 'Editor support', status: 'Functional', note: 'Language server, formatter, semantic highlighting, tree-sitter grammar and VS Code extension.' },
 ]
 
 export const STATUS_REMOVED: StatusRow[] = [
@@ -204,7 +204,8 @@ export const FAQS: Faq[] = [
   {
     q: 'Does it have a garbage collector?',
     a: [
-      'No tracing collector. Memory comes from a bump allocator over `mmap`, and every heap block carries a reference count, so a value is freed the moment its last reference dies, with nothing written in the source. Files, sockets, channels and mutexes are owners too: each closes or frees itself when its last reference goes. When you want reclamation at a point of your choosing, `(region r body)` rolls the allocator back in one step.',
+      'Axiom calls its hybrid memory model RECAP: regions, effect checks, reference counting and arenas. There is no tracing collector. Releasing a counted value’s final share releases its owned fields and makes eligible small blocks reusable. Files, sockets, channels and mutexes have owners that close or free them when their final share ends.',
+      'Reference counting does not collect unreachable cycles. Larger dead allocations and some retained shares wait for an arena reset. Use `(region r body)` to bound an allocation lifetime; the compiler checks that references stay within it.',
     ],
     link: { label: 'The memory model', href: `${DOCS}/memory-model.md` },
   },

@@ -35,6 +35,7 @@ other two. `run-bench.sh` stops if any binary prints something else.
 ## Build the programs
 
 ```bash
+cd web/bench
 axiom build --input collatz.ax --output out-axiom
 rustc -O collatz.rs -o out-rust
 clang -O2 collatz.c -o out-c
@@ -62,15 +63,12 @@ is [hyperfine](https://github.com/sharkdp/hyperfine).
 
 Run time is best of 20. Compile time is best of 15, cold.
 
-## Provenance, and what is not comparable
+## Read the results
 
-The Rust and C programs reproduce the previously published binary sizes
-exactly, 466,024 B and 33,432 B, and all three undefined-symbol counts.
-That shows this is the workload earlier passes timed.
+The table in `web/src/data/bench.ts` names the measured compiler source,
+platform and tool versions. Re-run the script when those inputs change.
+A release version alone does not identify a measurement.
 
-The Axiom program doesn't reproduce its published size: 35,384 B
-against 35,432 B. It is an equivalent implementation, not a
-byte-for-byte recovery of a source that was never committed. So the
-absolute seconds from passes timed before these sources were in the
-tree aren't comparable with these, and the table doesn't chain them
-into one series. Compare the ratios instead.
+This is one arithmetic workload on one machine. It does not measure
+allocation, I/O or parallel tasks. Compare the programs and their build
+settings before applying these results to your own work.

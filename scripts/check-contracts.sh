@@ -177,6 +177,16 @@ else
   bad "tagged exits $rc_t and untagged exits $rc_u; both must be 20"
 fi
 
+# Run the program named in examples/README.md, not a copy of its body.
+rc_example=0
+run_prog "$axc" "$repo_root/examples/contracts/contracts.ax" 1 || rc_example=$?
+if [[ "$rc_example" == 0 && "$(cat "$work/run.out")" == "0 7 10" ]]; then
+  ok "the shipped clamp example prints 0 7 10 and exits 0"
+else
+  bad "the shipped clamp example differs: exit $rc_example, stdout $(cat "$work/run.out")"
+  head -10 "$work/run.err"
+fi
+
 # ---------------------------------------------------------------
 echo "== 3. @__axiom_contract_fail is defined where it is called, and nowhere else =="
 # ---------------------------------------------------------------

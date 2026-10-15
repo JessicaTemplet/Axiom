@@ -30,6 +30,7 @@ writeFileSync(
   `import { renderToStaticMarkup } from 'react-dom/server'
 import App from './src/App.tsx'
 export { TOUR, DEMO } from './src/data/samples.ts'
+export { highlight } from './src/lib/highlight.ts'
 export const html = renderToStaticMarkup(<App />)
 `,
 )
@@ -59,7 +60,7 @@ const realWarn = console.warn
 console.error = (...a) => warnings.push(a.join(' '))
 console.warn = (...a) => warnings.push(a.join(' '))
 
-const { html, TOUR, DEMO } = await import(pathToFileURL(out).href)
+const { html, TOUR, DEMO, highlight } = await import(pathToFileURL(out).href)
 
 rmSync(entry, { force: true })
 rmSync(out, { force: true })
@@ -120,6 +121,37 @@ for (const img of imgs) {
   }
 }
 if (!noalt) console.log(`ok   all ${imgs.length} images carry an alt attribute`)
+
+// Current language spellings keep their syntactic roles in the tour.
+// These assertions also catch a removed spelling being painted as valid.
+{
+  const cases = [
+    ['(as 1 UInt8)', [['as', 'keyword.modifier'], ['UInt8', 'type.builtin']]],
+    ['(as value (Vec Count))', [['Vec', 'type'], ['Count', 'type']]],
+    ['(type Byte = UInt8)', [['Byte', 'type.definition'], ['UInt8', 'type.builtin']]],
+    ['(let mut count (as 1 UInt32))', [['mut', 'keyword.modifier'], ['count', 'variable'], ['UInt32', 'type.builtin']]],
+    ['(Point :x 1 :y 2)', [['Point', 'constructor'], [':x', 'variable.member'], [':y', 'variable.member']]],
+    ['(cast Int value)', [['cast', 'error']]],
+  ]
+  let wrong = 0
+  for (const [source, expected] of cases) {
+    const tokens = highlight(source)
+    for (const [text, capture] of expected) {
+      const matches = tokens.filter((token) => token.text === text)
+      if (matches.length !== 1 || matches[0].capture !== capture) {
+        fail(`highlight ${source}: ${text} should be ${capture}`)
+        wrong++
+      }
+    }
+  }
+  for (const text of ['I8', 'U8', 'I128', 'Double']) {
+    if (highlight(`(:: value ${text})`).some((token) => token.text === text && token.capture === 'type.builtin')) {
+      fail(`highlight: ${text} is not a current built-in type`)
+      wrong++
+    }
+  }
+  if (!wrong) console.log('ok   modern integer types, as, aliases, locals and named fields keep their highlighting roles')
+}
 
 // --- 5. one numbered line per source line ---------------------------
 // The number lives inside the line it numbers, so this is what proves

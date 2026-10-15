@@ -21,16 +21,15 @@
 ;   malformed      m                            the tally, counted
 ;                                               under the skip run
 ;
-; MEMORY IS THE POINT. A batch loop has no request boundary, so there
-; is no arena reset (`memory-model.md` MM-ALLOC-22): whatever a record
-; costs, the process keeps for the run. Every record here allocates
-; its text (`fmtInt`) and drops it; the malformed ones perform the
-; operation with a LITERAL message, because a message built per record
-; leaks 80 bytes through the dispatch and a two-argument operation
-; leaks its handler's inner closure - both measured, both in the
-; module's header. The gate builds this program and runs it at
-; 100,000 and 1,000,000 records, and requires the two peak RSS
-; readings to land within one band of each other.
+; Each record builds its decimal text and releases it after parsing. The
+; malformed-record operation uses a literal message, and each installed
+; handler is reused for the loop. Owned messages and intermediate curried
+; handler closures are reclaimed too (`tests/stdlib/410-fallible.ax` and
+; `scripts/check-closure-reclaim.sh`). Handling the literal message adds
+; no allocation per malformed record.
+;
+; `scripts/check-steady-state.sh` runs this program at 100,000 and
+; 1,000,000 records and checks both arithmetic and flat peak memory.
 ;
 ; Usage:
 ;   batch-fallible [N [k]]        defaults 1000000 and 7

@@ -40,6 +40,17 @@ counted environments.
 
 <!-- release-notes: end of highlights -->
 
+- Documentation, website examples and generated programs use canonical
+  locals and named struct fields. The API reference includes public type
+  aliases and marks incomplete effect rows. Website highlighting covers
+  fixed-width types and explicit conversions; benchmarks report fresh
+  measurements with their compiler and toolchain versions.
+  Tested by `scripts/check-stdlib-api.sh` and `web/scripts/smoke.mjs`.
+
+- CI runs the native gate battery in four shards per supported target.
+  Both Tests checks require every shard to succeed, and input-checked
+  gate reuse keeps separate shard caches. Tested by `tests/ci/shards.py`.
+
 - Vector overwrites release discarded branch results. Replacing elements
   and assigning an existing owner preserve values and reclaim their shares.
   Tested by `tests/stdlib/968-vec-set-reclaim.ax`.

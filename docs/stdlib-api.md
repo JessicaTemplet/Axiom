@@ -1,24 +1,26 @@
 # Axiom standard library
 
 Every public function, type and macro in Axiom's standard library, one
-section per module. To find out what each module is for, start with
-[Modules at a glance](reference.md#modules-at-a-glance) in the language
-reference.
+section per module. Start with [Modules at a glance](reference.md#modules-at-a-glance)
+to choose a module.
 
-Every name listed is `pub` in the source. The columns are:
+Every listed declaration is public. An `effect` declaration is exported
+without a `pub` keyword. The columns are:
 
 - **Kind**: `value` for a function or constant, `struct`, `data`,
-  `effect` or `macro`.
-- **Type**: the signature as you write it in source, such as
-  `(-> Int Int)`.
-- **Effects**: what the compiler infers the definition does. `Alloc`
-  allocates, uses the arena or installs a handler. `IO` reaches the
-  outside world through a syscall, an `extern` call or the command
-  line. `Mut` changes heap state that something else can see. `Unsafe`
-  uses a raw-memory primitive. A blank cell means the compiler inferred
-  no effect, and a macro's cell is always blank. Treat the column as a
-  lower bound when a call reaches a function value inference cannot
-  resolve (`docs/memory-model.md` MM-EXEC-9a).
+  `type` for an alias, `effect` or `macro`.
+- **Type**: the source signature, such as `(-> Int Int)`, or the
+  complete type alias declaration with its parameters.
+- **Effects**: the compiler's inferred row. `Alloc` allocates, resets
+  an arena or installs a handler. `IO` performs a syscall or external
+  call, or reads command-line arguments. `Mut` changes memory. `Unsafe` exposes caller-established low-level obligations.
+  `Spawn` creates a process or task, `Block` waits, and `Entropy` obtains
+  randomness. Custom effects appear under their declared names.
+  `incomplete` marks unresolved callable flow; that row is a lower bound.
+  Callable arguments can add their own effects. A blank cell means no
+  effects were inferred; a macro has no inferred row. See
+  [effect inference limits](memory-model.md#1-execution-semantics) for the
+  distinction between an inferred row and a guarantee.
 - **Contracts**: the `pre` and `post` clauses checked on every call.
 - **Summary**: the first paragraph of the `;;` doc comment above the
   definition. A blank cell is a name with no doc comment yet.
@@ -26,9 +28,7 @@ Every name listed is `pub` in the source. The columns are:
 A module's `;;!` lines open its section.
 
 This page is generated from the standard library by
-`examples/axdoc/axdoc.ax`, so please don't edit it by hand.
-`scripts/check-stdlib-api.sh` regenerates it in CI and fails if the
-two differ.
+`examples/axdoc/axdoc.ax`. Change its source or the generator to update it.
 
 ## `Agent.Tags`
 
@@ -291,12 +291,12 @@ Axqlite.AxqlMacro - AXQL statements written as Axiom forms.
 | `axqlPutParam` | value | `(-> QueryBuilder Value Int)` | `Alloc,Mut` |  | Append a parameter: `?` in the text, `v` in the parameters. |
 | `axqlFinish` | value | `(-> QueryBuilder Query)` | `Alloc,Mut` |  | The finished query. |
 | `axqlQuoteName` | value | `(-> String String)` | `Alloc,Mut` |  | `name` as AXQL writes a name: bare when it can be, else in double quotes with each `"` inside doubled. |
-| `RowId` | type |  |  |  | A field that is its table's INTEGER PRIMARY KEY, the rowid. |
-| `Bytes` | type |  |  |  | A field holding a BLOB's bytes. |
-| `OptInt` | type |  |  |  | An INTEGER column that may be NULL: `None` is NULL. |
-| `OptFloat` | type |  |  |  | A REAL column that may be NULL. |
-| `OptString` | type |  |  |  | A TEXT column that may be NULL. |
-| `OptBytes` | type |  |  |  | A BLOB column that may be NULL. |
+| `RowId` | type | `(type RowId = Int)` |  |  | A field that is its table's INTEGER PRIMARY KEY, the rowid. |
+| `Bytes` | type | `(type Bytes = String)` |  |  | A field holding a BLOB's bytes. |
+| `OptInt` | type | `(type OptInt = (Option Int))` |  |  | An INTEGER column that may be NULL: `None` is NULL. |
+| `OptFloat` | type | `(type OptFloat = (Option Float))` |  |  | A REAL column that may be NULL. |
+| `OptString` | type | `(type OptString = (Option String))` |  |  | A TEXT column that may be NULL. |
+| `OptBytes` | type | `(type OptBytes = (Option String))` |  |  | A BLOB column that may be NULL. |
 | `axqlAddParam` | value | `(-> QueryBuilder Value Int)` | `Alloc,Mut` |  | Append a parameter's value with no `?`, for a statement whose text already holds its marks. |
 | `axqlOptIntValue` | value | `(-> (Option Int) Value)` | `Alloc` |  | An optional INTEGER as a parameter: `None` is NULL. |
 | `axqlOptFloatValue` | value | `(-> (Option Float) Value)` | `Alloc` |  | An optional REAL as a parameter. |
@@ -1733,19 +1733,19 @@ Raw consumers require live Cereal handles; new code uses typed values.
 | `cerealTextCodec` | value | `(Codec String)` | `Alloc,Mut` |  | The `Codec` that reads and writes a `String`. |
 | `cerealBoolCodec` | value | `(Codec Bool)` | `Alloc,Mut` |  | The `Codec` that reads and writes a `Bool`. |
 | `cerealValueCodec` | value | `(Codec CerealValue)` | `Alloc` |  | The `Codec` that passes a `CerealValue` through unchanged, for a field you want to keep as a tree. |
-| `cerealToValue` | value | `(-> (Codec a) a (Result CerealValue Error))` |  |  | Encode `value` with the codec into a `CerealValue` tree. |
-| `cerealFromValue` | value | `(-> (Codec a) CerealValue (Result a Error))` |  |  | Decode a `CerealValue` tree with the codec. |
-| `cerealVecCodec` | value | `(-> (Codec a) (Codec (Vec a)))` | `Alloc,Mut` |  | The `Codec` for a `Vec` of what `codec` handles, as a list. |
-| `cerealOptionCodec` | value | `(-> (Codec a) (Codec (Option a)))` | `Alloc` |  | The `Codec` for an `Option` of what `codec` handles: `None` is null. |
-| `cerealField` | value | `(-> (Codec a) CerealValue String (Result a Error))` | `Alloc,Mut` |  | Include the field name in a record codec's error context. |
+| `cerealToValue` | value | `(-> (Codec a) a (Result CerealValue Error))` | `incomplete` |  | Encode `value` with the codec into a `CerealValue` tree. |
+| `cerealFromValue` | value | `(-> (Codec a) CerealValue (Result a Error))` | `incomplete` |  | Decode a `CerealValue` tree with the codec. |
+| `cerealVecCodec` | value | `(-> (Codec a) (Codec (Vec a)))` | `Alloc,Mut (incomplete)` |  | The `Codec` for a `Vec` of what `codec` handles, as a list. |
+| `cerealOptionCodec` | value | `(-> (Codec a) (Codec (Option a)))` | `Alloc (incomplete)` |  | The `Codec` for an `Option` of what `codec` handles: `None` is null. |
+| `cerealField` | value | `(-> (Codec a) CerealValue String (Result a Error))` | `Alloc,Mut (incomplete)` |  | Include the field name in a record codec's error context. |
 | `cerealEncodeWith` | value | `(-> CerealFormat CerealLimits CerealValue (Result String Error))` | `Alloc,Mut` |  | Write a `CerealValue` tree in `format` under the given limits. Invalid limits answer `Err`. |
 | `cerealEncode` | value | `(-> CerealFormat CerealValue (Result String Error))` | `Alloc,Mut` |  | Write a `CerealValue` tree in `format` under the default limits. |
 | `cerealDecodeWith` | value | `(-> CerealFormat CerealLimits String (Result CerealValue Error))` | `Alloc,Mut` |  | Parse `source` in `format` into a `CerealValue` tree under the given limits. Past a limit, or on malformed input, it answers `Err`. |
 | `cerealDecode` | value | `(-> CerealFormat String (Result CerealValue Error))` | `Alloc,Mut` |  | Parse `source` in `format` into a `CerealValue` tree under the default limits. |
-| `cerealSerialize` | value | `(-> CerealFormat (Codec a) a (Result String Error))` | `Alloc,Mut` |  | Encode `value` with the codec and write it in `format`: the one call for turning a typed value into text. |
-| `cerealDeserialize` | value | `(-> CerealFormat (Codec a) String (Result a Error))` | `Alloc,Mut` |  | Parse `source` in `format` and decode it with the codec: the one call for turning text into a typed value. |
-| `cerealSerializeWith` | value | `(-> CerealFormat CerealLimits (Codec a) a (Result String Error))` | `Alloc,Mut` |  | `cerealSerialize` under the given limits. |
-| `cerealDeserializeWith` | value | `(-> CerealFormat CerealLimits (Codec a) String (Result a Error))` | `Alloc,Mut` |  | `cerealDeserialize` under the given limits. |
+| `cerealSerialize` | value | `(-> CerealFormat (Codec a) a (Result String Error))` | `Alloc,Mut (incomplete)` |  | Encode `value` with the codec and write it in `format`: the one call for turning a typed value into text. |
+| `cerealDeserialize` | value | `(-> CerealFormat (Codec a) String (Result a Error))` | `Alloc,Mut (incomplete)` |  | Parse `source` in `format` and decode it with the codec: the one call for turning text into a typed value. |
+| `cerealSerializeWith` | value | `(-> CerealFormat CerealLimits (Codec a) a (Result String Error))` | `Alloc,Mut (incomplete)` |  | `cerealSerialize` under the given limits. |
+| `cerealDeserializeWith` | value | `(-> CerealFormat CerealLimits (Codec a) String (Result a Error))` | `Alloc,Mut (incomplete)` |  | `cerealDeserialize` under the given limits. |
 
 ## `Map`
 
@@ -2283,7 +2283,7 @@ Structured tasks with typed results across the process boundary
 | `taskMapRanges` | value | `(-> (-> Int Int String) Int Int TaskOpts (Vec (Result String Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | Run `worker start end` on contiguous half-open ranges covering `0 .. count`. `grain` is the maximum items per range, clamped to one. Each range runs in a fresh child and answers one `Result` in range order. Captures are isolated between ranges; work inside one range shares that child's state. All options and budgets apply per range. |
 | `taskMapDecoded` | value | `(-> (-> Int String) (-> String (Result a Error)) Int Int Int (Vec (Result a Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | Decode each successful answer in the parent, in submit order. Task failures pass through unchanged and never call `decode`. The encoded answers keep `taskMap`'s byte limit; decoded storage is the decoder's responsibility and the result vector holds n values. |
 | `taskMapDecodedWith` | value | `(-> (-> Int String) (-> String (Result a Error)) Int TaskOpts (Vec (Result a Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | All task options, with parent-side decoding. Decoder errors belong to their result slots; `failFast` concerns worker failures, not decoding. Delivery calls `decode` before starting more work, so a slow decoder can delay submission and deadline/cancellation handling. |
-| `taskFold` | value | `(-> (-> Int String) Int TaskOpts Int (-> Int Int (Result String Error) Int) Int)` | `Alloc,Block,IO,Mut,Spawn` |  | Fold the answers in submit order without keeping them: `step acc i r` for each task, starting from `init`, answering the last `acc`. Each answer and everything the step allocates are reclaimed on return. A retained mark cell is refreshed before delivery, then reset after it. The pool's state and the accumulator were allocated before that mark. `scoped(step)` checks each invocation: supplied references and fresh allocations cannot escape into captured state. Pass a lambda directly, a non-nullary function declaration, or a parameter with the same tag. The accumulator carries scalar bits. taskMapWith retains answers. |
+| `taskFold` | value | `(-> (-> Int String) Int TaskOpts Int (-> Int Int (Result String Error) Int) Int)` | `Alloc,Block,IO,Mut,Spawn (incomplete)` |  | Fold the answers in submit order without keeping them: `step acc i r` for each task, starting from `init`, answering the last `acc`. Each answer and everything the step allocates are reclaimed on return. A retained mark cell is refreshed before delivery, then reset after it. The pool's state and the accumulator were allocated before that mark. `scoped(step)` checks each invocation: supplied references and fresh allocations cannot escape into captured state. Pass a lambda directly, a non-nullary function declaration, or a parameter with the same tag. The accumulator carries scalar bits. taskMapWith retains answers. |
 | `taskMapWords` | value | `(-> (-> Int Int) Int Int (Vec Int))` | `Alloc,Block,IO,Mut,Spawn` |  | Run `f i` for every `i` in `0 .. n`, at most `width` at once, answering the results in SUBMIT order. |
 | `taskMapWordsChecked` | value | `(-> (-> Int Int) Int Int (Vec (Result Int Error)))` | `Alloc,Block,IO,Mut,Spawn,Unsafe` |  | Run `f i` for every `i` in `0 .. n`, at most `width` at once, answering one `Result` per slot in SUBMIT order: `Ok` the thunk's word, `Err` the wait status of a slot whose thunk trapped. |
 | `taskArgvVector` | value | `(-> (Vec String) Int)` | `Alloc,Mut` |  | A null-terminated argv for `execve` or `posix_spawn`. Every string passes through `strCStr`, which copies a slice when it needs a terminator. The array lives in the caller's arena. |
@@ -2503,5 +2503,5 @@ Vec - a growable array of machine words, in Axiom.
 | `vecSum` | value | `(-> (Vec Int) Int)` |  |  | The sum of every element. |
 | `vecHash` | value | `(-> (Vec Int) Int)` |  |  | A position-sensitive digest of the whole vector. |
 | `vecSort` | value | `(-> (Vec Int) (Vec Int))` | `Mut` |  | Sort a vector of `Int` ascending, in place. Answers the vector. |
-| `vecSortBy` | value | `(-> (Vec a) (-> a a Int) (Vec a))` | `Mut` |  | Sort `v` in place by `cmp`, which takes two elements and answers negative, zero or positive the way `strCmp` does. Answers the vector. `(vecSortBy names (lambda (a b) (strCmp a b)))` orders strings by their bytes. |
+| `vecSortBy` | value | `(-> (Vec a) (-> a a Int) (Vec a))` | `Mut (incomplete)` |  | Sort `v` in place by `cmp`, which takes two elements and answers negative, zero or positive the way `strCmp` does. Answers the vector. `(vecSortBy names (lambda (a b) (strCmp a b)))` orders strings by their bytes. |
 

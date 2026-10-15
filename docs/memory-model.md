@@ -387,7 +387,7 @@ closed, and one remains:
 
 | A function that... | is inferred | why it is still open |
 |---|---|---|
-| calls through a local, a parameter, or an unresolved name | contributes nothing but a transparency mark | it needs the flow analysis that `MM-EXEC-9b` describes, and the language doesn't have it. The gap announces itself: the row carries `#effects-incomplete`, and an `effect(pure)` claim over it draws `AX3037`. You get a lower bound labelled as one, not a set that looks complete |
+| calls a target the compiler cannot resolve | adds a transparency mark to the known effects | finite target sets are followed through locals, parameters and capability fields, but unresolved targets still carry `#effects-incomplete`. An `effect(pure)` claim over an incomplete row draws `AX3037`; the reported effects remain a labelled lower bound |
 
 A call through an effect-transparent parameter often passes it an
 argument the walk can't follow, such as a load, a call result or an
@@ -3104,8 +3104,8 @@ standard library and the test corpus
 (`tests/diagnostics/555-string-int-distinct.ax`). The containers carry
 type variables instead, and their accessors `as` at the machine
 boundary. A signature's type variable is rigid inside its own body, so
-such a body needs an explicit `cast a`. Typing the tree changed no generated code,
-because `String` and `Int` share a representation and `as` is free.
+such a body needs an explicit `(as value a)`. `String` and `Int` share
+a word representation; `as` at this boundary preserves those bits.
 
 `MM-LIFE-2b` to `MM-LIFE-2f` give what the strategy needs from the
 machine: a count word, the ownership events, a reference map, a release
@@ -3918,14 +3918,16 @@ that size hands the same bytes to someone else. Under-reclaiming leaks,
 while this frees early, and the two are not symmetric.
 
 **MM-LIFE-2g (H). The invisible-store rule.** A store that erases a
-value's type **SHALL** take a share of it. This implementation has
-exactly two such places, and both are a `cast Int` inside a polymorphic
-function:
+value's type **SHALL** take a share of it. Trusted polymorphic stores
+take that share before converting the value to an `Int` word. They include:
 
-- `Mem.memSetWord`, which every container and every raw word store
-  goes through;
+- `Mem.memSetWord`, the typed wrapper for raw word stores;
 - the AST's `mkNode`/`mkNodeAt`, whose three payload words are
-  `ASTNode`'s `Int`-declared fields.
+  `ASTNode`'s `Int`-declared fields;
+- `Vec.vecPush` and `Vec.vecSet`, which retain an element before its
+  word enters the data block;
+- `Map.mapInsert`, which retains a value before handing its word to
+  the internal insertion routine.
 
 The share is taken by `__retainref`, `__retain`'s type-directed twin,
 and the only primitive designed with a polymorphic signature. It
@@ -4273,8 +4275,8 @@ Figures are in KiB:
 
 Evidence: `scripts/check-steady-state.sh`. The ablated twins are
 required, because a flat line also reads flat when the measurement is
-broken. The second shape's twin inserts each value through a `cast
-Int`, which takes no share and makes the table plain (`MM-LIFE-2m`),
+broken. The second shape's twin inserts each value through
+`(as value Int)`, which takes no share and makes the table plain (`MM-LIFE-2m`),
 and prints the same answer. So the two arms do the same work and
 differ only in what they hand back.
 
@@ -4631,15 +4633,13 @@ at ten thousand (130,848 KiB against 192). `scripts/check-net.sh` gates
 that with a negative probe, and `MM-ALLOC-22` states it as a rule. That isn't a program with an unusual
 memory profile. It is the shape the project targets.
 
-Here is why the ownership events never reached the compiler's own data.
-The declared type is discarded in exactly two places, both a `cast Int`
-inside a polymorphic function, and `MM-LIFE-2g` closes them with
-`__retainref`. So typing the containers and the AST was never the
-prerequisite. `MM-LIFE-2c`'s events 2 and 3 have shipped
-(`tests/stdlib/372-arc-owned-results.ax`). Both measurements are still
-blocked, because the compiler's own containers and AST declare their
-handles `Int`. No type-directed ownership event can fire on them, and
-neither figure moves until they carry a type the checker can see.
+Raw word storage limits which references these ownership events can
+reclaim. Trusted stores take a share before erasing a value's type
+(`MM-LIFE-2g`). `MM-LIFE-2c`'s events 2 and 3 are implemented
+(`tests/stdlib/372-arc-owned-results.ax`), but an `Int` payload no longer
+names the reference type it holds. Typed compiler containers preserve
+those reference edges; raw AST fields and raw containers rely on their
+enclosing arena's lifetime.
 
 That order is most of the reason the strategy is withdrawn rather than
 rescheduled. Twice, the step that looked next was neither the one that
@@ -5800,7 +5800,7 @@ That leaves two things the compiler doesn't check:
   freed word from a live one. A `Sys` function that only passes a
   buffer to the kernel carries no tag at all. Channels, mutexes,
   cancellation tokens and spawn handles are typed handles the runtime
-  checks (`MM-PAR-8`), and a `as` to one is a forging cast, so this
+  checks (`MM-PAR-8`), and an `as` conversion to one is a forging cast, so this
   hole doesn't reach them.
 
 *Evidence.*

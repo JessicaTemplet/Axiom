@@ -56,16 +56,12 @@ export interface Token {
 
 // grammar.js: BUILTIN_TYPES
 const BUILTIN_TYPES = new Set([
-  'Int', 'Float', 'Double', 'Bool', 'Char', 'String',
-  'I8', 'I16', 'I32', 'I64', 'I128', 'Isize',
-  'U8', 'U16', 'U32', 'U64', 'U128', 'Usize',
-  'F32', 'F64',
+  'Int', 'Int8', 'Int16', 'Int32', 'UInt8', 'UInt16', 'UInt32', 'UInt64',
+  'Float', 'Bool', 'Char', 'String', 'Foreign', 'Handle', 'Spawn',
 ])
 
-// The built-in effect row. grammar.js lists Pure/IO/Mut/Div; README.md's
-// "Effects" status row names the set the checker infers over: IO, Pure,
-// Alloc, Mut, Div.
-const BUILTIN_EFFECTS = new Set(['Pure', 'IO', 'Alloc', 'Mut', 'Div'])
+// Built-in effects from self_host/lexicon.ax.
+const BUILTIN_EFFECTS = new Set(['Pure', 'IO', 'Alloc', 'Mut', 'Div', 'Unsafe', 'Spawn', 'Block', 'Entropy'])
 
 const KEYWORD_FUNCTION = new Set(['fn', 'lambda'])
 const KEYWORD_TYPE = new Set(['data', 'struct', 'type', 'subtype', 'effect'])
@@ -85,7 +81,7 @@ const KEYWORD_INNER: Record<string, Record<number, string>> = {
   for: { 2: 'in', 4: 'by' },
   subtype: { 2: 'is', 4: 'range' },
 }
-const KEYWORD_MODIFIER = new Set(['sizeof', 'alignof', 'cast', 'mut'])
+const KEYWORD_MODIFIER = new Set(['sizeof', 'alignof', 'as', 'mut'])
 
 // Heads the parser refuses with AX2004. highlights.scm captures these as
 // `@error` "because that is what the compiler reports".
@@ -94,7 +90,7 @@ const KEYWORD_MODIFIER = new Set(['sizeof', 'alignof', 'cast', 'mut'])
 // trait and impl. `region` was on it until 2026-09-03.
 const REMOVED = new Set([
   'union', 'foreign', 'deriving',
-  'linear', 'consume', 'begin', 'trait', 'impl', 'cond', 'emacro',
+  'linear', 'consume', 'begin', 'trait', 'impl', 'cond', 'emacro', 'cast',
 ])
 
 const DELIMITERS = new Set(['::', '->', ':', '=', '!', ','])
@@ -404,6 +400,7 @@ export function highlight(source: string): Token[] {
           raw.text === '[' ||
           frame.typeCtx ||
           (frame.head === '::' && arg >= 2) ||
+          (frame.head === 'as' && arg === 2) ||
           (frame.head === '->' && arg >= 1)
 
         // `(fn (name a b) …)` / `(define (name a) …)` header list.
@@ -468,6 +465,7 @@ export function highlight(source: string): Token[] {
           }
         }
 
+        if (frame.head === 'as' && arg === 2) frame.typeCtx = true
         const capture = classifyAtom(raw.text, frame, parent)
         tokens.push({ text: raw.text, capture })
         if (frame.head === 'let' && arg === 1 && raw.text === 'mut') frame.localMutable = true

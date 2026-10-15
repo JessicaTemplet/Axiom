@@ -361,6 +361,14 @@ cat > "$work/ApiLayout.ax" <<'SIGNATURES'
 ;; A following signature stays separate.
 (pub :: layoutInt Int)
 (pub fn (layoutInt) 42)
+
+;; A concrete alias stays visible.
+(pub type LayoutNumber = Int)
+
+;; Generic parameters stay in declaration order.
+(pub type LayoutItems a =
+  (Vec ; a comment containing )) is not a delimiter
+    a))
 SIGNATURES
 : > "$work/signature.axsym"
 if ! "$axc" --diagnostic-format=ai check "$work/ApiLayout.ax" >"$work/signature.log" 2>&1; then
@@ -381,7 +389,14 @@ expected = {
     'layoutVector': '(-> (Vec Int) (Vec Int))',
     'layoutInt': 'Int',
 }
-assert set(rows) == set(expected), rows
+aliases = {
+    'LayoutNumber': '(type LayoutNumber = Int)',
+    'LayoutItems': '(type LayoutItems a = (Vec a))',
+}
+assert set(rows) == set(expected) | set(aliases), rows
+for name, declaration in aliases.items():
+    assert rows[name][2] == 'type', rows[name]
+    assert rows[name][3] == f'`{declaration}`', rows[name]
 for name, signature in expected.items():
     assert rows[name][2] == 'value', rows[name]
     assert rows[name][3] == f'`{signature}`', rows[name]
@@ -389,9 +404,63 @@ assert rows['layoutCallback'][6] == 'Calls a numeric callback.', rows
 assert ';@axiom:pre((>= value 0))' in rows['layoutCallback'][5], rows
 VERIFY_SIGNATURES
 then
-  ok "multiline signatures retain nested types, comments, contracts and declaration boundaries"
+  ok "multiline signatures and aliases retain nested types, parameters, comments, contracts and declaration boundaries"
 else
   bad "the generator truncated or merged a source signature"
+fi
+
+# Incomplete inference stays visible even when its inferred row is empty.
+# These marks come from actual unresolved field calls, not fixture metadata.
+echo "== unresolved effect rows stay labelled =="
+cat > "$work/ApiEffects.ax" <<'EFFECTS'
+(import Vec)
+;; A callback whose implementation is supplied by the caller.
+(pub struct Runner
+  (run : (-> Int Int)))
+;; Calls an opaque callback.
+(pub :: effectUnknown (-> Runner Int Int))
+(pub fn (effectUnknown worker n) (worker.run n))
+;; Allocates before calling an opaque callback.
+(pub :: effectMixed (-> Runner Int Int))
+(pub fn (effectMixed worker n)
+  {
+    (let v (vecPush vecNew n))
+    (worker.run (vecGet v 0))
+  })
+;; Adds without an unresolved call.
+(pub :: effectComplete (-> Int Int))
+(pub fn (effectComplete n) (+ n 1))
+EFFECTS
+if "$axc" --diagnostic-format=ai symbols "$work/ApiEffects.ax" > "$work/effects.axsym" \
+     2> "$work/effects.log"; then
+  "$gen_bin" "$work/effects.axsym" "$work/ApiEffects.ax" > "$work/effects.md"
+  sed 's/ #effects-incomplete//g' "$work/effects.axsym" > "$work/effects-unmarked.axsym"
+  "$gen_bin" "$work/effects-unmarked.axsym" "$work/ApiEffects.ax" > "$work/effects-unmarked.md"
+  if python3 - "$work/effects.md" "$work/effects-unmarked.md" <<'VERIFY_EFFECTS'
+from pathlib import Path
+import sys
+
+def effects(path):
+    return {cells[1].strip('`'): cells[4]
+            for line in Path(path).read_text().splitlines() if line.startswith('| `')
+            for cells in [[cell.strip() for cell in line.split('|')]]}
+
+marked, unmarked = map(effects, sys.argv[1:])
+assert marked['effectUnknown'] == '`incomplete`', marked
+assert marked['effectMixed'] == '`Alloc,Mut (incomplete)`', marked
+assert marked['effectComplete'] == '', marked
+assert unmarked['effectUnknown'] == '', unmarked
+assert unmarked['effectMixed'] == '`Alloc,Mut`', unmarked
+assert unmarked['effectComplete'] == marked['effectComplete'], unmarked
+VERIFY_EFFECTS
+  then
+    ok "actual incomplete rows retain their mark; removing only the mark changes only those cells"
+  else
+    bad "the reference hides unresolved callable flow or labels complete rows incomplete"
+  fi
+else
+  bad "the effect-row source probe did not check"
+  head -20 "$work/effects.log"
 fi
 
 generate() {  # <src-root> <out-file>

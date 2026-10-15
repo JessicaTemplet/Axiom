@@ -327,6 +327,13 @@ else
   bad "gate reuse invalidation or failure propagation failed"
 fi
 
+# The platform test jobs are partitioned without changing the gate list.
+if python3 "$repo_root/tests/ci/shards.py" "$ci_yml"; then
+  ok "every test shard is required and cache identities remain independent"
+else
+  bad "test shard coverage, aggregation or cache identity failed"
+fi
+
 # --------------------------------------------------------------------
 echo
 if (( failed )); then

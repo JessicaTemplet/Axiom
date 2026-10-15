@@ -25,6 +25,8 @@ axiom run examples/contracts/contracts.ax
 See [contracts](../docs/reference.md#contracts-pre-and-post) for the
 allowed expressions and what happens when a clause fails.
 
+Tested by `scripts/check-contracts.sh`.
+
 ## batch-fallible
 
 [`examples/batch-fallible/batch-fallible.ax`](batch-fallible/batch-fallible.ax)
@@ -43,8 +45,19 @@ per record.
 axiom run examples/batch-fallible/batch-fallible.ax [N [k]]
 ```
 
-`N` and `k` default to `1000000` and `7`. The header shows the
-arithmetic behind the three numbers it prints, so you can check them.
+`N` and `k` default to `1000000` and `7`. For a smaller run:
+
+```bash
+axiom run examples/batch-fallible/batch-fallible.ax 1000 7
+```
+
+```text
+skip total 429429
+default total 429571
+malformed 142
+```
+
+The header shows the arithmetic behind the totals.
 
 Tested by `scripts/check-steady-state.sh`.
 
@@ -68,9 +81,9 @@ Tested by `scripts/check-obfuscation.sh`.
 surface and writes a reference page for it. It's the program that
 writes [`docs/stdlib-api.md`](../docs/stdlib-api.md).
 
-It reads the `(pub :: …)` declarations from the source, because that's
-the only place visibility is written. It then joins them with the rows
-`axiom symbols` prints, which supply the effects column.
+It reads public declarations and type aliases from the source. It then
+joins function signatures with the rows `axiom symbols` prints, which
+supply the effects column and mark unresolved calls.
 
 ```bash
 axdoc <axsym-file> <module.ax>…

@@ -389,17 +389,8 @@
 ; ------------------------------------------------------------------
 ; The effect row, from AXSYM
 ; ------------------------------------------------------------------
-; `#effects=Alloc,IO` for `name`, or "" when the stream does not carry
-; one - which is what a pure function looks like, and also what a macro
-; looks like, because AXSYM has no row for a macro at all.
-;
-; A LINEAR SCAN, deliberately. The stream is a few hundred lines and
-; the public surface a few hundred names, so this is a few tens of
-; thousands of string comparisons - under a millisecond, against the
-; interner and hash map an index would cost. `Intern` and `Map` are
-; both in the standard library and both would work; neither earns its
-; place here, and a reference that reached for them would be teaching
-; the wrong lesson in the file people read as an example.
+; Read the inferred row and preserve an unresolved-call marker. A blank
+; row alone must not make an incomplete analysis look like inferred purity.
 (:: effectsOf (-> (Vec String) String String))
 (fn (effectsOf axsym name)
   {
@@ -428,9 +419,18 @@
 (fn (effectsField line)
   {
     (let at (strFindStr line "#effects="))
-    (if (< at 0)
-      ""
-      (identAt line (+ at 9)))
+    (let effects
+      (if (< at 0)
+        ""
+        (identAt line (+ at 9))))
+    (let mark (strFindStr line " #effects-incomplete"))
+    (if (if (< mark 0)
+      false
+      (strEq (identAt line (+ mark 1)) "#effects-incomplete"))
+      (if (== (strLen effects) 0)
+        "incomplete"
+        (concat effects " (incomplete)"))
+      effects)
   })
 
 ; The first index at or after 0 where `needle` occurs in `hay`, or -1.
@@ -614,7 +614,7 @@
                       {
                         (let dn (declName line kind))
                         (let signature
-                          (if (strEq kind "value")
+                          (if (|| (strEq kind "value") (strEq kind "type"))
                             (signatureAt lines i)
                             (Signature :text "" :next (+ i 1))))
                         {
@@ -623,9 +623,15 @@
                                       (renderRow kind dn
                                         (if (strEq kind "value")
                                           (declType signature.text dn)
+                                          (if (strEq kind "type")
+                                            (concat "("
+                                              (strSlice signature.text 5
+                                                (- (strLen signature.text) 5)))
+                                            ""))
+                                        (if (strEq kind "value")
+                                          (effectsOf axsym dn)
                                           "")
-                                        (effectsOf axsym dn) (contractsFor lines dn)
-                                        (docAbove lines i))))
+                                        (contractsFor lines dn) (docAbove lines i))))
                           (set i (- signature.next 1))
                           ()
                         }
@@ -705,4 +711,4 @@
 
 (:: header String)
 (fn (header)
-  "# Axiom standard library\n\nEvery public function, type and macro in Axiom's standard library, one\nsection per module. To find out what each module is for, start with\n[Modules at a glance](reference.md#modules-at-a-glance) in the language\nreference.\n\nEvery name listed is `pub` in the source. The columns are:\n\n- **Kind**: `value` for a function or constant, `struct`, `data`,\n  `effect` or `macro`.\n- **Type**: the signature as you write it in source, such as\n  `(-> Int Int)`.\n- **Effects**: what the compiler infers the definition does. `Alloc`\n  allocates, uses the arena or installs a handler. `IO` reaches the\n  outside world through a syscall, an `extern` call or the command\n  line. `Mut` changes heap state that something else can see. `Unsafe`\n  uses a raw-memory primitive. A blank cell means the compiler inferred\n  no effect, and a macro's cell is always blank. Treat the column as a\n  lower bound when a call reaches a function value inference cannot\n  resolve (`docs/memory-model.md` MM-EXEC-9a).\n- **Contracts**: the `pre` and `post` clauses checked on every call.\n- **Summary**: the first paragraph of the `;;` doc comment above the\n  definition. A blank cell is a name with no doc comment yet.\n\nA module's `;;!` lines open its section.\n\nThis page is generated from the standard library by\n`examples/axdoc/axdoc.ax`, so please don't edit it by hand.\n`scripts/check-stdlib-api.sh` regenerates it in CI and fails if the\ntwo differ.\n\n")
+  "# Axiom standard library\n\nEvery public function, type and macro in Axiom's standard library, one\nsection per module. Start with [Modules at a glance](reference.md#modules-at-a-glance)\nto choose a module.\n\nEvery listed declaration is public. An `effect` declaration is exported\nwithout a `pub` keyword. The columns are:\n\n- **Kind**: `value` for a function or constant, `struct`, `data`,\n  `type` for an alias, `effect` or `macro`.\n- **Type**: the source signature, such as `(-> Int Int)`, or the\n  complete type alias declaration with its parameters.\n- **Effects**: the compiler's inferred row. `Alloc` allocates, resets\n  an arena or installs a handler. `IO` performs a syscall or external\n  call, or reads command-line arguments. `Mut` changes memory. `Unsafe` exposes caller-established low-level obligations.\n  `Spawn` creates a process or task, `Block` waits, and `Entropy` obtains\n  randomness. Custom effects appear under their declared names.\n  `incomplete` marks unresolved callable flow; that row is a lower bound.\n  Callable arguments can add their own effects. A blank cell means no\n  effects were inferred; a macro has no inferred row. See\n  [effect inference limits](memory-model.md#1-execution-semantics) for the\n  distinction between an inferred row and a guarantee.\n- **Contracts**: the `pre` and `post` clauses checked on every call.\n- **Summary**: the first paragraph of the `;;` doc comment above the\n  definition. A blank cell is a name with no doc comment yet.\n\nA module's `;;!` lines open its section.\n\nThis page is generated from the standard library by\n`examples/axdoc/axdoc.ax`. Change its source or the generator to update it.\n\n")

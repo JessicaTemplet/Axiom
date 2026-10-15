@@ -131,15 +131,15 @@ writes, so a program never touches a column number:
           0
         }
         {
-          (let _ (insertBook db (Book 1 "Dune" (Some 1965))))
+          (let _ (insertBook db (Book :id 1 :title "Dune" :year (Some 1965))))
           0
         }
         {
-          (let _ (insertBook db (Book 2 "Untitled" None)))
+          (let _ (insertBook db (Book :id 2 :title "Untitled" :year None)))
           0
         }
         {
-          (let _ (upsertBook db (Book 2 "Untitled" (Some 2026))))
+          (let _ (upsertBook db (Book :id 2 :title "Untitled" :year (Some 2026))))
           0
         }
         (match (queryBook db selectAllBook)
