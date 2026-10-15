@@ -753,9 +753,11 @@ call to each entropy, unmap and wait function, and
 **MM-EXEC-9f (H). `IO`'s typed descriptor calls check their range
 before the kernel sees it.** Every descriptor is a `File`, and every
 path is a `String`. `writeStr` and `writeSlice` write a string or a
-range of one, `readInto` reads into a range of a `String` buffer,
-`fileRead` into a range of a `ReadBuffer`, and `readLine` and `readAll`
-answer fresh strings. `termRaw` keeps a terminal's saved settings in a
+range of one, `fileRead` reads into a range of a `ReadBuffer`, and
+`readLine` and `readAll` answer fresh strings. A read never fills a
+`String`: a literal's bytes are the loader's, and a slice or an alias
+shares the bytes of the string it came from, so `fileRead` takes the
+sealed `ReadBuffer` and `readBufferText` copies out of it. `termRaw` keeps a terminal's saved settings in a
 `TermGuard`, and `termSize` answers a `TermSize`. A range outside its
 string is the index trap, status 77, before the kernel is called
 (`tests/stdlib/610-typed-io-bounds.ax`). `tests/stdlib/545-no-unsafe-practical.ax`
@@ -954,7 +956,7 @@ statuses. A program **MUST NOT** reuse them as a normal result:
 | 74 | a `__syscallN` reached on a target with no syscall ABI (windows-x86_64, windows-aarch64) | emitted, not yet executed: `emitPrimSyscall` lowers the primitive there to `__axiom_no_syscall`, which prints `axiom: no syscall ABI on this target` (37 bytes) and exits 74. Status 73 belongs to the FFI (`ffiHandleClose`) |
 | 75 | `__axiom_arena_reset` handed a mark whose chunk is no longer on the active list (`MM-ALLOC-16a`) | measured: `tests/stdlib/166-arena-bad-mark.ax` resets an inner mark after its outer one; the run prints `axiom: arena reset to an invalid mark` to fd 2 and exits 75. The fixture's first two blocks (nested marks reset innermost-first, and one mark reset twice) must still exit silently, so the trap is pinned against firing on legal use |
 | 76 | `__axiom_arena_reset` handed a mark taken before a `handle` whose extent is still live (`MM-ALLOC-16b`) | measured: `tests/stdlib/167-arena-live-handle.ax` resets a mark that predates the extent; the run prints `axiom: arena reset past a live handle` to fd 2 and exits 76. Its first two blocks (a mark taken inside the extent, and a mark with no handle in scope) must still exit silently. `tests/stdlib/401-recover-effect.ax` must still exit 71, because a recovery abort performs this same reset legitimately |
-| 77 | an index out of range, raised by `(__indexTrap)`: `vecGet` and its kin, and `IO`'s range checks on `writeSlice`, `readInto` and `fileRead` | measured: `tests/stdlib/464-index-trap.ax` prints `axiom: vector index out of range` to fd 2 and exits 77; `tests/stdlib/610-typed-io-bounds.ax` refuses each typed call's out-of-range argument before its syscall |
+| 77 | an index out of range, raised by `(__indexTrap)`: `vecGet` and its kin, and `IO`'s range checks on `writeSlice` and `fileRead` | measured: `tests/stdlib/464-index-trap.ax` prints `axiom: vector index out of range` to fd 2 and exits 77; `tests/stdlib/610-typed-io-bounds.ax` refuses each typed call's out-of-range argument before its syscall |
 | 78 | `parallel`: the kernel refused the fork or the pthread (`__axiom_par_spawn_failed`) | measured by `scripts/check-parallel.sh` §12d: under a per-user process limit of 1 a `parallel` form's fork answers EAGAIN, a recovery point armed around it answers 78, and the unrecovered spawn prints `axiom: parallel: could not spawn the binding` and exits 78 (processes on every non-root runner, threads too on Linux, where the limit counts threads) |
 | 79 | `parallel` on a target with neither `fork` nor a pthread (windows-x86_64, windows-aarch64) | emitted, not executed: both primitives compile there to `__axiom_par_unsupported`, which prints `axiom: parallel is not available on this target` and exits 79. The program builds for every target and says at its first spawn what it can't do (`scripts/check-parallel.sh` reads the IR) |
 | 80 | a violated `;@axiom:pre(...)`/`post(...)` contract | measured by `scripts/check-contracts.sh` §1: a violated `pre`/`post` prints ``axiom: precondition failed in `half`: (> n 0)`` to fd 2, prints the backtrace, and exits 80 at every `--opt` level. Inside `__axiom_recover` it answers 80 to the arming call |

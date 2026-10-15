@@ -43,6 +43,16 @@ its changelog too.
   `vecFree` left the library. Tested by
   `tests/stdlib/895-scalar-element-read.ax` and `scripts/check-task.sh`.
 
+- `IO.readInto` is removed. It read into a `String`, and a `String`
+  is a value: a read into a slice or an alias changed every string
+  sharing those bytes, and a literal's bytes are the loader's. Read
+  into a `ReadBuffer` with `fileRead`, which no other value can share,
+  and copy out with `readBufferText`. `Rpc`'s framer and `Tui.Term`'s
+  key reader moved onto it, and `Rpc.rdBuf` gives way to `rdPending`,
+  a copy of the bytes not yet handed out. **BREAKING**:
+  `compat/BREAKING` names both. Tested by
+  `tests/diagnostics/1310-read-into-string-refused.ax`.
+
 - A `match` arm that builds a value from its own binder no longer keeps
   the scrutinee. `((Some a) (Some (strLen a)))` stores a length, but
   the escape walk read the mention of `a` as the string escaping, so

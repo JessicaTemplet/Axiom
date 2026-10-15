@@ -7,7 +7,7 @@
 ;   \r\n
 ;   {"jsonrpc":"2.0","method":"initialized",...}
 ;
-; WHY A BUFFERED READER. `IO.readInto` performs ONE `read`, and a
+; WHY A BUFFERED READER. `IO.fileRead` performs ONE `read`, and a
 ; read is permitted to return fewer bytes than asked - a pipe hands
 ; over whatever the writer has flushed. Framing therefore cannot be
 ; done by reading a header "then" a body: the header, the terminator
@@ -18,7 +18,7 @@
 ; messages out of it.
 ;
 ;   word 0  fd
-;   word 1  buf, a Str whose LENGTH is the capacity
+;   word 1  buf, a `ReadBuffer` whose length is the capacity
 ;   word 2  filled    - bytes of `buf` holding data
 ;   word 3  consumed  - how far the reader has got
 ;
@@ -30,7 +30,7 @@
 ; CONTENT-LENGTH IS COUNTED IN BYTES, not characters - the spec says so,
 ; and getting it wrong would desynchronise the stream permanently on the
 ; first non-ASCII message rather than failing visibly.
-; `IO` arrives selectively - `(readInto writeStr)` only. A whole `IO`
+; `IO` arrives selectively - the reader and `writeStr` only. A whole `IO`
 ; import would collide: it defines `die`, and so does the compiler's
 ; own `main.ax`, and Axiom's namespace is flat, so a program holding
 ; both has an ambiguous `die` at every call site.
@@ -38,7 +38,7 @@
 (import Str)
 (import Fmt)
 (import Sys)
-(import IO (File readInto writeStr))
+(import IO (File ReadBuffer readBufferNew readBufferLen readBufferByte readBufferText readBufferPut fileRead writeStr))
 
 (:: rdCap Int)
 (fn (rdCap)
@@ -93,7 +93,7 @@
   (let ((r (memAlloc 32)))
     {
       (memSetWord r 0 f)
-      (memSetWord r 1 (strAlloc rdCap))
+      (memSetWord r 1 (readBufferNew rdCap))
       (memSetWord r 2 0)
       (memSetWord r 3 0)
       r
@@ -106,10 +106,19 @@
 (fn (rdFile r)
   (cast File (memGetWord r 0)))
 
-;; The reader's buffer.
-(pub :: rdBuf (-> Int String))
-(pub fn (rdBuf r)
-  (memGetWordStr r 1))
+; The reader's buffer. The cast is at a return inside a signature that
+; carries the type, as `rdFile`'s is.
+(:: rdBuf (-> Int ReadBuffer))
+;@axiom:effect(unsafe)
+(fn (rdBuf r)
+  (cast ReadBuffer (memGetWord r 1)))
+
+;; A copy of the bytes the reader holds but has not handed out: the
+;; start of the next message, which a caller that moves the reader to
+;; fresh storage carries across with `rdReseat`.
+(pub :: rdPending (-> Int String))
+(pub fn (rdPending r)
+  (readBufferText (rdBuf r) (rdConsumed r) (- (rdFilled r) (rdConsumed r))))
 
 ;; How many bytes of the reader's buffer hold data.
 (pub :: rdFilled (-> Int Int))
@@ -133,12 +142,12 @@
 (pub :: rdReseat (-> Int Int Int Int))
 (pub fn (rdReseat r addr u)
   (let ((buf 
-    (strAlloc
+    (readBufferNew
       (if (> u rdCap)
         u
         rdCap))))
     {
-      (memCopy (strData buf) addr u)
+      (readBufferPut buf 0 (strWrap addr u))
       (memSetWord r 1 buf)
       (memSetWord r 2 u)
       (memSetWord r 3 0)
@@ -157,15 +166,15 @@
     {
       (if (> c 0)
         {
-          (memCopy (strData buf) (+ (strData buf) c) (- f c))
+          (readBufferPut buf 0 (readBufferText buf c (- f c)))
           (memSetWord r 2 (- f c))
           (memSetWord r 3 0)
         })
-      ; Still no room? Grow. `strLen` of the buffer is its capacity.
-      (if (>= (rdFilled r) (strLen (rdBuf r)))
-        (let ((bigger (strAlloc (* (strLen (rdBuf r)) 2))))
+      ; Still no room? Grow. The buffer's length is its capacity.
+      (if (>= (rdFilled r) (readBufferLen (rdBuf r)))
+        (let ((bigger (readBufferNew (* (readBufferLen (rdBuf r)) 2))))
           {
-            (memCopy (strData bigger) (strData (rdBuf r)) (rdFilled r))
+            (readBufferPut bigger 0 (readBufferText (rdBuf r) 0 (rdFilled r)))
             (memSetWord r 1 bigger)
           }))
       0
@@ -177,10 +186,10 @@
 ;@axiom:effect(io)
 (fn (rdFill r)
   {
-    (if (>= (rdFilled r) (strLen (rdBuf r)))
+    (if (>= (rdFilled r) (readBufferLen (rdBuf r)))
       (rdCompact r))
     (let ((n 
-      (match (readInto (rdFile r) (rdBuf r) (rdFilled r) (- (strLen (rdBuf r)) (rdFilled r)))
+      (match (fileRead (rdFile r) (rdBuf r) (rdFilled r) (- (readBufferLen (rdBuf r)) (rdFilled r)))
         ((Ok k) k)
         ((Err e) (- 0 (errCode e))))))
       {
@@ -221,7 +230,7 @@
     {
       (while (&& (< found 0) (<= (+ i 4) n))
         {
-          (if (&& (== (strByte buf (+ base i)) 13) (&& (== (strByte buf (+ (+ base i) 1)) 10) (&& (== (strByte buf (+ (+ base i) 2)) 13) (== (strByte buf (+ (+ base i) 3)) 10))))
+          (if (&& (== (readBufferByte buf (+ base i)) 13) (&& (== (readBufferByte buf (+ (+ base i) 1)) 10) (&& (== (readBufferByte buf (+ (+ base i) 2)) 13) (== (readBufferByte buf (+ (+ base i) 3)) 10))))
             (set found i))
           (set i (+ i 1))
         })
@@ -242,7 +251,7 @@
     true
     (if (>= (+ at i) (rdFilled r))
       false
-      (if (== (rdLower (strByte (rdBuf r) (+ at i))) (rdLower (strByte word i)))
+      (if (== (rdLower (readBufferByte (rdBuf r) (+ at i))) (rdLower (strByte word i)))
         (rdMatchCI r at word (+ i 1))
         false))))
 
@@ -277,7 +286,7 @@
                 (mut digits 0)
               )
                 {
-                  (while (&& (< p end) (== (strByte buf p) 32))
+                  (while (&& (< p end) (== (readBufferByte buf p) 32))
                     (set p (+ p 1)))
                   ; The ceiling is tested HERE, after each digit, and
                   ; deliberately not on the finished value: by then the
@@ -289,9 +298,9 @@
                   ; stops as soon as `v` passes `rdMaxBody`) while
                   ; `Content-Length: 0000000000000005` stays legal,
                   ; which a digit-count cap would have broken.
-                  (while (&& (== over 0) (&& (< p end) (&& (>= (strByte buf p) 48) (<= (strByte buf p) 57))))
+                  (while (&& (== over 0) (&& (< p end) (&& (>= (readBufferByte buf p) 48) (<= (readBufferByte buf p) 57))))
                     {
-                      (set v (+ (* v 10) (- (strByte buf p) 48)))
+                      (set v (+ (* v 10) (- (readBufferByte buf p) 48)))
                       (set digits (+ digits 1))
                       (set p (+ p 1))
                       (if (> v rdMaxBody)
@@ -376,14 +385,12 @@
                     (set dead 1)))
                 (if (== dead 1)
                   None
-                  ; `strDup`, not `strSlice`: a slice would SHARE
-                  ; the reader's buffer, and the next compaction
-                  ; memcpys within that same allocation - so a
-                  ; body handed to the caller, or any substring
-                  ; the JSON parser kept of it, would change
-                  ; under them later. One copy per message is
-                  ; nothing next to the parse that follows it.
-                  (let ((body (strDup (strSlice (rdBuf r) (+ (rdConsumed r) bodyRel) n))))
+                  ; A copy: the next read and compaction write the
+                  ; reader's buffer, so a body that shared it would
+                  ; change under the caller and the JSON parser.
+                  ; One copy per message is nothing next to the
+                  ; parse that follows it.
+                  (let ((body (readBufferText (rdBuf r) (+ (rdConsumed r) bodyRel) n)))
                     {
                       (memSetWord r 3 (+ (+ (rdConsumed r) bodyRel) n))
                       (Some body)

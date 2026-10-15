@@ -1051,25 +1051,14 @@
     (Err (ioFdError (- 0 n) op))
     (Ok n)))
 
-;; One `read(2)` of at most `count` bytes from `f` into the bytes of
-;; `buf` that start at byte `at`: `(Ok n)` with `n` the bytes read, `(Ok
-;; 0)` at end of input, or `(Err e)` whose code is the errno.
-;
-; This is the reader for a program that keeps its own buffer: a
-; `String` from `strAlloc`, filled a piece at a time. The range is
-; checked before the call, and one outside `buf` stops the program
-; with status 77, so the kernel only ever writes bytes `buf` holds.
-; Use a ReadBuffer and `fileRead` for storage no other String shares,
-; or readAll and readLine for a fresh string.
-(pub :: readInto (-> File String Int Int (Result Int Error)))
-;@axiom:effect(io)
-(pub fn (readInto f buf at count)
-  (if (ioOutside buf at count)
-    __indexTrap
-    (ioAnswer "readInto" (ioReadFd (ioFd f) (+ (strData buf) at) count))))
-
 ;; Mutable input storage. The constructor and backing string stay private,
 ;; so safe code cannot alias an immutable String as a writable buffer.
+;
+; It is the only storage a read fills in place. A `String` is a value:
+; a literal's bytes are the loader's, and a slice, an alias or a copy
+; handed elsewhere shares the bytes of the string it came from. A reader
+; that wrote into a caller's `String` changed every one of them, so the
+; one that did was removed, and `fileRead` takes a `ReadBuffer`.
 (pub struct ReadBuffer sealed
   (bytes : String))
 

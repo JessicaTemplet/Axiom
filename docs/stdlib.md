@@ -103,7 +103,7 @@ nothing. The other readers and writers take a `File`:
 | Task | API |
 |---|---|
 | open and close | `openPath`, `fileClose` |
-| read | `readLine`, `readAll`, `fileRead` into a `ReadBuffer`, `readInto` into a `String` you allocated |
+| read | `readLine`, `readAll`, and `fileRead` into a `ReadBuffer` you allocated with `readBufferNew` |
 | write | `writeStr` and `writeSlice` answer a count or a negative errno; `fileWrite` answers a `Result`; `writeOut` and `writeErr` write to the standard streams |
 | by path | `readFile`, `writeFile`, `appendFile`, `copyFile`, `removeFile`, `renamePath`, `fileExists`, `fileSize`, `isDir`, `listDir`, `makeDir`, `makeDirAll`, `removeDir`, `cwd` |
 | wait on many | `pollerNew`, `pollerAdd`, `pollerRemove`, `pollerAddSignals`, `pollerWait`, `pollerToken`, `pollerSignal`, `pollerClose` |

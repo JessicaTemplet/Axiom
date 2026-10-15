@@ -1,0 +1,44 @@
+; A read fills a `ReadBuffer`, never a `String` (MM-EXEC-9f). A
+; `String` is a value: a literal's bytes are the loader's, and a slice
+; or an alias shares the bytes of the string it came from, so a read
+; into one changed every string that shares them.
+;
+;   1  `fileRead` handed a literal is AX3004: it takes a `ReadBuffer`
+;   2  handed a `strAlloc`'d string, AX3004 again
+;   3  `readInto`, the call that took a `String`, is gone: AX3001
+;   4  `copied` reads into a `ReadBuffer` and copies out: silent
+(import IO)
+(import Str)
+
+(:: literal Int)
+;@axiom:effect(io)
+(fn (literal)
+  (match (fileRead stdin "hello world" 0 5)
+    ((Ok n) n)
+    ((Err e) 0)))
+
+(:: allocated Int)
+;@axiom:effect(io)
+(fn (allocated)
+  (match (fileRead stdin (strAlloc 8) 0 8)
+    ((Ok n) n)
+    ((Err e) 0)))
+
+(:: removed Int)
+;@axiom:effect(io)
+(fn (removed)
+  (match (readInto stdin (strAlloc 8) 0 8)
+    ((Ok n) n)
+    ((Err e) 0)))
+
+(:: copied String)
+;@axiom:effect(io)
+(fn (copied)
+  (let ((buf (readBufferNew 8)))
+    (match (fileRead stdin buf 0 8)
+      ((Ok n) (readBufferText buf 0 n))
+      ((Err e) ""))))
+
+(:: main Int)
+(fn (main)
+  0)

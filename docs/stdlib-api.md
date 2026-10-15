@@ -1536,7 +1536,7 @@ Fmt - number formatting, in Axiom.
 
 ## `IO`
 
-`stdlib/IO.ax` — 73 public names
+`stdlib/IO.ax` — 72 public names
 
 IO - files, standard streams, terminals, readiness and sockets.
 
@@ -1577,7 +1577,6 @@ IO - files, standard streams, terminals, readiness and sockets.
 | `todo` | value | `(-> String a)` | `Alloc,IO,Mut` | Exit 70 with `todo: <what>` on standard error; types as any result and never returns. |
 | `readLine` | value | `(-> File (Result (Option String) Error))` | `Alloc,IO,Mut` | One line of `f` without its newline: `(Ok (Some line))`; `(Ok None)` at end of input when nothing was read; `(Err e)` whose code is the errno, its message `readLine: errno 9`. |
 | `readAll` | value | `(-> File (Result String Error))` | `Alloc,IO,Mut` | Everything left on `f` to end of input: `(Ok s)`, `(Ok "")` when nothing arrived, or `(Err e)` whose code is the errno. |
-| `readInto` | value | `(-> File String Int Int (Result Int Error))` | `Alloc,IO,Mut` | One `read(2)` of at most `count` bytes from `f` into the bytes of `buf` that start at byte `at`: `(Ok n)` with `n` the bytes read, `(Ok 0)` at end of input, or `(Err e)` whose code is the errno. |
 | `ReadBuffer` | struct |  |  | Mutable input storage. The constructor and backing string stay private, so safe code cannot alias an immutable String as a writable buffer. |
 | `readBufferNew` | value | `(-> Int ReadBuffer)` | `Alloc,Mut` | Allocate a zeroed input buffer of n bytes. A negative size traps 77. |
 | `readBufferLen` | value | `(-> ReadBuffer Int)` |  | The buffer's capacity, in bytes. |
@@ -1909,7 +1908,7 @@ Rpc.ax — the LSP base protocol's framing, over a file descriptor.
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
 | `rdNew` | value | `(-> File Int)` | `Alloc,Mut` | A reader over `f`. The record holds a share of `f`, so the file stays open while the reader does. |
-| `rdBuf` | value | `(-> Int String)` |  | The reader's buffer. |
+| `rdPending` | value | `(-> Int String)` | `Alloc,Mut` | A copy of the bytes the reader holds but has not handed out: the start of the next message, which a caller that moves the reader to fresh storage carries across with `rdReseat`. |
 | `rdFilled` | value | `(-> Int Int)` |  | How many bytes of the reader's buffer hold data. |
 | `rdConsumed` | value | `(-> Int Int)` |  | How many bytes of the reader's buffer have been handed out. |
 | `rdReseat` | value | `(-> Int Int Int Int)` | `Alloc,Mut` | Re-seat a reader on freshly allocated storage, carrying `u` bytes of not-yet-consumed input from `addr`. |

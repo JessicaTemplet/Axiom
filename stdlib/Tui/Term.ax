@@ -2,7 +2,7 @@
 ;
 ; `Tui.Keys` turns bytes into events and `Tui.Edit` turns events into
 ; a buffer and a byte stream; both are compiler-enforced pure.
-; This file is the seam: it refills a buffer from `readInto`, decides
+; This file is the seam: it refills a buffer with `fileRead`, decides
 ; the ONE case the decoder cannot (a prefix that stopped arriving),
 ; runs the loop, and performs the single write per keystroke.
 ;
@@ -47,7 +47,7 @@
 (import Str)
 (import Vec)
 (import Sys)
-(import IO (File stdout readInto writeStr termRaw termRestore termSize TermGuard TermSize Poller pollerNew pollerAdd pollerWait))
+(import IO (File ReadBuffer readBufferNew readBufferLen readBufferText fileRead stdout writeStr termRaw termRestore termSize TermGuard TermSize Poller pollerNew pollerAdd pollerWait))
 (import Err)
 (import Tui.Keys)
 (import Tui.Edit)
@@ -79,12 +79,11 @@
 ; ------------------------------------------------------------------
 ; The reader.
 ;
-; `buf` is a `strAlloc`'d String read into through `strData`, so the
-; scanner takes a String and never needs `strWrap` - whose header
+; The scanner takes a String and never needs `strWrap`, whose header
 ; makes the caller responsible for a NUL at bytes[len] and for the
 ; bytes outliving the header, two obligations an interior view of a
-; live read buffer cannot honour. `len` is the fill and `pos` the
-; consume point; they are compacted to 0 when they meet.
+; live read buffer cannot honour. A fill copies the arrived bytes out
+; of the read buffer once, and drops the decoded prefix as it does.
 ;
 ; `poller` watches `in` for readability, or is `None` when the poll
 ; layer refused or the reader is inert. A tty is a file like any other
@@ -94,13 +93,17 @@
 ; `guard` holds the terminal's raw-mode guard while raw mode is on, and
 ; `rows`/`cols` the last size `termReadSize` asked for.
 ;
-; PRIVATE. `len`/`pos` bound the range a `read` fills; another module
-; can name the type, but only `mkKeyIn` builds one and only this file
-; reads or sets a field.
+; PRIVATE. A `read` fills `rb`, and `view` is an immutable copy of the
+; bytes not yet decoded followed by the new ones, so `Tui.Keys` scans a
+; `String` the next read cannot change. `len` is the length of `view`
+; and `pos` how far into it decoding has got. Another module can name
+; the type, but only `mkKeyIn` builds one and only this file reads or
+; sets a field.
 ; ------------------------------------------------------------------
 (struct KeyIn
   (in : File)
-  (buf : String)
+  (rb : ReadBuffer)
+  (mut view : String)
   (mut len : Int)
   (mut pos : Int)
   (poller : (Option Poller))
@@ -118,7 +121,8 @@
   (if (== active 0)
     (KeyIn
       in
-      (strAlloc 1)
+      (readBufferNew 1)
+      ""
       0
       0
       None
@@ -128,7 +132,8 @@
       0)
     (KeyIn
       in
-      (strAlloc termBufBytes)
+      (readBufferNew termBufBytes)
+      ""
       0
       0
       ; A poller that cannot be made, or cannot watch `in`, is `None`:
@@ -170,16 +175,10 @@
 (pub :: keyInFill (-> KeyIn Int Int))
 ;@axiom:effect(io)
 (pub fn (keyInFill kin timeoutMs)
-  {
-    (if (> kin.pos 0)
-      {
-        (memCopy (strData kin.buf) (+ (strData kin.buf) kin.pos) (- kin.len kin.pos))
-        (set kin.len (- kin.len kin.pos))
-        (set kin.pos 0)
-      })
+  (let ((pending (- kin.len kin.pos)))
     (if (== kin.eof 1)
       (- 0 1)
-      (if (>= kin.len (strLen kin.buf))
+      (if (>= pending (readBufferLen kin.rb))
         (- 0 2)
         (let ((ready
           (if (>= timeoutMs 0)
@@ -193,7 +192,7 @@
           (if (== ready 0)
             0
             (let ((n 
-              (match (readInto kin.in kin.buf kin.len (- (strLen kin.buf) kin.len))
+              (match (fileRead kin.in kin.rb 0 (- (readBufferLen kin.rb) pending))
                 ((Ok k) k)
                 ((Err e) (- 0 (errCode e))))))
               (if (<= n 0)
@@ -202,10 +201,14 @@
                   (- 0 1)
                 }
                 {
-                  (set kin.len (+ kin.len n))
+                  ; The undecoded tail of the old view, then the new
+                  ; bytes: one copy of what arrived, as the old
+                  ; compaction moved it.
+                  (set kin.view (concat (strSlice kin.view kin.pos pending) (readBufferText kin.rb 0 n)))
+                  (set kin.len (+ pending n))
+                  (set kin.pos 0)
                   n
-                }))))))
-  })
+                }))))))))
 
 ; ------------------------------------------------------------------
 ; One event, never KEY_MORE. The only function here that both reads
@@ -236,7 +239,7 @@
   )
     {
       (while (== done 0)
-        (let ((ev (keyScan kin.buf kin.len kin.pos)))
+        (let ((ev (keyScan kin.view kin.len kin.pos)))
           (if (== ev.kind KEY_MORE)
             (let ((pending (- kin.len kin.pos)))
               (let ((n 
@@ -251,7 +254,7 @@
                       (set kind KEY_EOF)
                       (set done 1)
                     }
-                    (let ((r (keyResolve kin.buf kin.len kin.pos)))
+                    (let ((r (keyResolve kin.view kin.len kin.pos)))
                       {
                         (set kin.pos (+ kin.pos r.used))
                         (set kind r.kind)
