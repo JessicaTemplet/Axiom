@@ -25,8 +25,6 @@
   (data_constructor)
   (macro_declaration)
   (macro_rule)
-  (emacro_declaration)
-  (emacro_rule)
   (macro_pattern_form)
   (struct_declaration)
   (field_declaration)

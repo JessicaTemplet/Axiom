@@ -128,9 +128,7 @@
 
 ([
   (macro_declaration name: (identifier) @function.macro)
-  (emacro_declaration name: (identifier) @function.macro)
   (macro_rule rule_name: (identifier) @function.macro)
-  (emacro_rule rule_name: (identifier) @function.macro)
 ]
   (#not-match? @function.macro "^(_|syntax/.*|[.][.][.]|[-+*/%<>=!&|^~]+)$"))
 
@@ -139,7 +137,6 @@
   (lambda parameter: (identifier) @variable.parameter)
   (macro_declaration parameter: (identifier) @variable.parameter)
   (macro_rule parameter: (identifier) @variable.parameter)
-  (emacro_rule parameter: (identifier) @variable.parameter)
   (macro_pattern_form (identifier) @variable.parameter)
 ]
   (#not-match? @variable.parameter "^(_|syntax/.*|[.][.][.]|[-+*/%<>=!&|^~]+)$"))
@@ -233,7 +230,6 @@
   (list_literal element: (identifier) @constructor)
   (macro_declaration body: (identifier) @constructor)
   (macro_rule template: (identifier) @constructor)
-  (emacro_rule template: (identifier) @constructor)
   (match_arm body: (identifier) @constructor)
   (match_expression scrutinee: (identifier) @constructor)
   (parallel_binding value: (identifier) @constructor)
@@ -274,7 +270,6 @@
   (list_literal element: (identifier) @variable)
   (macro_declaration body: (identifier) @variable)
   (macro_rule template: (identifier) @variable)
-  (emacro_rule template: (identifier) @variable)
   (match_arm body: (identifier) @variable)
   (match_expression scrutinee: (identifier) @variable)
   (parallel_binding value: (identifier) @variable)
@@ -308,7 +303,6 @@
   "fn"
   "lambda"
   "macro"
-  "emacro"
   "data"
   "struct"
   "type"

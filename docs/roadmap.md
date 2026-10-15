@@ -86,7 +86,7 @@ integrator would still need.
 | The precondition tag removed; contracts are `pre` and `post` | Done | `AX3095` |
 | Macro hygiene has one implementation | Done | `MAC-HYG-10` |
 | Literal identifiers in macro patterns compare by binding, not spelling | Planned | `MAC-HYG-9`, `MAC-LANG-14a` |
-| `macro` and `emacro` become one form | Not started | [macro-system.md](macro-system.md) |
+| `macro` and `emacro` become one form: a rule's template is declarations or one expression, and the invocation's position picks | Done | `MAC-LANG-14`, `tests/stdlib/930-macro-both-positions.ax` |
 | Errors propagate with a postfix `?` | Done | `ERR-SUGAR-4`, `tests/stdlib/847-propagate.ax`, `tests/diagnostics/1303-try-removed.axbad` |
 | A unit type with a value, `()`, so an `if` without an else, a dropped branch and a procedure need no filler `0` | Done | `tests/stdlib/890-unit-and-if.ax`, `tests/stdlib/892-dropped-branches.ax` |
 | Functional piping as a structural form: a pipe the tree, the language server and agents see stage by stage, with an explicit `_` hole for where the value goes | Not started | |

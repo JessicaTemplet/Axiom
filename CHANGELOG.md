@@ -32,6 +32,15 @@ its changelog too.
   judged like any other cast into a reference: `(cast Map 4096)` in a
   user file forged a map header in safe code, and is AX3073 now. Tested
   by `tests/diagnostics/1381-private-struct-forge.ax`.
+- `macro` and `emacro` are one form. A rule-form `macro` reads each
+  rule's template as declarations or as one expression, and where the
+  macro is invoked picks which: `(macro total ((total x) x) ((total x
+  rest ...) (+ x (total rest ...))))` is an expression macro, and one
+  macro can hold both kinds of rule. A matching rule of the wrong kind
+  is `AX3027` at the invocation. `emacro` is removed, so old source
+  gets `AX2004` with the rewrite. **BREAKING**: `compat/BREAKING` names
+  it. Tested by `tests/stdlib/930-macro-both-positions.ax` and
+  `tests/diagnostics/1341-macro-rule-kind.ax`.
 
 - `Rpc` has one reader: `rpcRead` answers `(Option String)`, `Some` the
   body of every whole frame, an empty one included, and `None` when the

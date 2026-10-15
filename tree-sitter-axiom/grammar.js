@@ -208,7 +208,6 @@ module.exports = grammar({
       $.effect_declaration,
       $.extern_declaration,
       $.macro_declaration,
-      $.emacro_declaration,
       $.syntax_for_declaration,
     ),
 
@@ -349,9 +348,8 @@ module.exports = grammar({
     // Two forms, split by one token of lookahead after `macro`: a
     // paren opens the HEAD-LIST (expression-template) form, an
     // identifier the RULE form (macro-system.md MAC-LANG-14), whose
-    // template is DECLARATIONS - including further declaration-macro
-    // invocations, which parse as top-level calls. The rule form takes
-    // ONE OR MORE rules since 2026-08-15, selected by arity.
+    // rules each hold declarations or one expression - which is why a
+    // rule's template is any `_form`.
     macro_declaration: $ => choice(
       seq(
         '(', optional(field('visibility', 'pub')), 'macro',
@@ -366,26 +364,6 @@ module.exports = grammar({
         repeat1(field('rule', $.macro_rule)),
         ')',
       ),
-    ),
-
-    // MAC-LANG-14 wide half (`emacro`): an expression-rule macro holds
-    // single EXPRESSION templates, not declaration lists, so one TAG
-    // serves both without renumbering the wire format. The rules share
-    // the pattern language (including `literals` and `...`) with
-    // declaration rules; only the template differs.
-    emacro_declaration: $ => seq(
-      '(', optional(field('visibility', 'pub')), 'emacro',
-      field('name', $.identifier),
-      optional(field('literals', $.literals_clause)),
-      repeat1(field('rule', $.emacro_rule)),
-      ')',
-    ),
-
-    emacro_rule: $ => seq(
-      '(',
-      '(', field('rule_name', $.identifier), repeat(field('parameter', $._macro_pattern)), ')',
-      field('template', $._expression),
-      ')',
     ),
 
     // MAC-LANG-17: `(literals + *)` between the name and the rules
@@ -688,7 +666,8 @@ module.exports = grammar({
     // the variadic `if` covers it, so an editor must paint `(cond …)`
     // as an error the way the compiler reports it, not as the
     // conditional the `cond_expression` rule used to say it was.
-    removed_keyword: _ => choice('union', 'trait', 'impl', 'cond'),
+    // `emacro` joined it when `macro` took expression templates.
+    removed_keyword: _ => choice('union', 'trait', 'impl', 'cond', 'emacro'),
     _removed_foreign: _ => 'foreign',
 
     // -----------------------------------------------------------------

@@ -783,7 +783,7 @@ Team    129385889792 bytes  <- shared`,
 (defUnit gib (mib 1024))
 
 ; An expression macro whose last rule repeats: any number of terms.
-(emacro total ((total x) x)
+(macro total ((total x) x)
   ((total x rest ...) (+ x (total rest ...))))
 
 (data Plan

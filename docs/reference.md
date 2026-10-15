@@ -883,6 +883,28 @@ checking. Arguments used twice are evaluated twice; bind a temporary
 when the operation should happen once. Template-local binders are
 renamed hygienically.
 
+The rule form, `(macro name ((name pattern ...) template) ...)`, tries
+its rules in order and uses the first whose pattern matches. A rule's
+template is declarations or one expression, and where you invoke the
+macro picks which:
+
+```scheme
+(import IO)
+
+(macro total
+  ((total x) x)
+  ((total x rest ...) (+ x (total rest ...))))
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  (println (total 1 2 3 4)))
+```
+
+```text
+10
+```
+
 Macros can generate declarations and inspect syntactic type
 information. They do not execute arbitrary source code during
 compilation. `Pre` supplies two derivers, `deriveEq` and
@@ -1874,8 +1896,8 @@ committed seed and requires a self-hosting fixpoint. See
 Traits and `impl` are replaced by capability records. Use `Vec` for
 sequences and `struct`/`data` for products and sums. Printing uses
 `format`, `println` and `eprintln`; strings join with `concat`.
-`for` replaces `range`, and `restrict(no-trap)` replaces
-`restrict(no-untrapped)`.
+`for` replaces `range`, `macro` replaces `emacro`, and
+`restrict(no-trap)` replaces `restrict(no-untrapped)`.
 
 Foreign libraries use `extern`; the older `foreign` keyword is reserved.
 See [compatibility](compatibility.md) and `compat/BREAKING` for migration

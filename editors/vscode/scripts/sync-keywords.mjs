@@ -22,13 +22,13 @@ const grammarPath = join(here, "..", "syntaxes", "axiom.tmLanguage.json");
 
 // Heads the parser names only to refuse (AX2004). They parse, so the
 // editor marks them as what the compiler will say they are.
-const REMOVED = ["union", "foreign", "trait", "impl", "cond", "begin", "alloc", "consume", "define", "try"];
+const REMOVED = ["union", "foreign", "trait", "impl", "cond", "begin", "alloc", "consume", "define", "try", "emacro"];
 
 // Heads the grammar colours whatever the two sources say. They are all
 // in the sources today; the list keeps a renamed call site from
 // silently dropping one.
 const FIXED = [
-  "fn", "let", "if", "match", "data", "struct", "macro", "emacro", "pub", "import",
+  "fn", "let", "if", "match", "data", "struct", "macro", "pub", "import",
   "extern", "effect", "handle", "region", "parallel", "while", "for", "lambda", "set",
   "type", "subtype", "syntax/for",
 ];

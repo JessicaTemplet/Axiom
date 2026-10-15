@@ -8,7 +8,7 @@ reference.
 Every name listed is `pub` in the source. The columns are:
 
 - **Kind**: `value` for a function or constant, `struct`, `data`,
-  `effect`, `macro` or `emacro`.
+  `effect` or `macro`.
 - **Type**: the signature as you write it in source, such as
   `(-> Int Int)`.
 - **Effects**: what the compiler infers the definition does. `Alloc`
@@ -301,28 +301,28 @@ Axqlite.AxqlMacro - AXQL statements written as Axiom forms.
 | `axqlOptFloatValue` | value | `(-> (Option Float) Value)` | `Alloc` | An optional REAL as a parameter. |
 | `axqlOptTextValue` | value | `(-> (Option String) Value)` | `Alloc` | An optional TEXT as a parameter. |
 | `axqlOptBlobValue` | value | `(-> (Option String) Value)` | `Alloc` | An optional BLOB as a parameter. |
-| `axqlPutNameOf` | emacro |  |  | A name, as `axqlPutName` writes it, from an identifier. |
-| `axqlColumnOf` | emacro |  |  | An `axqlTable` field as its column. |
+| `axqlPutNameOf` | macro |  |  | A name, as `axqlPutName` writes it, from an identifier. |
+| `axqlColumnOf` | macro |  |  | An `axqlTable` field as its column. |
 | `axqlPutColumn` | value | `(-> QueryBuilder String String Int)` | `Alloc,Mut` | Append `name TYPE...`. |
-| `axqlFieldValue` | emacro |  |  | An `axqlTable` field's value as a parameter. |
-| `axqlReadField` | emacro |  |  | An `axqlTable` field read from a row by its column's name. |
-| `axqlUpdate` | emacro |  |  | An UPDATE of table `t`: `(assign (column e) ...)`, then an optional `(where e)`. The word is `assign` because `set` is Axiom's own. |
-| `axqlDelete` | emacro |  |  | A DELETE from table `t`, with an optional `(where e)`. |
-| `axqlDropTable` | emacro |  |  | A DROP TABLE, with an optional `IF EXISTS`. |
-| `axqlCreateIndex` | emacro |  |  | A CREATE INDEX: optional `UNIQUE` and `IF NOT EXISTS`, the index's name, `ON`, the table, and its columns. |
-| `axqlDropIndex` | emacro |  |  | A DROP INDEX, with an optional `IF EXISTS`. |
-| `axqlMark` | emacro |  |  | One `?`, for a field of `axqlTable`'s INSERT. |
-| `axqlFieldColumn` | emacro |  |  | One `(name Type)` field of `axqlTable` as its column. |
+| `axqlFieldValue` | macro |  |  | An `axqlTable` field's value as a parameter. |
+| `axqlReadField` | macro |  |  | An `axqlTable` field read from a row by its column's name. |
+| `axqlUpdate` | macro |  |  | An UPDATE of table `t`: `(assign (column e) ...)`, then an optional `(where e)`. The word is `assign` because `set` is Axiom's own. |
+| `axqlDelete` | macro |  |  | A DELETE from table `t`, with an optional `(where e)`. |
+| `axqlDropTable` | macro |  |  | A DROP TABLE, with an optional `IF EXISTS`. |
+| `axqlCreateIndex` | macro |  |  | A CREATE INDEX: optional `UNIQUE` and `IF NOT EXISTS`, the index's name, `ON`, the table, and its columns. |
+| `axqlDropIndex` | macro |  |  | A DROP INDEX, with an optional `IF EXISTS`. |
+| `axqlMark` | macro |  |  | One `?`, for a field of `axqlTable`'s INSERT. |
+| `axqlFieldColumn` | macro |  |  | One `(name Type)` field of `axqlTable` as its column. |
 | `axqlTableRest` | macro |  |  | The second half of `axqlTable`, which it invokes: what it declares once the struct exists, because a struct's fields can be read by name only through `syntax/fields`, which answers only for a struct already declared. It is public because a declaration macro's own invocation is resolved where `axqlTable` is used; a program has no need to call it. |
-| `axqlSpread` | emacro |  |  | Spread a parenthesised list into the arguments of a helper: `(axqlSpread k qb (a b c))` is `(k qb a b c)`. Public because the statement macros that use it are expanded where they are invoked. |
-| `axqlSelect` | emacro |  |  | A SELECT from table `t`: its select list (`*`, one column, or a list of columns and `(as e name)` items), then its clauses in this order, each optional: `(where e)`, `(groupBy e ...)` with up to three terms, `(having e)`, `(orderBy term ...)`, `(limit n)`, and `(offset n)` after a `limit`. `n` is an Axiom `Int`, bound as a parameter. |
-| `axqlFieldNames` | emacro |  |  | `(names f ...)`, spread: names separated by `, `. Public, as the helpers `axqlTable` reaches are, because a declaration macro's expansion is resolved where it is used. |
-| `axqlMarks` | emacro |  |  | `(names f ...)`, spread: one `?` per name. |
-| `axqlFieldColumns` | emacro |  |  | `(fields (f t) ...)`, spread: each field as its column. |
-| `axqlInsert` | emacro |  |  | An INSERT into table `t`: `*` for every column in order, or the columns the rows fill, then one `(values e ...)` per row, up to 16. |
-| `axqlUpsert` | emacro |  |  | An UPSERT into table `t`, shaped as `axqlInsert` is: a row whose rowid names a row that exists sets the columns listed and keeps the rest, and any other row is inserted. |
-| `axqlCreateTable` | emacro |  |  | A CREATE TABLE: an optional `IF NOT EXISTS`, the table's name, and one `(name TYPE ...)` per column, up to 32. |
-| `axqlFieldValues` | emacro |  |  | The typed values of a record's fields, as parameters. |
+| `axqlSpread` | macro |  |  | Spread a parenthesised list into the arguments of a helper: `(axqlSpread k qb (a b c))` is `(k qb a b c)`. Public because the statement macros that use it are expanded where they are invoked. |
+| `axqlSelect` | macro |  |  | A SELECT from table `t`: its select list (`*`, one column, or a list of columns and `(as e name)` items), then its clauses in this order, each optional: `(where e)`, `(groupBy e ...)` with up to three terms, `(having e)`, `(orderBy term ...)`, `(limit n)`, and `(offset n)` after a `limit`. `n` is an Axiom `Int`, bound as a parameter. |
+| `axqlFieldNames` | macro |  |  | `(names f ...)`, spread: names separated by `, `. Public, as the helpers `axqlTable` reaches are, because a declaration macro's expansion is resolved where it is used. |
+| `axqlMarks` | macro |  |  | `(names f ...)`, spread: one `?` per name. |
+| `axqlFieldColumns` | macro |  |  | `(fields (f t) ...)`, spread: each field as its column. |
+| `axqlInsert` | macro |  |  | An INSERT into table `t`: `*` for every column in order, or the columns the rows fill, then one `(values e ...)` per row, up to 16. |
+| `axqlUpsert` | macro |  |  | An UPSERT into table `t`, shaped as `axqlInsert` is: a row whose rowid names a row that exists sets the columns listed and keeps the rest, and any other row is inserted. |
+| `axqlCreateTable` | macro |  |  | A CREATE TABLE: an optional `IF NOT EXISTS`, the table's name, and one `(name TYPE ...)` per column, up to 32. |
+| `axqlFieldValues` | macro |  |  | The typed values of a record's fields, as parameters. |
 | `axqlTable` | macro |  |  | A table of typed rows. `(axqlTable User users (id RowId) (name String) (age OptInt))` declares, for table `users`: |
 
 ## `Axqlite.AxqlParse`

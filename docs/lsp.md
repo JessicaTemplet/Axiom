@@ -1300,7 +1300,7 @@ maps to scopes. The token types, in the order the integers index them:
 |---|---|
 | `keyword` | a head keyword the parser dispatches on, `pub`, `mut`, `cast`, the `syntax/*` words; `true` and `false` with `defaultLibrary`; a removed word such as `cond` with `deprecated` |
 | `function` | a `fn` name (`declaration`, and `definition` at the `fn` itself), a `::` subject, an effect operation, an `extern` item, a call |
-| `macro` | a `macro` or `emacro` name and its rule heads |
+| `macro` | a `macro` name and its rule heads |
 | `type` | a `data`, `struct`, `type` or `subtype` name and every type in a signature, field or `cast`; a builtin such as `Int` with `defaultLibrary` |
 | `typeParameter` | a lowercase name in a type position |
 | `enumMember` | a constructor, declared or applied, and a positional struct build |

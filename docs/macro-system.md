@@ -239,34 +239,33 @@ constant arithmetic in its own output (`MM-EXEC-14`).
 ### 1.5 Pattern macros
 
 **MAC-LANG-14 (H).** A macro **SHALL** be a sequence of rules, each a
-pattern and a template, tried in order. Rules belong to the rule forms.
-There are two, one per template kind, so no rule has to guess its kind
-from its head:
+pattern and a template, tried in order. A rule's template is
+declarations or one expression, and where the macro is invoked picks
+which it needs:
 
 ```scheme
 ; The head-list form: one template, which is one expression.
-(macro (when test body) (if test body 0))
+(macro (square x) (* x x))
 
-; The declaration rule form: a bare name, then one or more rules.
-; Each rule is a pattern and a template of declarations.
+; The rule form: a bare name, then one or more rules. These templates
+; are declarations.
 (macro deriveTag
   ((deriveTag T)      (:: (syntax/join tag T) Int)
                       (fn ((syntax/join tag T)) 1))
   ((deriveTag T base) (:: (syntax/join tag T) Int)
                       (fn ((syntax/join tag T)) base)))
 
-; The expression rule form: the same shape, but each template is
-; one expression.
-(emacro total
+; The same form, with templates that are one expression each.
+(macro total
   ((total x) x)
   ((total x rest ...) (+ x (total rest ...))))
 ```
 
 One token of lookahead tells the forms apart: `(macro (` starts a head
-list, and `(macro <name>` starts a rule list. `emacro` always takes a
-rule list. No existing program changes meaning, and one rule is a rule
-list of length one. Each rule's pattern repeats the macro's name in
-head position, as Scheme's `syntax-rules` does.
+list, and `(macro <name>` starts a rule list. One rule is a rule list of
+length one. Each rule's pattern repeats the macro's name in head
+position, as Scheme's `syntax-rules` does. `emacro`, which spelled the
+rule form for expression templates, is removed (`AX2004`).
 
 Selection is a match, not a count (`MAC-LANG-15`, `MAC-LANG-18`). The
 rules are tried in order, and the first whose pattern matches wins. A
@@ -288,15 +287,16 @@ Two refusals follow from this:
 `tests/diagnostics/600-macro-rule-unreachable.ax` and
 `tests/diagnostics/605-macro-no-rule-matches.ax` pin each on its own.
 
-This rule holds in full. A rule list takes one or more rules, in either
-of two forms:
+This rule holds in full. A rule list is `(macro name ((name p ...)
+template ...) ...)`, and each rule's template is read two ways:
 
-- `(macro name ((name p ...) decl ...) ...)`, whose templates are
-  declarations (`MAC-CAP-8`);
-- `(emacro name ((name p ...) expr) ...)`, whose templates are one
-  expression each.
+- as declarations (`MAC-CAP-8`), when it parses as declarations;
+- as one expression, when it is a single form that doesn't open with a
+  declaration keyword or `syntax/for`, and parses as an expression.
 
-Each pattern's head must repeat the macro's name. Each parameter is a
+A rule keeps every reading that parses, and one that parses neither way
+is refused at the macro's own line. Each pattern's head must repeat the
+macro's name. Each parameter is a
 pattern (`MAC-LANG-15`), and selection is a match in rule order
 (`MAC-LANG-18`). Ellipsis (`MAC-LANG-16`) and literal identifiers
 (`MAC-LANG-17`) both hold. An invocation that matches no rule is
@@ -307,25 +307,26 @@ bare `syntax error`. `parseDeclMacro` reports it with `pErr`, which
 carries no expectation. Unknown declaration heads have a better message
 (`MAC-LANG-5`), and this refusal doesn't have one yet.
 
-The two rule forms exist because a template's kind can't be read from
-the template. In the declaration rule form, a template is
-declarations. So in `(macro when ((when test body) (if test body 0)))`,
-the template `(if test body 0)` is read as a nested declaration-macro
-invocation of `if`. Invoking `when` in expression position is then
-`AX3027`, "declaration macro `when` invoked in expression position".
+A template's kind can't be read from the template alone, which is why
+a rule keeps both readings. `(defPair a b)` is a nested
+declaration-macro invocation at the top level (`372-decl-macro.ax`'s
+`defPair` generates two declarations) and a call in an expression.
+Deciding by the template's head would misread one of them. So the
+invocation decides: in declaration position the first rule whose
+pattern matches must have declarations, and in expression position it
+must have an expression. A rule of the other kind is `AX3027` at the
+invocation, naming the macro. A macro none of whose rules fits the
+position draws the same code before any rule is tried.
 
-Deciding the kind from the template's head isn't sound either. A
-declaration template's first form can legitimately be a nested
-invocation: `372-decl-macro.ax`'s `defPair` generates two. So the
-head-list form stays single-template, `macro` rules generate
-declarations, and `emacro` rules generate expressions. Multi-rule
-expression macros earn their place because patterns, ellipsis and
-literals give them something to select by. By arity alone they would
-add little, since a single template already takes whatever arity it
-declares. Tested by `tests/selfhost/403-expr-rule-macro.ax` (153).
-`tests/diagnostics/612-emacro-misuse.ax` pins the two `emacro`
-refusals: an `emacro` in declaration position, and an invocation that
-matches no rule.
+Multi-rule expression macros earn their place because patterns,
+ellipsis and literals give them something to select by. By arity alone
+they would add little, since a single template already takes whatever
+arity it declares. Tested by `tests/selfhost/403-expr-rule-macro.ax`
+(153) and `tests/stdlib/930-macro-both-positions.ax`.
+`tests/diagnostics/612-expression-rule-misuse.ax` pins an
+expression-only macro in declaration position and an invocation that
+matches no rule, and `tests/diagnostics/1341-macro-rule-kind.ax` a rule
+of the wrong kind in each position.
 
 **MAC-LANG-14a (P, prerequisite).** Patterns are not a distinct
 syntactic category today, and a pattern-macro design must say what it
@@ -561,7 +562,7 @@ literal matches only itself, and is compared by binding, not by
 spelling:
 
 ```scheme
-(emacro simp (literals + *)
+(macro simp (literals + *)
   ((simp (+ a 0)) a)
   ((simp (* a 1)) a)
   ((simp other) other))
@@ -2742,9 +2743,8 @@ last-wins, so allowing it would silently bind the second occurrence.
 There is also no structural form-equality to compare against, and
 `syntax/same` isn't one.
 
-The templates here are *expressions*, which the rule form accepts as
-`emacro` (`MAC-LANG-14`'s wide half). The table above spells `macro`.
-Written as `emacro` with a `(literals + *)` header, five of its seven
+The templates here are *expressions*, which the rule form takes
+(`MAC-LANG-14`). With a `(literals + *)` header, five of its seven
 rules run today, and `(- e e)` is the one that still refuses.
 
 ### 10.5 A small DSL
@@ -2820,7 +2820,8 @@ document's rules still holds:
   rewritten at run time rather than refused at `check`.
 - The module worked around the system's limits at the time:
   - No variadic expression macro (`MAC-LANG-14`), so children were a
-    block. `emacro` now fills that gap.
+    block. A rule-form macro with expression templates now fills that
+    gap.
   - No macro generating a macro (`MAC-CAP-8`'s `AX3021`), so the tag
     table was written out, two lines per tag.
   - No `{}`, so `div` and `divA` were two macros.
@@ -2845,7 +2846,7 @@ signature in scope spells them as type variables.
 
 | Area | Holds today | Planned | Refused |
 |---|---|---|---|
-| Language | LANG-1…12, LANG-14 (several rules over both forms, declarations through `macro` and expressions through `emacro`, selected by a pattern match in rule order, with arity kept inside the match as a pre-filter), LANG-15 (all six pattern kinds), LANG-16 (v1–v5: bare-name, nested-pattern, arm/ctor, declaration and ctor-pattern splices), LANG-17 (literal identifiers, canonical-spelling comparison), LANG-18 | — | LANG-13 |
+| Language | LANG-1…12, LANG-14 (several rules, each template declarations or one expression with the invocation's position choosing, selected by a pattern match in rule order, with arity kept inside the match as a pre-filter), LANG-15 (all six pattern kinds), LANG-16 (v1–v5: bare-name, nested-pattern, arm/ctor, declaration and ctor-pattern splices), LANG-17 (literal identifiers, canonical-spelling comparison), LANG-18 | — | LANG-13 |
 | Expansion | EXP-1…17, including module-side invocation | — | — |
 | Hygiene | HYG-1…8 (all four of HYG-8's holes are closed, and so is HYG-3a), HYG-11 | HYG-9 | — |
 | Capabilities | CAP-1…4, CAP-6, CAP-7, CAP-8 (`fn`/`::`/`data`/`struct`/`type`/`effect`/invocation/iteration templates; the kind list is closed, and `impl` left it when the construct was removed in 0.6.0), CAP-9 (the deriving clause is refused), CAP-10 (format strings; 10.5's capture is closed as of 0.7.4) | — | CAP-5 (its replacement has landed, and the query table is complete: join in name, reference and argument position, nested to any depth; constructors; fields; same; for, including its parallel form; binders; fold; name; arity; defined; format; formatln) |
@@ -2898,12 +2899,14 @@ the rule landed.
 | `tests/selfhost/398-arm-ctor-splice.ax` (155) | LANG-16 v3 and v5: `arm ...` and `C ...` splices, including fixed-test and named field-test ctor patterns in spliced arms |
 | `tests/selfhost/399-decl-splice.ax` (45) | LANG-16 v4: `decl ...` over parallel sequences, a `data` splice and a nested-invocation splice |
 | `tests/selfhost/402-literal-dispatch.ax` (19) | LANG-17: `(literals ...)` head-spelling dispatch with the shadow veto, over `LitLib.ax` |
-| `tests/selfhost/403-expr-rule-macro.ax` (153) | LANG-14's wide half: `emacro` rules over expression templates, with ellipsis and hygiene |
+| `tests/selfhost/403-expr-rule-macro.ax` (153) | LANG-14: rules over expression templates, with ellipsis and hygiene |
+| `tests/stdlib/930-macro-both-positions.ax` | LANG-14: one macro with a declaration rule and an expression rule, invoked in both positions |
 | `tests/diagnostics/600-macro-rule-unreachable.ax` | LANG-18's `AX3033`: an irrefutable rule starving a later one of its arity |
 | `tests/diagnostics/605-macro-no-rule-matches.ax` | LANG-18's `AX3018`: every shape the macro accepts, joined from the tokens |
 | `tests/diagnostics/610-macro-ellipsis-misuse.ax` | LANG-16's `AX3034`: all four depth refusals, plus the arm and spine interior rows |
 | `tests/diagnostics/611-macro-literal.ax` | LANG-17's `AX3066`: a declared literal that no pattern spells |
-| `tests/diagnostics/612-emacro-misuse.ax` | The refusals of LANG-14's wide half: `emacro` in declaration position (`AX3027`) and no rule matching (`AX3018`) |
+| `tests/diagnostics/612-expression-rule-misuse.ax` | An expression-only macro in declaration position (`AX3027`) and no rule matching (`AX3018`) |
+| `tests/diagnostics/1341-macro-rule-kind.ax` | A matching rule of the wrong kind, in each position (`AX3027`) |
 | `tests/diagnostics/585-multi-rule-misuse.ax` | LANG-14's refusals: two rules of one arity, at the macro's line, and an invocation matching none, which names every arity the macro offers |
 | `tests/diagnostics/575-syntax-parallel-for-misuse.axbad` | The zip's refusals: a skewed pair in each of the three positions, and a parallel binding that is not a pair. It is `.axbad` because the last is an expression to the parser and a non-shape to the grammar. |
 | `tests/selfhost/387-syntax-nested-join.ax` (47) | CAP-5's nested `syntax/join`: a lens set over two structs sharing a field name, three-deep nesting, and the `getX`-twice collision that made the two-part form unusable |
@@ -3019,9 +3022,7 @@ expression templates have all landed. What remains is narrower:
    spelling. The representation change stays provisional.
 2. A repeated binder read as a same-form test, such as `(- e e)` in
    §10.4's `simplify` table. `MAC-LANG-15` refuses it as last-wins
-   (`AX3020`). The table's templates are also expressions, which the
-   rule form does not take. `emacro` takes one expression per rule, and
-   the table needs rewriting as well as dispatch.
+   (`AX3020`).
 3. The one held-but-defective render in §11, `MAC-EXP-8`'s anchor,
    plus `MAC-EXP-14c`'s spanless nodes, which no invocation-span rule
    can reach.

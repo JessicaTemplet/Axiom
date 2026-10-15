@@ -148,14 +148,14 @@ derive_keywords() {
     awk '/\(pub fn \(lspKeywords\)/ { on = 1; next } on && /^\(/ { exit } on' "$lsp_ax" \
       | grep -oE 'vecPush v "[^"]+"' | sed -E 's/.*"([^"]+)"/\1/'
     # The heads the grammar must colour whatever the sources say.
-    printf '%s\n' fn let if match data struct macro emacro pub import extern effect \
+    printf '%s\n' fn let if match data struct macro pub import extern effect \
       handle region parallel while for lambda set type subtype syntax/for
   } | LC_ALL=C sort -u
 }
 
 # The heads the parser names only to refuse (AX2004), coloured as the
 # error they will be. The same list sits in sync-keywords.mjs.
-removed_expected="$(printf '%s\n' union foreign trait impl cond begin alloc consume define try | LC_ALL=C sort)"
+removed_expected="$(printf '%s\n' union foreign trait impl cond begin alloc consume define try emacro | LC_ALL=C sort)"
 
 # Print a rule's alternation, one word per line. The match is
 # `\G\s*(?:(pub)\s+)?(a|b|c)(?!...)`, and the group after `)?` is it.

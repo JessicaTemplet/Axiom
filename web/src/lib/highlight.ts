@@ -74,7 +74,7 @@ const KEYWORD_TYPE = new Set(['data', 'struct', 'type', 'subtype', 'effect'])
 const KEYWORD_CONDITIONAL = new Set(['if', 'match'])
 const KEYWORD_PLAIN = new Set([
   'let', 'handle', 'pub', 'import', 'set', 'while', 'for', 'extern',
-  'macro', 'emacro', 'literals', 'region', 'parallel',
+  'macro', 'literals', 'region', 'parallel',
 ])
 
 // Keywords that sit inside a form rather than at its head, keyed by the
@@ -94,7 +94,7 @@ const KEYWORD_MODIFIER = new Set(['sizeof', 'alignof', 'cast', 'mut'])
 // trait and impl. `region` was on it until 2026-09-03.
 const REMOVED = new Set([
   'union', 'foreign', 'deriving',
-  'linear', 'consume', 'begin', 'trait', 'impl', 'cond',
+  'linear', 'consume', 'begin', 'trait', 'impl', 'cond', 'emacro',
 ])
 
 const DELIMITERS = new Set(['::', '->', ':', '=', '!', ','])

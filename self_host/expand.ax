@@ -5450,19 +5450,21 @@
       (if (== mac 0)
         e
         (if (!= (memGetWord mac 9) 0)
-          {
-            (expEmit env (expMarkUnit env (mkDiagNote
-              SEV_ERROR
-              "AX3027"
-              "declaration-macro"
-              (nodeSpan e)
-              (concat (concat "declaration macro `" (expSrcSpelling (nodeAName e))) "` referenced in expression position")
-              0
-              0
-              "a rule-form macro's template is declarations; invoke it at top level"
-              "the two template kinds are disjoint (macro-system.md MAC-CAP-8)") (memGetWord env 11)))
-            (mkEInt 0)
-          }
+          (if (expMacHasExprRule mac)
+            (expandRuleApp mac (expSrcSpelling (nodeAName e)) vecNew env bs (nodeSpan e))
+            {
+              (expEmit env (expMarkUnit env (mkDiagNote
+                SEV_ERROR
+                "AX3027"
+                "declaration-macro"
+                (nodeSpan e)
+                (concat (concat "declaration macro `" (expSrcSpelling (nodeAName e))) "` referenced in expression position")
+                0
+                0
+                "every rule of this macro generates declarations; invoke it at top level"
+                "an expression position needs a value, and each rule's template here is declarations (macro-system.md MAC-CAP-8)") (memGetWord env 11)))
+              (mkEInt 0)
+            })
           (if (> (vecLen (nodeBVec mac)) 0)
             {
               (expArityDiag
@@ -6940,13 +6942,91 @@
     head
     (expBuildSpine (mkEApp head (vecGet argv i)) argv (+ i 1))))
 
-(pub :: expandMacroApp (-> Int Int Int Int (Vec Int) Int))
+; Whether any rule of the rule-form macro `mac` has an expression
+; template, or any has declarations: what decides the refusal a macro
+; gets in a position none of its rules can fill.
+(pub :: expMacHasExprRule (-> Int Bool))
+(pub fn (expMacHasExprRule mac)
+  (expRulesHaveExpr (memGetWordVec mac 9) 0))
+
+(pub :: expMacHasDeclRule (-> Int Bool))
+(pub fn (expMacHasDeclRule mac)
+  (expRulesHaveDecls (memGetWordVec mac 9) 0))
+
+(pub :: expRulesHaveExpr (-> (Vec (Vec Int)) Int Bool))
+(pub fn (expRulesHaveExpr rules i)
+  (if (>= i (vecLen rules))
+    false
+    (if (!= (expRuleExpr (vecGet rules i)) 0)
+      true
+      (expRulesHaveExpr rules (+ i 1)))))
+
+(pub :: expRulesHaveDecls (-> (Vec (Vec (Vec Int))) Int Bool))
+(pub fn (expRulesHaveDecls rules i)
+  (if (>= i (vecLen rules))
+    false
+    (if (> (vecLen (expRuleTpl (vecGet rules i))) 0)
+      true
+      (expRulesHaveDecls rules (+ i 1)))))
+
+; A rule's expression template, or 0 when its template is only
+; declarations (slot 6, `parseMacroRules`).
+(pub :: expRuleExpr (-> (Vec Int) Int))
+(pub fn (expRuleExpr r)
+  (vecGet r 6))
+
+; A rule-form macro invoked in expression position, with `args`: the
+; first rule whose pattern matches is instantiated, and it must have an
+; expression template. A macro with none at all keeps the refusal it
+; has always drawn, before any rule is tried.
+(pub :: expandRuleApp (-> Int String (Vec Int) Int (Vec Int) Int Int))
 ;@axiom:effect(unsafe)
+(pub fn (expandRuleApp mac name args env bs isp)
+  (if (expMacHasExprRule mac)
+    (let ((m (expRuleForForms (memGetWordVec mac 9) args 0 (expMatchCtx (expDeclsVec env) (memGetWord env 9) (nodeModule mac)))))
+      (if (== m 0)
+        {
+          (expNoRuleDiag env name (expRuleShapes (memGetWordVec mac 9) name 0 "") isp)
+          (mkEInt 0)
+        }
+        (if (== (expRuleExpr (expMatchOf (cast (Vec Int) m))) 0)
+          {
+            (expEmit env (expMarkUnit env (mkDiagNote
+              SEV_ERROR
+              "AX3027"
+              "declaration-macro"
+              isp
+              (concat (concat "the rule of macro `" name) "` that matches here generates declarations, so it can't stand in expression position")
+              0
+              0
+              "invoke it at top level, or give the macro an earlier rule for this shape whose template is one expression"
+              "each rule's template is declarations or one expression, and where the macro is invoked picks which it needs (macro-system.md MAC-LANG-14)") (memGetWord env 11)))
+            (mkEInt 0)
+          }
+          (expandExprRuleInstantiate
+            mac
+            (cast (Vec Int) m)
+            env
+            bs
+            isp))))
+    {
+      (expEmit env (expMarkUnit env (mkDiagNote
+        SEV_ERROR
+        "AX3027"
+        "declaration-macro"
+        isp
+        (concat (concat "declaration macro `" name) "` invoked in expression position")
+        0
+        0
+        "every rule of this macro generates declarations; invoke it at top level"
+        "an expression position needs a value, and each rule's template here is declarations (macro-system.md MAC-CAP-8)") (memGetWord env 11)))
+      (mkEInt 0)
+    }))
+
+(pub :: expandMacroApp (-> Int Int Int Int (Vec Int) Int))
 (pub fn (expandMacroApp e head mac env bs)
-  ; A DECLARATION-rule macro (word 9, word 6 == 0) has no expression
-  ; template to instantiate here. An EXPRESSION-rule macro (word 9,
-  ; word 6 == 1, `emacro`) selects by match like a declaration rule
-  ; does and instantiates its single expression template; arity is
+  ; A rule-form macro (word 9) selects its rule by match, and the rule
+  ; it selects must have an expression template to stand here; arity is
   ; exact in rule position, so there is no surplus-applies story here
   ; (that story is the head-list form's alone).
   (let (
@@ -6957,32 +7037,7 @@
       (nodeSpan e)))
   )
     (if (!= (memGetWord mac 9) 0)
-      (if (== (memGetWord mac 6) 1)
-        (let ((m (expRuleForForms (memGetWordVec mac 9) args 0 (expMatchCtx (expDeclsVec env) (memGetWord env 9) (nodeModule mac)))))
-          (if (== m 0)
-            {
-              (expNoRuleDiag env (expSrcSpelling (nodeAName head)) (expRuleShapes (memGetWordVec mac 9) (expSrcSpelling (nodeAName head)) 0 "") isp)
-              (mkEInt 0)
-            }
-            (expandExprRuleInstantiate
-              mac
-              (cast (Vec Int) m)
-              env
-              bs
-              isp)))
-        {
-          (expEmit env (expMarkUnit env (mkDiagNote
-            SEV_ERROR
-            "AX3027"
-            "declaration-macro"
-            isp
-            (concat (concat "declaration macro `" (expSrcSpelling (nodeAName head))) "` invoked in expression position")
-            0
-            0
-            "a rule-form macro's template is declarations; invoke it at top level"
-            "the two template kinds are disjoint: an expression position needs a value, and this macro generates declarations (macro-system.md MAC-CAP-8)") (memGetWord env 11)))
-          (mkEInt 0)
-        })
+      (expandRuleApp mac (expSrcSpelling (nodeAName head)) args env bs isp)
       (if (< (vecLen args) (vecLen params))
         {
           (expArityDiag
@@ -7115,8 +7170,8 @@
               })
           })))))
 
-; Instantiate an EXPRESSION-rule macro (MAC-LANG-14 wide half,
-; `emacro`): the match `m` already selected the rule and built the
+; Instantiate a rule's EXPRESSION template (MAC-LANG-14, slot 6): the
+; match `m` already selected the rule and built the
 ; parallel names/vals plus the sequence binds. Substitution runs
 ; through `substTpl` like any expression template, so hygiene, spans
 ; and the definition-site rule are unchanged; the result is expanded
@@ -7160,7 +7215,7 @@
         (_setseqs (memSetWord env 20 (expMatchSeqs m)))
       )
         (let ((body (substTpl
-          (vecGet (expMatchOf m) 1)
+          (expRuleExpr (expMatchOf m))
           (expMatchNames m)
           (expMatchVals m)
           env
@@ -7961,11 +8016,9 @@
       (expCheckRuleArities (vecGet (expMacrosVec env) i) env 0)
       (expCheckRuleEllipsis (vecGet (expMacrosVec env) i) env 0)
       (expCheckRuleLiterals (vecGet (expMacrosVec env) i) env)
-      ; Declaration template kinds only: an expression-rule macro
-      ; (word 6) holds single expressions, not declarations, so the
-      ; decl-kind check has nothing to read there.
-      (if (== (memGetWord (vecGet (expMacrosVec env) i) 6) 0)
-        (expCheckTplKinds (vecGet (expMacrosVec env) i) env 0))
+      ; Declaration templates only: a rule whose template is only an
+      ; expression has an empty declaration vector.
+      (expCheckTplKinds (vecGet (expMacrosVec env) i) env 0)
       (expCheckMacros env (+ i 1))
     }))
 
@@ -9482,13 +9535,13 @@
               (concat (concat "`" (expSrcSpelling (nodeAName d))) "` is neither a declaration keyword nor a visible macro")
               "a top-level form is a declaration - fn, ::, data, struct, type, effect, import, macro - or an invocation of a declaration macro"
               "this used to be a bare `syntax error` that also stopped the parse at the first unknown head, hiding every later diagnostic in the file")
-            (if (|| (== (memGetWord mac 9) 0) (== (memGetWord mac 6) 1))
+            (if (|| (== (memGetWord mac 9) 0) (! (expMacHasDeclRule mac)))
               (expDeclCallErr
                 env
                 d
                 (concat (concat "macro `" (expSrcSpelling (nodeAName d))) "` has an expression template and cannot stand in declaration position")
-                "give it a rule form - `(macro name ((name args ...) (fn ...) ...))` - whose template is declarations"
-                "an expression macro's template is one expression; a declaration position needs declarations (macro-system.md MAC-CAP-8)")
+                "give it a rule whose template is declarations - `(macro name ((name args ...) (fn ...) ...))`"
+                "an expression template is one expression; a declaration position needs declarations (macro-system.md MAC-CAP-8)")
               (let ((m (expRuleForForms (memGetWordVec mac 9) (nodeBVec d) 0 (expMatchCtx decls (nodeModule d) (nodeModule mac)))))
                 (if (== m 0)
                   {
@@ -9496,13 +9549,20 @@
                     (memSetWord d 3 1)
                     0
                   }
-                  (expInstantiateDecl
-                    entryDecls
-                    decls
-                    env
-                    d
-                    mac
-                    (cast (Vec Int) m)))))))))
+                  (if (== (vecLen (expRuleTpl (expMatchOf (cast (Vec Int) m)))) 0)
+                    (expDeclCallErr
+                      env
+                      d
+                      (concat (concat "the rule of macro `" (expSrcSpelling (nodeAName d))) "` that matches here has an expression template, so it can't stand in declaration position")
+                      "invoke it where a value goes, or give the macro an earlier rule for this shape whose template is declarations"
+                      "each rule's template is declarations or one expression, and where the macro is invoked picks which it needs (macro-system.md MAC-LANG-14)")
+                    (expInstantiateDecl
+                      entryDecls
+                      decls
+                      env
+                      d
+                      mac
+                      (cast (Vec Int) m))))))))))
         {
           (memSetWord env 9 prevSite)
           r
