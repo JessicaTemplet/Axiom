@@ -91,7 +91,8 @@ report_context() {
   fi
 }
 
-for case_file in tests/stdlib/*.ax; do
+# Named siblings are support modules, exercised through numbered cases.
+for case_file in tests/stdlib/[0-9]*.ax; do
   name="$(basename "$case_file" .ax)"
   if [[ -n "$filter" && "$name" != "$filter"* ]]; then
     continue

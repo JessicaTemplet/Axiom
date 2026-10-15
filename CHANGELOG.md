@@ -34,6 +34,14 @@ and selected entry roots; they do not establish aviation or space certification.
 
 <!-- release-notes: end of highlights -->
 
+- Native standard-library tests select executable cases, keeping imported
+  support modules out of the entry-point check. Tested by
+  `scripts/run-stdlib-tests.sh`.
+
+- Shared-build coverage accounts for ninety-five gates using the compiler
+  artifact. Source, toolchain and environment changes invalidate that
+  artifact. Tested by `scripts/check-gate-lib.sh`.
+
 - Cross-target checks assemble executable cases and exercise support
   modules through their importers. Named support modules no longer produce
   a missing-entry-point failure. Tested by
