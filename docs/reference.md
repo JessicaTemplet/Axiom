@@ -286,10 +286,15 @@ narrow implicitly, including in calls, returns, assignments and ADT
 payloads. An expected type does not convert a literal: `1` is `Int`,
 whereas `1.0` is `Float`.
 
-Float arithmetic uses two `Float` operands. Convert numeric types with
-`__intToFloat` and `__floatToInt`; for example, `(+ (__intToFloat 1) 2.0)`
-answers `3.0`. `cast` reinterprets bits and does not perform that numeric
-conversion. `String` equality reads contents; ordering uses `strCmp`.
+Float arithmetic uses two `Float` operands. `(as 1 Float)` answers
+`1.0`, so `(+ (as 1 Float) 2.0)` answers `3.0`. `(as 3.75 Int)`
+truncates towards zero and answers `3`. Float-to-Int conversion saturates
+at the integer bounds; a NaN answers zero. Integer-to-Float conversion
+rounds to the nearest representable value, with ties to even.
+
+Use `Float.floatToBits` and `Float.floatFromBits` to reinterpret a
+binary64 encoding. `String` equality reads contents; ordering uses
+`strCmp`.
 
 An `(Option Int)` cannot stand in for `(Option Float)`. Convert the payload
 and construct a new `Option` with the required type.
@@ -520,15 +525,16 @@ Lowercase type parameters describe polymorphism. For example,
 witnesses a type parameter; a result-only parameter requires the
 explicit low-level contract described in [diagnostics](diagnostics.md).
 
-`cast` changes the declared representation type. It does not make a
-raw address valid or extend its lifetime. Raw memory and foreign
+`(as value Type)` makes an explicit conversion. Numeric conversions
+operate on values; reference conversions preserve the existing lifetime.
+A conversion cannot make a raw address valid or extend its lifetime. Raw memory and foreign
 operations belong behind an `effect(unsafe)` declaration. Library
 functions that take a raw address, such as `memGetWord`, trust it, so
 passing one a bad address crashes the program.
 
 A function's result is checked like an argument. A record, closure,
 `String` or type variable returned where the signature says `Int` is
-`AX3004`, so declare the type the body answers. `(cast Int v)` still
+`AX3004`, so declare the type the body answers. `(as v Int)` still
 turns a reference into a word that holds no share. To compare values
 by identity, use `addrOf` (see
 [Compare values by identity](#compare-values-by-identity)).
@@ -551,7 +557,7 @@ Tested by `tests/diagnostics/1133-alias-params.axbad`.
 ### Range-constrained subtypes
 
 `(subtype Percent is Int range 0..101)` makes a distinct integer type.
-The upper bound is excluded. Narrowing with `(cast Percent n)`, or at
+The upper bound is excluded. Narrowing with `(as n Percent)`, or at
 a declared parameter/result boundary, checks the range at run time and
 traps with status 80 on failure. Widening to `Int` needs no check.
 Arithmetic does not prove that its result stays within the range.

@@ -537,7 +537,7 @@ impl Surface {
             let mut note = String::from(
                 "; A `Vec` of words is a `(Vec Int)`, one word per element, and which\n\
                  ; scalar those words hold is whatever the program reads them as -\n\
-                 ; Float bits with `(cast Float (vecGet v i))`, a Bool as 0/1, a Char\n\
+                 ; Float bits with `(__floatFromBits (vecGet v i) )`, a Bool as 0/1, a Char\n\
                  ; as its code point, every integer as the word (a u64 >= 2^63 reads\n\
                  ; negative):",
             );
@@ -925,7 +925,7 @@ fn to_words_name(record: &str) -> String {
 /// (:: __pointFromWords (-> (Vec Point) Int Int Int (Vec Point)))
 /// (fn (__pointFromWords __v __p __n __i)
 ///   (if (>= __i __n) __v
-///     (let ((__w0 (ffiWordAt __p (* __i 2))) (__w1 (cast Float ..)))
+///     (let ((__w0 (ffiWordAt __p (* __i 2))) (__w1 (__floatFromBits .. )))
 ///       { (vecPush __v (Point __w0 __w1)) (__pointFromWords __v __p __n (+ __i 1)) })))
 /// ```
 fn record_from_words_loop(r: &RecordTy) -> (String, String) {
@@ -982,7 +982,7 @@ fn record_from_words_loop(r: &RecordTy) -> (String, String) {
 ///   (if (>= __i (vecLen __ps)) __w
 ///     (match (vecGet __ps __i)
 ///       ((Point __f0 __f1)
-///         { (vecPush __w __f0) (vecPush __w (cast Int __f1))
+///         { (vecPush __w __f0) (vecPush __w (as __f1 Int))
 ///           (__pointToWords __ps __w (+ __i 1)) }))))
 /// ```
 ///

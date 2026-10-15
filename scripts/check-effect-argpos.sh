@@ -230,13 +230,13 @@ seam_old='      (if (&&
         (== (escapeValue bound (vecGet args i)) 0)
         (&&
           (!=
-            (cast Int acc)
+            (as acc Int)
             0)
           (== (tyIsCallable (arrowParamTy cty i)) 1)))'
 seam_new='      (if (&&
         (== (escapeValue bound (vecGet args i)) 0)
           (!=
-            (cast Int acc)
+            (as acc Int)
             0))'
 n_seam="$(python3 -c 'import sys; print(open(sys.argv[1], encoding="utf-8").read().count(sys.argv[2]))' "$abl/self_host/typecheck.ax" "$seam_old" || true)"
 checks=$((checks + 1))

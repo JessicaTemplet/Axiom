@@ -63,7 +63,7 @@
   (effect_list)
   (sizeof_expression)
   (alignof_expression)
-  (cast_expression)
+  (as_expression)
   (block)
   (list_literal)
   (application)

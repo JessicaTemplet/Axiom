@@ -98,6 +98,7 @@ integrator would still need.
 | `macro` and `emacro` become one form: a rule's template is declarations or one expression, and the invocation's position picks | Done | `MAC-LANG-14`, `tests/stdlib/930-macro-both-positions.ax` |
 | Errors propagate with a postfix `?` | Done | `ERR-SUGAR-4`, `tests/stdlib/847-propagate.ax`, `tests/diagnostics/1300-propagate-position.ax` |
 | A unit type with a value, `()`, so an `if` without an else, a dropped branch and a procedure need no filler `0` | Done | `tests/stdlib/890-unit-and-if.ax`, `tests/stdlib/892-dropped-branches.ax` |
+| Explicit numeric conversion uses `(as value Type)`; bit reinterpretation has named Float operations | Done | `tests/stdlib/943-as-numeric.ax`, `tests/diagnostics/1411-as-boundaries.ax` |
 | Functional piping as a structural form: a pipe the tree, the language server and agents see stage by stage, with an explicit `_` hole for where the value goes | Not started | |
 | One code-generation route: the MIR route is finished or removed | Not started | |
 

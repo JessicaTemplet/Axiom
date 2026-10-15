@@ -406,7 +406,7 @@ for i, line in enumerate(lines, 1):
         tagged, sig = False, line
     elif line.startswith(";@axiom:effect(unsafe)"):
         tagged = True
-    if re.search(r"\(cast (Spawn|Job) ", line) and not tagged and "(-> Spawn Spawn)" not in sig:
+    if re.search(r"\(as .* (Spawn|Job)\)", line) and not tagged and "(-> Spawn Spawn)" not in sig:
         out.append(str(i))
 print(" ".join(out))
 PY
@@ -424,7 +424,7 @@ fi
 printf '(import Task)\n(import Par)\n\n(fn (main)\n  0)\n' > "$work/libforge.ax"
 (cd "$work" && AXIOM_STDLIB="$repo_root/stdlib" "$axc" --diagnostic-format=ai symbols libforge.ax) > "$work/libforge.axsym" 2>&1 || true
 lib_rows="$(grep -cE '^F [A-Za-z:]*(taskHandleOf|parHandleOf) .*#unsafe=trusted' "$work/libforge.axsym" || true)"
-lib_casts="$(grep -c '(cast Spawn ' "$repo_root/stdlib/Task.ax" "$repo_root/stdlib/Par.ax" | awk -F: '{t += $2} END {print t}')"
+lib_casts="$(grep -cE '\(as .* Spawn\)' "$repo_root/stdlib/Task.ax" "$repo_root/stdlib/Par.ax" | awk -F: '{t += $2} END {print t}')"
 if [[ "$lib_rows" == 2 && "$lib_casts" == 2 ]]; then
   ok "the library's two casts to Spawn are in taskHandleOf and parHandleOf, each #unsafe=trusted"
 else

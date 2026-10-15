@@ -20,7 +20,7 @@ never had.
 
 WHAT IT FOUND ON ITS FIRST RUN (2026-09-28), all three silent to
 every gate then in the battery:
-  - the effect walk read `(cast a x)`'s TYPE operand as a reference,
+  - the effect walk read `(as x a)`'s TYPE operand as a reference,
     so an entry file's `a` gave `Vec`'s element readers IO: 136 of 136
     `tests/stdlib/` programs stopped compiling;
   - codegen resolved a nullary function before a parameter, so a

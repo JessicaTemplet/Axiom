@@ -214,7 +214,7 @@
 ([
   (application . (_) (identifier) @constructor)
   (block body: (identifier) @constructor)
-  (cast_expression operand: (identifier) @constructor)
+  (as_expression operand: (identifier) @constructor)
   (function_definition body: (identifier) @constructor)
   (if_expression operand: (identifier) @constructor)
   (for_expression start: (identifier) @constructor)
@@ -254,7 +254,7 @@
 ([
   (application . (_) (identifier) @variable)
   (block body: (identifier) @variable)
-  (cast_expression operand: (identifier) @variable)
+  (as_expression operand: (identifier) @variable)
   (function_definition body: (identifier) @variable)
   (if_expression operand: (identifier) @variable)
   (for_expression start: (identifier) @variable)
@@ -327,7 +327,7 @@
   "range"
   "sizeof"
   "alignof"
-  "cast"
+  "as"
   "mut"
   "syntax/for"
   "syntax/binders"

@@ -421,8 +421,8 @@
 # type where you declare one: `(Vec Int)` for machine words (node
 # handles, ids, indices), `(Vec String)`, `(Vec (Vec Int))`, or
 # `(Vec a)` where the code is genuinely polymorphic. The absent-vector
-# sentinel is `(cast (Vec Int) 0)`, and a null test on a handle reads
-# `(== (cast Int v) 0)`.
+# sentinel is `(as 0 (Vec Int))`, and a null test on a handle reads
+# `(== (as v Int) 0)`.
 #
 # `vecPush` ANSWERS THE VECTOR NOW rather than an `Int`, which is a
 # break at every site that discarded the result in `Int` position.
@@ -433,7 +433,7 @@
 # THE ONE TRAP WORTH WRITING DOWN, because it type-checks and is a
 # use-after-free. Do NOT reach for a cast at a `vecPush` argument:
 #
-#     (vecPush v (cast Int s))     type-checks, LEAKS THE RETAIN
+#     (vecPush v (as s Int))     type-checks, LEAKS THE RETAIN
 #
 # `vecPush`'s element parameter is a type VARIABLE, and
 # `docs/memory-model.md` MM-VAL-22 measures that a cast at an argument
@@ -813,7 +813,7 @@
 # in-tree caller passes a value already in range (two constants, a
 # percent-decoded byte, two hex-digit spellings, two base-36 digits),
 # so none of them moves. A caller that relied on the truncation masks
-# first and casts: `(strFromByte (cast Byte (& b 255)))`.
+# first and casts: `(strFromByte (as (& b 255) Byte))`.
 0.7.6  F  strFromByte  (-> Int String) -> (-> Byte String): truncation is now a trap, not a silent wrap
 
 # 0.7.7 - MM-EXEC-9c: `__retain` and `__release` joined `Unsafe`
@@ -836,7 +836,7 @@
 # 0.7.7 - R-B6, MM-EXEC-9d: a cast that makes a reference out of a word
 # is an unsafe operation. These four answered, or took, a `(Vec Int)`
 # whose words were `String` handles, so every caller that read a name
-# back wrote `(cast String ...)` - a forging cast, which now needs
+# back wrote `(as ... String)` - a forging cast, which now needs
 # `effect(unsafe)`. The vectors are typed `(Vec String)`, and a caller
 # reads a name with `vecGet`. The effect rows narrow too, not listed
 # here because narrowing breaks no caller: a trusted encapsulation's
@@ -1015,7 +1015,7 @@
 # 0.7.8 - `Int` is not a heap handle in a result, and `Mem` gains a typed
 # address. Tested by tests/diagnostics/1241-result-coercion-shapes.ax and
 # tests/stdlib/810-addr-identity.ax.
-0.7.8  L  int-result-coercion  a record, closure, String or type variable answered where the signature says Int is AX3004; declare the type the body answers, write (cast Int v) where a word is meant, or use Mem.addrOf for identity
+0.7.8  L  int-result-coercion  a record, closure, String or type variable answered where the signature says Int is AX3004; declare the type the body answers, write (as v Int) where a word is meant, or use Mem.addrOf for identity
 0.7.8  S  Addr  added to Mem: a program importing Mem and another module that exports Addr now qualifies the bare name (AX3014)
 0.7.8  F  addrOf  added to Mem: a program importing Mem and another module that exports addrOf now qualifies the bare name (AX3014)
 0.7.8  F  addrEq  added to Mem: a program importing Mem and another module that exports addrEq now qualifies the bare name (AX3014)
@@ -1167,7 +1167,7 @@
 0.7.9  S  TcpStream  gains a read-ahead buffer and its blocking mode; still sealed, so no caller built or read one
 0.7.8  L  error-payload-untyped  a reference cast into a field declared Int is AX3043, an error; declare the field's real type
 
-0.7.9  L  spawn-forging-cast  (cast Spawn x) where x is not already a Spawn is a forging cast, AX3073 without ;@axiom:effect(unsafe); tag the declaration that writes it
+0.7.9  L  spawn-forging-cast  (as x Spawn) where x is not already a Spawn is a forging cast, AX3073 without ;@axiom:effect(unsafe); tag the declaration that writes it
 0.7.9  F  sysNowMonotonic  row gains Mut and loses Unsafe: darwin-aarch64 reads the processor's counter with an asm form, and the call is no longer itself a trusted encapsulation
 0.7.9  F  sysTimeoutMicros  row gains Mut: on darwin-aarch64 a timeout is measured on the processor's counter, read with an asm form
 0.7.9  S  TaskOpts  gains keep and memory, the pool's answer and task-memory budgets; build options with taskOpts and the taskWith functions, or pass 0 for each
@@ -1199,3 +1199,5 @@
 0.7.9  F  ledNotWord  removed: write (! (ledIsWord ed cp))
 0.7.9  L  emacro  removed, AX2004: write `macro`; a rule-form macro's rules each hold declarations or one expression, and where the macro is invoked picks which
 0.7.9  L  import-header  imports must precede every other module declaration; move late or nested imports to the module header (AX2001)
+
+0.7.9  L  explicit-as  replace (cast Type value) with (as value Type); Int/Float conversions operate on numeric values, bit reinterpretation uses Float.floatToBits/floatFromBits; expression ascriptions check their operand, and converted functions keep ordinary argument checks

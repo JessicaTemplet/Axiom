@@ -422,7 +422,7 @@ def ev(node, env):
         return UNMODELLED
 
     if h == 'cast' and len(args) == 2:
-        # `(cast Int 'é')` is the code point, which is what Python's ord is.
+        # `(as 'é' Int)` is the code point, which is what Python's ord is.
         target = args[0]
         lit = args[1]
         if target[0] == 'atom' and target[2] == 'Int' and lit[0] == 'chr':

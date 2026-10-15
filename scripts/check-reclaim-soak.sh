@@ -307,7 +307,7 @@ cat > "$work/cycles.ax" <<'AX'
 (:: knot (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (knot i)
-  (let ((a (Node i (cast Node 0))) (b (Node (+ i 1) (cast Node 0))))
+  (let ((a (Node i (as 0 Node))) (b (Node (+ i 1) (as 0 Node))))
     {
       (set a.next b)
       (set b.next a)
@@ -317,7 +317,7 @@ cat > "$work/cycles.ax" <<'AX'
 (:: chain (-> Int Int))
 ;@axiom:effect(unsafe)
 (fn (chain i)
-  (let ((b (Node (+ i 1) (cast Node 0))))
+  (let ((b (Node (+ i 1) (as 0 Node))))
     (let ((a (Node i b)))
       (+ a.v b.v))))
 

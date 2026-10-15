@@ -609,6 +609,17 @@ its changelog too.
   `errInvalidData`, and `IO` gains `readBufferPut`. Tested by
   `tests/stdlib/840-error-kind.ax`.
 
+### Explicit conversions
+
+Write `(as value Type)` for an explicit conversion. `Int` and `Float`
+convert numeric values; use `Float.floatToBits` and `Float.floatFromBits`
+for bit reinterpretation. `cast` is refused with migration advice.
+Expression ascriptions check their operand without converting it, and
+calling a converted function checks its remaining arguments. Tested by
+`tests/stdlib/943-as-numeric.ax` and
+`tests/diagnostics/1411-as-boundaries.ax`.
+
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

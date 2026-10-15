@@ -936,7 +936,7 @@ expect_symbols += N + 1
 # while completion offers current syntax only. This independent set pins
 # the exclusions even if the server's shared list changes.
 RETIRED_KEYWORDS = {"union", "foreign", "trait", "impl", "cond", "begin", "alloc",
-                    "consume", "define", "emacro"}
+                    "consume", "define", "emacro", "cast"}
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PARSER_AX = os.path.join(REPO, "self_host", "parser.ax")
 _psrc = open(PARSER_AX, encoding="utf-8").read()
@@ -3044,7 +3044,7 @@ TH_TYPES = """(import ThHelper)
 
 (:: main Int)
 
-(fn (main) (+ (cast Positive 5) (takePos 7)))
+(fn (main) (+ (as 5 Positive) (takePos 7)))
 """
 TH_USER = """(import ThTypes)
 
@@ -3124,8 +3124,8 @@ if ident_count(TH_TYPES, "Positive") != 3:
     sys.exit("FAIL: ThTypes.ax spells `Positive` %d times; the prepare and "
              "references checks need its binder, its signature use and its "
              "cast target" % ident_count(TH_TYPES, "Positive"))
-if "(cast Positive 5)" not in TH_TYPES:
-    sys.exit("FAIL: ThTypes.ax no longer spells `(cast Positive 5)`, so the "
+if "(as 5 Positive)" not in TH_TYPES:
+    sys.exit("FAIL: ThTypes.ax no longer spells `(as 5 Positive)`, so the "
              "references check cannot tell a walk that resolves cast targets "
              "from one that leaves them `?Positive`")
 for _label, _text, _want in (("ThHelper.ax", TH_HELPER, 1),
@@ -5517,7 +5517,7 @@ HL = r"""(import RefHelper)
 (:: main Int)
 (fn (main)
   (+ (area (Circle 4) -2)
-     (+ (RefHelper::twice (cast Int (cast Small 6)))
+     (+ (RefHelper::twice (as (as 6 Small) Int))
         (+ (if true (twiceOf 1) 0) ((lambda (lx) lx) 5)))))
 
 (:: greet String)

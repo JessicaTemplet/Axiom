@@ -517,7 +517,7 @@ resolves, and there is nothing to run.
 ### explain AX3002
 AX3002 - undefined type
 
-A name in TYPE position - a signature, a field's type, a `cast`
+A name in TYPE position - a signature, a field's type, an `as` conversion
 target - names no built-in type, no `data`, no `struct` and no `type`
 alias visible in this module:
 
@@ -902,8 +902,8 @@ A BUILT-IN is the exception to that last sentence. A primitive -
 `__floatToInt`, `__alloc`, `__atomic_load` - is lowered in place at
 every call and has no function behind it, so even a one-argument one
 has no value to take: `(__floatToInt)` and a bare `__alloc` are this
-code. So are the forms `cast`, `sizeof` and `alignof` named bare, and
-`(cast T)` with its value missing. Each of these checked OK until
+code. So are the forms `as`, `sizeof` and `alignof` named bare, and
+`(as T)` with its value missing. Each of these checked OK until
 2026-09-27 and emitted a register nothing defines, which the native
 toolchain refused. Wrap one in a lambda to pass it as a value:
 `(lambda (x) (__floatToInt x))`.
@@ -1629,7 +1629,7 @@ spelling.
 
 It reaches memory unsafety, measured rather than argued:
 
-    (fn (conjure n) (cast a n))
+    (fn (conjure n) (as n a))
     (strWrap (conjure 42) 8)
 
 `check` answers OK and the binary exits 139 - 42 dereferenced as a
@@ -1653,7 +1653,7 @@ correct program is not yet a check.
 So the compiler now tells them apart, and it can do so exactly. A
 function whose result is a type variable no parameter mentions can
 produce that result only two ways, because the type system admits no
-others: a `cast`, which fabricates the value, or a call to another
+others: an `as` conversion, which fabricates the value, or a call to another
 such function, which is the same question one level down. The set of
 them is solved by a fixpoint over their tail positions - assume they
 all diverge, then strike out any whose tail can produce a value. What
@@ -1662,7 +1662,7 @@ fabricates a value and is this error.
 
 A call that never returns also counts: `sysExitWith` is the base case,
 anything whose every tail reaches it inherits that (which is how
-`IO.exit` and `IO.die` qualify), and a `cast` whose ARGUMENT never
+`IO.exit` and `IO.die` qualify), and an `as` conversion whose ARGUMENT never
 returns never returns either - the coercion is unreachable.
 
 THE SECOND SHAPE, and why the rule is about VARIANCE rather than
@@ -1672,7 +1672,7 @@ That question has a wrong answer as soon as a parameter is itself a
 function:
 
     (:: apply1 (-> (-> a Int) Int))
-    (fn (apply1 f) (f (cast a 42)))
+    (fn (apply1 f) (f (as 42 a)))
     (apply1 strLen)
 
 `a` is on a left side, so the old rule filed it under "witnessed" and
@@ -1695,7 +1695,7 @@ function that never returns never produced the `a` it promised.
 And this is both at once:
 
     (:: divDemand (-> (-> a Int) a))
-    (fn (divDemand f) { (f (cast a 42)) (cast a (exit 70)) })
+    (fn (divDemand f) { (f (as 42 a)) (as (exit 70) a) })
 
 Its RESULT variable is excused, because it really does never return.
 The `a` it hands to `f` is fabricated anyway, and a divergence that
@@ -1712,7 +1712,7 @@ an arrow and the four with variables in one mention every variable on
 both sides.
 
 WHAT TO DO. Three ways out, in the order to prefer them. Return a
-concrete word type and let callers write `cast`, which is the
+concrete word type and let callers write `as`, which is the
 language's one documented reinterpretation and is visible where it
 happens. Or make the function DIVERGE, so every path ends in a call
 that never returns - that is what makes `forall a` honest, and it is
@@ -1813,12 +1813,12 @@ clean and printed.
 ### explain AX3043
 AX3043 - a reference stored through a field declared `Int`
 
-The release walk follows DECLARED types, so a reference word in an `Int` slot is invisible to reclamation and leaks: a `String` stored through a field declared `Int` is never released (docs/error-model.md ERR-TYPE-5/ERR-MEM-1). The type checker already refuses the direct shape - a `String` where an `Int` stands is `AX3004` - so what this reports is the smuggled one: a `cast` laundering the operand's type while the operand stays a reference.
+The release walk follows DECLARED types, so a reference word in an `Int` slot is invisible to reclamation and leaks: a `String` stored through a field declared `Int` is never released (docs/error-model.md ERR-TYPE-5/ERR-MEM-1). The type checker already refuses the direct shape - a `String` where an `Int` stands is `AX3004` - so what this reports is the smuggled one: an `as` conversion laundering the operand's type while the operand stays a reference.
 
 This is an ERROR. The program is well-typed, but the leak is certain, and a cast written on purpose leaks just the same. What is reported is only what the checker can see: a variable it resolves, or a literal, read through any nesting of casts, whose class is a reference - the same rule `AX3071` follows for `__store64`. A call result, a field, or a poisoned operand is skipped, and a direct mismatch is owned by the error beside it.
 
     (struct Box (v : Int))
-    (Box (cast Int name))         ; refused: `name` is a String
+    (Box (as name Int))         ; refused: `name` is a String
 
 Declare the field's real type, `(struct Box (v : String))`, and drop the cast. To compare or hash a value by identity, store its `Addr` from `addrOf` instead.
 
@@ -2025,12 +2025,12 @@ refuse nearly everything that reaches the standard library. Write
 this body's casts at their spans and the nearest reachable function
 whose body casts, once, with the path.
 
-`no-cast` is the one that makes the others worth having. `cast` is the
+`no-cast` is the one that makes the others worth having. `as` is the
 one documented way to fabricate a value, and a cast between two
 concrete types is unchecked - a `Port` carrying 99999 and an `Int` read
 back as a `String` are the same one-word act. Under `restrict(no-cast)`
 a type's guarantee is true; without it, it is true of programs that
-did not write `cast`.
+did not write `as`.
 
 `no-wrap` is LEXICAL for the same reason `no-cast` is: on `Int`
 operands `+`, `-` and `*` lower to plain `add`/`sub`/`mul` with no
@@ -2643,7 +2643,7 @@ Give it a parameter, or write a top-level `(fn (name) body)` - a bare reference 
 ### explain AX3069
 AX3069 - `sizeof` or `alignof` given more than the one type each takes
 
-`sizeof` and `alignof` take one TYPE and answer a constant, so a surplus argument has nowhere to go: the emitter used to drop it in silence and `(sizeof Int 99)` answered 8. `cast` is exempt - its result is routinely a function value, and a surplus argument there is an application of it.
+`sizeof` and `alignof` take one TYPE and answer a constant, so a surplus argument has nowhere to go: the emitter used to drop it in silence and `(sizeof Int 99)` answered 8. `as` is exempt - its result is routinely a function value, and a surplus argument there is an application of it.
 
 Remove the extra argument.
 
@@ -2675,16 +2675,16 @@ The body performs an unsafe operation, and its declaration does not say `;@axiom
 
 - an extern call, whose implementation is outside the safety checker;
 - a raw primitive, such as `__load64`, `__store8`, `__retain` or `__addr`;
-- a forging cast: `(cast T x)` where `T` is a reference - a `String`, a `Vec`, a `Handle`, a struct, a `data` type with a field, a function, a tuple or a type variable - or a spawn handle, `Spawn`, and `x` is not already a `T`.
+- a forging cast: `(as x T)` where `T` is a reference - a `String`, a `Vec`, a `Handle`, a struct, a `data` type with a field, a function, a tuple or a type variable - or a spawn handle, `Spawn`, and `x` is not already a `T`.
 
     (struct Hid (name : String) (n : Int))
-    (fn (peek k) (let ((h (cast Hid k))) h.n))
+    (fn (peek k) (let ((h (as k Hid))) h.n))
 
 Here `peek` makes a `Hid` out of an `Int`, and reading `h.n` reads whatever that word points at.
 
 Write `;@axiom:effect(unsafe)` on a line of its own, directly above the `fn` (below the `::` signature when there is one). That tag makes the function a trusted encapsulation: you vouch that every well-typed call to it is safe, and its callers inherit nothing.
 
-A cast that only observes is not unsafe: a reference read as an `Int`, a number converted, a `Foreign` read as an `Int` or back, a value cast to the type it already has. Nor is a cast of a value that never returns, such as `(cast a (exit 70))`.
+A cast that only observes is not unsafe: a reference read as an `Int`, a number converted, a `Foreign` read as an `Int` or back, a value cast to the type it already has. Nor is a cast of a value that never returns, such as `(as (exit 70) a)`.
 
 This fires where the operation is performed, not up the call chain, and it asks every declaration that does not say `effect(unsafe)`, whatever else it claims. An unsafe operation under `effect(pure)` is AX3010 instead.
 
@@ -2815,7 +2815,7 @@ program holds is one `chanNew` made. It names a live slot in the
 runtime's handle table, or a freed one, which traps with status 85
 when it is used (MM-PAR-8).
 
-A `cast` to a sealed type forges a handle. That belongs to the unsafe
+A `as` to a sealed type forges a handle. That belongs to the unsafe
 layer (MM-VAL-22), not to ordinary code.
 
 ### explain AX3086

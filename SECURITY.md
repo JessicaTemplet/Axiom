@@ -76,7 +76,7 @@ way in CI. See `CONTRIBUTING.md` and `bootstrap/README.md`.
 
 ## Out of scope
 
-- **Unsound use of `cast`.** `cast` reinterprets a value without
+- **Unsound use of `as`.** `as` reinterprets a value without
   checking it, and `docs/memory-model.md` documents it as the
   language's escape hatch.
 - **Calling `__syscallN` directly.** The standard library is written on

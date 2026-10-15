@@ -148,11 +148,11 @@ echo "== negative probe: one word, and the accepted program is refused =="
 # `(cast a 70)` is the same coercion around a value that does. An
 # analysis that could not tell them apart would answer the same for
 # every program, and every check above would be vacuous.
-if ! grep -q '(cast a (exit 70))' "$src"; then
-  echo "FAIL: the probe's anchor '(cast a (exit 70))' is gone from $src"
+if ! grep -q '(as (exit 70) a)' "$src"; then
+  echo "FAIL: the probe's anchor '(as (exit 70) a)' is gone from $src"
   exit 1
 fi
-sed 's/(cast a (exit 70))/(cast a 70)/' "$src" > "$work/976cast.ax"
+sed 's/(as (exit 70) a)/(as 70 a)/' "$src" > "$work/976cast.ax"
 rc="$(check_of 976cast.ax)"
 if (( rc == 1 )) && grep -q 'error\[AX3040\]' "$work/out"; then
   ok "with the coercion wrapped around a value instead, it is refused (exit $rc)"
@@ -163,7 +163,7 @@ fi
 # The other direction: `sysExitWith` is the base case, so a divergence
 # spelled with it directly must also be accepted. Otherwise acceptance
 # would be a special case for `IO.exit`, not an analysis.
-sed 's/(cast a (exit 70))/(cast a (sysExitWith 70))/; s/^(import IO)$/(import IO)\n\n(import Sys)/' "$src" > "$work/976sys.ax"
+sed 's/(as (exit 70) a)/(as (sysExitWith 70) a)/; s/^(import IO)$/(import IO)\n\n(import Sys)/' "$src" > "$work/976sys.ax"
 rc="$(check_of 976sys.ax)"
 if (( rc == 0 )); then
   ok "spelled with the base case \`sysExitWith\` directly, it is still accepted"
@@ -191,19 +191,19 @@ cat > "$work/shapes.ax" <<'AX'
 
 ;@axiom:effect(io)
 
-(fn (pSys m) (cast a (sysExitWith 70)))
+(fn (pSys m) (as (sysExitWith 70) a))
 
 ; 2. through `IO.exit`, one call away from it
 (:: pExit (-> String a))
 
 ;@axiom:effect(io)
-(fn (pExit m) (cast a (exit 70)))
+(fn (pExit m) (as (exit 70) a))
 
 ; 3. through `IO.die`, two calls away
 (:: pDie (-> String a))
 
 ;@axiom:effect(io)
-(fn (pDie m) (cast a (die m 70)))
+(fn (pDie m) (as (die m 70) a))
 
 ; 4. self tail recursion, which needs no cast at all
 (:: pSelf (-> String a))
@@ -228,7 +228,7 @@ cat > "$work/shapes.ax" <<'AX'
     {
       (while true
         (set i (+ i 1)))
-      (cast a i)
+      (as i a)
     }
   )
 )
@@ -258,7 +258,7 @@ else
 fi
 # The sweep can fail: with one shape made to return, the same file must
 # be refused, so a run that accepted everything cannot read as success.
-sed 's/(fn (pSelf m) (pSelf m))/(fn (pSelf m) (cast a 1))/' "$work/shapes.ax" > "$work/shapes2.ax"
+sed 's/(fn (pSelf m) (pSelf m))/(fn (pSelf m) (as 1 a))/' "$work/shapes.ax" > "$work/shapes2.ax"
 rc="$(check_of shapes2.ax)"
 if (( rc == 1 )) && grep -q '`pSelf`' "$work/out"; then
   ok "and one of them made to return is refused, so the sweep can fail"
@@ -275,9 +275,9 @@ echo "== the escape hatch, on either half of a declaration =="
 # exempt it, or a tagged program is refused.
 for where in sig fn; do
   if [[ "$where" == sig ]]; then
-    printf ';@axiom:raw\n(:: rawGet (-> Int a))\n;@axiom:effect(unsafe)\n(fn (rawGet w) (cast a w))\n\n(:: main Int)\n\n(fn (main) 0)\n' > "$work/raw.ax"
+    printf ';@axiom:raw\n(:: rawGet (-> Int a))\n;@axiom:effect(unsafe)\n(fn (rawGet w) (as w a))\n\n(:: main Int)\n\n(fn (main) 0)\n' > "$work/raw.ax"
   else
-    printf '(:: rawGet (-> Int a))\n\n;@axiom:raw\n;@axiom:effect(unsafe)\n(fn (rawGet w) (cast a w))\n\n(:: main Int)\n\n(fn (main) 0)\n' > "$work/raw.ax"
+    printf '(:: rawGet (-> Int a))\n\n;@axiom:raw\n;@axiom:effect(unsafe)\n(fn (rawGet w) (as w a))\n\n(:: main Int)\n\n(fn (main) 0)\n' > "$work/raw.ax"
   fi
   rc="$(check_of raw.ax)"
   if (( rc == 0 )); then
@@ -288,7 +288,7 @@ for where in sig fn; do
 done
 # The tag is not a blanket: an untagged declaration in the same file is
 # still refused, so the exemption is per declaration.
-printf ';@axiom:raw\n(:: rawGet (-> Int a))\n;@axiom:effect(unsafe)\n(fn (rawGet w) (cast a w))\n\n(:: alsoRaw (-> Int a))\n;@axiom:effect(unsafe)\n(fn (alsoRaw w) (cast a w))\n\n(:: main Int)\n\n(fn (main) 0)\n' > "$work/raw2.ax"
+printf ';@axiom:raw\n(:: rawGet (-> Int a))\n;@axiom:effect(unsafe)\n(fn (rawGet w) (as w a))\n\n(:: alsoRaw (-> Int a))\n;@axiom:effect(unsafe)\n(fn (alsoRaw w) (as w a))\n\n(:: main Int)\n\n(fn (main) 0)\n' > "$work/raw2.ax"
 rc="$(check_of raw2.ax)"
 if (( rc == 1 )) && grep -q 'alsoRaw' "$work/out" && ! grep -q '`rawGet`' "$work/out"; then
   ok "the tag exempts its own declaration and not its neighbour"
@@ -466,7 +466,7 @@ echo "== what the diagnostic is guarding, run rather than argued =="
 # clean, builds, and dies. A gate that only asserted "a diagnostic
 # appears" would pass just as well against a rule that refused correct
 # programs.
-printf '(import Str)\n\n;@axiom:raw\n(:: demand (-> (-> a Int) Int))\n;@axiom:effect(unsafe)\n(fn (demand f) (f (cast a 42)))\n\n(:: main Int)\n\n(fn (main) (demand strLen))\n' > "$work/boom.ax"
+printf '(import Str)\n\n;@axiom:raw\n(:: demand (-> (-> a Int) Int))\n;@axiom:effect(unsafe)\n(fn (demand f) (f (as 42 a)))\n\n(:: main Int)\n\n(fn (main) (demand strLen))\n' > "$work/boom.ax"
 rc="$(check_of boom.ax)"
 ( cd "$work" && "$axc" run boom.ax ) >/dev/null 2>&1
 run=$?

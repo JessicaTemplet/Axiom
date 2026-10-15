@@ -155,7 +155,7 @@ echo "--- 1. user-level cast count does not grow ---"
 # of a fixture whose forged `(cast Spawn w)` handles are its subject;
 # a human golden quotes the source lines it points at. The two left
 # with `vecFree`'s fixtures (48b43283).
-cast_count="$(git -C "$repo_root" grep -h -o '(cast ' -- stdlib tests examples ':!tests/fuzz' | wc -l | tr -d ' ')"
+cast_count="$(git -C "$repo_root" grep -h -o '(as ' -- stdlib tests examples ':!tests/fuzz' | wc -l | tr -d ' ')"
 if [ "$cast_count" -eq 0 ]; then
   bad "user-level: the cast count read 0 - the measurement is broken, not the tree clean"
 elif [ "$cast_count" -le 476 ]; then
@@ -182,7 +182,7 @@ cat > "$work/cast4.ax" <<'EOF'
 (fn (main)
   (let ((p (memAlloc 8)))
     {
-      (memSetWord p 0 (cast String (strDup "hi")))
+      (memSetWord p 0 (as (strDup "hi") String))
     }))
 EOF
 if "$axc" --diagnostic-format=ai check "$work/cast3.ax" >/dev/null 2>&1 \
@@ -215,7 +215,7 @@ cat > "$work/scalar.ax" <<'EOF'
 (:: main ())
 (fn (main)
   (let ((p (memAlloc 8)))
-    { (memSetWord p 0 (cast Int 7)) }))
+    { (memSetWord p 0 (as 7 Int)) }))
 EOF
 if "$axc" --diagnostic-format=ai emit-llvm "$work/scalar.ax" -o "$work/scalar.ll" \
      > /dev/null 2> "$work/scalar.err"; then
@@ -290,7 +290,7 @@ fi
 # Every compiler module that writes a cast must be in the closure the
 # sum reads, or its erasures would never be counted.
 outside=""
-for f in $(git -C "$repo_root" grep -l '(cast ' -- 'self_host/*.ax'); do
+for f in $(git -C "$repo_root" grep -l '(as ' -- 'self_host/*.ax'); do
   grep -q " $f:" "$work/main.axsym" || outside="$outside $f"
 done
 if [[ -z "$outside" ]]; then
@@ -311,43 +311,43 @@ cat > "$work/erase.ax" <<'EOF'
 
 (:: str (-> String Int))
 (fn (str s)
-  (cast Int s))
+  (as s Int))
 
 (:: box (-> Box Int))
 (fn (box b)
-  (cast Int b))
+  (as b Int))
 
 (:: vec (-> (Vec Int) Int))
 (fn (vec v)
-  (cast Int v))
+  (as v Int))
 
 (:: tv (-> a Int))
 (fn (tv x)
-  (cast Int x))
+  (as x Int))
 
 (:: fgn (-> String Foreign))
 (fn (fgn s)
-  (cast Foreign s))
+  (as s Foreign))
 
 (:: alias (-> Box Word))
 (fn (alias b)
-  (cast Word b))
+  (as b Word))
 
 (:: two (-> String String Int))
 (fn (two a b)
-  (+ (cast Int a) (cast Int b)))
+  (+ (as a Int) (as b Int)))
 
 (:: chr (-> Char Int))
 (fn (chr c)
-  (cast Int c))
+  (as c Int))
 
 (:: color (-> Color Int))
 (fn (color c)
-  (cast Int c))
+  (as c Int))
 
 (:: num (-> Int Float))
 (fn (num n)
-  (cast Float n))
+  (__floatFromBits n ))
 
 (:: main ())
 (fn (main)

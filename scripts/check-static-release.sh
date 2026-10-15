@@ -83,7 +83,7 @@ cat > "$work/lit.ax" <<'AX'
 
 (:: boxOf (-> Int Int))
 
-(fn (boxOf n) (cast Int (Box "in field position" n)))
+(fn (boxOf n) (as (Box "in field position" n) Int))
 
 (:: letOf (-> Int Int))
 

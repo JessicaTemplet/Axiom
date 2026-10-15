@@ -434,7 +434,7 @@ answer `AX3051` rather than clearing the body.
 
 A stored lambda, or any value the walk can't name, leaves the field
 open: the first row above. The set is the whole program's, so a library's field is resolved by
-what the program it is built into stores. A forging `cast` or a raw
+what the program it is built into stores. A forging `as` or a raw
 store can also fill a field, and both are unsafe operations
 (`MM-EXEC-9d`).
 
@@ -661,7 +661,7 @@ operations:
 - a primitive in `MM-EXEC-9c`;
 - a call to, or a reference to, an `extern` item, whose body the
   checker can't see (`tests/diagnostics/1116-extern-unsafe.ax`);
-- a *forging cast*: `(cast T x)`, where `T` is a reference type and
+- a *forging cast*: `(as x T)`, where `T` is a reference type and
   `x` isn't already a `T`. The reference types are `String`, `Vec`,
   `Handle`, a struct, a `data` type with a field, a function, a
   non-empty tuple, and a type variable, which a caller may instantiate
@@ -684,7 +684,7 @@ claim (`tests/diagnostics/1200-unsafe-claim-open-row.ax`).
 
 (:: peek (-> Int Int))
 (fn (peek k)
-  (let ((h (cast Hid k)))
+  (let ((h (as k Hid)))
     h.n))
 ```
 
@@ -701,7 +701,7 @@ A cast that only observes forges nothing, so these stay silent:
 - a value cast to the type it already has;
 - an ascription that chooses the element type of a value nothing else
   in the body constrains, such as `(:: vecNew (Vec Int))`;
-- a cast of a value that never returns, such as `(cast a (exit 70))`,
+- a cast of a value that never returns, such as `(as (exit 70) a)`,
   the diverging spelling `AX3040` accepts.
 
 A cast is judged once its whole body is typed, so the type a value
@@ -881,7 +881,7 @@ obligation**:
 |---|---|
 | `(__alloc n)`, `memAlloc` | the address itself |
 | `(__addr "lit")`, `strData` | a literal's or a string's data address |
-| `(cast Int v)` on any heap value | that value's address |
+| `(as v Int)` on any heap value | that value's address |
 | `Vec`/`Map`/`Str` handles | addresses, since a handle *is* an address |
 | `sysPid`, `sysNowMicros` | process and wall-clock state |
 | `sysEnv`, `sysArg` | the environment |
@@ -908,7 +908,7 @@ length word bounds it, so an interior NUL is an ordinary byte, and a
           "equal"
           "different"))
       (println
-        (if (== (cast Int a) (cast Int b))
+        (if (== (as a Int) (as b Int))
           "same object"
           "two objects"))
       0
@@ -931,7 +931,7 @@ Two consequences you **MUST** know:
   `add`.
 - **Identity is a different question from equality.** A program asking
   whether two handles are the *same object* **MUST** say
-  `(== (cast Int a) (cast Int b))`, as the example does.
+  `(== (as a Int) (as b Int))`, as the example does.
   Identical literals within a module share one header, so they are the
   same object. `tests/stdlib/090-intern.ax` uses this test to prove an
   interner's inputs were distinct handles.
@@ -1373,11 +1373,20 @@ This puts an obligation on your program. Float-ness is static and
 can't be recovered at runtime, so a `Float` that reaches a position the
 compiler believes is an `Int` is reinterpreted, not converted.
 
-**MM-VAL-4a (H).** `cast` performs **no conversion**. It reinterprets
-the same 64-bit word. Its only effect on code generation is to set the
-compiler's float flag when the target type is spelled `Float`. The real
-numeric conversions are `__intToFloat` and `__floatToInt`, which lower
-to `sitofp` and `fptosi`.
+**MM-VAL-4a (H).** `(as value Type)` converts numeric values explicitly.
+`Int` to `Float` rounds to nearest with ties to even. `Float` to `Int`
+truncates towards zero and saturates at the integer bounds; a NaN
+answers zero. Alias targets select the same conversion as their
+expanded type. The compiler lowers these operations to `sitofp` or
+saturating `fptosi` support.
+
+`Float.floatToBits` and `Float.floatFromBits` reinterpret the binary64
+encoding without numeric conversion. Reference conversions keep the
+ownership and lifetime obligations of `MM-VAL-22` and `MM-VAL-23`.
+An expression ascription, `(:: value Type)`, checks the value against
+the type and performs no conversion. Tested by
+`tests/stdlib/943-as-numeric.ax` and
+`tests/diagnostics/1411-as-boundaries.ax`.
 
 **MM-VAL-4b (H).** Float arithmetic is selected by the type name
 `Float` **and no other**. The spellings `Double`, `F32` and `F64` are
@@ -1492,7 +1501,7 @@ type.
 
 One probe shows all three facts. With `(data A () (A1) (A2))` and
 `(data B () (B1 Int) (B2 Int Int))`, the expression
-`(+ (cast Int (A2)) (cast Int (B1 7)))` emits:
+`(+ (as (A2) Int) (as (B1 7) Int))` emits:
 
 ```llvm
 %.t0 = call i64 @axiom_alloc(i64 16)    ; B1: (1 + arity) * 8
@@ -1592,7 +1601,7 @@ either spelling, or read its field, whatever `pub` says (`AX3085`,
 `AX3086`). A function declared to answer `Int` can't answer one
 (`AX3004`). `pub` exports the name, so another module's signatures can
 mention the type and pass it on, but can't make or open one. Every
-value of the type is therefore one its module made. A `cast` to the
+value of the type is therefore one its module made. A `as` to the
 type forges one, and that belongs to the unsafe layer (`MM-VAL-22`).
 
 The checker holds the shape (`AX3084`): exactly one field, typed `Int`,
@@ -2537,7 +2546,7 @@ instead of promoting an arena.
 ---
 
 <a id="35-cast-degrades-the-evidence-word--measured"></a>
-### 3.5 `cast` degrades the evidence word
+### 3.5 `as` degrades the evidence word
 
 **MM-VAL-22 (H, renumbered from a second `MM-LIFE-2e`). A
 type-preserving cast preserves ownership and evidence.** When checking
@@ -2575,7 +2584,7 @@ from it:
 (:: getStr (-> Int Int String))
 ;@axiom:effect(unsafe)
 (fn (getStr a i)
-  (cast String (memGetWord a i)))
+  (as (memGetWord a i) String))
 
 (memSetWord p 0 (getStr p 0))  ; evidence word 1, releases emitted
 ```
@@ -2605,7 +2614,7 @@ by part:
   (Bx "kept"))       ; AX3004: expected Int, found Box
 ```
 
-Two explicit routes remain. `(cast Int v)` erases `v` as `MM-VAL-22`
+Two explicit routes remain. `(as v Int)` erases `v` as `MM-VAL-22`
 describes. `Mem.addrOf` answers a sealed `Addr` word (`MM-VAL-10a`)
 that compares and hashes `v`'s identity and takes no share. A function
 whose declared result is a word struct aliases none of its parameters,
@@ -3042,10 +3051,10 @@ static half of that is in place. The `String`/`Int` fiat, the rule in
 checker sees a string as a `String` throughout the compiler, the
 standard library and the test corpus
 (`tests/diagnostics/555-string-int-distinct.ax`). The containers carry
-type variables instead, and their accessors `cast` at the machine
+type variables instead, and their accessors `as` at the machine
 boundary. A signature's type variable is rigid inside its own body, so
 such a body needs an explicit `cast a`. Typing the tree changed no generated code,
-because `String` and `Int` share a representation and `cast` is free.
+because `String` and `Int` share a representation and `as` is free.
 
 `MM-LIFE-2b` to `MM-LIFE-2f` give what the strategy needs from the
 machine: a count word, the ownership events, a reference map, a release
@@ -3218,7 +3227,7 @@ reclaiming at zero), or, where the event says so, neither:
    `MM-ALLOC-9a`'s sixteen bytes per loop entry.
 
 A callee that ends a parameter's share *consumes* it, and neither event
-1 nor event 3 applies to that handoff. A `(__release (cast Int x))` on a
+1 nor event 3 applies to that handoff. A `(__release (as x Int))` on a
 parameter ends the caller's share, so a `let`-bound container passed to
 such a callee takes no scope-end release, and an owned temporary handed
 to it is not released after the call. The compiler records this in
@@ -3314,7 +3323,7 @@ when all of these hold:
 
 Intermediate steps keep their arguments, because the next step loads
 the answer's word 0 as a code pointer and so may alias them. Surplus
-arguments, from the `cast` spine and the over-applied tail, keep theirs
+arguments, from the `as` spine and the over-applied tail, keep theirs
 too: they are unmeasured, not known to be safe. `stdlib/Fallible.ax`
 records both halves at 0 bytes per operation, and
 `tests/stdlib/410-fallible.ax` term `e` pins the built-message case.
@@ -3401,7 +3410,7 @@ The binding escapes wherever that guarantee stops:
   takes no share. A store into a slot of a reference type
   takes one, as a field store does, and a slot that only stores keeps
   it;
-- under `cast`, `__addr`, `strData` or `strOwner`, the four ways to get
+- under `as`, `__addr`, `strData` or `strOwner`, the four ways to get
   a word out of a reference, which counting cannot see (`MM-LIFE-2g`'s
   own stated limit).
 
@@ -3445,7 +3454,7 @@ Measured in five directions:
 | built, read and dropped, 20,000 calls | 256 bytes (640,224 without the event) | yes |
 | built, passed to a function and dropped, 20,000 calls | 256 bytes (640,224 without the event) | yes |
 | returned from `keep` and read by `readA`, 5,000 iterations | under 4,096 bytes | yes |
-| its word escapes through a `cast`, 5,000 iterations | 291,328 bytes | no |
+| its word escapes through a `as`, 5,000 iterations | 291,328 bytes | no |
 | captured by a lambda, 5,000 iterations | 400,224 bytes | no |
 
 The last two must grow: a release there would free a block something
@@ -3574,7 +3583,7 @@ from three fixpoints over the call graph (`inferOwnership` and
   borrowed tail leaf as it is emitted, not at `ret`, so a body owned on
   one branch and borrowed on another retains only the borrowed branch.
   Every reference-returning global therefore hands its caller exactly
-  one share. `strWrapOwned`'s `(cast String s)` of a raw allocation is
+  one share. `strWrapOwned`'s `(as s String)` of a raw allocation is
   where every string is adopted, once.
 - **Who releases it.** Event 3 releases a `let` bound to any owned
   reference value, unless the escape walk says it escapes. An owned
@@ -3590,10 +3599,10 @@ from three fixpoints over the call graph (`inferOwnership` and
     escapes.
 - **Where an argument goes.** A callee can do one thing to an argument
   that counting does not see: erase its type. It can park the argument
-  in a field declared `Int` through a `cast`, in a mutable slot through
+  in a field declared `Int` through a `as`, in a mutable slot through
   `set`, in raw memory through `__store64`, or in a closure's record.
   It can also hand it to a callee that does one of those. For example, `mkDiag`
-  parks its message through `(cast Int msg)`. Each signed global
+  parks its message through `(as msg Int)`. Each signed global
   therefore carries a stash mask and a ret mask (`FSig.stash` and
   `FSig.ret`), both least fixpoints.
 
@@ -3603,7 +3612,7 @@ counted and cancels the bit, as in `memSetWord`, `mkNode` and
 `strSlice`.
 
 The ret mask names the parameters whose reference may be part of a word
-the function answers. That happens through `cast`, `__addr`, `strData`,
+the function answers. That happens through `as`, `__addr`, `strData`,
 `strOwner`, or a 64-bit load of a header word past index 0. Other loads
 answer scalars: word 0 of a handle is a length, a header's own count
 and shape words are numbers, and a byte is never a pointer. So
@@ -3613,7 +3622,7 @@ Each mask has three forms per parameter:
 
 - the *arrival*: the parameter as it came, a typed reference or a type
   variable's value;
-- the *header word*: the handle laundered through `cast`, `__addr` or
+- the *header word*: the handle laundered through `as`, `__addr` or
   arithmetic (an `Int` parameter arrives as one);
 - the *owner word*: `strData`, `strOwner` or a header word past index
   0, a pointer to or into the block the string's header owns.
@@ -3625,7 +3634,7 @@ header forms, and an owner as the owner. So `strSlice` and
 while a retain of the owner licenses no park of the header.
 
 A count is credited only to what the retained expression must be: the
-parameter, a `cast` of it, or a `let` alias of either, and only one
+parameter, a `as` of it, or a `let` alias of either, and only one
 parameter. It is never credited to a field, a binder or a join, so a
 match binder's `__retainref` never stands for its scrutinee.
 
@@ -3635,7 +3644,7 @@ given there is parked, uncounted. An owner word is never what
 `s` alive at the call, at the loop's boundary and at its exit. The
 header bit is a *weak* park: it parks only when a header word arrives,
 because a typed arrival is counted. So `memSetWord` of a typed string
-is counted, and `memSetWord` of `(cast Int s)` parks `s` however it
+is counted, and `memSetWord` of `(as s Int)` parks `s` however it
 arrived. A polymorphic `put` that forwards its parameter to
 `memSetWord` inherits the weak bit.
 
@@ -3666,7 +3675,7 @@ does not. A constructor's word field is judged the same way: a `match`
 arm such as `((Some a) (Some (strLen a)))` parks a length, so the
 scrutinee is still released after the merge
 (`tests/stdlib/902-match-arm-over-binder.ax`). Retaining at every
-`cast` instead was measured and rejected:
+`as` instead was measured and rejected:
 `strLen` and `strData` are casts, and every string in the compiler grew
 a share per read.
 
@@ -3681,10 +3690,10 @@ holds:
   it.
 - A parameter the function parks a word of, recorded in its own stash
   mask. For example, `parseModPathRest` hands `acc` to `pOk`, which
-  stores it through a `cast`. The slot's share is the stash's keeper,
+  stores it through a `as`. The slot's share is the stash's keeper,
   so neither the boundary nor the return path takes it back, and the
   parked value holds exactly one share.
-- A parameter the function answers a word of, such as `(cast Int s)`
+- A parameter the function answers a word of, such as `(as s Int)`
   as a tail. The word has no other keeper, so the block leaks rather
   than dangles.
 
@@ -3772,7 +3781,7 @@ slot. A length or a sum computed from it doesn't.
 
 These still leak, which is the safe direction:
 
-- a temporary passed to a primitive, to a `cast`, to a local function
+- a temporary passed to a primitive, to a `as`, to a local function
   value, or to a function whose result is a type variable, since none
   of those retains what it hands back;
 - a temporary that a `match` binder escapes from;
@@ -3908,7 +3917,7 @@ only counted share, the closure's park takes none, and the overwrite
 releases the last share while the closure's container still points at
 the block. The program is a factory returning a logging closure over a
 `Session` whose `name` is recorded and then reassigned. It uses no
-`cast`, no `__load64` and no header arithmetic, and `axiom check`
+`as`, no `__load64` and no header arithmetic, and `axiom check`
 prints `OK`.
 
 Two changes close it, and they close different things.
@@ -3988,7 +3997,7 @@ four depths across two- and three-parameter lambdas. Built by the
 compiler one commit before the change, it doesn't answer wrongly: it
 exits 139.
 
-The over-applied path and a `cast` spine's surplus arguments carry the
+The over-applied path and a `as` spine's surplus arguments carry the
 class too. Without it, both are live use-after-frees that `axiom check`
 accepts. On the shape `461` uses:
 
@@ -3996,7 +4005,7 @@ accepts. On the shape `461` uses:
 |---|---|---|
 | `((lambda (v) (vecPush log v)) h.name)`, the control | 97, the `a` | 97 |
 | `((mkParker log) h.name)`, over-applied | **122**, the `z` | 97 |
-| `((cast Int (lambda (v) ..)) h.name)`, a cast spine | **122** | 97 |
+| `((as (lambda (v) ..) Int) h.name)`, a cast spine | **122** | 97 |
 
 122 is the first byte of the five-byte string allocated into the block
 after `(set h.name ..)` released the only counted share. All three in
@@ -4012,7 +4021,7 @@ The two had different causes, so the fix is in two places:
   `dispatchCall` snapshots `spineEvs` beside the arguments, as
   `emitIndirectCall` does, and `emitOverApplied` drops it by the same
   arity as its arguments.
-- The `cast` spine never had the class. `checkCastForm` claims the
+- The `as` spine never had the class. `checkCastForm` claims the
   whole spine at its outermost node, so the intermediate application
   nodes never reach the arm that stamps them. `checkCastArgs` stamps
   the surplus ones.
@@ -4064,7 +4073,7 @@ leaving it to every caller.
 
 The rule doesn't cover a program that casts a reference into an
 `Int`-declared field of its own `struct`. That writes a word the rule
-never sees. `cast` marks leaving the type system, and keeping such a
+never sees. `as` marks leaving the type system, and keeping such a
 value alive is the program's obligation, the same position §10 takes
 for `memAlloc`. The compiler's own instance of that shape is `mkNode`,
 which the rule covers.
@@ -4657,7 +4666,7 @@ An unreachable cycle is never reclaimed. `MM-LIFE-3` shows both ways to
 build one, and this is the cost `MM-LIFE-2a` accepts. A program that
 builds a knot and needs the memory back **MUST** break the cycle before
 dropping its last external reference. To do so, store a non-reference
-into one edge, as in `(set a.next (cast Node 0))`. The word 0 is below
+into one edge, as in `(set a.next (as 0 Node))`. The word 0 is below
 4096, and release skips it. Nothing checks this, which is what
 *program obligation* means throughout this document.
 
@@ -4759,8 +4768,8 @@ records the correction. There are two independent routes:
 ; 1. Through the standard library, with no unsafe form at all:
 (let ((v vecNew)) { (vecPush v 7) (vecPushVec v v) ... })   ; v contains v
 
-; 2. Through a struct's mutable field, using `cast` to seed the knot:
-(let ((a (Node 1 (cast Node 0))) (b (Node 2 (cast Node 0))))
+; 2. Through a struct's mutable field, using `as` to seed the knot:
+(let ((a (Node 1 (as 0 Node))) (b (Node 2 (as 0 Node))))
   { (set a.next b) (set b.next a) ... })                 ; walks forever
 ```
 
@@ -4855,7 +4864,7 @@ of old source:
   written directly is now an undefined type, `AX3002`, with advice to
   write `T` (`tests/diagnostics/1132-linear-not-a-type.ax`).
 - `linear` is a keyword in type position only. In expression position
-  it is an ordinary identifier, and as `cast`'s type argument
+  it is an ordinary identifier, and as `as`'s type argument
   `(linear T)` still builds a different, lowercase constructor
   `linear T`, incompatible with `Linear T`.
 - `consume` was erased in the parser. The operand came back directly,
@@ -5003,7 +5012,7 @@ applies from the second stage of the bootstrap ladder.
 These leak, which is the safe direction:
 
 - a container whose first element arrives through a call that can't
-  see its type, such as a `cast` or a function value's thunk, which
+  see its type, such as a `as` or a function value's thunk, which
   stays plain;
 - a container that holds itself (`MM-LIFE-3`);
 - an `Intern`, whose handle is an `Int`, until `internFree`.
@@ -5380,7 +5389,7 @@ arena, leaving the parent naming unmapped memory.
 
 What remains belongs to the unsafe layer, and it is a **program
 obligation**: a word that is the address of thread-arena memory,
-laundered through `cast` or stored through a raw address, dangles after
+laundered through `as` or stored through a raw address, dangles after
 the join.
 
 **MM-PAR-6b (H). A `parallel` binding may borrow immutable data its parent
@@ -5538,7 +5547,7 @@ So an `Int` joined, a handle used as an `Int` and a function declared
 capture one (`AX3064`), because a join belongs to the binding that
 spawned it (`MM-PAR-7`'s 78).
 
-A `cast` that makes a `Spawn` out of any other word, directly or
+A `as` that makes a `Spawn` out of any other word, directly or
 through an alias, is a forging cast (`MM-EXEC-9d`). A declaration that
 writes one says `;@axiom:effect(unsafe)`, or draws `AX3073` at the
 cast.
@@ -5720,7 +5729,7 @@ That leaves two things the compiler doesn't check:
   freed word from a live one. A `Sys` function that only passes a
   buffer to the kernel carries no tag at all. Channels, mutexes,
   cancellation tokens and spawn handles are typed handles the runtime
-  checks (`MM-PAR-8`), and a `cast` to one is a forging cast, so this
+  checks (`MM-PAR-8`), and a `as` to one is a forging cast, so this
   hole doesn't reach them.
 
 *Evidence.*
@@ -5983,7 +5992,7 @@ answers a guard, and the guard's end lets the next holder in
 
 *Program obligations.* The handle is a `Mutex`, an owner as `Chan`'s is
 (`MM-PAR-16`), and every guard holds it too, so its page outlives every
-binding and every guard that uses it. A guard made with a `cast` is the
+binding and every guard that uses it. A guard made with a `as` is the
 unsafe layer's (`MM-VAL-22`).
 What the lock protects is protected only if every access to it happens
 under the lock. A plain access outside it is a data race (`MM-PAR-9`).
@@ -6380,7 +6389,7 @@ Three limits:
 - A NaN's payload and sign are the hardware's, so only its NaN-ness is
   reproducible.
 - `fmtFloat` rounds to six places. Send a `Float` between tasks as the
-  `Int` of its bits (`cast`), which is exact.
+  `Int` of its bits (`as`), which is exact.
 - A float literal is converted by the parser in two roundings, and one
   whose integer part is 2^63 or more, or with 19 or more fractional
   digits, wraps. Reproducible, but not the nearest double.
@@ -6486,7 +6495,7 @@ free again
   opened (`AX3086`) or captured by a concurrent binding (`AX3064`), and
   there is no unlock call. `mutexUnlock` was removed.
 
-*Limits.* A guard laundered through `cast` or a raw word is never
+*Limits.* A guard laundered through `as` or a raw word is never
 released, and its lock stays held: a deadlock, not a memory error, as
 with Rust's `mem::forget`. A guard kept in a container lives as long as
 the container. Each acquisition allocates the guard and its cleanup's
@@ -6593,7 +6602,7 @@ its return leaves the lent owners frozen, so their pages stay mapped
 until the process exits (`MM-PAR-6b`). A page address the library takes
 from an owner is valid while that owner lives: each call holds the
 object it was given, and a pool holds its token until it returns. That
-is a trusted obligation inside `Chan`, `Sync` and `Task`. A `cast` that
+is a trusted obligation inside `Chan`, `Sync` and `Task`. A `as` that
 forges an owner is the unsafe layer's (`MM-VAL-22`).
 
 *Evidence.* `tests/stdlib/803-shared-owner.ax`: 2,000 channels each
@@ -7193,14 +7202,14 @@ twice.
 | Was | Meaning | Cited | Now |
 |---|---|---|---|
 | `MM-LIFE-2e` (§5) | the ARC release path | 19 | unchanged |
-| `MM-LIFE-2e` (§3.5) | `cast` degrades the evidence word | 1 | **`MM-VAL-22`** |
+| `MM-LIFE-2e` (§3.5) | `as` degrades the evidence word | 1 | **`MM-VAL-22`** |
 | `MM-LIFE-2f` (§5) | cycles under counting | 1 (plus `I14`) | unchanged |
 | `MM-LIFE-2f` (§3.5) | the typed accessor is the safe vehicle | 1 | **`MM-VAL-23`** |
 | `MM-ALLOC-17` (§3.4) | the implicit per-activation arena, **W** | 0 outside this file | unchanged |
 | `MM-ALLOC-17` (§3.3) | a trap may abort to a mark, **H** | 1 | **`MM-ALLOC-23`** |
 
 The §3.5 pair became `MM-VAL-*` because both rules are about the
-evidence word and `cast`, which are §2's subject rather than §5's.
+evidence word and `as`, which are §2's subject rather than §5's.
 
 ### 9.0 Defects this specification records
 
@@ -7746,7 +7755,7 @@ twice or not used at all was accepted:
 
 ```scheme refused
 (:: dup (-> (linear Int) Int))
-(fn (dup x) (+ (cast Int (consume (consume x))) (cast Int x)))   ; once accepted
+(fn (dup x) (+ (as (consume (consume x)) Int) (as x Int)))   ; once accepted
 (:: drop (-> (linear Int) Int))
 (fn (drop x) 0)                                                  ; once accepted
 ```

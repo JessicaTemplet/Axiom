@@ -60,7 +60,7 @@ pub enum Ex {
     Atom(String),
     /// `(head args...)`.
     App(Vec<Ex>),
-    /// `(cast Type e)`.
+    /// `(as e Type)`.
     Cast(String, Box<Ex>),
     /// `(let (bindings...) body)`; bindings are `(name init)`.
     Let(Vec<(String, Ex)>, Box<Ex>),

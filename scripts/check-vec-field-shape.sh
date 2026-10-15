@@ -65,7 +65,7 @@ EOF
   echo "${s:-NO-SHAPE-WORD}"
 }
 
-VEC='(cast (Vec Int) (vecNew))'
+VEC='(as (vecNew) (Vec Int))'
 
 echo "== the shape word a record gets, by the type of its first field =="
 anchor="$(emit_shape Int String '"hi"' 7)"

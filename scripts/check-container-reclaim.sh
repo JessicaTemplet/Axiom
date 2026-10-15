@@ -184,7 +184,7 @@ AX
 ;@axiom:effect(unsafe)
 (fn (mapHeld m)
   {
-    (__retain (cast Int m))
+    (__retain (as m Int))
     (mapLen m)
   })
 

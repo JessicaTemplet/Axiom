@@ -35,8 +35,8 @@ cat > "$work/p/witness.ax" <<'AX'
 (fn (main)
   (let ((s (strDup "freed-value-12345678")))
     {
-      (dropIt (cast Int s))
-      (let ((word (readWord (cast Int s)))) (println "{word}"))
+      (dropIt (as s Int))
+      (let ((word (readWord (as s Int)))) (println "{word}"))
     }))
 AX
 for mode in plain poison; do
@@ -56,7 +56,7 @@ cat > "$work/p/zero.ax" <<'AX'
 (:: main Int)
 ;@axiom:effect(unsafe)
 (fn (main)
-  (let ((s (strDup "reusable")) (p (cast Int s)))
+  (let ((s (strDup "reusable")) (p (as s Int)))
     {
       (__release p)
       (let ((q (__alloc 24)))

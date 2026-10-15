@@ -135,7 +135,7 @@ AX
       ;;
     aggregate)
       local value='(strDup (fmtInt i))'
-      [[ "$variant" == leaking ]] && value='(cast Int (strDup (fmtInt i)))'
+      [[ "$variant" == leaking ]] && value='(as (strDup (fmtInt i)) Int)'
       cat > "$out" <<AX
 ; 64 fixed keys, values replaced $n times. Variant: $variant.
 (import IO)
@@ -196,7 +196,7 @@ AX
 ;@axiom:effect(io)
 (fn (main)
   (let ((kept vecNew))
-    { (println (cast Int (handle (total $n) (Fallible Alloc Mut) $handler))) 0 }))
+    { (println (as (handle (total $n) (Fallible Alloc Mut) $handler) Int)) 0 }))
 AX
       ;;
   esac

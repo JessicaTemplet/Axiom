@@ -690,7 +690,7 @@ else
     (k (argInt 2))
     (p (if (strEq (sysArg 1) "heap")
       (memAlloc 16)
-      (cast Int "abcdefghijklmnop")))
+      (as "abcdefghijklmnop" Int)))
   )
     {
       (println (fmtInt (peek p k)))

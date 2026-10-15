@@ -99,7 +99,7 @@ probe read-back refuse <<'AX'
 (fn (put b x) b)
 (:: peek (-> (Box a) a))
 ;@axiom:effect(unsafe)
-(fn (peek b) (cast a 0))
+(fn (peek b) (as 0 a))
 (:: needStr (-> String Int))
 (fn (needStr s) 0)
 (fn (main)

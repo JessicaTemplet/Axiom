@@ -1017,15 +1017,15 @@ the record nothing.**
 (fn (main)
   {
     (println
-      (cast Int (handle
+      (as (handle
         (total 20)
         (Fallible)
-        fallibleSkip)))
+        fallibleSkip) Int))
     (println
-      (cast Int (handle
+      (as (handle
         (total 20)
         (Fallible)
-        (fallibleDefault 100))))
+        (fallibleDefault 100)) Int))
   })
 ```
 
@@ -1091,7 +1091,7 @@ every record as text, and holds it to the same band at 100,000 and
 record is a block per record, allocated and released a million times,
 where a sentinel is one comparison. A `handle` expression's own type is
 also the checker's wildcard, so an `Option` would arrive through a
-`cast` at every site. If your records can hold the most negative `Int`,
+`as` at every site. If your records can hold the most negative `Int`,
 write a one-line handler that answers your own sentinel.
 
 *What this does not change.* `ERR-REC-3` stands: the handler answers,
@@ -1185,7 +1185,7 @@ This section records the codes below. All of them are built, and
 | `AX3068` `nullary-lambda` | a parameterless `lambda` applied | Split from `AX3008`. |
 | `AX3069` `sizeof-arity` | a surplus argument to `sizeof` or `alignof` | Split from `AX3008`. |
 | `AX3070` `unsafe-field-access` | a field read on a `data` type with a nullary constructor beside a fielded one | Split from `AX3008`. |
-| `AX3071` `unretained-store` | a bare `__store64` of a reference-typed value through `cast` | `tests/diagnostics/1002-unretained-store.ax` |
+| `AX3071` `unretained-store` | a bare `__store64` of a reference-typed value through `as` | `tests/diagnostics/1002-unretained-store.ax` |
 | `AX3072` `addr-nonliteral` | `__addr` of anything but a string literal | `tests/diagnostics/1003-addr-nonliteral.ax` |
 | `AX3073` `undeclared-unsafe` | a declaration performs a raw primitive, calls an `extern` or forges a reference or a spawn handle without `;@axiom:effect(unsafe)` | An error. `tests/diagnostics/1004-undeclared-unsafe.ax`, `tests/diagnostics/1040-forging-cast.ax`, `tests/diagnostics/1116-extern-unsafe.ax`, `tests/diagnostics/1260-spawn-forging-cast.ax` |
 | `AX3089` `signature-needed` | a function with no signature, called from inside its own body or from a declaration above it, before its type is known | An error. `tests/diagnostics/1032-signature-needed.ax` |
@@ -1270,7 +1270,7 @@ a discarded argument and an unsafe load. It is split into
 its old message word for word, and only the code and slug changed. The
 four corpus fixtures `270`, `390`, `395` and `480` are their primaries.
 
-`AX3071` exists because `cast` takes no share: the owner's release
+`AX3071` exists because `as` takes no share: the owner's release
 frees a block the stored word still names. `AX3072` exists because
 anything but a string literal has no interned bytes behind it.
 

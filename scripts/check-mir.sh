@@ -675,8 +675,8 @@ p = sys.argv[1]
 s = open(p, encoding="utf-8").read()
 # Whitespace-insensitive between atoms, for the reason the `ablate`
 # seams give: `axiom fmt` can rejoin a long constructor's arguments.
-pat = re.compile(r"\(vecSet\s+ops\s+n\.dst\s+\(cast\s+Int\s+\(constStr\s+n\.a\)\)\s*\)")
-rep = "(vecSet ops n.dst (cast Int (regStr (allocReg cg))))"
+pat = re.compile(r"\(vecSet\s+ops\s+n\.dst\s+\(as\s+\(constStr\s+n\.a\)\s+Int\)\s*\)")
+rep = "(vecSet ops n.dst (as (regStr (allocReg cg)) Int))"
 hits = len(pat.findall(s))
 if hits != 1:
     sys.stderr.write("seam 3 appears %d times, expected 1\n" % hits)
@@ -815,7 +815,7 @@ else
   crashed5=0
   for f in "${fixtures[@]}"; do
     n="$(basename "$f" .ax)"
-    if grep -q '(cast ' "tests/mir/$n.ax"; then expect=red; else expect=same; fi
+    if grep -q '(as ' "tests/mir/$n.ax"; then expect=red; else expect=same; fi
     [[ "$expect" == "red" ]] && n_cast=$((n_cast + 1))
     "$a5" lower "$f" > "$work/abl5.$n.mir" 2>/dev/null
     if cmp -s "$work/abl5.$n.mir" "tests/mir/$n.mir"; then got=same; else got=red; fi

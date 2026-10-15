@@ -604,7 +604,7 @@ that must go *now*, such as a file or a lock, and for nothing else.
 ;@axiom:effect(unsafe)
 (pub fn (counterNew start)
   (let (
-    (__p (cast Int (counterNewRaw start)))
+    (__p (as (counterNewRaw start) Int))
     (__h (ffiHandleNew __p counterDropFn))
   )
     (Counter __h)))
@@ -614,7 +614,7 @@ that must go *now*, such as a file or a lock, and for nothing else.
 ;@axiom:effect(unsafe)
 (pub fn (counterValue c)
   (let (
-    (__a0 (cast Foreign (ffiHandlePtr c.handle)))
+    (__a0 (as (ffiHandlePtr c.handle) Foreign))
     (__r (counterValueRaw __a0))
   )
     __r))
@@ -627,7 +627,7 @@ that must go *now*, such as a file or a lock, and for nothing else.
 The struct holds the `Handle`, so its death releases the handle,
 and the handle's death runs the Rust `Drop`. `Counter` and `Widget`
 stay distinct Axiom types because each is its own sealed struct.
-`(cast Int x)` and `(cast Foreign x)` reinterpret the bits, and they
+`(as x Int)` and `(as x Foreign)` reinterpret the bits, and they
 are the documented way across the `Foreign`/`Int` line.
 
 `tests/ffi/demo/060-opaque-handle.ax` shows this working: it prints
@@ -784,7 +784,7 @@ place that casts:
 (pub fn (sumWords xs)
   (let ((__r 
     (sumWordsRaw
-      (cast Int xs)
+      (as xs Int)
     )
   ))
     __r
@@ -794,7 +794,7 @@ place that casts:
 
 Without the wrapper, the raw item would be the name you call. Its
 signature would say `Int`, and every call in your code would need a
-`cast`, which is the shape `MM-VAL-22` measures as a lost retain. The
+`as`, which is the shape `MM-VAL-22` measures as a lost retain. The
 generated wrapper keeps that cast in one reviewed place, so you pass
 the vector you have.
 
@@ -813,7 +813,7 @@ pub struct Point { pub x: i64, pub y: f64 }
 
 ```scheme
 (sumWords (rangeVec 5))                     ; 10: the Vec goes in as itself
-(cast Float (vecGet (halves 3) 1))          ; 0.5: a Float element is its bits
+(__floatFromBits (vecGet (halves 3) 1) )          ; 0.5: a Float element is its bits
 (joinWords (vecOf "a" "b"))                 ; "a b"
 (match (pointScale (Point 1 2.5) 2)
   ((Point x y) ...))                        ; x = 2, y = 5.0
@@ -837,7 +837,7 @@ each use:
         (__c (ffiCellNewN 2))
         (__st (pointScaleRaw __f0 __f1 k __c))
         (__w0 (ffiCellWord __c 0))
-        (__w1 (cast Float (ffiCellWord __c 1)))
+        (__w1 (__floatFromBits (ffiCellWord __c 1) ))
         (__r (Point __w0 __w1))
       )
         {

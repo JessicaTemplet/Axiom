@@ -153,7 +153,7 @@ the neighbourhood of the corpus.
 
 ## Known defects
 
-- Safe code can still turn a reference into a word with `(cast Int v)`,
+- Safe code can still turn a reference into a word with `(as v Int)`,
   or by storing it in an `Int` container slot or through `memSetWord`.
   A value that leaves this way stops being tracked. A function result
   can't do it (`MM-VAL-24`).

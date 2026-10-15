@@ -1941,7 +1941,7 @@ The second row is what lets `println` print any value, not just a
 format string. `(println s)` on a `String` renders as itself, and
 `(println n)` on an `Int` prints the integer. A value with no named
 static type has no rendering to pick, and is `AX3025` (MAC-CAP-10.6).
-Name its type with a `cast` or a signature.
+Name its type with a `as` or a signature.
 
 `syntax/formatln` folds `\n` into the last literal run at expansion
 time. So `(println "hi")` compiles to one static constant, `"hi\n"`,
@@ -2065,7 +2065,7 @@ argument's static type decides which rendering it reaches. Where there
 is no named type, there is nothing to reach: a generic function's own
 type variable, or a type that mentions one such as `(Box a)`. That hole
 is `AX3025`, naming the situation. The fix is to name the type, with a
-signature or a `cast`, as in `(println (cast Int x))`. An effect
+signature or a `as`, as in `(println (as x Int))`. An effect
 operation's result is typed by its `handle` body, so
 `(println (handle ..))` renders. Tested by
 `tests/diagnostics/620-show-refusals.ax`.

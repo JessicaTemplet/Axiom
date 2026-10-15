@@ -283,7 +283,7 @@ pub fn sum_words(xs: &[i64]) -> i64 {
 //     into the same `(ptr, len)` of words as a `Vec<i64>` - an f64 as
 //     its bits, an f32 as f64 bits, a bool as 0/1, a u8 as the word -
 //     so the Axiom wrapper is unchanged and the element type is
-//     whatever the program reads: `(cast Float (vecGet v i))` for
+//     whatever the program reads: `(__floatFromBits (vecGet v i) )` for
 //     `halves`, `(vecGet v i)` for `flags`. A `&[T]` parameter reads
 //     the Axiom `Vec` the other way: `&[f64]` reinterprets the words
 //     in place (same size, same alignment, every bit pattern a float),
@@ -387,8 +387,8 @@ pub fn point_maybe(ok: bool) -> Option<Point> {
 
 // 6k. `char` is Axiom `Char`: the code point in the word, both ways.
 //     Rust -> Axiom is `c as i64`; Axiom -> Rust is `char::from_u32`,
-//     and a word that is not a Unicode scalar value (`(cast Char
-//     1114112)`, a surrogate, a negative word) aborts with the
+//     and a word that is not a Unicode scalar value (`((as //
+Char)     1114112)`, a surrogate, a negative word) aborts with the
 //     argument named, as a narrow integer out of range does. The same
 //     rule covers a record field, a `Vec<char>` element and a `&[char]`
 //     element.

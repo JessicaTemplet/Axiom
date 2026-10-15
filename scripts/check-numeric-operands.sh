@@ -46,7 +46,7 @@ def wrap(expr, ty, kind):
     if kind == 7:
         return f'(let ((v {expr})) (- (- v)))'
     other = 'Float' if ty == 'Int' else 'Int'
-    return f'(cast {ty} (cast {other} {expr}))'
+    return f'(as (as {expr} {other}) {ty})'
 
 
 def call(*args):

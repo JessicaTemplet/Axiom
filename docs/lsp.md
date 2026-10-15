@@ -644,7 +644,7 @@ server can't know without reading the file.
 Tested by `SECTION NAV TESTS` in `tests/lsp/drive.py`. There the
 supertype anchor is the `Int` of the subtype's own `is Int range`, and
 `references` on the `Positive` binder finds the binder, the signature
-use and the `cast` target.
+use and the `as` target.
 
 #### Find references and highlights
 
@@ -810,7 +810,7 @@ for an imported name is in a different file.
 The language itself answers too, so you can read what a form means
 without leaving the editor:
 
-- A keyword or form word (`let`, `match`, `mut`, `cast`, `::`, `->`)
+- A keyword or form word (`let`, `match`, `mut`, `as`, `::`, `->`)
   answers its shape in a fence, its kind, a paragraph and the section
   of the [reference](reference.md) that covers it. `axiom explain let`
   prints the same entry.
@@ -1345,10 +1345,10 @@ maps to scopes. The token types, in the order the integers index them:
 
 | Token type | What it marks |
 |---|---|
-| `keyword` | a head keyword the parser dispatches on, `pub`, `mut`, `cast`, the `syntax/*` words; `true` and `false` with `defaultLibrary`; a removed word such as `cond` with `deprecated` |
+| `keyword` | a head keyword the parser dispatches on, `pub`, `mut`, `as`, the `syntax/*` words; `true` and `false` with `defaultLibrary`; a removed word such as `cond` with `deprecated` |
 | `function` | a `fn` name (`declaration`, and `definition` at the `fn` itself), a `::` subject, an effect operation, an `extern` item, a call |
 | `macro` | a `macro` name and its rule heads |
-| `type` | a `data`, `struct`, `type` or `subtype` name and every type in a signature, field or `cast`; a builtin such as `Int` with `defaultLibrary` |
+| `type` | a `data`, `struct`, `type` or `subtype` name and every type in a signature, field or `as`; a builtin such as `Int` with `defaultLibrary` |
 | `typeParameter` | a lowercase name in a type position |
 | `enumMember` | a constructor, declared or applied, and a positional struct build |
 | `property` | a struct or constructor field at its declaration, and a `.field` read |

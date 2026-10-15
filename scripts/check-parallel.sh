@@ -782,8 +782,8 @@ cat > "$work/nrpar.ax" <<'NRPAR'
     (let ((h (__par_spawn (lambda (w) (+ w 41)) 1)))
       (let ((ans (__par_join_nr h cell)))
         {
-          (println (cast Int ans))
-          (println (cast Int (memGetWord cell 0)))
+          (println (as ans Int))
+          (println (as (memGetWord cell 0) Int))
         }))))
 NRPAR
 cat > "$work/nrtrap.ax" <<'NRTRAP'
@@ -801,8 +801,8 @@ cat > "$work/nrtrap.ax" <<'NRTRAP'
     (let ((h (__par_spawn (lambda (w) (/ 10 w)) 0)))
       (let ((ans (__par_join_nr h cell)))
         {
-          (println (cast Int ans))
-          (println (cast Int (memGetWord cell 0)))
+          (println (as ans Int))
+          (println (as (memGetWord cell 0) Int))
         }))))
 NRTRAP
 if run_case "$work/nrpar.ax" "" nrpar-p && run_case "$work/nrpar.ax" "--threads" nrpar-t; then
@@ -1577,8 +1577,8 @@ fi
 # (MM-EXEC-9d), so `main` says `effect(unsafe)`.
 for kind in proc thread; do
   for form in raising checked; do
-    join_expr="(__${kind}_join (cast Spawn hw))"
-    [[ "$form" == checked ]] && join_expr="(__${kind}_join_nr (cast Spawn hw) cell)"
+    join_expr="(__${kind}_join (as hw Spawn))"
+    [[ "$form" == checked ]] && join_expr="(__${kind}_join_nr (as hw Spawn) cell)"
     tag="owner-$kind-$form"
     cat > "$work/$tag.ax" <<OWNER
 (import IO)
@@ -1593,7 +1593,7 @@ for kind in proc thread; do
     (cell (memAlloc 8))
     (_ (memSetWord cell 0 123))
     (h (__${kind}_spawn (lambda (x) 42) 0))
-    (hw (cast Int h))
+    (hw (as h Int))
     (other (__thread_spawn
       (lambda (x)
         (__axiom_recover __axiom_arena_mark

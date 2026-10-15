@@ -82,7 +82,7 @@ $3
     (build 1)
     $2
     (__axiom_recover __axiom_arena_mark (lambda (x) (build 2)))
-    (cast Int (handle (log "y") (Console Alloc IO) (lambda (s) 0)))
+    (as (handle (log "y") (Console Alloc IO) (lambda (s) 0)) Int)
   }
 )
 PROBE

@@ -667,7 +667,7 @@ module.exports = grammar({
     // as an error the way the compiler reports it, not as the
     // conditional the `cond_expression` rule used to say it was.
     // `emacro` joined it when `macro` took expression templates.
-    removed_keyword: _ => choice('union', 'trait', 'impl', 'cond', 'emacro'),
+    removed_keyword: _ => choice('union', 'trait', 'impl', 'cond', 'emacro', 'cast'),
     _removed_foreign: _ => 'foreign',
 
     // -----------------------------------------------------------------
@@ -886,7 +886,7 @@ module.exports = grammar({
       $.handle_expression,
       $.sizeof_expression,
       $.alignof_expression,
-      $.cast_expression,
+      $.as_expression,
       $.type_signature,
       $.block,
       $.list_literal,
@@ -1128,8 +1128,8 @@ module.exports = grammar({
 
     alignof_expression: $ => seq('(', 'alignof', field('type', $._type), ')'),
 
-    cast_expression: $ => seq(
-      '(', 'cast', field('type', $._type), field('operand', $._expression), ')',
+    as_expression: $ => seq(
+      '(', 'as', field('operand', $._expression), field('type', $._type), ')',
     ),
 
     // `{ e1 e2 ... }` - sequencing, value of the last expression.

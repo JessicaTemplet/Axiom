@@ -115,10 +115,10 @@ emit_probe() {
     {
       (memSetWord cell 0 b)
       (while (> nn 0)
-        (let ((up (cast Int (copyBoard (step (memGetWordVec cell 0))))))
+        (let ((up (as (copyBoard (step (memGetWordVec cell 0))) Int)))
           {
             (__axiom_arena_reset m)
-            (memSetWord cell 0 (copyBoard (cast (Vec Int) up)))
+            (memSetWord cell 0 (copyBoard (as up (Vec Int))))
             (set nn (- nn 1))
           }))
       (memGetWordVec cell 0)
