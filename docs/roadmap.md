@@ -89,7 +89,7 @@ integrator would still need.
 | Imports form the module header and cannot appear later or inside expressions | Done | `tests/diagnostics/1400-late-import.axbad`, `tests/diagnostics/1401-nested-import.axbad`, `tests/diagnostics/1402-lambda-import.axbad` |
 | REPL uses the brand palette and shares diagnostic and language help with the CLI | Done | `scripts/check-repl-tui.sh`, `tests/repl/170-explain-shape.txt` |
 | Editor and REPL completion exclude retired syntax | Done | `tests/lsp/drive.py`, `scripts/check-replcomp.sh` |
-| Define numeric promotion for literals, mixed arithmetic and expected types, with precision guarantees and explicit lossy conversions | Planned | |
+| Define numeric promotion for literals, mixed arithmetic and expected types, with precision guarantees and ADT soundness; lossy conversions stay explicit | Planned | |
 | Legacy CLI and syntax removed: `axiom FILE`, expression `fn`, keyword struct construction, format aliases | Done | `compat/BREAKING` |
 | The precondition tag removed; contracts are `pre` and `post` | Done | `AX3095` |
 | Macro hygiene has one implementation | Done | `MAC-HYG-10` |
@@ -99,6 +99,11 @@ integrator would still need.
 | A unit type with a value, `()`, so an `if` without an else, a dropped branch and a procedure need no filler `0` | Done | `tests/stdlib/890-unit-and-if.ax`, `tests/stdlib/892-dropped-branches.ax` |
 | Functional piping as a structural form: a pipe the tree, the language server and agents see stage by stage, with an explicit `_` hole for where the value goes | Not started | |
 | One code-generation route: the MIR route is finished or removed | Not started | |
+
+Numeric promotion must preserve algebraic data type (ADT) identity,
+constructor payload types, pattern matching and ownership evidence.
+Converting an already constructed ADT requires an explicit operation.
+Incompatible ADTs must fail type checking.
 
 ## Standard library
 
