@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- The REPL uses Axiom's lime and amber palette for the prompt, syntax,
+  completion and results, with coral diagnostics. Piped sessions stay plain.
+- `:explain` looks up diagnostics, language forms and tags inside a session,
+  sharing the CLI's reference. Help and diagnostic hints link to it.
+
 - Imports must form the module header, before every other declaration.
   Late and nested imports draw AX2001; formatting refuses them without
   rewriting the file. Cereal's imports now precede its declarations.

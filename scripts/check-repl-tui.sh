@@ -146,7 +146,10 @@ piperc=$?
 mkscript "$work/l1.json" <<'PYX'
 import json, sys
 json.dump([["prompt"],
-           ["send", "b'(+ 1 2)\\r'"], ["prompt"],
+           ["send", "b'(+ 1 2)'"], ["quiet", 100],
+           ["send", "b'\\r'"], ["prompt"],
+           ["send", "b'(+ 1 true)\\r'"], ["prompt"],
+           ["send", "b':explain ax3004\\r'"], ["prompt"],
            ["send", "b':quit\\r'"], ["exit"]], open(sys.argv[1], "w"))
 PYX
 run_pty 24 80 "$work/l1.json" ptyrun
@@ -194,6 +197,33 @@ if has "$work/ptyrun.bin" "result 3"; then
   ok "pty: the session evaluated - 'result 3'"
 else
   bad "pty: no 'result 3' in the transcript"
+fi
+
+# Check colour roles against the website's brand tokens and preserve the
+# plain result/error text when the escape sequences are removed.
+if python3 - "$work/ptyrun.bin" "$repo_root/web/src/styles/tokens.css" <<'PYX'
+import re, sys
+raw = open(sys.argv[1], 'rb').read().replace(b'\r', b'')
+css = open(sys.argv[2]).read()
+def rgb(token):
+    value = re.search(r'--' + token + r':\s*#([0-9a-fA-F]{6})', css).group(1)
+    return ';'.join(str(int(value[i:i+2], 16)) for i in (0, 2, 4)).encode()
+checks = [
+    (b'\x1b[1;38;2;' + rgb('accent') + b'maxiom> ', 'lime prompt'),
+    (b'\x1b[1;38;2;' + rgb('text') + b'mresult 3\n', 'bright result'),
+    (b'\x1b[1;38;2;' + rgb('danger') + b'mType error: [AX3004]', 'coral diagnostic'),
+    (b'\x1b[38;2;' + rgb('amber') + b'm1', 'amber literal'),
+]
+for marker, label in checks:
+    if marker not in raw:
+        sys.exit('missing ' + label)
+plain = re.sub(rb'\x1b\[[0-9;]*m', b'', raw)
+assert b'AX3004 -' in plain, ':explain did not answer the diagnostic'
+PYX
+then
+  ok "terminal prompt, literals, results and errors use the website's brand palette; :explain answers in the session"
+else
+  bad "REPL brand colours or in-session diagnostic help are missing"
 fi
 
 # =================================================================

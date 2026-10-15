@@ -320,15 +320,10 @@ else
 fi
 
 # ---------------------------------------------------------------------
-# Layer 4: no tenth colour.
-#
-# Every colour the highlighter uses must be one of style.ax's nine
-# exported constants. ESC has no literal spelling (`isEscapeChar` accepts
-# exactly \n \t \r \\ \" \' \0), so a colour cannot be written inline
-# as an escape. An SGR parameter string can be: `(paint "1;31" x)` would
-# compile and hide a tenth colour outside the palette.
+# Layer 4: every colour comes from the shared palette.
+# Parameter strings belong in style.ax, including the REPL brand palette.
 # ---------------------------------------------------------------------
-used="$(grep -o 'SGR_[A-Z]*' "$module" | LC_ALL=C sort -u)"
+used="$(grep -oE '(SGR|REPL)_[A-Z]+' "$module" | LC_ALL=C sort -u)"
 n_used="$(printf '%s\n' "$used" | grep -c . || true)"
 checks=$((checks + 1))
 if (( n_used < 5 )); then

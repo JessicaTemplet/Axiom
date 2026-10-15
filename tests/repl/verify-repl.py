@@ -73,7 +73,7 @@ MODELLED_EXACT = ("Goodbye!",)
 # whole list to tell a command the REPL does not know (one line of chatter,
 # predictable) from one this model has not implemented (skip the session).
 COMMANDS = {":help", ":h", ":quit", ":q", ":exit", ":type", ":t", ":load",
-            ":l", ":reset", ":r", ":defs", ":d", ":llvm", ":time"}
+            ":l", ":reset", ":r", ":defs", ":d", ":llvm", ":time", ":explain"}
 
 LINE = "line"          # a transcript line this model derived
 CHATTER = "chatter"    # one command's output, unpredictable, window-checked
@@ -408,7 +408,7 @@ def predict(session):
             v = ev(form, {}, defs, Budget())
         except Undefined as u:
             out.append((LINE, "Type error: [AX3001] undefined variable `%s`" % u.name))
-            out.append((LINE, "  help: run `axiom explain AX3001`"))
+            out.append((LINE, "  help: :explain AX3001"))
             continue
         out.append((LINE, "type : %s" % v.type_name()))
         out.append((LINE, "result %s" % v.render()))

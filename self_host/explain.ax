@@ -252,3 +252,51 @@
                                                                                                                                                                                                                                   (if (strEq c "3043")
                                                                                                                                                                                                                                     "AX3043 - a reference stored through a field declared `Int`\n\nThe release walk follows DECLARED types, so a reference word in an `Int` slot is invisible to reclamation and leaks: a `String` stored through a field declared `Int` is never released (docs/error-model.md ERR-TYPE-5/ERR-MEM-1). The type checker already refuses the direct shape - a `String` where an `Int` stands is `AX3004` - so what this reports is the smuggled one: a `cast` laundering the operand's type while the operand stays a reference.\n\nThis is an ERROR. The program is well-typed, but the leak is certain, and a cast written on purpose leaks just the same. What is reported is only what the checker can see: a variable it resolves, or a literal, read through any nesting of casts, whose class is a reference - the same rule `AX3071` follows for `__store64`. A call result, a field, or a poisoned operand is skipped, and a direct mismatch is owned by the error beside it.\n\n    (struct Box (v : Int))\n    (Box (cast Int name))         ; refused: `name` is a String\n\nDeclare the field's real type, `(struct Box (v : String))`, and drop the cast. To compare or hash a value by identity, store its `Addr` from `addrOf` instead.\n\n"
                                                                                                                                                                                                                                     ""))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+
+; Normalise a diagnostic code for both the CLI and the REPL.
+; Trim ASCII whitespace, strip AX and leading dashes, and uppercase.
+(pub :: explainNormalize (-> String String))
+;@axiom:effect(unsafe)
+(pub fn (explainNormalize s)
+  (let (
+    (mut a 0)
+    (mut b (strLen s))
+  )
+    {
+      (while (&&
+               (< a b)
+               (let ((c (strByte s a)))
+                 (|| (== c 32) (|| (== c 9) (|| (== c 10) (== c 13))))))
+        (set a (+ a 1)))
+      (while (&&
+               (> b a)
+               (let ((c (strByte s (- b 1))))
+                 (|| (== c 32) (|| (== c 9) (|| (== c 10) (== c 13))))))
+        (set b (- b 1)))
+      (if (&&
+            (< (+ a 1) b)
+            (&&
+              (|| (== (strByte s a) 65) (== (strByte s a) 97))
+              (|| (== (strByte s (+ a 1)) 88) (== (strByte s (+ a 1)) 120))))
+        (set a (+ a 2)))
+      (while (&& (< a b) (== (strByte s a) 45))
+        (set a (+ a 1)))
+      (let (
+        (out (strAlloc (- b a)))
+        (mut i a)
+      )
+        {
+          (while (< i b)
+            (let ((c (strByte s i)))
+              {
+                (__store8
+                  (strData out)
+                  (- i a)
+                  (if (&& (>= c 97) (<= c 122))
+                    (- c 32)
+                    c))
+                (set i (+ i 1))
+              }))
+          out
+        })
+    }))

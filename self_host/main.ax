@@ -34,18 +34,6 @@
 (import pkg)
 (import obfuscate)
 
-; Obfuscation is selected only by compiler flags, never program argv.
-; `axiom explain WORD`: the lexicon's entry for a keyword, a builtin
-; type, an effect, an operator or a literal, or for an AXTAG key
-; written as `@key` (`@restrict`), as Markdown. "" when the lexicon
-; has no entry, so the caller reports the unknown code.
-(:: explainLexicon (-> String String))
-(fn (explainLexicon word)
-  (let ((w (strTrim word)))
-    (if (strStartsWith w "@")
-      (lexTagMarkdown (strSlice w 1 (- (strLen w) 1)) "")
-      (lexEntryMarkdown w))))
-
 (:: emitBinaryIr (-> (Vec Int) (Vec String) (Vec String) Int String))
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
@@ -2376,11 +2364,6 @@
                                 fetchCmd
                                 (die "error: unknown subcommand\n" 1)))))))))))))))))
 
-; A diagnostic code the way stage0's `lookup` normalises one: ASCII
-; whitespace trimmed, a leading `AX` (any case) stripped, leading
-; dashes stripped, the rest uppercased - so `ax3001`, `3001` and
-; `AX-3001` all reach the same table row. Hand-written here rather
-; than in explain.ax so that file stays wholly generated.
 ; `axiom explain --list`, coloured the way stage0's did it: the heading
 ; bold bright cyan, every `AXnnnn` bright yellow, the title and slug
 ; plain. stage0 used the `colored` crate for this and ariadne for the
@@ -2429,56 +2412,6 @@
               (set i (+ e 1))
             })))
       (catStrs parts)
-    }))
-
-; One past the last byte of the line starting at `i`, or the string's
-; length. (`render.ax`'s `lineEndOf` takes an offset into a source file
-; and this takes an offset into any string; the same three lines, but
-; importing render here for it would be a cycle through diag.)
-(pub :: explainNormalize (-> String String))
-;@axiom:effect(unsafe)
-(pub fn (explainNormalize s)
-  (let (
-    (mut a 0)
-    (mut b (strLen s))
-  )
-    {
-      (while (&&
-               (< a b)
-               (let ((c (strByte s a)))
-                 (|| (== c 32) (|| (== c 9) (|| (== c 10) (== c 13))))))
-        (set a (+ a 1)))
-      (while (&&
-               (> b a)
-               (let ((c (strByte s (- b 1))))
-                 (|| (== c 32) (|| (== c 9) (|| (== c 10) (== c 13))))))
-        (set b (- b 1)))
-      (if (&&
-            (< (+ a 1) b)
-            (&&
-              (|| (== (strByte s a) 65) (== (strByte s a) 97))
-              (|| (== (strByte s (+ a 1)) 88) (== (strByte s (+ a 1)) 120))))
-        (set a (+ a 2)))
-      (while (&& (< a b) (== (strByte s a) 45))
-        (set a (+ a 1)))
-      (let (
-        (out (strAlloc (- b a)))
-        (mut i a)
-      )
-        {
-          (while (< i b)
-            (let ((c (strByte s i)))
-              {
-                (__store8
-                  (strData out)
-                  (- i a)
-                  (if (&& (>= c 97) (<= c 122))
-                    (- c 32)
-                    c))
-                (set i (+ i 1))
-              }))
-          out
-        })
     }))
 
 ; The input file for `fmt`: the first operand that is not `--check`

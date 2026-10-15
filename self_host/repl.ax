@@ -1,91 +1,14 @@
-; repl.ax — the interactive evaluator, in Axiom.
+; repl.ax — interactive evaluation, editing and session commands.
 ;
-; The parity target is stage0's PIPED surface, which is the surface
-; the integration tests drive and the only one a differential gate
-; can compare: no prompt is written when stdin is not a TTY, the
-; `colored` crate suppresses its escapes, and every line of output -
-; results, errors, command chatter - goes to STDOUT with stderr
-; empty and exit 0. scripts/check-repl-selfhost.sh pins it per
-; behavior: byte-exact where stage0 is deterministic (results of
-; every scalar type, declaration OK lines, `type :` lines, semantic
-; error lines, the command surface), shape-only where it is not
-; (`:time` durations, `:llvm` IR that differs by design, compound
-; results that print per-run heap addresses).
+; Declarations accumulate as source. Each expression is checked against
+; the session, compiled through the normal pipeline, and run in a private
+; scratch directory. Type and result lines use the checked result type.
 ;
-; Deliberate divergences, recorded in the self-hosting record:
-;   * no rustyline: the editing that rustyline gave stage0 is provided
-;     by `Tui.Keys`, `Tui.Edit` and `Tui.Term` - STANDARD LIBRARY
-;     modules, not compiler ones. That is deliberate and it is the
-;     reason they are shaped the way they are: nothing in them knows
-;     what Axiom is, the word-boundary set arrives as a parameter, and
-;     the prompt arrives already painted. The REPL is their first
-;     caller, not their owner, and `axiom` links them the way it links
-;     `Str` and `Vec`. What EXISTS as of 2026-08-31: a coloured prompt,
-;     UTF-8 aware insertion, cursor motion by character and by word,
-;     the readline kills with one kill ring, and a redraw that stays
-;     correct when the line wraps past the terminal's width. Since
-;     2026-09-15 the redraw also paints the buffer: live syntax
-;     highlighting from `replhl.ax`, on every keystroke, with the
-;     cursor's bracket pair marked. Since 2026-09-16 Up and Down
-;     (Ctrl-P/Ctrl-N) browse `replhist.ax`: an in-memory ring always,
-;     a file across sessions when one resolves, complete entries
-;     recorded on dispatch and recalled flattened to one row. Since
-;     2026-09-15 Tab completes through `replcomp.ax` - session names,
-;     imports, keywords and colon commands, with the menu's rows
-;     erased on the next keystroke - and Ctrl-R steps back through
-;     matching history with the buffer as the needle. What does NOT:
-;     multi-line in-place editing (a submitted line is still final;
-;     the escape is Ctrl-C or two blank lines, and history still
-;     recalls flattened).
-;
-;     THE HIGHLIGHTING LIVES HERE, NOT IN `Tui/`, because
-;     scripts/check-repl-tui.sh requires every `stdlib/Tui` module to
-;     import zero compiler modules: the editor cannot call `lex`, so
-;     it cannot paint. What the editor does instead is draw a painted
-;     string it is handed (`ledRefreshPainted`, Tui.Edit): geometry
-;     from the plain buffer, bytes from the caller. `replTermLoop`
-;     below is `termEditLoop`'s twin with that one difference - after
-;     every key it paints the buffer with `replHlPaint` and hands the
-;     result over. The paint covers only the physical line being typed:
-;     while a multi-line entry is open the WHOLE joined buffer is lexed
-;     (a `)` here can only match a `(` two lines up) and only the tail
-;     past `pending` is rendered, which is the `from` parameter's job.
-;
-;     ALL OF IT HANGS OFF ONE PREDICATE, `replInteractive`, true only
-;     when fd 0 AND fd 1 are both terminals. When it is false the
-;     REPL runs the code it ran before this landed, byte for byte,
-;     and check-repl-selfhost.sh is what turns that from a claim into
-;     a check: its `run_repl` redirects stdin from a file and stdout
-;     to a file, so the piped branch is the one its 14 sessions
-;     drive. scripts/check-repl-tui.sh drives the other branch under
-;     a pty it allocates itself and requires the two to DIFFER -
-;     because "no escapes off a TTY" and "escapes on one" are each
-;     satisfied by a build in which the other side is dead code.
-;   * MULTI-LINE ENTRIES, added 2026-08-31: a decl or expression whose
-;     parens/braces/brackets do not balance on one physical line keeps
-;     reading lines (`replParenDepth`) until they do, so `fn` and
-;     other multi-line forms are typeable at the prompt at all. A
-;     line already SUBMITTED still cannot be revisited on either
-;     surface; a mistyped paren is escaped with a blank line, and on
-;     a TTY also with Ctrl-C, which `replMain` sees as that same
-;     blank line.
-;   * the banner names THIS compiler, not stage0's version string.
-;     Gated sessions run --no-banner, so it never enters a byte
-;     comparison.
-;   * `:time` measures with sysNowMicros and prints stage1's own
-;     duration spelling (`Time: 12.345ms`), not Rust's Duration
-;     debug format, which is stage0 internals.
-;   * `:defs` lists what the session defined, not stage0's builtin
-;     table render.
-;
-; Evaluation is stage0's design re-expressed: declarations accumulate
-; as SOURCE TEXT; each expression is typed against a fresh check of
-; that text, wrapped in a generated module that prints one value,
-; compiled by THIS compiler's own pipeline, assembled with the same
-; llc/cc invocations the driver uses, run, and its stdout re-printed
-; as `result ...`. The wrapper template is stage0's exactly,
-; including the Bool/String/Char/other dispatch and the `Int`-typed
-; `__repl_result` carrier (generate_repl_wrapper, axiom-cli).
+; Editing, history, completion and colour require both stdin and stdout
+; to be terminals. Piped sessions have no prompt or escape sequences;
+; results, diagnostics and command output all go to stdout.
+; Tui modules own terminal editing; compiler modules supply syntax and
+; completion. See scripts/check-repl-selfhost.sh and check-repl-tui.sh.
 (import core)
 (import Host)
 (import Mem)
@@ -104,6 +27,8 @@
 (import codegen)
 (import driver)
 (import style)
+(import explain)
+(import lexicon)
 (import Tui.Keys)
 (import Tui.Edit)
 (import Tui.Term)
@@ -165,20 +90,25 @@
     1
     0))
 
-; The prompt, and the one shown while a form's parens are still open.
-;
-; BOTH ARE SEVEN COLUMNS, so a continued form's text lines up under
-; the first line's. They are painted here and handed to the editor
-; already painted, which is why every column formula in lineedit.ax
-; measures the prompt with `visLen` and never with `strLen`: painted
-; SGR_SEC, these seven columns are twenty bytes.
+; Paint structured output only on a terminal. Whole messages retain
+; their plain text, including diagnostic codes and result markers.
+(pub :: replStyled (-> String String Int))
+;@axiom:effect(io)
+(pub fn (replStyled sgr text)
+  (replOut
+    (if (== replInteractive 1)
+      (paint sgr text)
+      text)))
+
+; Main and continuation prompts both occupy seven columns, so entered
+; forms stay aligned. The editor measures their width with `visLen`.
 (pub :: replPromptMain String)
 (pub fn (replPromptMain)
-  (paint SGR_SEC "axiom> "))
+  (paint REPL_ACCENT "axiom> "))
 
 (pub :: replPromptCont String)
 (pub fn (replPromptCont)
-  (paint SGR_GUT "  ...> "))
+  (paint REPL_MUTED "  ...> "))
 
 ; ------------------------------------------------------------------
 ; THE BRANCH. One conditional, one call site, and both sides answer
@@ -195,7 +125,7 @@
 ;
 ; Everything below this line in `replMain` - `replTrim`, the `;`/`:`
 ; classification, `replParenDepth`, the pending join, `replDispatch`,
-; every `replOut` - is the code that runs today, unmodified, on both
+; output dispatch - is shared by both
 ; surfaces.
 ;
 ; `pending` is the multi-line entry so far, "" when the next line
@@ -972,14 +902,14 @@
     (let ((er (parseExpr toks 0)))
       (if (== (memGetWord er 0) 0)
         {
-          (replOut "Parse error: the line does not parse as an expression\n")
+          (replStyled REPL_ERROR "Parse error: the line does not parse as an expression\n")
           (pErr 0)
         }
         (let ((dtoks (lex declsSrc)))
           (let ((dr (parseDecls dtoks 0 vecNew)))
             (if (== (memGetWord dr 0) 0)
               {
-                (replOut "Error: the accumulated declarations no longer parse\n")
+                (replStyled REPL_ERROR "Error: the accumulated declarations no longer parse\n")
                 (pErr 0)
               }
               ; `impl`s are LOWERED before the expression is
@@ -1087,9 +1017,10 @@
             (code (diagCode d))
           )
             {
-              (replOut
+              (replStyled
+                REPL_ERROR
                 (concat (concat (concat (concat "Type error: [" code) "] ") (diagMsg d)) "\n"))
-              (replOut (concat (concat "  help: run `axiom explain " code) "`\n"))
+              (replStyled REPL_MUTED (concat (concat "  help: :explain " code) "\n"))
             })
           (set i (+ i 1))
         })
@@ -1248,8 +1179,8 @@
       (let ((ds (memGetWordVec tr 1)))
         {
           (if (== (vecLen ds) 0)
-            (replOut "Error: parsing failed\n")
-            (replOut (concat "Error: " (joinDiagMsgs ds))))
+            (replStyled REPL_ERROR "Error: parsing failed\n")
+            (replStyled REPL_ERROR (concat "Error: " (joinDiagMsgs ds))))
           (pErr 0)
         }))))
 
@@ -1291,8 +1222,8 @@
         (let ((ds (memGetWordVec tr 1)))
           {
             (if (== (vecLen ds) 0)
-              (replOut "Error: parsing failed\n")
-              (replOut (concat "Error: " (joinDiagMsgs ds))))
+              (replStyled REPL_ERROR "Error: parsing failed\n")
+              (replStyled REPL_ERROR (concat "Error: " (joinDiagMsgs ds))))
             (pErr 0)
           })))))
 
@@ -1415,7 +1346,7 @@
     (let ((leaf (concat (concat "axiom-repl-" (fmtInt pid)) ".d")))
       (let ((dir (pathJoin replTmpRoot leaf)))
         (if (isErr (makeDirMode dir 448))
-          (replOut "Error: could not create a private scratch directory\n")
+          (replStyled REPL_ERROR "Error: could not create a private scratch directory\n")
           (let ((base (pathJoin dir "expr")))
             (let (
               (ll (concat base ".ll"))
@@ -1425,7 +1356,7 @@
             )
               {
                 (if (isErr (writeFile ll ir))
-                  (replOut "Error: could not write the generated IR\n")
+                  (replStyled REPL_ERROR "Error: could not write the generated IR\n")
                   (let ((lrc
                     (runTool
                       "llc"
@@ -1439,7 +1370,7 @@
                           v
                         }))))
                     (if (!= lrc 0)
-                      (replOut "Error: llc rejected the generated code\n")
+                      (replStyled REPL_ERROR "Error: llc rejected the generated code\n")
                       (let ((crc
                         (runTool
                           "cc"
@@ -1451,7 +1382,7 @@
                               v
                             }))))
                         (if (!= crc 0)
-                          (replOut "Error: linking failed\n")
+                          (replStyled REPL_ERROR "Error: linking failed\n")
                           (let ((cmd
                             (catStrs
                               (let ((v vecNew))
@@ -1466,14 +1397,16 @@
                             (let ((rc (runTool "/bin/sh" (argsOf3 "-c" cmd ""))))
                               (let ((printed (replTrim (unwrapOr (readFile outf) ""))))
                                 (if (> (strLen printed) 0)
-                                  (replOut (concat (concat "result " printed) "\n"))
+                                  (replStyled REPL_VALUE (concat (concat "result " printed) "\n"))
                                   (if (< rc 0)
-                                    (replOut "Error: the program was terminated by a signal\n")
+                                    (replStyled REPL_ERROR "Error: the program was terminated by a signal\n")
                                     ; `fmtInt`, not `fmtIntStr`: an
                                     ; exit status is any byte, and
                                     ; `fmtIntStr` reported every one
                                     ; of them above 3 as `1`.
-                                    (replOut (concat (concat "result " (fmtInt rc)) "\n"))))))))))))
+                                    (replStyled
+                                      REPL_VALUE
+                                      (concat (concat "result " (fmtInt rc)) "\n"))))))))))))
                 (unwrapOr (removeFile ll) 0)
                 (unwrapOr (removeFile obj) 0)
                 (unwrapOr (removeFile exe) 0)
@@ -1497,7 +1430,7 @@
       0
       (let ((tyStr (memGetWordStr tr 1)))
         {
-          (replOut (concat (concat "type : " tyStr) "\n"))
+          (replStyled REPL_MUTED (concat (concat "type : " tyStr) "\n"))
           (let ((cr (replCompileExpr declsSrc line tyStr)))
             (if (== (memGetWord cr 0) 0)
               0
@@ -1679,26 +1612,28 @@
   (let ((dr (parseDecls (lex line) 0 vecNew)))
     (if (== (memGetWord dr 0) 0)
       {
-        (replOut "Parse error: the declaration does not parse\n")
+        (replStyled REPL_ERROR "Parse error: the declaration does not parse\n")
         declsSrc
       }
       (let ((decls (memGetWordVec dr 1)))
         (let ((candidate (concat (concat (replDeclsSrcDropping declsSrc decls) line) "\n")))
           (if (== (memGetWord (parseDecls (lex candidate) 0 vecNew) 0) 0)
             {
-              (replOut "Parse error: imports must precede all definitions; use :reset before starting a new import header\n")
+              (replStyled REPL_ERROR "Parse error: imports must precede all definitions; use :reset before starting a new import header\n")
               declsSrc
             }
             {
               (if (== (vecLen decls) 0)
-                (replOut "OK\n")
+                (replStyled REPL_ACCENT "OK\n")
                 (let ((d (vecGet decls 0)))
                   (let ((tag (nodeTag d)))
                     (if (|| (== tag TAG_D_FN) (== tag TAG_D_SIG))
-                      (replOut (concat (concat "OK: " (nodeAName d)) " defined\n"))
+                      (replStyled REPL_ACCENT (concat (concat "OK: " (nodeAName d)) " defined\n"))
                       (if (|| (== tag TAG_D_DATA) (== tag TAG_D_STRUCT))
-                        (replOut (concat (concat "OK: data " (nodeAName d)) " defined\n"))
-                        (replOut "OK\n"))))))
+                        (replStyled
+                          REPL_ACCENT
+                          (concat (concat "OK: data " (nodeAName d)) " defined\n"))
+                        (replStyled REPL_ACCENT "OK\n"))))))
               candidate
             }))))))
 
@@ -1714,28 +1649,24 @@
 ;@axiom:effect(io)
 (pub fn (replHelp)
   {
-    (replOut "\nAvailable Commands:\n")
-    (replOut "  :help, :h, ?     Show this help message\n")
-    (replOut "  :quit, :q, :exit      Exit the REPL\n")
-    (replOut "  :type, :t <expr>  Show the type of an expression\n")
-    (replOut "  :load, :l <file>  Load a file into the REPL\n")
-    (replOut "  :reset, :r        Reset the REPL state\n")
-    (replOut "  :defs, :d       Show all definitions in scope\n")
-    (replOut "  :llvm <expr>  Show generated LLVM IR\n")
-    (replOut "  :time <expr>  Time expression evaluation\n")
-    (replOut "\nTips:\n")
+    (replStyled REPL_ACCENT "\nCommands:\n")
+    (replStyled REPL_TEXT "  :help, :h, ?       Show help\n")
+    (replStyled REPL_TEXT "  :quit, :q, :exit   Exit the REPL\n")
+    (replStyled REPL_TEXT "  :type, :t <expr>   Show an expression's type\n")
+    (replStyled REPL_TEXT "  :load, :l <file>   Load declarations from a file\n")
+    (replStyled REPL_TEXT "  :reset, :r         Clear session definitions\n")
+    (replStyled REPL_TEXT "  :defs, :d          List session definitions\n")
+    (replStyled REPL_TEXT "  :llvm <expr>       Show generated LLVM IR\n")
+    (replStyled REPL_TEXT "  :time <expr>       Time expression evaluation\n")
+    (replStyled REPL_TEXT "  :explain <topic>   Explain a diagnostic, keyword or @tag\n")
+    (replStyled REPL_ACCENT "\nTips:\n")
     (replOut "  • Define functions: (fn (add x y) (+ x y))\n")
     (replOut "  • Type signatures: (:: add (-> Int Int Int))\n")
     (replOut "  • Data types: (data Maybe (a) (Nothing) (Just a))\n")
     (replOut "  • Expressions are evaluated and results shown\n")
     (replOut "  • Use ; for line comments\n")
     (replOut "  • Unbalanced input continues on the next line; two blank lines abort the entry\n")
-    ; THE ONLY LINES OF OUTPUT IN THIS FILE THAT DIFFER BY SURFACE,
-    ; and they differ because they are statements ABOUT the surface.
-    ; The piped branch is the bytes 050-commands.golden pins; the TTY
-    ; branch is the one that is true there. Saying "no line editing"
-    ; to a user who has it, or offering Ctrl-A to a pipe, would each
-    ; be the document lying about the program.
+    ; Advertise the editing commands available on this surface.
     (if (== replInteractive 0)
       (replOut "  • No history or line editing; Ctrl+D ends the session, Ctrl+C kills it\n")
       {
@@ -1753,10 +1684,34 @@
 ;@axiom:effect(io)
 (pub fn (replBanner)
   {
-    (replOut (concat "Axiom " (concat axiomVersion " - REPL\n")))
-    (replOut "Type :help for commands, :quit to exit\n\n")
+    (replStyled REPL_ACCENT (concat "Axiom " (concat axiomVersion " - REPL\n")))
+    (if (== replInteractive 1)
+      (replStyled REPL_MUTED "Tab completes · Ctrl-R searches history · :help lists commands\n\n")
+      (replOut "Type :help for commands, :quit to exit\n\n"))
     0
   })
+
+; :explain uses the same diagnostic registry and language lexicon as
+; `axiom explain`. Looking up help never evaluates a session expression.
+(pub :: replCmdExplain (-> String Int))
+;@axiom:effect(io)
+(pub fn (replCmdExplain topic)
+  (if (== (strLen topic) 0)
+    (replStyled REPL_ERROR "Error: Usage: :explain <code, keyword or @tag>; :explain --list lists diagnostics\n")
+    (if (strEq topic "--list")
+      (replStyled REPL_TEXT explainListText)
+      (let ((diagnostic (explainText (explainNormalize topic))))
+        (let ((text
+          (if (> (strLen diagnostic) 0)
+            diagnostic
+            (explainLexicon topic))))
+          (if (> (strLen text) 0)
+            (replStyled REPL_TEXT text)
+            (replStyled
+              REPL_ERROR
+              (concat
+                (concat "Error: Unknown diagnostic code or word '" topic)
+                "'. Use :explain --list or :help.\n"))))))))
 
 ; :type - the argument as typed, colon, its type. Does not evaluate.
 (pub :: replCmdType (-> String String Int))
@@ -1764,14 +1719,15 @@
 (pub fn (replCmdType declsSrc arg)
   (if (== (strLen arg) 0)
     {
-      (replOut "Error: Usage: :type <expression>\n")
+      (replStyled REPL_ERROR "Error: Usage: :type <expression>\n")
       0
     }
     (let ((tr (typeExprAgainst declsSrc arg)))
       (if (== (memGetWord tr 0) 0)
         0
         {
-          (replOut
+          (replStyled
+            REPL_TEXT
             (catStrs
               (let ((v vecNew))
                 {
@@ -1792,26 +1748,26 @@
 (pub fn (replCmdLoad declsSrc arg)
   (if (== (strLen arg) 0)
     {
-      (replOut "Error: Usage: :load <filename>\n")
+      (replStyled REPL_ERROR "Error: Usage: :load <filename>\n")
       declsSrc
     }
     (let ((src (unwrapOr (readFile arg) "")))
       (if (== (strLen src) 0)
         {
-          (replOut (concat (concat "File error: cannot read '" arg) "'\n"))
+          (replStyled REPL_ERROR (concat (concat "File error: cannot read '" arg) "'\n"))
           declsSrc
         }
         (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
           (if (== (memGetWord pr 0) 0)
             {
-              (replOut "Parse error: the file does not parse\n")
+              (replStyled REPL_ERROR "Parse error: the file does not parse\n")
               declsSrc
             }
             (if (==
                   (memGetWord (parseDecls (lex (concat (concat declsSrc src) "\n")) 0 vecNew) 0)
                   0)
               {
-                (replOut "Parse error: loaded imports must precede session definitions; use :reset before loading this module\n")
+                (replStyled REPL_ERROR "Parse error: loaded imports must precede session definitions; use :reset before loading this module\n")
                 declsSrc
               }
               ; `:load` used to hand `decls` to `checkModule`
@@ -1861,7 +1817,7 @@
                         {
                           (if (> (vecLen ds) 0)
                             (printTypeErrors ds 0))
-                          (replOut (concat (concat "OK: Loaded '" arg) "'\n"))
+                          (replStyled REPL_ACCENT (concat (concat "OK: Loaded '" arg) "'\n"))
                           (concat (concat declsSrc src) "\n")
                         }))))))))))))
 
@@ -1870,7 +1826,7 @@
 (pub fn (replCmdLlvm declsSrc arg)
   (if (== (strLen arg) 0)
     {
-      (replOut "Error: Usage: :llvm <expression>\n")
+      (replStyled REPL_ERROR "Error: Usage: :llvm <expression>\n")
       0
     }
     (let ((tr (typeExprAgainst declsSrc arg)))
@@ -2023,7 +1979,7 @@
 (pub fn (replDispatch declsSrc entry)
   (if (replDepthNegative entry)
     {
-      (replOut "Parse error: too many closing parens\n")
+      (replStyled REPL_ERROR "Parse error: too many closing parens\n")
       declsSrc
     }
     (if (isDeclLine entry)
@@ -2060,7 +2016,8 @@
             ((Err e) 0))))
           {
             (replExpr declsSrc rest)
-            (replOut
+            (replStyled
+              REPL_AMBER
               (fmtMicrosMs
                 (-
                   (match (sysNowMicros tbuf)
@@ -2112,52 +2069,56 @@
               (histClose hist)
               (sysExitWith 0)
             }
-            (if (|| (strEq w ":type") (strEq w ":t"))
-              (replCmdType src rest)
-              (if (|| (strEq w ":load") (strEq w ":l"))
-                (set src (replCmdLoad src rest))
-                (if (|| (strEq w ":reset") (strEq w ":r"))
-                  {
-                    (set src "")
-                    (replOut "REPL state reset.\n")
-                  }
-                  (if (|| (strEq w ":defs") (strEq w ":d"))
-                    (replCmdDefs src)
-                    (if (strEq w ":llvm")
-                      (replCmdLlvm src rest)
-                      (if (strEq w ":time")
-                        ; stage0 prints the two eval lines, then
-                        ; the duration (probed: type, result,
-                        ; Time). The duration is real now -
-                        ; sysNowMicros bracketing the eval - in
-                        ; stage1's own format: stage0 prints
-                        ; Rust's Duration debug, which is
-                        ; internals, and the gate's marker pins
-                        ; only the `Time: ` prefix.
-                        (let ((tbuf (memAlloc 16)))
-                          (let ((t0
-                            (match (sysNowMicros tbuf)
-                              ((Ok t) t)
-                              ((Err e) 0))))
-                            {
-                              (replExpr src rest)
-                              (replOut
-                                (fmtMicrosMs
-                                  (-
-                                    (match (sysNowMicros tbuf)
-                                      ((Ok t) t)
-                                      ((Err e) 0))
-                                    t0)))
-                            }))
-                        (replOut
-                          (catStrs
-                            (let ((v vecNew))
+            (if (strEq w ":explain")
+              (replCmdExplain rest)
+              (if (|| (strEq w ":type") (strEq w ":t"))
+                (replCmdType src rest)
+                (if (|| (strEq w ":load") (strEq w ":l"))
+                  (set src (replCmdLoad src rest))
+                  (if (|| (strEq w ":reset") (strEq w ":r"))
+                    {
+                      (set src "")
+                      (replStyled REPL_ACCENT "REPL state reset.\n")
+                    }
+                    (if (|| (strEq w ":defs") (strEq w ":d"))
+                      (replCmdDefs src)
+                      (if (strEq w ":llvm")
+                        (replCmdLlvm src rest)
+                        (if (strEq w ":time")
+                          ; stage0 prints the two eval lines, then
+                          ; the duration (probed: type, result,
+                          ; Time). The duration is real now -
+                          ; sysNowMicros bracketing the eval - in
+                          ; stage1's own format: stage0 prints
+                          ; Rust's Duration debug, which is
+                          ; internals, and the gate's marker pins
+                          ; only the `Time: ` prefix.
+                          (let ((tbuf (memAlloc 16)))
+                            (let ((t0
+                              (match (sysNowMicros tbuf)
+                                ((Ok t) t)
+                                ((Err e) 0))))
                               {
-                                (vecPush v "Error: Unknown command '")
-                                (vecPush v w)
-                                (vecPush v "'. Type :help for available commands.\n")
-                                v
-                              }))))))))))))
+                                (replExpr src rest)
+                                (replStyled
+                                  REPL_AMBER
+                                  (fmtMicrosMs
+                                    (-
+                                      (match (sysNowMicros tbuf)
+                                        ((Ok t) t)
+                                        ((Err e) 0))
+                                      t0)))
+                              }))
+                          (replStyled
+                            REPL_ERROR
+                            (catStrs
+                              (let ((v vecNew))
+                                {
+                                  (vecPush v "Error: Unknown command '")
+                                  (vecPush v w)
+                                  (vecPush v "'. Type :help for available commands.\n")
+                                  v
+                                })))))))))))))
       src
     }))
 
@@ -2245,7 +2206,7 @@
                       (if (> (strLen pending) 0)
                         {
                           (set pending "")
-                          (replOut "Aborted: unbalanced input discarded.\n")
+                          (replStyled REPL_AMBER "Aborted: unbalanced input discarded.\n")
                         })
                       (replOut "\nGoodbye!\n")
                     }
@@ -2266,14 +2227,14 @@
                       (if (replIsAbort raw)
                         {
                           (set pending "")
-                          (replOut "Aborted: unbalanced input discarded.\n")
+                          (replStyled REPL_AMBER "Aborted: unbalanced input discarded.\n")
                         }
                         (let ((next (replTrim raw)))
                           (if (== (strLen next) 0)
                             (if (== (strByte pending (- (strLen pending) 1)) 10)
                               {
                                 (set pending "")
-                                (replOut "Aborted: unbalanced input discarded.\n")
+                                (replStyled REPL_AMBER "Aborted: unbalanced input discarded.\n")
                               }
                               (set pending (concat pending "\n")))
                             (let ((joined (concat (concat pending "\n") next)))
@@ -2283,7 +2244,7 @@
                                   (set pending "")
                                   (if (replDepthNegative joined)
                                     {
-                                      (replOut "Parse error: too many closing parens\n")
+                                      (replStyled REPL_ERROR "Parse error: too many closing parens\n")
                                       (histRecord hist joined)
                                     }
                                     (if (== (strByte joined 0) 58)

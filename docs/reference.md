@@ -1977,11 +1977,15 @@ Tested by `scripts/check-test-runner.sh`.
 ## The REPL
 
 Run `axiom repl` to evaluate expressions and add definitions. Completed
-forms run; incomplete forms continue onto another line. `:help` lists
-commands, including `:type`, `:load`, `:reset` and `:quit`. The line
-you type is coloured as you go: keywords, calls, constructors and
-types, literals, doc comments and AXTAGs each in their own colour, with
-the bracket under the cursor and its partner lit.
+forms run; incomplete forms continue onto another line. Start your session
+with imports, before defining functions or values. `:load` follows the
+same rule; use `:reset` to start a new module header.
+
+The prompt, syntax and results use Axiom's lime and amber palette. Errors
+stand out in coral, with a code you can look up using `:explain AX3004`.
+`:explain let` explains a language form; `:explain @restrict` explains a tag.
+Use `:help` for commands, Tab for completion and Ctrl-R to search history.
+Piped sessions keep plain output without prompts or colour.
 
 ```text
 Axiom 0.7.8 - REPL
