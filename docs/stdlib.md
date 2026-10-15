@@ -636,7 +636,13 @@ size wherever the pool started. Tested by
 answers into typed values in the parent, in submit order; transport
 errors bypass the decoder. The byte limit covers the encoded answer,
 so your decoder must bound its own storage. `taskFold` consumes results
-with a scalar accumulator instead of retaining a results vector.
+with a scalar accumulator instead of retaining a results vector. Each
+step's answer and temporary allocations are reclaimed on return.
+`scoped(step)` checks that the callback retains neither in captured
+state. Pass a lambda directly, a non-nullary function declaration, or a
+parameter carrying the same tag. Use `taskMapWith` when answers need to
+outlive their delivery. Tested by `tests/stdlib/953-scoped-task-fold.ax`
+and `tests/diagnostics/1440-scoped-callback-escape.ax`.
 
 Decoder errors stay in their result slots; `failFast` applies to worker
 failures. A slow decoder can delay submission and deadline handling.

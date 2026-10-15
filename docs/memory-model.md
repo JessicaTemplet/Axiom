@@ -6285,17 +6285,27 @@ deadline/cancellation handling. Tested by
 
 *Program obligations.*
 
-- `taskFold`'s step may keep only what its `Int` accumulator carries.
-  The pool resets a raw arena mark after each step, so a step that
-  stores an answer or grows a captured `Vec` names reclaimed memory.
-  Nothing checks this: checked regions refuse opaque callbacks whose
-  captures might retain a scoped value, and the pool's delivery, which
-  resets the mark, is trusted.
+- `taskFold`'s `scoped(step)` precondition requires a scalar callback
+  result. Supplied references and fresh allocations MUST NOT escape
+  into captured state. The compiler walks each directly supplied lambda
+  against a fresh invocation extent. It accepts a non-nullary function
+  declaration or forwarding from a parameter with the same contract;
+  opaque callbacks are refused with `AX3130`. An escaping store is
+  `AX3060`, with the invocation boundary attached. Tagged functions MUST
+  be called directly with all declared arguments, preserving the
+  precondition. The pool's raw mark/reset remains a trusted unsafe
+  implementation obligation: its author supplies valid values and keeps
+  their storage alive until the step returns. This does not prove raw
+  address validity or add a typed ownership transfer across tasks.
 - A token passed in is shared state: cancelling it cancels every pool
   using it.
 
 *Evidence.*
 
+- `tests/stdlib/953-scoped-task-fold.ax`: scalar reductions and checked
+  forwarding. `tests/diagnostics/1440-scoped-callback-escape.ax` refuses
+  answer and allocation retention; the adjacent opaque and tag probes
+  refuse erased preconditions and invalid declarations.
 - `tests/stdlib/542-task-codec.ax`: twelve tasks each build a record
   with a `Vec` in it and send it through JSON. The decoded records equal
   the sequential ones, and an encoding over the limit is refused whole.

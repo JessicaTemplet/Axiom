@@ -874,10 +874,31 @@ def build_report(args):
     # handler, but it runs on the fault stack, not on top of another.
     fault_hooks = [q for q in isrs if fns[q].metas.get('isr') == 'fault']
     roots += [q for q in isrs if q not in roots]
-    for r in args.root:
-        if r not in fns:
-            raise ReportError('--root %s names no function' % r)
-        roots.append(r)
+    # A selected steady or nonblocking entry is an analysis root even
+    # when `main` never calls it (for example, a later callback entry).
+    # Otherwise a valid name can silently bypass its requested check.
+    for flag in ('root', 'steady', 'nonblocking'):
+        for r in getattr(args, flag):
+            if r not in fns or fns[r].builtin:
+                raise ReportError('--%s %s names no source function' % (flag, r))
+            if r not in roots:
+                roots.append(r)
+    # Exceptions identify one real declaration. A stale or ambiguous
+    # bare name must not silently exempt a different imported body.
+    for flag, marker in (('allow_foreign', 'extern'), ('allow_asm', 'asm')):
+        resolved = []
+        for name in getattr(args, flag):
+            candidates = [q for q, f in fns.items() if not f.builtin
+                          and (q == name if '$' in name else f.name == name)]
+            if len(candidates) != 1:
+                raise ReportError('--%s %s names %s; use an exact module-qualified name' % (
+                    flag.replace('_', '-'), name, 'no source function' if not candidates else 'more than one function'))
+            q = candidates[0]
+            has_marker = fns[q].flag('extern') if marker == 'extern' else any(ASM_RE.match(c) for c in fns[q].calls)
+            if not has_marker:
+                raise ReportError('--%s %s names a function with no %s' % (flag.replace('_', '-'), name, marker))
+            resolved.append(q)
+        setattr(args, flag, resolved)
     if not roots:
         raise ReportError('no root: the file has no `main`, no `isr` and no --root')
     g = Graph(fns, roots)
@@ -889,9 +910,6 @@ def build_report(args):
     for q in reach:
         facts[q]['traps'] = sorted(traps[q])
         facts[q]['blocks'] = bool(blocks[q])
-    for r in args.nonblocking:
-        if r not in fns:
-            raise ReportError('--nonblocking %s names no function' % r)
     refusals, obligations = [], []
 
     def refuse(rule, msg, path=None):
@@ -932,13 +950,13 @@ def build_report(args):
             pth = g.path(par, q)
             if fa['indirect']:
                 refuse('RP-2', '%s makes a call the graph cannot follow (%s)' % (q, '; '.join(fa['indirect'])), pth)
-            if fa['extern'] and fns[q].name not in args.allow_foreign and q not in args.allow_foreign:
+            if fa['extern'] and q not in args.allow_foreign:
                 refuse('RP-3', '%s is an `extern` item' % q, pth)
             for l in fa['spawn'] + fa['join']:
                 refuse('RP-4', '%s calls %s' % (q, l), pth + [l])
             for u in fa['unresolved']:
                 refuse('RP-6', '%s calls `%s`, which resolves to no row' % (q, u), pth + [u])
-            if fa['asm'] and fns[q].name not in args.allow_asm and q not in args.allow_asm:
+            if fa['asm'] and q not in args.allow_asm:
                 refuse('RP-9', '%s holds inline assembly' % q, pth)
         # RP-5
         steady = sorted(set(isrs + [q for q in reach if 'no-alloc' in facts[q]['restrict']] + list(args.steady)))
@@ -1088,7 +1106,7 @@ def main(argv):
     ap.add_argument('file')
     ap.add_argument('--axiom', default=os.environ.get('AXIOM', 'axiom'))
     ap.add_argument('--target', default='')
-    ap.add_argument('--opt', type=int, default=1)
+    ap.add_argument('--opt', type=int, choices=range(4), default=1)
     ap.add_argument('--profile', choices=['restricted'], default=None)
     ap.add_argument('--root', action='append', default=[])
     ap.add_argument('--steady', action='append', default=[])
@@ -1107,6 +1125,12 @@ def main(argv):
         sys.stdout.write('selftest: %d cases failed\n' % len(fails))
         return 1 if fails else 0
     args = ap.parse_args(argv)
+    if args.stack_budget is not None and (not args.stack or args.stack_budget <= 0):
+        ap.error('--stack-budget requires --stack and a positive byte count')
+    if args.stack_root and not args.stack:
+        ap.error('--stack-root requires --stack')
+    if (args.allow_foreign or args.allow_asm) and args.profile != 'restricted':
+        ap.error('--allow-foreign and --allow-asm require --profile restricted')
     try:
         rep = build_report(args)
     except ReportError as e:

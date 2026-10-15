@@ -6932,6 +6932,15 @@ else:
     print(memory_check.stdout.strip())
     passed += 1
 
+scoped_check = subprocess.run([sys.executable, os.path.join(fixdir, "scoped-callback.py"), stage1],
+                              capture_output=True, text=True)
+if scoped_check.returncode:
+    print(scoped_check.stdout + scoped_check.stderr)
+    failed += 1
+else:
+    print(scoped_check.stdout.strip())
+    passed += 1
+
 print(f"\nlsp: {passed} passed, {failed} failed, "
       f"{len(fixtures)} fixtures + 2 generated")
 

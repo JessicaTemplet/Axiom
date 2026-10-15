@@ -1197,6 +1197,7 @@ This section records the codes below. All of them are built, and
 | `AX3125` `type-parameter` | an invalid, repeated or undeclared type parameter, or an unused alias parameter | `tests/diagnostics/1421-generic-alias-parameters.axbad` |
 | `AX3126` `recursive-alias` | a direct or indirect recursive alias, including unused declarations | `tests/diagnostics/1422-recursive-alias.ax` |
 | `AX3127` `pipeline-stage` | a pipeline with no stage, or a stage with multiple direct holes | `tests/diagnostics/1430-pipeline-boundaries.ax` |
+| `AX3130` `scoped-callback` | an invalid scoped callback declaration, an opaque callback without a matching contract, or erasure of the precondition through a function value | `tests/diagnostics/1441-scoped-callback-opaque.ax`, `tests/diagnostics/1442-scoped-callback-tag.ax` |
 | `AX3116` `result-claim` | a `result(...)` claim the compiler cannot read: a value other than `owned`, or the claim on a function that is not a trusted encapsulation | `tests/diagnostics/1259-result-claim.ax` |
 | `AX3110` `axtag-never-checked` | an `effect(div)` claim, which names an effect nothing infers | An error, because no body can ever support it. `tests/diagnostics/359-div-not-inferred.ax` |
 | `AX3117` `inline-asm-rejected` | a line of an `asm` template the assembler rejects, or whose operands the register allocator can't place | An error when the program is built, at the template line, with status 1. `tests/embedded/asm-rejected.ax` |

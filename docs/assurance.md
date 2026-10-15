@@ -17,8 +17,8 @@ Four words mean different things here:
   evidence for a specific application, platform, configuration and
   development process.
 
-Nothing in Axiom is approved, and nothing here claims compliance with a
-standard. Whether a system built with Axiom is fit for a mission
+Axiom has no qualified tool configuration or approved application.
+Nothing here claims compliance with a standard. Whether a system built with Axiom is fit for a mission
 depends on that system, its hardware and its development process, and
 an independent assessment of them.
 
@@ -128,7 +128,7 @@ ThreadSanitizer. It covers the thread lowering only.
 
 | ID | Guarantee | Rule | Evidence |
 |---|---|---|---|
-| R-D1 | The restricted profile refuses recursion, steady-state allocation and the other RP rules over the whole program, and bounds stack use from machine code | RP-1 to RP-9 | `scripts/check-report.sh`, `scripts/check-stack-bound.sh` |
+| R-D1 | The restricted profile checks every selected entry and its reachable helpers, refuses the RP rules and bounds stack use from machine code; invalid exceptions fail closed | RP-1 to RP-9 | `scripts/check-report.sh`, `scripts/check-stack-bound.sh` |
 | R-D2a | Device registers are read and written at their own width, with barriers | `MM-FFI-8` | `scripts/check-embedded.sh` |
 | R-D2b | An unhandled CPU exception exits 81, and an `isr(fault)` hook chooses the exit once | `MM-EXEC-16`, `MM-EXEC-19` | `tests/embedded/fault.ax`, `tests/embedded/fault-hook.ax`, `scripts/check-isr.sh` |
 | R-D2c | A periodic interrupt workload and a DMA driver keep their budgets and ownership protocol | `MM-EXEC-18`, `MM-FFI-8` | `tests/embedded/periodic.ax`, `tests/embedded/dma.ax` |
@@ -216,8 +216,16 @@ column is Axiom's mapping, not a claim that an objective is satisfied.
 |---|---|---|
 | [FAA AC 20-115D](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_20-115D.pdf) | Recognises DO-178C for airborne software and DO-330 for software tool qualification | Seed lineage, reproducibility and the restricted profile provide inputs. Tool qualification and application verification remain project obligations. |
 | [FAA AC 20-193](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_20-193.pdf) | Assurance objectives for airborne multicore processors | Concurrency tests exercise language behaviour. They establish no timing or interference bound for an aircraft processor. |
+| [NASA NPR 7150.2D](https://nodis3.gsfc.nasa.gov/displayDir.cfm?t=NPR&c=7150&s=2D) | Software engineering requirements, with applicability determined by software classification and approved tailoring | Specifications, configuration records and regression results are inputs. A mission needs its own classification, requirements traceability, verification and approved tailoring. |
+| [NASA-STD-8739.8B](https://standards.nasa.gov/standard/NASA/NASA-STD-87398) | Software assurance, software safety and independent verification and validation throughout the software life cycle | The trusted set and known defects support review. Hazard analysis, verification independence and mission-specific assurance evidence remain project obligations. |
 | [ECSS-Q-ST-80C Rev.2](https://ecss.nl/standard/ecss-q-st-80c-rev-2-software-product-assurance-30-april-2025/) | Software product assurance, including development tools and other software affecting the delivered product | Clause 5.6 covers tool selection, suitability and correct use; 6.2.6.12 covers milestone traceability review. The guarantee tables above provide trace links, with qualification gaps listed separately. |
 | [ECSS-E-ST-40C Rev.1](https://ecss.nl/standard/ecss-e-st-40c-rev-1-software-30-april-2025/) | Space software engineering from requirements through operations and maintenance | Specifications and tests cover parts of the implementation. A mission still needs its own requirements, verification records and selected configuration. |
+
+For a multicore deployment, freeze the processor, active cores, scheduler
+and dynamic frequency settings. Identify shared cache, memory, interconnect
+and device interference, then verify mitigations and timing on that target.
+Ordered task answers and worker budgets provide no time-partitioning or
+worst-case execution-time guarantee ([AC 20-193, section 5](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_20-193.pdf)).
 
 The two ECSS editions are dated 30 April 2025. Apply the edition and
 tailoring agreed for your project. In particular, emulator runs provide

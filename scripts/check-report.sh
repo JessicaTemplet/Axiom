@@ -296,10 +296,92 @@ rp3-foreign.ax|--allow-foreign add|none
 rp4-spawn.ax||RP-4
 rp5-steady.ax|--steady step|RP-5
 rp5-steady.ax||none
+rp5-selected-root.ax||none
+rp5-selected-root.ax|--steady step|RP-5
+rp8-selected-root.ax||none
+rp8-selected-root.ax|--nonblocking later|RP-8
+rp8-selected-root.ax|--nonblocking main|none
 rp8-blocking.ax||RP-8
 rp9-asm.ax||RP-9
 rp9-asm.ax|--allow-asm spin|none
 ROWS
+
+echo
+echo "== 3b. named entries and exceptions fail closed =="
+# A named entry must be a source function. Unknown or ineffective options
+# cannot produce a successful assurance report.
+while IFS='|' read -r fx extra want; do
+  [[ -z "$fx" ]] && continue
+  # shellcheck disable=SC2086
+  report "$tool" "$work/invalid.json" "$fxdir/$fx" $extra; rc=$?
+  if [[ "$rc" == 2 ]] && grep -Fq -- "$want" "$work/invalid.json.err"; then
+    ok "$extra: exit 2, $want"
+  else
+    bad "$extra: exit $rc, expected exit 2 with [$want]"
+    head -3 "$work/invalid.json.err" | sed 's/^/     /'
+  fi
+done <<'ROWS'
+ok-periodic.ax|--profile restricted --root missing|names no source function
+ok-periodic.ax|--profile restricted --steady missing|names no source function
+ok-periodic.ax|--profile restricted --nonblocking missing|names no source function
+ok-periodic.ax|--profile restricted --root +|names no source function
+rp3-foreign.ax|--profile restricted --allow-foreign missing|names no source function
+rp3-foreign.ax|--profile restricted --allow-foreign main|with no extern
+rp9-asm.ax|--profile restricted --allow-asm missing|names no source function
+rp9-asm.ax|--profile restricted --allow-asm main|with no asm
+ok-periodic.ax|--stack-budget 8192|requires --stack
+ok-periodic.ax|--stack --stack-budget 0|positive byte count
+ok-periodic.ax|--stack-root main|requires --stack
+ok-periodic.ax|--opt -1|invalid choice
+ok-periodic.ax|--opt 4|invalid choice
+rp3-foreign.ax|--allow-foreign add|require --profile restricted
+rp9-asm.ax|--allow-asm spin|require --profile restricted
+ROWS
+# Two modules can export the same asm spelling. An exception must
+# identify the intended item rather than authorising both at once.
+mkdir -p "$work/mods"
+for mod in Left Right; do
+  cat > "$work/mods/$mod.ax" <<'AX'
+(pub :: spin Int)
+;@axiom:effect(unsafe)
+(pub fn (spin)
+  (asm (aarch64 "yield" (options nostack))
+       (x86_64 "pause" (options nostack))))
+AX
+done
+cat > "$work/ambiguous.ax" <<'AX'
+(import mods.Left)
+(import mods.Right)
+
+(:: main Int)
+(fn (main)
+  (+ (mods.Left::spin) (mods.Right::spin)))
+AX
+report "$tool" "$work/ambiguous.json" "$work/ambiguous.ax" --profile restricted --allow-asm spin; rc=$?
+if [[ "$rc" == 2 ]] && grep -q 'more than one function' "$work/ambiguous.json.err"; then
+  ok "a bare exception matching two imported functions is refused"
+else
+  bad "ambiguous exception: exit $rc, expected 2"
+  head -3 "$work/ambiguous.json.err" | sed 's/^/     /'
+fi
+report "$tool" "$work/qualified.json" "$work/ambiguous.ax" --profile restricted --allow-asm 'mods.Left$spin'; rc=$?
+if [[ "$rc" == 1 ]] && python3 - "$work/qualified.json" <<'PYTEST'
+import json, sys
+r = json.load(open(sys.argv[1]))
+assert [(v['rule'], v['path'][-1]) for v in r['refusals']] == [('RP-9', 'mods.Right$spin')]
+PYTEST
+then
+  ok "a qualified exception admits its own item and refuses the other module"
+else
+  bad "qualified exception: exit $rc, expected one RP-9 for mods.Right\$spin"
+  head -3 "$work/qualified.json.err" | sed 's/^/     /'
+fi
+report "$tool" "$work/qualified-both.json" "$work/ambiguous.ax" --profile restricted --allow-asm 'mods.Left$spin' --allow-asm 'mods.Right$spin'; rc=$?
+if [[ "$rc" == 0 && -z "$(rules_of "$work/qualified-both.json")" ]]; then
+  ok "two reviewed qualified exceptions admit both asm items"
+else
+  bad "two qualified exceptions: exit $rc, expected 0"
+fi
 
 echo
 echo "== 4. the stack bound, from AArch64 machine code =="
@@ -497,6 +579,16 @@ RP-5|rp5-steady.ax|--steady step
 RP-8|rp8-blocking.ax|
 RP-9|rp9-asm.ax|
 ROWS
+if ablate selected-roots "for flag in ('root', 'steady', 'nonblocking'):" "for flag in ('root',):"; then
+  report "$work/abl-selected-roots.py" "$work/a-selected.json" "$fxdir/rp8-selected-root.ax" --profile restricted --nonblocking later; rc=$?
+  if [[ "$rc" == 0 && -z "$(rules_of "$work/a-selected.json")" ]]; then
+    ok "ablation selected roots: omitting the selected entry misses its blocking helper"
+  else
+    bad "ablation selected roots: selected blocking entry still exits $rc"
+  fi
+else
+  bad "ablation selected roots: the seam did not match exactly once"
+fi
 # With no trap leaves the exact statuses above must come out wrong, and
 # with no blocking kernel entry RP-8's fixture must pass. Each shows the
 # fact is read off the graph.

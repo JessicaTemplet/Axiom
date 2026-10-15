@@ -164,6 +164,11 @@ prints its first paragraph, and `axiom doc` renders the whole of it.
 | string | `"hello"`, `"line one\nline two"` |
 
 Numbers are decimal; source literals have no hexadecimal or exponent form.
+Integer literals are `Int`, from `-9223372036854775808` through
+`9223372036854775807`, inclusive. Out-of-range digits are refused before
+code generation; separators do not change the bound.
+
+Tested by `tests/selfhost/1016-integer-literal-boundaries.ax`.
 
 Escapes include `\n`, `\r`, `\t`, `\0`, `\\`, `\"` and `\'`.
 Strings may span source lines. A string literal is a `String` value;
@@ -1876,7 +1881,10 @@ bounds the answer bytes a call holds. `taskWithMemory` caps each task's
 memory, so a task that runs away answers `Err` 70 instead of taking the
 machine with it. `taskWithStack` sets the stack each task runs on, so a
 task that recurses too deep answers `Err` 86. `taskFold` consumes answers with a scalar
-accumulator; the callback must not retain region-owned values.
+accumulator. Its checked `scoped(step)` contract refuses callbacks that
+retain an answer or a fresh allocation in captured state. Pass a lambda
+directly, a non-nullary function declaration, or a parameter carrying the
+same scoped contract.
 
 Width is clamped to the input count, with a minimum of one for non-empty
 inputs. A slab size that exceeds the `Int` range returns `Err` 22 before
@@ -2092,6 +2100,38 @@ or `;@axiom:Effect(io)`, is refused with `AX3039`, so a claim never
 drops out unnoticed. Give a key of your own a namespace, such as
 `;@axiom:my:owner(storage)`, and it is recorded without being checked.
 Tested by `tests/diagnostics/1134-axtag-near-miss.ax`.
+
+A scoped callback can read invocation-owned values and return a scalar:
+
+```scheme
+(import Str)
+
+(:: withText (-> String (-> String Int) Int))
+;@axiom:scoped(step)
+(fn (withText text step)
+  (step text))
+
+(:: length Int)
+(fn (length)
+  (withText "hello" (lambda (text) (strLen text))))
+```
+
+`scoped(step)` requires a declared callback type with a scalar result.
+The compiler checks a lambda as a fresh invocation: its reference
+arguments and new allocations cannot be stored in older captured state.
+Pass the lambda directly, a non-nullary function declaration, or a
+parameter carrying the same tag. Opaque callbacks are `AX3130`; an
+escaping store is `AX3060`, with the invocation boundary attached.
+Call the tagged function directly with all its declared arguments so
+the precondition remains visible.
+
+The tag establishes the callback's retention rule. A callee that resets
+raw storage still needs a trusted unsafe implementation: it must supply
+valid values, keep them alive through the invocation and reclaim them
+only after it returns. Normal type, effect and region checks still apply.
+Raw addresses retain their unsafe validity and lifetime obligations.
+Tested by `tests/stdlib/953-scoped-task-fold.ax` and
+`tests/diagnostics/1440-scoped-callback-escape.ax`.
 
 Use `axiom --diagnostic-format=ai symbols file.ax` to inspect accepted
 tags and inferred facts. [Symbol tags](diagnostics.md#read-symbol-tags) describes reading

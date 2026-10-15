@@ -687,6 +687,23 @@ calling a converted function checks its remaining arguments. Tested by
   a full result for an unknown base. Tested by
   `tests/lsp/semantic-token-updates.py`.
 
+- Integer literals include `-9223372036854775808`. The compiler and
+  formatter share signed bounds, and both overflow directions report
+  `AX1004`. Tested by `tests/selfhost/1016-integer-literal-boundaries.ax`.
+
+- `scoped(step)` checks callback retention at invocation boundaries.
+  `Task.taskFold` requires it, rejecting callbacks that keep reclaimed
+  answers or fresh scratch allocations. Matching scoped callbacks can
+  be forwarded. Tested by `tests/stdlib/953-scoped-task-fold.ax` and
+  `tests/diagnostics/1440-scoped-callback-escape.ax`.
+
+- Restricted reports analyse selected steady and nonblocking entries
+  through every reachable helper, including entries that `main` does
+  not call. Stale, ambiguous or wrong-kind review exceptions and
+  ineffective stack options fail closed. The assurance mapping includes
+  NASA software engineering and assurance requirements alongside FAA
+  and ECSS guidance.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

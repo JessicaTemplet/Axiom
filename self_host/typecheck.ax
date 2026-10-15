@@ -2997,7 +2997,8 @@
   (unsafe : Int)
   (uses : (Vec EpUse))
   (mayCalls : (Vec Int))
-  (mut pending : Int))
+  (mut pending : Int)
+  (scoped : (Vec Int)))
 
 ; The region FACTS of this function (`rgnFactsNew`, stage S3 of
 ; docs/memory-model.md): which parameters its body stores
@@ -3617,7 +3618,8 @@
           0
           (vecWithCapacity 1)
           (vecWithCapacity 1)
-          0) Int)))
+          0
+          vecNew) Int)))
 
 ; A primitive that PERFORMS something, registered with the effect it
 ; performs rather than with the empty set every other one gets.
@@ -3708,7 +3710,8 @@
               0
               (vecWithCapacity 1)
               (vecWithCapacity 1)
-              0) Int))
+              0
+              vecNew) Int))
     }))
 
 ; ------------------------------------------------------------------
@@ -4856,7 +4859,8 @@
           0
           (vecWithCapacity 1)
           (vecWithCapacity 1)
-          0) Int)))
+          0
+          vecNew) Int)))
 
 ; An `extern` item. Modelled on `tcAddEffectOp` above, and for the
 ; same reason: an operation's FnEnt arrives with its effects already
@@ -4908,7 +4912,8 @@
           0
           (vecWithCapacity 1)
           (vecWithCapacity 1)
-          0) Int)))
+          0
+          vecNew) Int)))
 
 ; Every item in an `extern` block, and the `Mod$name` spelling too when
 ; the block came from an imported module - the same double registration
@@ -5067,7 +5072,8 @@
                 0
                 (vecWithCapacity 1)
                 (vecWithCapacity 1)
-                0) Int))
+                0
+                vecNew) Int))
         (memSetWord ent 1 ty)))))
 
 ; Whether declaration `i` is a second signature for its name in its
@@ -5132,7 +5138,8 @@
                     0
                     (vecWithCapacity 1)
                     (vecWithCapacity 1)
-                    0) Int))
+                    0
+                    vecNew) Int))
           }))))
       (memSetWord ent 2 (vecLen (nodeBVec d))))))
 
@@ -26353,7 +26360,9 @@
               (axtagUnsupported tc d val eff eparams lex))))
         (if (strEq key "result")
           (checkResultTag tc d val lex)
-          (axtagKeyTypo tc d key))))))
+          (if (strEq key "scoped")
+            (checkScopedTag tc d val)
+            (axtagKeyTypo tc d key)))))))
 
 ; Does either half of the declaration say `effect(unsafe)`? `checkAxtags`
 ; asks about every tag with the `fn` as `d`, so the signature's tags
@@ -27192,6 +27201,8 @@
     1
     (strEq key "effect")
     1
+    (strEq key "scoped")
+    1
     (if (strEq key "raw")
       1
       (if (strEq key "pre")
@@ -27227,6 +27238,8 @@
 (pub fn (axtagNearMiss key)
   (if (== (axtagKnownKey key) 1)
     ""
+    (== (axtagSlip key "scoped") 1)
+    "scoped"
     (== (axtagSlip key "deprecated") 1)
     "deprecated"
     (if (== (axtagSlip key "effect") 1)
@@ -28195,6 +28208,162 @@
         f
       })))
 
+; A scoped callback's reference arguments and fresh allocations stay
+; inside each invocation. The ordinary region walk checks that promise.
+; A callee using raw reset still owns the unsafe implementation proof.
+(pub :: scopedCollectAll (-> Int (Vec Int) Int Int))
+(pub fn (scopedCollectAll tc decls i)
+  (if (>= i (vecLen decls))
+    0
+    {
+      (let ((d (vecGet decls i)))
+        (if (== (nodeTag d) TAG_D_FN)
+          (let ((ent (findFnEntAnywhere tc (nodeAName d))))
+            (if (!= ent 0)
+              {
+                (scopedCollectTags tc d ent (memGetWordVec d 7) 0)
+                (scopedCollectTags tc d ent (sigAxtagsFor tc (nodeAName d)) 0)
+              }))))
+      (scopedCollectAll tc decls (+ i 1))
+    }))
+
+(pub :: scopedCollectTags (-> Int Int Int (Vec Int) Int Int))
+(pub fn (scopedCollectTags tc d ent tags i)
+  (if (|| (== (as tags Int) 0) (>= i (vecLen tags)))
+    0
+    {
+      (let ((tag (vecGet tags i)))
+        (if (strEq (axtagKeyOf tag) "scoped")
+          (let ((pos (strVecIdx (nodeBVec d) (axtagTextValue tag))))
+            (if (>= pos 0)
+              {
+                (if (== (intInVec (memGetWordVec ent 13) pos 0) 0)
+                  (vecPush (memGetWordVec ent 13) pos))
+                (memSetWord tc 39 1)
+              }))))
+      (scopedCollectTags tc d ent tags (+ i 1))
+    }))
+
+(pub :: emitScopedCallback (-> Int Int String Int))
+(pub fn (emitScopedCallback tc span message)
+  (if (== span 0)
+    0
+    (emitDiag
+      tc
+      (mkDiag
+        SEV_ERROR
+        "AX3130"
+        "scoped-callback"
+        span
+        message
+        0
+        0
+        "write a lambda at the call, or forward a parameter declared scoped; a scoped callback returns a scalar and retains no invocation-owned references or allocations"))))
+
+(pub :: checkScopedTag (-> Int Int String Int))
+(pub fn (checkScopedTag tc d name)
+  (let ((pos (strVecIdx (nodeBVec d) name)))
+    (if (< pos 0)
+      (emitScopedCallback
+        tc
+        (nodeSpan d)
+        (concat "scoped callback contract names no parameter: `" (concat name "`")))
+      (let ((ent (findFnEntAnywhere tc (nodeAName d))))
+        (if (== ent 0)
+          0
+          (let ((ty (tyExpandAliases tc (tyResolve (nthParamTy (memGetWord ent 1) pos 0)) 0)))
+            (if (|| (== ty 0) (!= (nodeTag ty) TAG_T_ARR))
+              (emitScopedCallback
+                tc
+                (nodeSpan d)
+                "a scoped parameter must have a declared function type")
+              (if (== (rgTyScalar tc (sigArrowResultTy ty)) 0)
+                (emitScopedCallback tc (nodeSpan d) "a scoped callback must return a scalar value")
+                0))))))))
+
+; A parameter carrying the same contract may be forwarded. Shadowed
+; names and ordinary local closures do not inherit the assertion.
+(pub :: rgnScopedParam (-> Int Int Int))
+(pub fn (rgnScopedParam rc e)
+  (if (!= (nodeTag e) TAG_E_VAR)
+    0
+    (let ((pos (rgnEnvFind rc (nodeAName e))))
+      (if (|| (< pos 0) (>= pos (memGetWord rc 3)))
+        0
+        (if (== (intInVec (memGetWordVec (memGetWord rc 2) 13) pos 0) 1)
+          1
+          0)))))
+
+(pub :: rgnCheckScopedArgs (-> Int Int (Vec Int) Int Int))
+(pub fn (rgnCheckScopedArgs rc ent args span)
+  (let ((indices (memGetWordVec ent 13)))
+    (let ((_sat
+      (if (&& (> (vecLen indices) 0) (< (vecLen args) (memGetWord ent 2)))
+        (if (== (rgnReport rc) 1)
+          (emitScopedCallback
+            (rgnTc rc)
+            span
+            "a function with a scoped callback contract requires all declared arguments in one call")
+          0)
+        0)))
+      (let ((mut i 0))
+        {
+          (while (< i (vecLen indices))
+            {
+              (let ((pos (vecGet indices i)))
+                (if (< pos (vecLen args))
+                  (rgnCheckScopedValue rc (vecGet args pos) span)))
+              (set i (+ i 1))
+            })
+          0
+        }))))
+
+; Only a real non-nullary declaration is a static callback. A bare
+; nullary factory executes and can return a closure with mutable captures.
+(pub :: rgnScopedStatic (-> Int Int Int))
+(pub fn (rgnScopedStatic rc e)
+  (if (|| (!= (nodeTag e) TAG_E_VAR) (>= (rgnEnvFind rc (nodeAName e)) 0))
+    0
+    (let ((ent (findFnEnt (rgnTc rc) (nodeAName e))))
+      (if (== ent 0)
+        0
+        (if (&& (> (memGetWord ent 2) 0) (&& (== (memGetWord ent 3) 0) (== (memGetWord ent 4) 0)))
+          1
+          0)))))
+
+; Lambda binders keep their checked arrow; applications keep an
+; evidence stamp whose first word is their checked result type.
+(pub :: rgnCheckedTy (-> Int Int))
+(pub fn (rgnCheckedTy e)
+  (let ((ty (nodeBinderTy e)))
+    (if (== ty 0)
+      0
+      (if (== (nodeTag ty) TAG_EVSTAMP)
+        (nodeA ty)
+        ty))))
+
+(pub :: rgnCheckScopedValue (-> Int Int Int Int))
+(pub fn (rgnCheckScopedValue rc e span)
+  (if (== (nodeTag e) TAG_E_LAM)
+    (rgnFormWalk rc e "#scoped callback" span)
+    (if (== (nodeTag e) TAG_E_IF)
+      {
+        (rgnCheckScopedValue rc (nodeB e) span)
+        (rgnCheckScopedValue rc (nodeC e) span)
+        0
+      }
+      (if (== (rgnScopedParam rc e) 1)
+        0
+        (if (== (rgnScopedStatic rc e) 1)
+          0
+          (if (== (rgnReport rc) 1)
+            (let ((_diagnostic (emitScopedCallback
+                                 (rgnTc rc)
+                                 (nodeSpan e)
+                                 "the compiler cannot prove this callback's invocation scope; its body is opaque here")))
+              0)
+            0))))))
+
 ; ---- the per-function walk context ----
 ;   0 tc   1 decl   2 ent   3 nparams   4 env names (Vec String)
 ;   5 env origins (Vec Int)   6 env binding regions (Vec Int)
@@ -28324,6 +28493,8 @@
     (let ((nm (vecGetStr (rgnFormNames rc) (- rid 1))))
       (if (strEq nm "#recover")
         "the recovery point (reclaimed on abort)"
+        (strEq nm "#scoped callback")
+        "this scoped callback invocation"
         (concat (concat "region `" nm) "`")))))
 
 (pub :: rgnOriginText (-> Int Int String))
@@ -28661,11 +28832,19 @@
       ; value into a vector nothing checked, and reading it after the
       ; region ended crashed (tests/diagnostics/1301-region-bare-nullary.ax).
       (let ((ent (findFnEnt (rgnTc rc) (nodeAName e))))
-        (if (if (== ent 0)
-          false
-          (&& (== (memGetWord ent 2) 0) (&& (== (memGetWord ent 3) 0) (== (memGetWord ent 4) 0))))
-          (rgnApp rc e)
-          0))
+        {
+          (if (!= ent 0)
+            (if (&& (> (vecLen (memGetWordVec ent 13)) 0) (== (rgnReport rc) 1))
+              (emitScopedCallback
+                (rgnTc rc)
+                (nodeSpan e)
+                "a function with a scoped callback contract must be called directly; a function value would erase its precondition")))
+          (if (if (== ent 0)
+            false
+            (&& (== (memGetWord ent 2) 0) (&& (== (memGetWord ent 3) 0) (== (memGetWord ent 4) 0))))
+            (rgnApp rc e)
+            0)
+        })
       {
         ; A read below the innermost lambda's base is a CAPTURE, and
         ; the closure's origins grow by it.
@@ -28896,7 +29075,16 @@
       (memSetWord rc 15 0)
       (memSetWord rc 16 (as (rgnStrVec) Int))
       (memSetWord rc 18 (as (rgnIntVec) Int))
-      (rgnBindParams rc params 0 (memGetWord rc 7))
+      (rgnBindTypedParams
+        rc
+        params
+        0
+        (memGetWord rc 7)
+        (if (if (> (memGetWord rc 8) 0)
+          (strEq (vecGetStr (rgnFormNames rc) (- (memGetWord rc 8) 1)) "#scoped callback")
+          false)
+          (rgnCheckedTy e)
+          0))
       (rgnExpr rc (nodeB e))
       (rgnEnvTrunc rc mark)
       (let ((cap (memGetWord rc 15)))
@@ -28983,15 +29171,21 @@
     0
     cap))
 
-(pub :: rgnBindParams (-> Int (Vec String) Int Int Int))
-(pub fn (rgnBindParams rc params i mask)
+(pub :: rgnBindTypedParams (-> Int (Vec String) Int Int Int Int))
+(pub fn (rgnBindTypedParams rc params i mask ty)
   (if (== (as params Int) 0)
     0
     (if (>= i (vecLen params))
       0
       {
-        (rgnBind rc (vecGetStr params i) mask (memGetWord rc 8))
-        (rgnBindParams rc params (+ i 1) mask)
+        (rgnBind
+          rc
+          (vecGetStr params i)
+          (if (== (rgTyScalar (rgnTc rc) (nthParamTy ty i 0)) 1)
+            0
+            mask)
+          (memGetWord rc 8))
+        (rgnBindTypedParams rc params (+ i 1) mask ty)
       })))
 
 ; `(region r E)` - S2's node, walked against its contract: `r` in the
@@ -29114,7 +29308,12 @@
       (rgnUnknownCall rc args (spanOf e) (rgnExpr rc head))
       (let ((n (nodeAName head)))
         (if (>= (rgnEnvFind rc n) 0)
-          (rgnUnknownCall rc args (spanOf e) (rgnExpr rc head))
+          (if (== (rgnScopedParam rc head) 1)
+            (let ((v (rgnUnknownCall rc args (spanOf e) 0)))
+              (if (== (rgTyScalar tc (rgnCheckedTy e)) 1)
+                0
+                v))
+            (rgnUnknownCall rc args (spanOf e) (rgnExpr rc head)))
           (if (&& (strEq n "__axiom_recover") (== (vecLen args) 2))
             (rgnRecoverForm rc args (spanOf e))
             (if (== (isCastLike n) 1)
@@ -29265,153 +29464,156 @@
 ; word moves one site.
 (pub :: rgnKnownCall (-> Int Int String (Vec Int) Int Int Int))
 (pub fn (rgnKnownCall rc ent spelled args span e)
-  ; the entry's own name is the mangled one the declaration carries
-  ; (`Vec$vecPush`); the spelling at the call may be bare or qualified
-  (let (
-    (masks (rgnIntVec))
-    (callee (memGetWordStr ent 0))
-    (sig (memGetWord ent 1))
-    (f (memGetWord ent 8))
-    (tc (rgnTc rc))
-    (mut i 0)
-    (mut res 0)
-    (mut ok 1)
-  )
-    {
-      (while (< i (vecLen args))
-        {
-          (vecPush masks (rgnExpr rc (vecGet args i)))
-          (set i (+ i 1))
-        })
-      ; The facts say what the callee stores through each parameter.
-      (if (! (== f 0))
-        {
-          (set i 0)
-          (while (< i (vecLen args))
-            {
-              (if (< i (memGetWord f 7))
-                (let (
-                  (fresh (!= (& (memGetWord f 1) (<< 1 i)) 0))
-                  (from (vecGet (memGetWordVec f 2) i))
-                  (into (concat
-                          (concat
+  {
+    (rgnCheckScopedArgs rc ent args span)
+    ; the entry's own name is the mangled one the declaration carries
+    ; (`Vec$vecPush`); the spelling at the call may be bare or qualified
+    (let (
+      (masks (rgnIntVec))
+      (callee (memGetWordStr ent 0))
+      (sig (memGetWord ent 1))
+      (f (memGetWord ent 8))
+      (tc (rgnTc rc))
+      (mut i 0)
+      (mut res 0)
+      (mut ok 1)
+    )
+      {
+        (while (< i (vecLen args))
+          {
+            (vecPush masks (rgnExpr rc (vecGet args i)))
+            (set i (+ i 1))
+          })
+        ; The facts say what the callee stores through each parameter.
+        (if (! (== f 0))
+          {
+            (set i 0)
+            (while (< i (vecLen args))
+              {
+                (if (< i (memGetWord f 7))
+                  (let (
+                    (fresh (!= (& (memGetWord f 1) (<< 1 i)) 0))
+                    (from (vecGet (memGetWordVec f 2) i))
+                    (into (concat
                             (concat
-                              (concat "parameter `" (rgnCalleeParamName tc callee i))
-                              "` of `")
-                            (bareOf callee))
-                          "`"))
-                )
-                  {
-                    (if fresh
-                      {
-                        (rgnEmitEscape
-                          rc
-                          (rgnStoreBadMask rc (memGetWord rc 7) (vecGet masks i))
-                          span
-                          into
-                          (concat
-                            (concat " - `" (bareOf callee))
-                            "` stores a value it allocates into that parameter")
-                          0)
-                        (rgnNoteFlow rc (memGetWord rc 7) (vecGet masks i) callee)
-                      })
-                    (let ((mut j 0))
-                      (while (&& (< j (vecLen args)) (< j (memGetWord f 7)))
+                              (concat
+                                (concat "parameter `" (rgnCalleeParamName tc callee i))
+                                "` of `")
+                              (bareOf callee))
+                            "`"))
+                  )
+                    {
+                      (if fresh
                         {
-                          (if (!= (& from (<< 1 j)) 0)
-                            {
-                              (rgnEmitEscape
-                                rc
-                                (rgnStoreBadMask rc (vecGet masks j) (vecGet masks i))
-                                span
-                                into
-                                (concat
+                          (rgnEmitEscape
+                            rc
+                            (rgnStoreBadMask rc (memGetWord rc 7) (vecGet masks i))
+                            span
+                            into
+                            (concat
+                              (concat " - `" (bareOf callee))
+                              "` stores a value it allocates into that parameter")
+                            0)
+                          (rgnNoteFlow rc (memGetWord rc 7) (vecGet masks i) callee)
+                        })
+                      (let ((mut j 0))
+                        (while (&& (< j (vecLen args)) (< j (memGetWord f 7)))
+                          {
+                            (if (!= (& from (<< 1 j)) 0)
+                              {
+                                (rgnEmitEscape
+                                  rc
+                                  (rgnStoreBadMask rc (vecGet masks j) (vecGet masks i))
+                                  span
+                                  into
                                   (concat
                                     (concat
-                                      (concat " - `" (bareOf callee))
-                                      "` stores its parameter `")
-                                    (rgnCalleeParamName tc callee j))
-                                  "` into it")
-                                (vecGet args j))
-                              (rgnNoteFlow rc (vecGet masks j) (vecGet masks i) callee)
-                            })
-                          (set j (+ j 1))
-                        }))
-                  }))
-              (set i (+ i 1))
-            })
-          (if (!= (memGetWord f 5) 0)
-            (if (== (memGetWord (rgnFacts rc) 5) 0)
-              {
-                (memSetWord (rgnFacts rc) 5 1)
-                (memSetWord rc 13 1)
-              }))
-        })
-      ; The result derives from fresh allocation and/or parameters.
-      (if (== f 0)
-        (memGetWord rc 7)
-        {
-          (if (!= (memGetWord f 4) 0)
-            (set res (memGetWord rc 7)))
-          ; The facts carry one bit per declared parameter, so a
-          ; surplus argument of an over-applied call has none.
-          (set i 0)
-          (while (&& (< i (vecLen args)) (< i (memGetWord f 7)))
-            {
-              (if (!= (& (memGetWord f 3) (<< 1 i)) 0)
-                (set res (| res (vecGet masks i))))
-              (set i (+ i 1))
-            })
-          ; S4 slice 2's witness stamp: this call's answer is
-          ; freshly allocated by the callee - its facts say the
-          ; result derives from CUR0, from no HEAP parameter (a
-          ; scalar-typed parameter contributes no alias: an `Int`
-          ; field needs no release, so a cell built over words is
-          ; still a fresh cell), and from no call the walk could
-          ; not resolve - so record it on the node for codegen's
-          ; elision. The call must be saturated (every parameter
-          ; present, so no bit hides past the argument list); a
-          ; partial application abstains. Upgrade only (0 to 2; a
-          ; word answer stays 1), only on the post-fixpoint stamp
-          ; walks (`rgnStamping`, word 40), never while facts are
-          ; still moving, and never when truncation made every row
-          ; a lower bound (word 28 is 2 then, not 1). Over-stamping would
-          ; leak a share, never free one early - and the RSS half
-          ; of the gate watches the ratio - but the rule above is
-          ; stated as the guarantee, not the tendency.
-          ;
-          ; No signature, no stamp: without declared parameter
-          ; types there is nothing to prove scalar with, so a
-          ; signature-less callee abstains rather than guessing.
-          (if (== sig 0)
-            (set ok 0)
-            {
-              (set ok 1)
-              (set i 0)
-              (while (&& (< i (vecLen args)) (< i (memGetWord f 7)))
+                                      (concat
+                                        (concat " - `" (bareOf callee))
+                                        "` stores its parameter `")
+                                      (rgnCalleeParamName tc callee j))
+                                    "` into it")
+                                  (vecGet args j))
+                                (rgnNoteFlow rc (vecGet masks j) (vecGet masks i) callee)
+                              })
+                            (set j (+ j 1))
+                          }))
+                    }))
+                (set i (+ i 1))
+              })
+            (if (!= (memGetWord f 5) 0)
+              (if (== (memGetWord (rgnFacts rc) 5) 0)
                 {
-                  (if (&&
-                        (!= (& (memGetWord f 3) (<< 1 i)) 0)
-                        (== (rgTyScalar tc (nthParamTy sig i 0)) 0))
-                    (set ok 0))
-                  (set i (+ i 1))
-                })
-            })
-          (if (&&
-                (== (memGetWord tc 40) 1)
-                (&&
-                  (== (memGetWord tc 28) 1)
+                  (memSetWord (rgnFacts rc) 5 1)
+                  (memSetWord rc 13 1)
+                }))
+          })
+        ; The result derives from fresh allocation and/or parameters.
+        (if (== f 0)
+          (memGetWord rc 7)
+          {
+            (if (!= (memGetWord f 4) 0)
+              (set res (memGetWord rc 7)))
+            ; The facts carry one bit per declared parameter, so a
+            ; surplus argument of an over-applied call has none.
+            (set i 0)
+            (while (&& (< i (vecLen args)) (< i (memGetWord f 7)))
+              {
+                (if (!= (& (memGetWord f 3) (<< 1 i)) 0)
+                  (set res (| res (vecGet masks i))))
+                (set i (+ i 1))
+              })
+            ; S4 slice 2's witness stamp: this call's answer is
+            ; freshly allocated by the callee - its facts say the
+            ; result derives from CUR0, from no HEAP parameter (a
+            ; scalar-typed parameter contributes no alias: an `Int`
+            ; field needs no release, so a cell built over words is
+            ; still a fresh cell), and from no call the walk could
+            ; not resolve - so record it on the node for codegen's
+            ; elision. The call must be saturated (every parameter
+            ; present, so no bit hides past the argument list); a
+            ; partial application abstains. Upgrade only (0 to 2; a
+            ; word answer stays 1), only on the post-fixpoint stamp
+            ; walks (`rgnStamping`, word 40), never while facts are
+            ; still moving, and never when truncation made every row
+            ; a lower bound (word 28 is 2 then, not 1). Over-stamping would
+            ; leak a share, never free one early - and the RSS half
+            ; of the gate watches the ratio - but the rule above is
+            ; stated as the guarantee, not the tendency.
+            ;
+            ; No signature, no stamp: without declared parameter
+            ; types there is nothing to prove scalar with, so a
+            ; signature-less callee abstains rather than guessing.
+            (if (== sig 0)
+              (set ok 0)
+              {
+                (set ok 1)
+                (set i 0)
+                (while (&& (< i (vecLen args)) (< i (memGetWord f 7)))
+                  {
+                    (if (&&
+                          (!= (& (memGetWord f 3) (<< 1 i)) 0)
+                          (== (rgTyScalar tc (nthParamTy sig i 0)) 0))
+                      (set ok 0))
+                    (set i (+ i 1))
+                  })
+              })
+            (if (&&
+                  (== (memGetWord tc 40) 1)
                   (&&
-                    (== (nodeResWord e) 0)
+                    (== (memGetWord tc 28) 1)
                     (&&
-                      (!= (memGetWord f 4) 0)
+                      (== (nodeResWord e) 0)
                       (&&
-                        (== (memGetWord f 5) 0)
-                        (&& (== (vecLen args) (memGetWord f 7)) (== ok 1)))))))
-            (setNodeResWord e 2))
-          res
-        })
-    }))
+                        (!= (memGetWord f 4) 0)
+                        (&&
+                          (== (memGetWord f 5) 0)
+                          (&& (== (vecLen args) (memGetWord f 7)) (== ok 1)))))))
+              (setNodeResWord e 2))
+            res
+          })
+      })
+  })
 
 ; The i-th parameter's NAME of a callee, from its `fn` declaration,
 ; or its index when the declaration is not at hand.
@@ -29719,6 +29921,7 @@
         ; tags are asked here, over the entry file's own.
         (checkStrayImportAxtags tc entryDecls 0)
         (checkMissingDefs (defIdxBuild allDecls) entryDecls out 0 (tcUnknownCallees tc))
+        (scopedCollectAll tc allDecls 0)
         (tcWalkDecls tc 0)
         ; A witness noted outside any function body.
         (evSettle tc)

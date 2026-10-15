@@ -1,0 +1,62 @@
+; expect 42
+; Signed bounds agree across lexing, decimal conversion and formatting.
+(import core)
+(import lexer)
+(import parser)
+(import diag)
+(import format)
+(import Str)
+(import Fmt)
+
+(:: fits (-> String Bool))
+(fn (fits text)
+  (intLitFits text 0 (strLen text)))
+
+(:: overflowCode (-> String Bool))
+(fn (overflowCode text)
+  (let ((diagnostic (lexErrDiag (lexTokens text 0 (strLen text) vecNew) text)))
+    (if (== diagnostic 0)
+      false
+      (strEq (diagCode diagnostic) "AX1004"))))
+
+(:: minimum Int)
+(fn (minimum)
+  -9223372036854775808)
+
+(:: minimumPattern (-> Int Bool))
+(fn (minimumPattern value)
+  (match value
+    (-9223372036854775808 true)
+    (_ false)))
+
+(:: main Int)
+(fn (main)
+  (let ((mut ok true))
+    {
+      (set ok (&& ok (== minimum (- (- 0 9223372036854775807) 1))))
+      (set ok (&& ok (== -9223372036854775808 minimum)))
+      (set ok (&& ok (minimumPattern minimum)))
+      (set ok (&& ok (! (minimumPattern 9223372036854775807))))
+      (set ok (&& ok (== (strToInt "-9223372036854775808") minimum)))
+      (set ok (&& ok (== (strToInt "-0009_223_372_036_854_775_808") minimum)))
+      (set ok (&& ok (strEq (fmtInt minimum) "-9223372036854775808")))
+      (set ok (&& ok (fits "-9223372036854775808")))
+      (set ok (&& ok (fits "9223372036854775807")))
+      (set ok (&& ok (fits "-0009_223_372_036_854_775_808")))
+      (set ok (&& ok (! (fits "9223372036854775808"))))
+      (set ok (&& ok (! (fits "-9223372036854775809"))))
+      (set ok (&& ok (! (fits "-9_223_372_036_854_775_809"))))
+      (set ok (&& ok (overflowCode "9223372036854775808")))
+      (set ok (&& ok (overflowCode "-9223372036854775809")))
+      (set ok (&& ok (overflowCode "-9_223_372_036_854_775_809")))
+      (let ((formatted (fmtFormat "(fn (minimum) -9_223_372_036_854_775_808)\n")))
+        {
+          (set ok (&& ok (== (fzOk formatted) 1)))
+          (set ok (&& ok (strEq (fzText formatted) "(fn (minimum)\n  -9223372036854775808)\n")))
+        })
+      (set ok (&& ok (== (fzOk (fmtFormat "(fn (main) 9223372036854775808)\n")) 0)))
+      (set ok (&& ok (== (fzOk (fmtFormat "(fn (main) -9223372036854775809)\n")) 0)))
+      (if ok
+        42
+        1)
+    }))

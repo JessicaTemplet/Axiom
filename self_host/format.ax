@@ -23,10 +23,8 @@
 (import Str)
 (import Utf8)
 (import Vec)
-; For `isIdentChar` alone, and deliberately: what continues a name is
-; the LEXER's rule, and a formatter that restates it is a second
-; implementation of one agreement with nothing comparing them. That is
-; the defect this import removes - see `fscanName`.
+; Identifier boundaries and integer bounds come from the lexer.
+; Keeping those rules shared makes check and fmt accept the same values.
 (import lexer)
 ; `pastBom`: a byte order mark is formatted around, not through.
 (import core)
@@ -2020,8 +2018,8 @@
     }))
 
 ; An integer literal's text, normalised. A leading `-` (a fused
-; negative literal) passes through. Digits that overflow an i64
-; poison the output: stage0's lexer refuses the file.
+; negative literal) passes through. Digits outside Int's signed range
+; poison the output, using the same bound as the compiler.
 (pub :: fpInt (-> Int Int Int Int))
 (pub fn (fpInt p from to)
   (if (if (fpIntFits (fpSrc p) from to)
@@ -2348,68 +2346,11 @@
                                         "!"
                                         ""))))))))))))))))))))
 
-; Whether the integer literal's significant digits fit an i64 -
-; stage0's LEXER parses every integer through i64 and refuses the
-; file on overflow, before any sign applies (probed:
-; `-9223372036854775808` refuses even though it would fit signed).
+; Use the compiler's signed decimal bound, including Int minimum.
+; The formatter still owns its tokens and layout.
 (pub :: fpIntFits (-> String Int Int Bool))
-(pub fn (fpIntFits src from0 to)
-  ; Count significant digits: skip `_` and leading zeros.
-  (let (
-    (from (if (== (strByte src from0) 45)
-      (+ from0 1)
-      from0))
-    (limit "9223372036854775807")
-    (mut sig 0)
-    (mut i (if (== (strByte src from0) 45)
-      (+ from0 1)
-      from0))
-    (mut cmpBigger 0)
-    (mut k 0)
-  )
-    {
-      (while (< i to)
-        (let ((b (strByte src i)))
-          {
-            (if (! (== b 95))
-              (if (! (&& (== b 48) (== sig 0)))
-                (set sig (+ sig 1))))
-            (set i (+ i 1))
-          }))
-      (if (> sig 19)
-        false
-        (if (< sig 19)
-          true
-          ; Exactly 19: lexicographic compare against i64::MAX.
-          (let (
-            (mut j from)
-            (mut seen 0)
-            (mut decided 0)
-          )
-            {
-              (while (< j to)
-                (let ((b (strByte src j)))
-                  {
-                    (if (! (== b 95))
-                      (if (! (&& (== b 48) (== seen 0)))
-                        {
-                          (if (== decided 0)
-                            (let ((lb (strByte limit k)))
-                              (if (> b lb)
-                                {
-                                  (set cmpBigger 1)
-                                  (set decided 1)
-                                }
-                                (if (< b lb)
-                                  (set decided 1)))))
-                          (set seen 1)
-                          (set k (+ k 1))
-                        }))
-                    (set j (+ j 1))
-                  }))
-              (== cmpBigger 0)
-            })))
-    }))
+(pub fn (fpIntFits src from to)
+  (intLitFits src from to))
 
 ; The left side of a qualified reference. A dotted module path prints
 ; with `::` throughout - `Q.Inner::only` is `Q::Inner::only` - and only

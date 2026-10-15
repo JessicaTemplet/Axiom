@@ -140,6 +140,7 @@ ADT instantiation.
 | Typed promotion of owned task inputs and results across joins, with cleanup on cancellation and failure | In progress | `MM-PAR-6`, `MM-RGN-7` |
 | Task slab sizes are checked before mapping or spawning; indices cross without overflow-prone packing | Done | `tests/stdlib/941-task-index-and-size.ax` |
 | Explicit task grain with bounded range jobs, ordered answers and per-range budgets | Done | `tests/stdlib/951-task-ranges.ax`, `tests/stdlib/952-task-ranges-lifecycle.ax` |
+| Checked streaming callbacks reject retained answers and temporary allocations, with explicit forwarding contracts | Done | `tests/stdlib/953-scoped-task-fold.ax`, `tests/diagnostics/1440-scoped-callback-escape.ax` |
 | Scale multicore work with bounded worker reuse and scheduling, preserving isolation, submit order and cancellation | Planned | `MM-PAR-3`, `MM-PAR-5`, `MM-PAR-17` |
 | A `parallel` form keeps no arena storage once it returns, in both lowerings | Done | `tests/litmus/par-forms.ax`, `scripts/check-parallel.sh` |
 | Fixed worker, queue, memory and stack budgets, with exhaustion and shutdown tests | Done | `MM-PAR-17`, `tests/stdlib/920-task-stack.ax` |
@@ -164,6 +165,7 @@ ADT instantiation.
 | An assembler error inside an `asm` template is reported at the form | Done |
 | `asm` takes floating-point, vector and memory operands | Not started |
 | The restricted profile requires `nostack` of an allowed `asm` block, or counts what it pushes | Not started |
+| Selected steady and nonblocking entries are analysed transitively; stale or ambiguous assurance exceptions fail closed | Done |
 | The test runner runs tests in parallel | Done |
 | UTF-16 ranged document edits apply in order and atomically, with monotonic versions and versioned diagnostics | Done |
 | The language server cancels obsolete work and serves requests from revisioned background analysis | Not started |

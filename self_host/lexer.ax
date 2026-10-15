@@ -314,28 +314,35 @@
 ; digit an out-of-range number, `\` a bad escape, anything else an
 ; unexpected character. See `lexErrDiag` in parser.ax.
 ; ------------------------------------------------------------------
-; Do the digits of the integer literal spanning [start, end) fit an
-; i64? stage0 parses the lexeme with `from_str`, so the bound is
-; i64::MAX and a leading `-` buys nothing (probed:
-; `-9223372036854775808` is refused too). `_` separators are ignored,
-; as they are everywhere else.
+; Decimal bounds are checked before every multiply. Accumulating a
+; non-positive magnitude admits Int's minimum without constructing its
+; unrepresentable positive counterpart. Separators do not affect it.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: intLitFits (-> String Int Int Bool))
 (pub fn (intLitFits src start end)
   (let (
+    (negative (&& (< start end) (== (strByte src start) 45)))
     (mut i start)
     (mut acc 0)
     (mut ok true)
   )
     {
-      (while (< i end)
+      (while (&& ok (< i end))
         (let ((b (strByte src i)))
           {
             (if (! (|| (== b 95) (== b 45)))
               (let ((d (- b 48)))
-                (if (|| (> acc 922337203685477580) (&& (== acc 922337203685477580) (> d 7)))
+                (if (||
+                      (< acc -922337203685477580)
+                      (&&
+                        (== acc -922337203685477580)
+                        (>
+                          d
+                          (if negative
+                            8
+                            7))))
                   (set ok false)
-                  (set acc (+ (* acc 10) d)))))
+                  (set acc (- (* acc 10) d)))))
             (set i (+ i 1))
           }))
       ok

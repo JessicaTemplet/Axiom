@@ -31,6 +31,12 @@ no refusal, 1 refusals, 2 the tool could not answer - a program that
 does not check, a compiler or `llc` failure, an object it cannot read.
 It never exits 0 for an answer it did not compute.
 
+Entry names must identify source functions. Exceptions must identify
+one foreign item or assembly-containing function; use `Module$name`
+when a bare name matches several declarations. Missing, ambiguous or
+wrong-kind exceptions are errors. Stack budgets require `--stack` and a
+positive byte count, and optimisation levels are 0 to 3.
+
 ## Using Axiom in a critical system
 
 Run the restricted report with the deployment target, optimisation level
@@ -80,7 +86,9 @@ post-`opt` IR, which can tell an escape from a comparison.
 ## The profile
 
 The roots are `main`, every `;@axiom:isr` function of the root file,
-and any `--root NAME`. Everything reachable from them is held to:
+and every `--root`, `--steady` and `--nonblocking` entry you name.
+A selected entry is analysed even when `main` never calls it. Everything
+reachable from those roots is held to:
 
 | Rule | Refuses | Why |
 |---|---|---|
@@ -259,7 +267,9 @@ The linker script reserves 8 KiB of stack (`baremetalLinkScript`,
    exactly; `#extern` on the extern item and nowhere else; the trap
    statuses and undefined operators of a program with one source of
    each, compared exactly.
-3. The profile: `tests/profile/ok-periodic.ax` passes; each
+3. The profile: `tests/profile/ok-periodic.ax` passes; explicitly selected
+   entries are checked through their helpers, and invalid or ambiguous
+   options fail closed. Each
    `tests/profile/rpN-*.ax` is refused by exactly RP-N; `--allow-foreign`,
    `--allow-asm` and a missing `--steady` each lift their refusal.
 4. The stack: `ok-periodic.ax` and `blink.ax` bounded under 8 KiB; tree
