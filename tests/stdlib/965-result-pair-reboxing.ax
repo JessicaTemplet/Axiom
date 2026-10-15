@@ -1,0 +1,164 @@
+; Register-pair answers keep the same tag and reference map when boxed.
+; Each reference payload owns a resource, whose cleanup records its end.
+(import PairReboxNames)
+(import IO)
+(import Err)
+(import Mem)
+
+(struct Owner sealed
+  (handle : Handle))
+
+(:: owner (-> Int Int Owner))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (owner hits n)
+  (Owner
+    :handle
+      (__resource_new
+        (lambda (v)
+          {
+            (__store64 hits 0 (+ (__load64 hits 0) 1))
+            0
+          }
+        )
+        n)))
+
+(:: ownerValue (-> Owner Int))
+;@axiom:effect(unsafe)
+(fn (ownerValue o)
+  (__resource_get o.handle))
+
+(:: okRef (-> Int (Result Owner Int)))
+;@axiom:effect(io)
+(fn (okRef hits)
+  (Ok (owner hits 17)))
+
+(:: errRef (-> Int (Result Int Owner)))
+;@axiom:effect(io)
+(fn (errRef hits)
+  (Err (owner hits 19)))
+
+(:: okWord (-> Int (Result Int Owner)))
+(fn (okWord n)
+  (Ok (+ n 7000)))
+
+(:: errWord (-> Int (Result Owner Int)))
+(fn (errWord n)
+  (Err (+ n 9000)))
+
+(:: boolWord (-> Bool Int))
+(fn (boolWord b)
+  (if b
+    1
+    0))
+
+(:: checkBoxes
+  (-> (Result Owner Int) (Result Int Owner) (Result Int Owner) (Result Owner Int) Int Int))
+;@axiom:effect(unsafe)
+(fn (checkBoxes a b c d n)
+  {
+    (let values
+      (&&
+        (==
+          (match a
+            ((Ok o) (ownerValue o))
+            ((Err e) (- 0 1)))
+          17)
+        (&&
+          (==
+            (match b
+              ((Ok v) (- 0 1))
+              ((Err o) (ownerValue o)))
+            19)
+          (&&
+            (==
+              (match c
+                ((Ok v) v)
+                ((Err o) (- 0 1)))
+              (+ n 7000))
+            (==
+              (match d
+                ((Ok o) (- 0 1))
+                ((Err v) v))
+              (+ n 9000))))))
+    (let shapes
+      (&& (== (__load64 (- (as a Int) 16) 1) 131076)
+        (&& (== (__load64 (- (as b Int) 16) 1) 131076)
+          (&& (== (__load64 (- (as c Int) 16) 1) 4) (== (__load64 (- (as d Int) 16) 1) 4)))))
+    (+ (boolWord values) (* 2 (boolWord shapes)))
+  })
+
+(:: step (-> Int Int Int))
+;@axiom:effect(io)
+(fn (step hits n)
+  {
+    (let a (okRef hits))
+    (let b (errRef hits))
+    (let c (okWord n))
+    (let d (errWord n))
+    (checkBoxes a b c d n)
+  })
+
+(:: stepThunk (-> Int Int Int))
+;@axiom:effect(io)
+(fn (stepThunk hits n)
+  {
+    (let f okRef)
+    (let g errRef)
+    (let h okWord)
+    (let j errWord)
+    (let a (f hits))
+    (let b (g hits))
+    (let c (h n))
+    (let d (j n))
+    (checkBoxes a b c d n)
+  })
+
+(:: live Int)
+(fn (live)
+  {
+    (let st memStats)
+    st.backlogBytes
+  })
+
+(:: run (-> Int Int Bool Int))
+;@axiom:effect(io)
+(fn (run hits n indirect)
+  {
+    (let mut acc 0)
+    (for i in 0..n
+      (set acc (+ acc
+                 (if indirect
+                   (stepThunk hits i)
+                   (step hits i)))))
+    acc
+  })
+
+(:: main ())
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (main)
+  {
+    (println (== otherValue 17000))
+    (let hits (__alloc 8))
+    (let direct (step hits 17))
+    (println (== (& direct 1) 1))
+    (println (== (& direct 2) 2))
+    (println (== (__load64 hits 0) 2))
+    (let indirect (stepThunk hits 19))
+    (println (== (& indirect 1) 1))
+    (println (== (& indirect 2) 2))
+    (println (== (__load64 hits 0) 4))
+    (run hits 100 false)
+    (run hits 100 true)
+    (let checkBefore (__load64 hits 0))
+    (let b (run hits 1000 true))
+    ; Bare-function wrappers allocate their own closures. Measure the
+    ; direct-call reboxing loop after those wrapper probes have ended.
+    (let before live)
+    (let a (run hits 1000 false))
+    (let after live)
+    (println (&& (== a 3000) (== b 3000)))
+    (println (== (- (__load64 hits 0) checkBefore) 4000))
+    (println (<= (- after before) 1024))
+  })

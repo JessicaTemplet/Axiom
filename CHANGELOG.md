@@ -62,6 +62,11 @@ and selected entry roots; they do not establish aviation or space certification.
   declares its kernel I/O effect. Tested by `tests/ci/gate-cache.py` and
   `tests/litmus/pool-refuse.ax`.
 
+- Boxed `Result` values use their nominal constructor identities for tags and
+  reference maps. Reboxing preserves and releases owners in either payload,
+  including beside unrelated constructors named `Ok` or `Err`. Tested by
+  `tests/stdlib/965-result-pair-reboxing.ax`.
+
 - Region diagnostic checks wait for background analysis before shutting
   down the language server. Tested by `tests/lsp/region-boundary-hints.py`.
 
