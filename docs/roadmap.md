@@ -89,7 +89,8 @@ integrator would still need.
 | Imports form the module header and cannot appear later or inside expressions | Done | `tests/diagnostics/1400-late-import.axbad`, `tests/diagnostics/1401-nested-import.axbad`, `tests/diagnostics/1402-lambda-import.axbad` |
 | REPL uses the brand palette and shares diagnostic and language help with the CLI | Done | `scripts/check-repl-tui.sh`, `tests/repl/170-explain-shape.txt` |
 | Editor and REPL completion exclude retired syntax | Done | `tests/lsp/drive.py`, `scripts/check-replcomp.sh` |
-| Define numeric promotion for literals, mixed arithmetic and expected types, with precision guarantees and ADT soundness; lossy conversions stay explicit | Planned | |
+| Numeric conversions are explicit; mixed numeric operands and incompatible ADT parameters are refused | Done | `tests/diagnostics/1117-mixed-numeric-operands.ax`, `tests/diagnostics/1410-explicit-numeric-boundaries.ax` |
+| Refine explicit numeric conversion APIs, with clear precision, rounding and range behaviour | Planned | |
 | Legacy CLI and syntax removed: `axiom FILE`, expression `fn`, keyword struct construction, format aliases | Done | `compat/BREAKING` |
 | The precondition tag removed; contracts are `pre` and `post` | Done | `AX3095` |
 | Macro hygiene has one implementation | Done | `MAC-HYG-10` |
@@ -100,10 +101,11 @@ integrator would still need.
 | Functional piping as a structural form: a pipe the tree, the language server and agents see stage by stage, with an explicit `_` hole for where the value goes | Not started | |
 | One code-generation route: the MIR route is finished or removed | Not started | |
 
-Numeric promotion must preserve algebraic data type (ADT) identity,
-constructor payload types, pattern matching and ownership evidence.
-Converting an already constructed ADT requires an explicit operation.
-Incompatible ADTs must fail type checking.
+Numeric values never widen or narrow implicitly. Expected types do not
+insert conversions into calls, returns, assignments or constructor
+payloads. Algebraic data types (ADTs) keep their type arguments and payload
+representation. Convert payloads explicitly when constructing a different
+ADT instantiation.
 
 ## Standard library
 

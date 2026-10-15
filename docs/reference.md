@@ -281,9 +281,21 @@ words. Addition, subtraction and multiplication wrap; division by zero,
 `intMin / -1`, and shifts outside 0..63 trap. Use `Err`'s checked
 arithmetic when failure should be a `Result`.
 
+Numeric conversions are always explicit. `Int` and `Float` never widen or
+narrow implicitly, including in calls, returns, assignments and ADT
+payloads. An expected type does not convert a literal: `1` is `Int`,
+whereas `1.0` is `Float`.
+
 Float arithmetic uses two `Float` operands. Convert numeric types with
-`__intToFloat` and `__floatToInt`; `cast` alone does not perform that
-numeric conversion. `String` equality reads contents; ordering uses `strCmp`.
+`__intToFloat` and `__floatToInt`; for example, `(+ (__intToFloat 1) 2.0)`
+answers `3.0`. `cast` reinterprets bits and does not perform that numeric
+conversion. `String` equality reads contents; ordering uses `strCmp`.
+
+An `(Option Int)` cannot stand in for `(Option Float)`. Convert the payload
+and construct a new `Option` with the required type.
+
+Tested by `tests/diagnostics/1410-explicit-numeric-boundaries.ax` and
+`tests/stdlib/942-explicit-numeric-conversions.ax`.
 
 ## Let bindings
 

@@ -69,6 +69,8 @@ have() { # have <got> <want> <what>
 # REPL styling and shared help add six pure palette constants and two
 # Alloc,IO,Mut functions. The CLI helpers move modules with unchanged
 # effect sets; comparing the 4ffb6f02 symbols changes no existing row.
+# Pattern Float lowering adds patFloatFlag, an Unsafe leaf reading the
+# checker's binder stamp. Existing functions keep their measured rows.
 echo "== compiler view: symbols --calls self_host/main.ax =="
 "$axc" --diagnostic-format=ai symbols --calls self_host/main.ax > "$work/main.axsym" 2>"$work/main.err" \
   || { fail "could not read symbols over self_host/main.ax"; echo "check-effect-distribution: $failed failed"; exit 1; }
@@ -83,7 +85,7 @@ have "$(bucket "$work/main.axsym" 'Alloc,IO')" 15 "Alloc,IO"
 have "$(bucket "$work/main.axsym" 'IO')" 12 "exactly IO"
 have "$(bucket "$work/main.axsym" 'IO,Mut')" 1 "IO,Mut"
 have "$(bucket "$work/main.axsym" 'Alloc,Mut,Unsafe')" 260 "Alloc,Mut,Unsafe"
-have "$(bucket "$work/main.axsym" 'Unsafe')" 114 "exactly Unsafe"
+have "$(bucket "$work/main.axsym" 'Unsafe')" 115 "exactly Unsafe"
 have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut,Unsafe')" 64 "Alloc,IO,Mut,Unsafe"
 have "$(bucket "$work/main.axsym" 'Mut,Unsafe')" 23 "Mut,Unsafe"
 have "$(bucket "$work/main.axsym" 'Alloc,Unsafe')" 5 "Alloc,Unsafe"

@@ -1383,6 +1383,13 @@ alone, so accepting another name would lower its arithmetic as integer
 `add` on double bit patterns. `tyIsFloatTy` matches the emitter's
 one-name rule. Tested by `tests/diagnostics/495-widthless-types.ax`.
 
+Numeric conversions are always explicit. Arithmetic, comparisons, calls,
+returns, assignments and constructor payloads do not implicitly convert
+`Int` to `Float` or `Float` to `Int`. Generic unification preserves each
+ADT's type arguments. Tested by
+`tests/diagnostics/1410-explicit-numeric-boundaries.ax` and
+`tests/stdlib/942-explicit-numeric-conversions.ax`.
+
 **MM-VAL-4c (H).** Float comparisons use LLVM's **ordered** predicates,
 so every comparison involving NaN is false. That **includes `!=`**,
 which is `fcmp one`: `(!= NaN NaN)` is `false`, where IEEE-754 says

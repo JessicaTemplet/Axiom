@@ -1,0 +1,68 @@
+; Numeric conversion is an explicit operation on a payload. Generic ADTs
+; preserve their element types; conversion constructs a new typed value.
+(import IO)
+
+(data Wrapped a
+  (Wrap a))
+
+(:: convertBox (-> (Wrapped Int) (Wrapped Float)))
+(fn (convertBox value)
+  (match value
+    ((Wrap n) (Wrap (__intToFloat n)))))
+
+(:: unwrapFloat (-> (Wrapped Float) Float))
+(fn (unwrapFloat value)
+  (match value
+    ((Wrap n) n)))
+
+(:: takesOption (-> (Option Float) Bool))
+(fn (takesOption value)
+  (match value
+    ((Some n) (== n 3.0))
+    ((None) false)))
+
+(data Nested a
+  (Nest (Option a)))
+
+(:: takesNested (-> (Nested Float) Bool))
+(fn (takesNested value)
+  (match value
+    ((Nest (Some n)) (== n 3.0))
+    ((Nest (None)) false)))
+
+(:: takesIntOption (-> (Option Int) Bool))
+(fn (takesIntOption value)
+  (match value
+    ((Some n) (== n 3))
+    ((None) false)))
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println
+      (if (&&
+            (== (+ (__intToFloat 1) 2.0) 3.0)
+            (&&
+              (== (unwrapFloat (convertBox (Wrap 42))) 42.0)
+              (&&
+                (takesOption (Some (__intToFloat 3)))
+                (&&
+                  (takesNested (Nest (Some (__intToFloat 3))))
+                  (&&
+                    (takesIntOption (Some 3))
+                    (==
+                      (match 3.0
+                        (n n))
+                      3.0))))))
+        "explicit scalar and ADT conversions: correct"
+        "wrong conversion"))
+    ; Explicit conversion can lose precision. Binary64 cannot distinguish
+    ; 2^53 + 1 from 2^53 with round-to-nearest, ties-to-even.
+    (println
+      (if (&&
+            (== (__floatToInt (__intToFloat 9007199254740993)) 9007199254740992)
+            (== (__floatToInt 3.75) 3))
+        "explicit rounding and truncation: correct"
+        "wrong rounding"))
+  })

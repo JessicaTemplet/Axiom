@@ -16,6 +16,16 @@ its changelog too.
 
 ## Unreleased
 
+- Numeric conversion policy follows explicit primitive conversions:
+  expected types never insert conversions into calls, returns, assignments
+  or ADT payloads. Regression cases cover both directions, generic ADTs
+  and explicit conversions with rounding.
+- Code generation uses checked pattern-binder types for numeric lowering.
+  Float values extracted from generic ADTs retain their type, including
+  nested patterns, instead of being treated as integer words.
+- Float and arithmetic hover and explanation text now describe explicit
+  conversion and the shared numeric operators accurately.
+
 - Task pools reject slab-size overflow before mapping or spawning, and
   pass task indices directly instead of packing them with ring slots.
   Tests cover ring reuse, clamped widths and the overflow refusal in both

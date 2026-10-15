@@ -18338,10 +18338,25 @@
 ; name, and bound nothing inside it, so the emitted body referred to
 ; registers no instruction defines.
 ;
-; `isFloat` is the binder flag when `pat` is a bare name: 0 at the top
-; of an arm (the scrutinee's own float-ness is not tracked), the
-; field's declared flag when descending into a constructor.
+; A concrete checked binder type takes precedence over the field's
+; declaration. A generic field declared `a` can hold Float at this
+; instantiation; its declaration alone cannot select numeric lowering.
+; An unresolved binder keeps the caller's declared flag.
 ; ------------------------------------------------------------------
+(pub :: patFloatFlag (-> Int Int Int))
+;@axiom:effect(unsafe)
+(pub fn (patFloatFlag pat declared)
+  (let ((stamp (nodeBinderTy pat)))
+    (if (== stamp 0)
+      declared
+      (let ((name
+        (cast String stamp)))
+        (if (== (strLen name) 0)
+          declared
+          (if (strEq name "Float")
+            1
+            0))))))
+
 (pub :: emitPatMatch (-> Int String String Int Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (emitPatMatch pat vr failB cg isFloat)
@@ -18390,7 +18405,7 @@
                 (emitPatTest (constStr 1) vr failB cg)
                 (if (strEq (nodeAName pat) "false")
                   (emitPatTest (constStr 0) vr failB cg)
-                  (bindSym cg (nodeAName pat) (strDup vr) isFloat 0)))
+                  (bindSym cg (nodeAName pat) (strDup vr) (patFloatFlag pat isFloat) 0)))
               (if (== tag TAG_P_CON0)
                 ; A nullary constructor of a type that unboxes (rep 1 or 2) IS
                 ; its tag: compare the value directly. Correct even when the
@@ -18400,7 +18415,7 @@
                 ; whose tag loads from word 0.
                 (let ((entry (lookupType (memGetWordVec cg 3) (nodeAName pat))))
                   (if (== entry 0)
-                    (bindSym cg (nodeAName pat) (strDup vr) isFloat 0)
+                    (bindSym cg (nodeAName pat) (strDup vr) (patFloatFlag pat isFloat) 0)
                     (if (!= (eRep entry) 0)
                       (emitPatTest (constStr (eTag entry)) vr failB cg)
                       (let ((cgL (loadWordAt cg vr 0)))
