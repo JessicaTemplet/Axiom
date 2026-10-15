@@ -52,6 +52,12 @@ failed=0; passed=0
 fail() { echo "FAIL: $*"; failed=$((failed + 1)); }
 ok()   { echo "ok   $*"; passed=$((passed + 1)); }
 
+if python3 "$repo_root/tests/ci/local-models.py"; then
+  ok "independent models preserve sequential local scope and reject malformed forms"
+else
+  fail "independent local-scope models"
+fi
+
 # The comparator. P1 and every agreement below call this alone, so P1
 # tests the comparison the gate really makes.
 agree() { # <name> <want> <axc-exit> <interp-exit> -> 0 when all three agree

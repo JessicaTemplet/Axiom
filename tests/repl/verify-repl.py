@@ -8,7 +8,7 @@ green on `result 4`. Nothing in a golden knows what the answer should be.
 
 This does. It reads the session file's own bytes, tokenizes and evaluates the
 subset of Axiom the deterministic sessions use - Int/Bool/Char/String
-literals, `+ - *`, the comparisons, `if`, `let`, `fn` and `::` declarations,
+literals, `+ - *`, the comparisons, `if`, block locals, `fn` and `::` declarations,
 calls into them, and undefined-name detection - and predicts the whole
 transcript byte for byte: the `OK: <name> defined` line a declaration prints,
 the `type : T` and `result V` pair an expression prints, the
@@ -103,6 +103,8 @@ class Val:
         # How the REPL prints a value: the wrapper program prints it and the
         # REPL trims whitespace off both ends of what the program wrote
         # (repl.ax replTrim). Bool is printed by the wrapper as a word.
+        if self.kind == "()":
+            raise Unmodelled("unit rendering is outside the transcript subset")
         if self.kind == "Int":
             return str(self.v)
         if self.kind == "Bool":
@@ -120,6 +122,10 @@ DECL_HEADS = {"fn", "define", "::", "pub", "data", "struct",
               "import", "macro", "foreign", "effect", "type", "trait"}
 
 
+class Block(list):
+    """A block carries sequential declarations and a final expression."""
+
+
 def tokenize(src):
     toks = []
     i, n = 0, len(src)
@@ -132,7 +138,7 @@ def tokenize(src):
             while i < n and src[i] != "\n":
                 i += 1
             continue
-        if c in "()":
+        if c in "(){}":
             toks.append((c, None))
             i += 1
             continue
@@ -172,7 +178,7 @@ def tokenize(src):
                 continue
             raise Unmodelled("char literal at byte %d" % i)
         j = i
-        while j < n and src[j] not in " \t\r\n()":
+        while j < n and src[j] not in " \t\r\n(){}":
             j += 1
         word = src[i:j]
         if word.lstrip("-").isdigit() and word not in ("-",):
@@ -187,17 +193,18 @@ def read_form(toks, pos):
     if pos >= len(toks):
         raise Unmodelled("form ends early")
     kind, val = toks[pos]
-    if kind == "(":
-        items = []
+    if kind in ("(", "{"):
+        closing = ")" if kind == "(" else "}"
+        items = [] if kind == "(" else Block()
         pos += 1
-        while pos < len(toks) and toks[pos][0] != ")":
+        while pos < len(toks) and toks[pos][0] != closing:
             item, pos = read_form(toks, pos)
             items.append(item)
         if pos >= len(toks):
             raise Unmodelled("unclosed form")
         return items, pos + 1
-    if kind == ")":
-        raise Unmodelled("stray close paren")
+    if kind in (")", "}"):
+        raise Unmodelled("unexpected closing delimiter %s" % kind)
     return (kind, val), pos + 1
 
 
@@ -232,6 +239,22 @@ class Budget:
 
 def ev(node, env, defs, budget):
     budget.spend()
+    if isinstance(node, Block):
+        inner = dict(env)
+        result = Val("()", None)
+        for statement in node:
+            if (isinstance(statement, list) and statement
+                    and is_sym(statement[0], "let")):
+                if (isinstance(statement, Block) or len(statement) != 3
+                        or not is_sym(statement[1])
+                        or statement[1][1] in ("true", "false", "mut")):
+                    raise Unmodelled("local declaration shape")
+                value = ev(statement[2], inner, defs, budget)
+                inner[statement[1][1]] = value
+                result = Val("()", None)
+            else:
+                result = ev(statement, inner, defs, budget)
+        return result
     if isinstance(node, tuple):
         kind, val = node
         if kind == "int":
@@ -284,14 +307,7 @@ def ev(node, env, defs, budget):
             raise Unmodelled("if on %s" % c.kind)
         return ev(node[2] if c.v else node[3], env, defs, budget)
     if op == "let":
-        if len(node) != 3 or not isinstance(node[1], list):
-            raise Unmodelled("let shape")
-        inner = dict(env)
-        for b in node[1]:
-            if not isinstance(b, list) or len(b) != 2 or not is_sym(b[0]):
-                raise Unmodelled("let binding shape (mut?)")
-            inner[b[0][1]] = ev(b[1], inner, defs, budget)
-        return ev(node[2], inner, defs, budget)
+        raise Unmodelled("let declares a local inside a block")
 
     if op in env:
         raise Unmodelled("calling a local binding")

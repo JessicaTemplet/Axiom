@@ -49,6 +49,12 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- Independent REPL and diverse-compilation checks read canonical block
+  locals. Both models preserve sequential initialisation, shadowing and
+  nested scope, and reject mismatched delimiters and the retired `let`
+  expression. Coverage floors and planted compiler defects stay checked.
+  Tested by `tests/ci/local-models.py` and `scripts/check-ddc.sh`.
+
 - Adopt [@JessicaTemplet's conditional layout](https://github.com/chrispaig3/Axiom/pull/43):
   each branch in an `if` chain sits two columns deeper than its test,
   and the final else returns to the tests' indent. Two- and three-operand

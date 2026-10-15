@@ -25,12 +25,12 @@ every form outside it is a loud error, never a guess.
     and `(fn (name params...) body)` with exactly one body expression.
     `import` and any other top-level form are refused.
   Expressions: integer literals, `true`/`false`, variables, `if`
-    (the condition must be a Bool, as the language requires), `let`
-    with sequential bindings, calls to defined functions (arity
+    (the condition must be a Bool, as the language requires), lexical
+    blocks with sequential `(let name value)` declarations, calls to defined functions (arity
     checked, no partial application), and the operators
     `+ - * / % == != < > <= >=`.
   NOT in the subset: strings, chars, floats, `&&`/`||`/`!` (their
-    short-circuit behaviour is not pinned down here), brace blocks,
+    short-circuit behaviour is not pinned down here),
     `while`/`mut`/`set`, ADTs, structs, effects, macros, FFI.
   Integers are 64-bit two's-complement: every arithmetic result is
     masked to i64, `/` truncates toward zero and `%` takes the
@@ -76,6 +76,10 @@ class InterpError(Exception):
     pass
 
 
+class Block(list):
+    """A lexical scope, distinct from a parenthesised call."""
+
+
 def tokenize(src):
     toks = []
     i, n = 0, len(src)
@@ -86,14 +90,14 @@ def tokenize(src):
                 i += 1
         elif c in " \t\r\n":
             i += 1
-        elif c in "()":
+        elif c in "(){}":
             toks.append(c)
             i += 1
         elif c == '"':
             raise InterpError("string literals are outside the DDC subset")
         else:
             j = i
-            while j < n and src[j] not in " \t\r\n();\"":
+            while j < n and src[j] not in " \t\r\n(){};\"":
                 j += 1
             toks.append(src[i:j])
             i = j
@@ -108,17 +112,18 @@ def parse(toks):
             raise InterpError("unexpected end of file")
         t = toks[pos[0]]
         pos[0] += 1
-        if t == "(":
-            xs = []
+        if t in ("(", "{"):
+            closing = ")" if t == "(" else "}"
+            xs = [] if t == "(" else Block()
             while True:
                 if pos[0] >= len(toks):
                     raise InterpError("unterminated form")
-                if toks[pos[0]] == ")":
+                if toks[pos[0]] == closing:
                     pos[0] += 1
                     return xs
                 xs.append(expr())
-        if t == ")":
-            raise InterpError("stray close paren")
+        if t in (")", "}"):
+            raise InterpError("unexpected closing delimiter %r" % t)
         return t
 
     forms = []
@@ -185,6 +190,21 @@ class Interp:
         return v
 
     def eval(self, e, env):
+        if isinstance(e, Block):
+            inner = dict(env)
+            result = None
+            for statement in e:
+                if isinstance(statement, list) and statement and statement[0] == "let":
+                    if (isinstance(statement, Block) or len(statement) != 3
+                            or not isinstance(statement[1], str)
+                            or is_int(statement[1]) or statement[1] in ("true", "false", "mut")):
+                        raise InterpError("bad local declaration %r" % (statement,))
+                    value = self.eval(statement[2], inner)
+                    inner[statement[1]] = value
+                    result = None
+                else:
+                    result = self.eval(statement, inner)
+            return result
         if isinstance(e, str):
             if is_int(e):
                 return to_i64(int(e))
@@ -206,14 +226,7 @@ class Interp:
                 raise InterpError("if consumes a Bool, got %r" % (c,))
             return self.eval(e[2] if c else e[3], env)
         if head == "let":
-            if len(e) != 3 or not isinstance(e[1], list):
-                raise InterpError("bad let %r" % (e,))
-            env = dict(env)
-            for b in e[1]:
-                if not isinstance(b, list) or len(b) != 2 or not isinstance(b[0], str):
-                    raise InterpError("bad let binding %r" % (b,))
-                env[b[0]] = self.eval(b[1], env)
-            return self.eval(e[2], env)
+            raise InterpError("let declares a local inside a block")
         if isinstance(head, str) and head in ARITH:
             if len(e) != 3:
                 raise InterpError("operator %r takes two operands" % head)
