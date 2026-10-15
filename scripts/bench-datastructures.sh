@@ -127,10 +127,10 @@ cat > "$work/b_map.ax" <<AX
 (import IO)
 (import Map)
 $ax_args
-(:: ins (-> Map Int Int Map))
+(:: ins (-> (Map Int) Int Int (Map Int)))
 (fn (ins m lo hi)
   (if (>= lo hi) m { (mapInsert m lo (* lo 3)) (ins m (+ lo 1) hi) }))
-(:: look (-> Map Int Int Int Int))
+(:: look (-> (Map Int) Int Int Int Int))
 (fn (look m lo hi acc)
   (if (>= lo hi) acc (look m (+ lo 1) hi (+ acc (mapGet m lo 0)))))
 (:: rounds (-> Int Int Int Int))

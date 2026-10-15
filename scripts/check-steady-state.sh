@@ -118,7 +118,7 @@ emit_probe() {
 (:: windowSize Int)
 (fn (windowSize) 256)
 
-(:: churn (-> Map Int Int Int))
+(:: churn (-> (Map String) Int Int Int))
 (fn (churn m i n)
   (if (>= i n)
     (mapLen m)
@@ -135,7 +135,11 @@ AX
       ;;
     aggregate)
       local value='(strDup (fmtInt i))'
-      [[ "$variant" == leaking ]] && value='(as (strDup (fmtInt i)) Int)'
+      local value_type=String
+      if [[ "$variant" == leaking ]]; then
+        value='(as (strDup (fmtInt i)) Int)'
+        value_type=Int
+      fi
       cat > "$out" <<AX
 ; 64 fixed keys, values replaced $n times. Variant: $variant.
 (import IO)
@@ -146,7 +150,7 @@ AX
 (:: keyCount Int)
 (fn (keyCount) 64)
 
-(:: churn (-> Map Int Int Int))
+(:: churn (-> (Map $value_type) Int Int Int))
 (fn (churn m i n)
   (if (>= i n)
     (mapLen m)
