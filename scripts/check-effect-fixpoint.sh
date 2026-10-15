@@ -47,6 +47,11 @@ N=2000
 #
 #   fwd    f1 f2 f3 f4 ...   callers first, one round
 #   swap   f2 f1 f4 f3 ...   pairs swapped, N/2 rounds unfixed
+#
+# Every helper returns a constant after calling the next one. Returning
+# the callee's value also builds an order-dependent region-facts chain,
+# whose cost would mask the effect frontier this gate measures. The
+# call graph and its IO propagation are the same in both spellings.
 gen_chain() {
   local order="$1" n="$2" out="$3"
   python3 - "$order" "$n" "$out" <<'PY'
@@ -54,7 +59,7 @@ import sys
 order, n, out = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 d = []
 for i in range(1, n + 1):
-    body = '{ (println "end") x }' if i == n else f"(f{i+1} x)"
+    body = '{ (println "end") 0 }' if i == n else f"{{ (f{i+1} x) 0 }}"
     d.append(f"(:: f{i} (-> Int Int))\n\n;@axiom:effect(io)\n(fn (f{i} x) {body})\n")
 if order == "swap":
     seq = []

@@ -6,7 +6,7 @@
 # MM-RGN-7, `self_host/parser.ax` `parseParallelExpr`). Codegen lowers
 # the pair of primitives it desugars to in two ways - PROCESSES by
 # default (fork, one shared page per binding, wait4) and THREADS under
-# `--threads` (the platform's pthread, the eight runtime globals
+# `--threads` (the platform's pthread, mutable runtime state
 # thread-local) - and the whole claim of "one surface, two lowerings"
 # is that a program cannot tell which it got. This gate is where that
 # is measured, on the two fixtures the runner already executes under
@@ -30,7 +30,7 @@
 #      for it - and the thread lowering imports exactly the two pthread
 #      entry points and, on Darwin, the TLS bootstrap: the price of a
 #      thread, enumerated;
-#   3. the thread lowering moves exactly the eight runtime globals to
+#   3. the thread lowering moves exactly the required runtime globals to
 #      `thread_local(localexec)` and the process lowering moves none,
 #      which is `cgThreads` following the PROGRAM AND THE FLAG rather
 #      than the flag alone - and a program with no `parallel` built
@@ -257,21 +257,19 @@ fi
 
 # --------------------------------------------------------------------
 echo
-echo "== 3. the eight globals move under threads, none under processes, and the flag is inert without a spawn =="
+echo "== 3. runtime state moves under threads, none under processes, and the flag is inert without a spawn =="
 # --------------------------------------------------------------------
 "$axc" emit-llvm "$fx470" -o "$work/p470.ll" > /dev/null 2>&1
 "$axc" --threads emit-llvm "$fx470" -o "$work/t470.ll" > /dev/null 2>&1
 tl_p="$(grep -c 'thread_local' "$work/p470.ll" || true)"
 tl_t="$(grep -c '= internal thread_local(localexec) global' "$work/t470.ll" || true)"
 if [[ "$tl_p" == 0 ]]; then ok "processes: no thread_local in the module"; else bad "processes: $tl_p thread_local line(s)"; fi
-# eight: the five allocator words, the slab array, @__axiom_recover_top,
-# and one evidence slot per effect - the fixture declares none, so 7.
-# check-thread-local.sh counts them by name; here the number is what a
-# program with no effect must get.
-# Plus, since 2026-09-27, the child registry's head and sequence
-# counter (MM-PAR-7), which a spawning module always carries: 9.
-if [[ "$tl_t" == 9 ]]; then ok "threads: 9 thread_local(localexec) globals - the eight less the evidence slot this fixture has no effect for, and the registry's two"; else bad "threads: $tl_t thread_local globals, expected 9"; grep 'thread_local' "$work/t470.ll" | sed 's/^/     /' | head -10; fi
-for g in __axiom_bump __axiom_bump_end __axiom_chunk __axiom_free __axiom_high __axiom_slabs __axiom_recover_top __axiom_par_live __axiom_par_seq; do
+# Six allocator globals and the recovery point, two child-registry
+# globals (MM-PAR-7), and three resource-owner registry globals
+# (MM-EXEC-20). This fixture declares no effect, so it has no evidence
+# slot. Check every name as well as the exact total.
+if [[ "$tl_t" == 12 ]]; then ok "threads: exactly 12 thread_local(localexec) globals - allocator, recovery point and both registries"; else bad "threads: $tl_t thread_local globals, expected 12"; grep 'thread_local' "$work/t470.ll" | sed 's/^/     /' | head -14; fi
+for g in __axiom_bump __axiom_bump_end __axiom_chunk __axiom_free __axiom_high __axiom_slabs __axiom_recover_top __axiom_par_live __axiom_par_seq __axiom_res_head __axiom_res_seq __axiom_res_unwinding; do
   grep -q "^@$g = internal thread_local(localexec) global" "$work/t470.ll" || bad "threads: @$g did not move"
 done
 if grep -q '@__axiom_arg[cv] = internal thread_local' "$work/t470.ll"; then bad "threads: argc/argv moved; they are write-once and shared by design"; else ok "threads: @__axiom_argc/argv stayed shared"; fi
@@ -554,6 +552,12 @@ if "$axc" build --input "$work/width.ax" --output "$work/width.bin" > "$work/wid
   else
     bad "width: the probe answered [$(cat "$work/w1.out")] and [$(cat "$work/w8.out")], expected 8 and 8"
   fi
+  if (cd "$work" && ./width.bin 0 > "$work/w0.out" 2> "$work/w0.err") \
+       && [[ "$(cat "$work/w0.out")" == 8 ]]; then
+    ok "width: zero is clamped to one and joins all eight commands"
+  else
+    bad "width: zero did not behave like one - output [$(cat "$work/w0.out")]"
+  fi
 else
   bad "width: the probe would not build"; sed 's/^/     /' "$work/width.build" | head -5
 fi
@@ -593,6 +597,37 @@ abl_run() {  # <tag> <sed-program> <what-must-change> [module, default Task.ax] 
   sed -e "$prog" "$repo_root/stdlib/$module" > "$copy/stdlib/$module"
   if cmp -s "$repo_root/stdlib/$module" "$copy/stdlib/$module"; then
     bad "ablation $tag: the edit did not land - $what was never broken, so the arm proved nothing"
+    return 1
+  fi
+  return 0
+}
+
+# A multi-line form must match the expected number of times before
+# either word-pool loop is edited. Formatting drift or a new pool
+# cannot turn a partial mutation into a passing negative control.
+abl_exact() {  # <tag> <needle> <replacement> <count> <what> [module]
+  local tag="$1" needle="$2" repl="$3" count="$4" what="$5" module="${6:-Task.ax}"
+  local copy="$work/abl-$tag"
+  rm -rf "$copy"; mkdir -p "$copy"
+  if ! cp -r "$repo_root/stdlib" "$copy/stdlib"; then
+    bad "ablation $tag: could not copy the library, so the arm proved nothing"
+    return 1
+  fi
+  if ! NEEDLE="$needle" REPL="$repl" COUNT="$count" python3 - "$copy/stdlib/$module" <<'PY'
+import os, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_text()
+needle, repl = os.environ['NEEDLE'], os.environ['REPL']
+expected = int(os.environ['COUNT'])
+matches = s.count(needle)
+if matches != expected:
+    print(f'expected {expected} exact matches, found {matches}: {needle}', file=sys.stderr)
+    sys.exit(1)
+p.write_text(s.replace(needle, repl))
+PY
+  then
+    bad "ablation $tag: $what was not edited exactly $count time(s), so the arm proved nothing"
     return 1
   fi
   return 0
@@ -667,7 +702,14 @@ fi
 # and the blocking loop must agree on the ablated bound; deleting only
 # the loop would overwrite live handles and measure a broken pool.
 # Every task is forked at once, so the wall-time ratio approaches 1.
-if abl_run bound 's|(w (if (< width 1)|(w (if (< n 1)|; s|      width))|      n))|' "the width bound"; then
+word_width='(let w
+      (if (< width 1)
+        1
+        width))'
+if abl_exact bound "$word_width" '(let w
+      (if (< n 1)
+        1
+        n))' 2 "the width bound"; then
   if AXIOM_STDLIB="$work/abl-bound/stdlib" "$axc" build --input "$work/width.ax" --output "$work/abl-bound.bin" > "$work/abl-bound.build" 2>&1; then
     abl_ratio="$(pool_ratio ./abl-bound.bin)"
     ar="${abl_ratio%% *}"
@@ -683,15 +725,19 @@ fi
 
 # ABLATION 4 (the clamp): `(if (< width 1) 1 width)` deleted. A width of
 # 0 then makes the submit loop join before it has spawned anything -
-# `(>= 0 0)` is true - and the program traps on an empty handle vector
-# instead of behaving like width 1. The clamp is not decoration.
-if abl_run clamp 's|(w (if (< width 1)|(w (if (< width -1)|' "the width clamp"; then
+# `(>= 0 0)` is true - and selecting a ring slot divides by zero.
+# Require that native trap, rather than any nonzero driver status.
+if abl_exact clamp "$word_width" '(let w
+      (if (< width -1)
+        1
+        width))' 2 "the width clamp"; then
   if AXIOM_STDLIB="$work/abl-clamp/stdlib" "$axc" build --input "$work/width.ax" --output "$work/abl-clamp.bin" > "$work/abl-clamp.build" 2>&1; then
     ( cd "$work" && ./abl-clamp.bin 0 > "$work/abl-clamp.out" 2> "$work/abl-clamp.err" ); crc=$?
-    if [[ "$crc" == 0 ]]; then
-      bad "ablation clamp: width 0 still answered [$(cat "$work/abl-clamp.out")] - the clamp is not load-bearing"
+    if [[ "$crc" == 72 ]] && grep -q '^axiom: division by zero$' "$work/abl-clamp.err"; then
+      ok "ablation clamp: width 0 traps at ring-slot division (exit 72), so the clamp is doing work"
     else
-      ok "ablation clamp: without it, width 0 dies (exit $crc), so the clamp is doing work"
+      bad "ablation clamp: expected native division trap 72, got $crc with [$(cat "$work/abl-clamp.out")]"
+      head -5 "$work/abl-clamp.err" | sed 's/^/     /'
     fi
   else
     bad "ablation clamp: the ablated pool would not build"; sed 's/^/     /' "$work/abl-clamp.build" | head -5
@@ -1733,7 +1779,7 @@ if (( failed > 0 )); then
 fi
 echo "check-parallel: $checks checks - one surface, two lowerings, the same bytes;"
 echo "                processes import nothing and threads import their pthread;"
-echo "                seven globals move under threads and none without a spawn;"
+echo "                runtime state moves under threads and none without a spawn;"
 echo "                a child's trap is the program's, and the targets that cannot"
 echo "                say so at build time or at the first spawn; the pool over"
 echo "                those primitives answers Job's golden, imports nothing, bounds"

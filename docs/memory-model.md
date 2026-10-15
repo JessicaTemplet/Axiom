@@ -399,11 +399,10 @@ already uses for the parameter itself, applied to that parameter's own
 argument positions. A value in an `Int` position can hide no effect,
 because applying it is `AX3004` and the program doesn't compile.
 
-So `vecSiftDownBy`, whose body compares two `(memGetWord ...)` results
-with a `cmp` declared `(-> Int Int Int)`, carries no mark, and neither
-does `vecSortBy`. That keeps `restrict(no-io)` answerable over a
-function that sorts. With the mark, it would come back `AX3051`,
-unanswerable.
+An integer comparator `(-> Int Int Int)` consumes loaded values without
+adding the mark. `vecSiftDownBy` and `vecSortBy` accept `(-> a a Int)`,
+whose element type may be a function, so their rows remain lower bounds.
+They still report `Mut` and transparency through `cmp`.
 
 The walk meets three shapes, and only the last one is closable:
 

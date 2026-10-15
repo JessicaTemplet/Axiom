@@ -13,8 +13,9 @@
 # type variable or poison can hold a callable value. A concrete `Int`
 # cannot, and a value passed to an `Int` position hides no effect,
 # because applying it is `AX3004` and the program does not compile. So
-# `vecSiftDownBy`, which passes two loads to `cmp :: (-> Int Int Int)`,
-# has a complete row, and so does `vecSortBy`.
+# a sort with `cmp :: (-> Int Int Int)` has a complete row. The
+# library's generic comparator takes `a`, so its row stays a lower
+# bound; specialising only the signatures to `Int` removes the mark.
 #
 # A `symbols` golden would not hold this: re-blessing it would hide a
 # regression. A lost mark is the silent direction, since it turns three
@@ -157,9 +158,10 @@ echo
 echo "== 3. the library's own sort, which is what found this =="
 # --------------------------------------------------------------------
 # `vecSortBy` and `vecSiftDownBy` are the real-library case, checked
-# against the tree's stdlib. Both directions are asserted: the mark is
-# gone, and the row still says `Mut` through `cmp`. Otherwise a walk
-# that reported nothing at all would pass.
+# against the tree's stdlib. Their generic element `a` can hold a
+# callable, so they keep the mark and still say `Mut` through `cmp`.
+# Then the same bodies are checked with concrete `Int` signatures:
+# only that type change removes the mark, retaining `Mut` and `cmp`.
 mkdir -p "$work/lib"
 cat > "$work/lib/lib.ax" <<'AX'
 (import Vec)
@@ -188,8 +190,8 @@ for d in vecSortBy vecSiftDownBy; do
   if [[ -z "$row" ]]; then
     echo "FAIL: $d is not in the stdlib symbol stream at all"
     failed=$((failed + 1))
-  elif [[ "$row" == *"#effects-incomplete"* ]]; then
-    echo "FAIL: $d still reads as a lower bound"
+  elif [[ "$row" != *"#effects-incomplete"* ]]; then
+    echo "FAIL: generic $d lost its lower bound; a comparator argument of type a can hold a function"
     echo "     $row"
     failed=$((failed + 1))
   elif [[ "$row" != *"#effects=Mut"* || "$row" != *"#effect-params=cmp"* ]]; then
@@ -197,7 +199,7 @@ for d in vecSortBy vecSiftDownBy; do
     echo "     $row"
     failed=$((failed + 1))
   else
-    echo "ok   $d: Mut, transparent in cmp, and no longer a lower bound"
+    echo "ok   generic $d: Mut, transparent in cmp, and a lower bound"
   fi
 done
 
@@ -211,6 +213,51 @@ else
   grep -E '^F dispatch ' "$work/librows" | sed 's/^/     /' || echo "     (no row at all)"
   failed=$((failed + 1))
 fi
+
+# Keep the real sort bodies and replace only the two comparator
+# signatures. Exact seams make a renamed or redesigned sort fail
+# here, rather than silently stop testing the concrete-load case.
+cp -R "$repo_root/stdlib" "$work/stdlib-int"
+python3 - "$work/stdlib-int/Vec.ax" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = p.read_text(encoding="utf-8")
+signatures = {
+    "(:: vecSiftDownBy (-> (Vec a) Int Int (-> a a Int) Int))":
+    "(:: vecSiftDownBy (-> (Vec Int) Int Int (-> Int Int Int) Int))",
+    "(pub :: vecSortBy (-> (Vec a) (-> a a Int) (Vec a)))":
+    "(pub :: vecSortBy (-> (Vec Int) (-> Int Int Int) (Vec Int)))",
+}
+for old, new in signatures.items():
+    count = s.count(old)
+    if count != 1:
+        sys.exit(f"FAIL: Vec.ax holds {count} copies of {old}; expected exactly 1")
+    s = s.replace(old, new)
+p.write_text(s, encoding="utf-8")
+PY
+( cd "$work/lib" && AXIOM_STDLIB="$work/stdlib-int" \
+    "$axc" --diagnostic-format=ai symbols lib.ax ) 2>"$work/lib-int.err" \
+  | grep '^F ' > "$work/librows-int" || true
+
+for d in vecSortBy vecSiftDownBy; do
+  row="$(grep -E "^F $d " "$work/librows-int" || true)"
+  checks=$((checks + 1))
+  if [[ -z "$row" ]]; then
+    echo "FAIL: $d is not in the integer-specialised symbol stream"
+    sed 's/^/     /' "$work/lib-int.err" | head -10
+    failed=$((failed + 1))
+  elif [[ "$row" == *"#effects-incomplete"* ]]; then
+    echo "FAIL: integer-specialised $d still reads as a lower bound"
+    echo "     $row"
+    failed=$((failed + 1))
+  elif [[ "$row" != *"#effects=Mut"* || "$row" != *"#effect-params=cmp"* ]]; then
+    echo "FAIL: integer-specialised $d lost Mut or its transparent cmp parameter"
+    echo "     $row"
+    failed=$((failed + 1))
+  else
+    echo "ok   integer-specialised $d: Mut, transparent in cmp, and complete"
+  fi
+done
 
 # --------------------------------------------------------------------
 echo
@@ -226,18 +273,10 @@ mkdir -p "$abl"
 cp -R "$repo_root/self_host" "$repo_root/stdlib" "$abl/"
 # The condition as the formatter lays it out, then the same block with
 # the callable conjunct removed.
-seam_old='      (if (&&
-        (== (escapeValue bound (vecGet args i)) 0)
-        (&&
-          (!=
-            (as acc Int)
-            0)
-          (== (tyIsCallable (arrowParamTy cty i)) 1)))'
-seam_new='      (if (&&
-        (== (escapeValue bound (vecGet args i)) 0)
-          (!=
-            (as acc Int)
-            0))'
+seam_old='      (if (&& (== (escapeValue bound (vecGet args i)) 0)
+            (&& (!= (as acc Int) 0) (== (tyIsCallable (arrowParamTy cty i)) 1)))'
+seam_new='      (if (&& (== (escapeValue bound (vecGet args i)) 0)
+            (!= (as acc Int) 0))'
 n_seam="$(python3 -c 'import sys; print(open(sys.argv[1], encoding="utf-8").read().count(sys.argv[2]))' "$abl/self_host/typecheck.ax" "$seam_old" || true)"
 checks=$((checks + 1))
 if [[ "$n_seam" != 1 ]]; then
