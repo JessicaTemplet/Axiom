@@ -180,7 +180,7 @@ AX
 (import Fmt)
 
 ; One share of the map that nothing hands back.
-(:: mapHeld (-> Map Int))
+(:: mapHeld (-> (Map String) Int))
 ;@axiom:effect(unsafe)
 (fn (mapHeld m)
   {
