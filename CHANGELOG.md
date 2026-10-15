@@ -53,6 +53,13 @@ its changelog too.
   `tests/stdlib/055-filesystem.ax` and
   `tests/selfhost/994-directory-listing.ax`.
 
+- `Map` is generic: a `(Map v)` maps integer keys to values of type `v`,
+  so `mapGet` answers a `v` and its default must be one, and `mapValues`
+  answers a `(Vec v)`. **BREAKING**: write `(Map Int)` or `(Map String)`
+  where a signature named `Map`, and `mapGet` where you used
+  `mapGetStr`, which is removed. A default can no longer choose what a
+  lookup answers (tests/diagnostics/354-map-value-type.ax).
+
 - The prelude's `when` and `unless` are removed: an `if` without an
   else does their job. Write `(if test body)` for `(when test body)`
   and `(if (! test) body)` for `(unless test body)`. `Pre` keeps its

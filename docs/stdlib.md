@@ -26,8 +26,9 @@ Import `Err` when working with `Result`, and use `?` to propagate errors.
 `strCmp`. `Utf8` supplies code-point access and display width.
 
 `Vec` is a growable `(Vec a)`. `vecGet` traps on an invalid index;
-`vecTry` returns an `Option`. `Map` uses integer keys and word values;
-`mapGet` takes a fallback for an absent key.
+`vecTry` returns an `Option`. A `(Map v)` maps integer keys to values
+of type `v`: `mapGet` answers a `v`, and takes a fallback of that type
+for an absent key.
 
 ```scheme
 (import IO)

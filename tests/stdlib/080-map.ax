@@ -43,7 +43,7 @@
 
 ; Insert `k -> k*10` for k in [lo, hi). Recursion, because there is no
 ; loop and no function value to fold with.
-(pub :: mtInsertRange (-> Map Int Int Map))
+(pub :: mtInsertRange (-> (Map Int) Int Int (Map Int)))
 (pub fn (mtInsertRange m lo hi)
   (if (>= lo hi)
     m
@@ -56,7 +56,7 @@
 ; of keys that do. A single number that must equal `hi - lo` is a
 ; stronger assertion than a handful of spot checks, and it localises
 ; nothing - which is why the spot checks are also kept.
-(pub :: mtCountIntact (-> Map Int Int Int))
+(pub :: mtCountIntact (-> (Map Int) Int Int Int))
 (pub fn (mtCountIntact m lo hi)
   (if (>= lo hi)
     0
@@ -75,7 +75,7 @@
 ; counter in `mapFindLoop` turns that into a wrong answer rather than a
 ; hang, so the assertion after this runs is that lookups are still
 ; *right*, not merely that the program terminated.
-(pub :: mtChurn (-> Map Int Int Map))
+(pub :: mtChurn (-> (Map Int) Int Int (Map Int)))
 (pub fn (mtChurn m key n)
   (if (<= n 0)
     m
@@ -100,7 +100,7 @@
       (println (mapUsed m))  ; 0
       (println (mtBit (mapHas m 5)))  ; 0
       (println
-        (cast Int (mapGet m 5 (- 0 7))))
+        (mapGet m 5 (- 0 7)))
       ; -7: default returned
       (println (mapSumKeys m))  ; 0
       (println (mapSumVals m))  ; 0
@@ -113,18 +113,18 @@
       (println (mapSumKeys m))  ; 820 = 1+..+40
       (println (mapSumVals m))  ; 8200
       (println
-        (cast Int (mapGet m 1 (- 0 1))))
+        (mapGet m 1 (- 0 1)))
       ; 10: first ever inserted
       (println
-        (cast Int (mapGet m 40 (- 0 1))))
+        (mapGet m 40 (- 0 1)))
       ; 400: last inserted
       (println
-        (cast Int (mapGet m 20 (- 0 1))))
+        (mapGet m 20 (- 0 1)))
       ; 200
       ; --- a key that was never inserted ---
       (println (mtBit (mapHas m 999)))  ; 0
       (println
-        (cast Int (mapGet m 999 (- 0 7))))
+        (mapGet m 999 (- 0 7)))
       ; -7
       (println (mtBit (mapHas m 0)))  ; 0: 0 is not special
       (println (mtBit (mapHas m 41)))  ; 0: just past the range
@@ -134,7 +134,7 @@
       (println (mapUsed m))  ; 40: unchanged
       (println (mapCap m))  ; 128: no growth
       (println
-        (cast Int (mapGet m 7 (- 0 1))))
+        (mapGet m 7 (- 0 1)))
       ; 12345
       (println (mapSumVals m))  ; 8200 - 70 + 12345
       (mapInsert m 7 70)
@@ -151,13 +151,13 @@
       (println (mapLen c))  ; 3: three entries...
       (println (mapCap c))  ; 16: ...no rehash
       (println
-        (cast Int (mapGet c 30 (- 0 1))))
+        (mapGet c 30 (- 0 1)))
       ; 230: home slot
       (println
-        (cast Int (mapGet c 79 (- 0 1))))
+        (mapGet c 79 (- 0 1)))
       ; 380: one probe on
       (println
-        (cast Int (mapGet c 85 (- 0 1))))
+        (mapGet c 85 (- 0 1)))
       ; 460: two probes on
       (println (mapSumVals c))  ; 1070
       ; --- removing the middle of the probe run must not orphan the end
@@ -166,10 +166,10 @@
       (println (mapUsed c))  ; 3: tombstone still held
       (println (mtBit (mapHas c 79)))  ; 0
       (println
-        (cast Int (mapGet c 30 (- 0 1))))
+        (mapGet c 30 (- 0 1)))
       ; 230: before the hole
       (println
-        (cast Int (mapGet c 85 (- 0 1))))
+        (mapGet c 85 (- 0 1)))
       ; 460: past the hole
       (println (mapSumVals c))  ; 690
       ; --- the tombstone is reused, not leaked ---
@@ -177,10 +177,10 @@
       (println (mapLen c))  ; 3
       (println (mapUsed c))  ; 3: reused, not grown
       (println
-        (cast Int (mapGet c 79 (- 0 1))))
+        (mapGet c 79 (- 0 1)))
       ; 381
       (println
-        (cast Int (mapGet c 85 (- 0 1))))
+        (mapGet c 85 (- 0 1)))
       ; 460: still reachable
       ; --- removing an absent key changes nothing ---
       (mapRemove c 999)
@@ -203,25 +203,22 @@
       (mapInsert x (- 0 1) 333)
       (println (mapLen x))  ; 8
       (println
-        (cast Int (mapGet x 9223372036854775807 (- 0 1))))
+        (mapGet x 9223372036854775807 (- 0 1)))
       ; 111
       (println
-        (cast Int (mapGet x (- 0 9223372036854775807) (- 0 1))))
+        (mapGet x (- 0 9223372036854775807) (- 0 1)))
       ; 222
       (println
-        (cast Int (mapGet x (- 0 1) (- 0 1))))
+        (mapGet x (- 0 1) (- 0 1)))
       ; 333
       (println (mtBit (mapHas x (- 0 2))))  ; 0
-      ; --- a Map of Str values: the value position is a type variable,
-      ; so the table that held Ints above holds a String here, and the
-      ; get's default is the same variable as its return - so it must be
-      ; a String too.
-      (mapInsert x 1000 "interned")
-      ; `mapGetStr` and not `(cast String (mapGet ...))`: `mapGet`
-      ; answers `Int` since 2026-08-25, because a type variable there
-      ; let a caller name a type the table does not hold and exit 139.
-      ; The typed reader says at the CALL what the word is.
-      (println (mapGetStr x 1000 ""))
+      ; --- a Map of String values: the table's type names its values,
+      ; so `mapGet` answers a String and its default is one too ---
+      (let ((names mapNew))
+        {
+          (mapInsert names 1000 "interned")
+          (println (mapGet names 1000 ""))
+        })
       ; interned
       ; --- the hash is pinned against an independent fmix64 ---
       ; Values computed by a Python reimplementation working in

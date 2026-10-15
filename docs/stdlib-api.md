@@ -1697,36 +1697,35 @@ Raw consumers require live Cereal handles; new code uses typed values.
 
 ## `Map`
 
-`stdlib/Map.ax` — 23 public names
+`stdlib/Map.ax` — 22 public names
 
-Map - an open-addressing hash map from `Int` keys to word values, in
-Axiom.
+Map - an open-addressing hash map from `Int` keys to values of one
+type: a `(Map String)` maps keys to strings, a `(Map Int)` to numbers.
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
 | `mapHashPrime` | value | `Int` |  | 2^31 - 1, a Mersenne prime: the modulus `Intern`'s polynomial string hash reduces by. |
 | `mapHash` | value | `(-> Int Int)` |  | Hash `key` to a value in [0, 2^63). |
 | `mapSlotOf` | value | `(-> Int Int Int)` |  | The slot `key` probes first, in [0, cap). |
-| `mapNew` | value | `Map` | `Alloc,Mut` | An empty `Map` with `mapDefaultCap` slots. |
-| `mapWithCapacity` | value | `(-> Int Map)` | `Alloc,Mut` | An empty `Map` sized so that `want` entries fit without rehashing. |
+| `mapNew` | value | `(Map v)` | `Alloc,Mut` | An empty `Map` with `mapDefaultCap` slots. |
+| `mapWithCapacity` | value | `(-> Int (Map v))` | `Alloc,Mut` | An empty `Map` sized so that `want` entries fit without rehashing. |
 | `mapRoundUpPow2` | value | `(-> Int Int)` |  | `n` rounded up to a power of two, at least `mapDefaultCap`. |
-| `mapLen` | value | `(-> Map Int)` |  | How many keys the map holds. |
-| `mapCap` | value | `(-> Map Int)` |  | How many slots the map has before it grows. |
-| `mapUsed` | value | `(-> Map Int)` |  | How many slots are live or hold a removed entry's marker: the number that decides when the map rehashes. |
-| `mapOwnsVals` | value | `(-> Map Bool)` |  | Whether the map holds a share of every value, which it does when its values are a counted type. |
-| `mapKeyAt` | value | `(-> Map Int Int)` |  | The key in slot `i`, for a slot `mapLiveFrom` answered. A slot outside `0 .. (mapCap m) - 1` stops the program with status 77, as `vecGet`'s does. |
-| `mapValAt` | value | `(-> Map Int Int)` |  | The value in slot `i`, for a slot `mapLiveFrom` answered. A slot outside `0 .. (mapCap m) - 1` stops the program with status 77. |
+| `mapLen` | value | `(-> (Map v) Int)` |  | How many keys the map holds. |
+| `mapCap` | value | `(-> (Map v) Int)` |  | How many slots the map has before it grows. |
+| `mapUsed` | value | `(-> (Map v) Int)` |  | How many slots are live or hold a removed entry's marker: the number that decides when the map rehashes. |
+| `mapOwnsVals` | value | `(-> (Map v) Bool)` |  | Whether the map holds a share of every value, which it does when its values are a counted type. |
+| `mapKeyAt` | value | `(-> (Map v) Int Int)` |  | The key in slot `i`, for a slot `mapLiveFrom` answered. A slot outside `0 .. (mapCap m) - 1` stops the program with status 77, as `vecGet`'s does. |
+| `mapValAt` | value | `(-> (Map v) Int v)` | `Unsafe` | The value in slot `i`, for a slot `mapLiveFrom` answered. A slot outside `0 .. (mapCap m) - 1` stops the program with status 77. |
 | `mapNextSlot` | value | `(-> Int Int Int)` |  | The next slot after `i`. |
-| `mapHas` | value | `(-> Map Int Bool)` |  | Whether `key` is in the map. |
-| `mapGet` | value | `(-> Map Int Int Int)` |  | The value for `key`, or `dflt` if `key` is absent. |
-| `mapGetStr` | value | `(-> Map Int String String)` | `Unsafe` | The value for `key` read as a `String`, or `dflt` if `key` is absent. |
-| `mapInsert` | value | `(-> Map Int a Int)` | `Alloc,Mut` | Insert or overwrite, growing first if the load factor demands it. |
-| `mapRemove` | value | `(-> Map Int Int)` | `Mut` | Remove `key` and its value, if present. Answers 0. |
-| `mapLiveFrom` | value | `(-> Map Int (Option Int))` | `Alloc` | The first live slot at or after `i`, or `None` when the table has no live slot from there on. `(mapLiveFrom m 0)` starts an iteration; `(mapLiveFrom m (+ prev 1))` continues one. |
-| `mapKeys` | value | `(-> Map (Vec Int))` | `Alloc,Mut` | Every key, in slot order: the `j`th key and the `j`th element of `mapValues` came out of the same slot, so the two vectors zip. |
-| `mapValues` | value | `(-> Map (Vec Int))` | `Alloc,Mut` | Every live value, in the same slot order `mapKeys` uses, so the two vectors zip element for element. |
-| `mapSumVals` | value | `(-> Map Int)` |  | The sum of every live value. |
-| `mapSumKeys` | value | `(-> Map Int)` |  | The sum of every key. |
+| `mapHas` | value | `(-> (Map v) Int Bool)` |  | Whether `key` is in the map. |
+| `mapGet` | value | `(-> (Map v) Int v v)` |  | The value for `key`, or `dflt` if `key` is absent. |
+| `mapInsert` | value | `(-> (Map v) Int v Int)` | `Alloc,Mut` | Insert or overwrite, growing first if the load factor demands it. |
+| `mapRemove` | value | `(-> (Map v) Int Int)` | `Mut` | Remove `key` and its value, if present. Answers 0. |
+| `mapLiveFrom` | value | `(-> (Map v) Int (Option Int))` | `Alloc` | The first live slot at or after `i`, or `None` when the table has no live slot from there on. `(mapLiveFrom m 0)` starts an iteration; `(mapLiveFrom m (+ prev 1))` continues one. |
+| `mapKeys` | value | `(-> (Map v) (Vec Int))` | `Alloc,Mut` | Every key, in slot order: the `j`th key and the `j`th element of `mapValues` came out of the same slot, so the two vectors zip. |
+| `mapValues` | value | `(-> (Map v) (Vec v))` | `Alloc,Mut` | Every live value, in the same slot order `mapKeys` uses, so the two vectors zip element for element. |
+| `mapSumVals` | value | `(-> (Map Int) Int)` |  | The sum of every live value. |
+| `mapSumKeys` | value | `(-> (Map v) Int)` |  | The sum of every key. |
 
 ## `Mem`
 

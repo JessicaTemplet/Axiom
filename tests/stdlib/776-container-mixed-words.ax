@@ -11,10 +11,12 @@
 ;      words are large integers - becomes plain at the first integer,
 ;      and is dropped without the release walk touching an integer as if
 ;      it were a block
-;   3  a `Map` whose first value is a `String` and whose second is a
-;      large `Int` becomes plain and is dropped the same way
-;   4  a `Map` whose first value is an `Int` stays plain when a
-;      `String` follows, and the string outlives the table
+;   3  a `(Map Int)` whose first value is a `String`, put through a
+;      `(Map String)` view of the same table, and whose second is a
+;      large `Int`, becomes plain and is dropped the same way
+;   4  a `(Map Int)` whose first value is an `Int` stays plain when a
+;      `String` follows through that view, and the string outlives the
+;      table
 ;
 ; Releasing a word no share was taken for would read 104 as a block
 ; header on lines 2 and 3, and free the strings early on lines 1 and 4.
@@ -72,13 +74,19 @@
       (strEq name "name-7")
     }))
 
+; The same table, seen as holding strings.
+(:: asStringTable (-> (Map Int) (Map String)))
+;@axiom:effect(unsafe)
+(fn (asStringTable m)
+  (cast (Map String) m))
+
 (:: tableDemoted Bool)
 (fn (tableDemoted)
   (let ((name (concat "name-" (fmtInt 8))))
     {
       (let ((m mapNew))
         {
-          (mapInsert m 1 name)
+          (mapInsert (asStringTable m) 1 name)
           (mapInsert m 2 104857600)
           (mapLen m)
         })
@@ -93,7 +101,7 @@
       (let ((m mapNew))
         {
           (mapInsert m 1 104857600)
-          (mapInsert m 2 name)
+          (mapInsert (asStringTable m) 2 name)
           (mapLen m)
         })
       churn

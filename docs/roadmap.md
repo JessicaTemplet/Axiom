@@ -96,7 +96,7 @@ integrator would still need.
 |---|---|---|
 | Shorter, consistent names, with duplicates removed and internals private | In progress | `compat/BREAKING` |
 | Failure answers a `Result` or `Option`, never a sentinel | In progress | `ERR-ADOPT-1`, `compat/SENTINELS` |
-| `Map` is generic, and `vecSortBy` takes a typed comparator | Not started | |
+| `Map` is generic, and `vecSortBy` takes a typed comparator | Done | `tests/stdlib/081-map-value-type.ax`, `tests/stdlib/405-vec-sort.ax` |
 | `Par` folds into `Task` | Not started | |
 | Sleep and a monotonic clock | Done | `MM-PAR-12`, `tests/stdlib/851-instant-sleep.ax` |
 | A would-block test for sockets: `errorKind` answers `WouldBlock` | Done | `tests/stdlib/840-error-kind.ax` |

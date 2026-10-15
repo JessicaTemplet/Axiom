@@ -1,5 +1,5 @@
-;;! Map - an open-addressing hash map from `Int` keys to word values, in
-;;! Axiom.
+;;! Map - an open-addressing hash map from `Int` keys to values of one
+;;! type: a `(Map String)` maps keys to strings, a `(Map Int)` to numbers.
 ;
 ; A `Map` is the address of a seven-word header, declared below as a
 ; struct of that exact shape - the fields ARE these words, so `m.len`
@@ -15,9 +15,9 @@
 ;
 ; Word 7 of the eight-word block is spare.
 ;
-; Values are machine words, so the same code maps `Int -> Int`,
-; `Int -> Str`, and `Int -> Vec` (see `Vec`'s module comment on uniform
-; representation).
+; Values are machine words, so one body of code serves every `(Map v)`
+; (see `Vec`'s module comment on uniform representation), and the type
+; parameter is what tells a caller what the words are.
 ;
 ; OWNERSHIP. A `Map` is a counted value: the compiler releases it when
 ; its last reference goes, and the header's reference map takes the
@@ -29,9 +29,10 @@
 ; every value (the value array carries the array form, so the table's
 ; death releases them), 2 for plain words. The first insert decides,
 ; and an owning table given an uncounted value becomes plain, keeping
-; the shares it already holds. A `Map` has no value type of its own -
-; `mapGet` answers `Int` - so one table may hold an `Int` beside a
-; `String`, and that is the table this rule makes plain.
+; the shares it already holds. A `(Map v)` holds one value type, so in
+; safe code every insert agrees with the first; a table holding an
+; `Int` beside a `String` can only come of a cast, and it is the table
+; this rule makes plain.
 ;
 ; WHY A SEPARATE STATE ARRAY, AND NOT A SENTINEL KEY. The obvious saving
 ; is to reserve one key value - 0, or the most negative `Int` - to mean
@@ -94,7 +95,7 @@
 ;
 ; `type Map = Int` was not an option: aliases are transparent here on
 ; purpose (tests/selfhost/973-type-alias.ax), so they buy no checking.
-(struct Map
+(struct Map (v)
   (mut len : Int)
   (mut cap : Int)
   (mut keys : Int)
@@ -260,7 +261,7 @@
 ; measure different things - `mapNew` names a slot count, and
 ; `mapWithCapacity` names an entry count - and conflating them made
 ; `mapNew` quietly twice as large as its own documented default.
-(pub :: mapNew Map)
+(pub :: mapNew (Map v))
 (pub fn (mapNew)
   (mapAllocTable mapDefaultCap))
 
@@ -271,7 +272,7 @@
 ; that says `(mapWithCapacity 100)` means "I am about to insert 100
 ; things"; sizing the table at 128 and rehashing at 64 would make that
 ; request a lie.
-(pub :: mapWithCapacity (-> Int Map))
+(pub :: mapWithCapacity (-> Int (Map v)))
 (pub fn (mapWithCapacity want)
   (mapAllocTable
     (if (> want 288230376151711744)
@@ -312,7 +313,7 @@
 ; words of values, `cap` *bytes* of states - plus `len`, `used` and the
 ; word saying what the table claims about its values, 0 until the
 ; first insert.
-(:: mapAllocTable (-> Int Map))
+(:: mapAllocTable (-> Int (Map v)))
 ;@axiom:effect(unsafe)
 (fn (mapAllocTable cap)
   ; Words 2, 3 and 4 are the map (28 = bits 2/3/4), so the
@@ -322,7 +323,7 @@
   ; steps over zero.
   ;
   ; THE HEADER IS NOT RETAINED HERE, and that is not an oversight.
-  ; `(cast Map m)` at the return below is a cast to a REFERENCE type in
+  ; `(cast (Map v) m)` at the return below is a cast to a REFERENCE type in
   ; return position, which codegen retains - so the share this function
   ; hands its caller is already taken. Retaining `m` here as well leaves
   ; the header permanently at 2 and makes a release a no-op. MEASURED,
@@ -354,31 +355,31 @@
       ; its value array to pass 16,384 words. The map says what it is
       ; itself. Seven words in an eight-word block; word 7 is spare.
       (memSetWord m 6 0)
-      (cast Map m)
+      (cast (Map v) m)
     }))
 
 ; ------------------------------------------------------------------
 ; Accessors
 ; ------------------------------------------------------------------
 ;; How many keys the map holds.
-(pub :: mapLen (-> Map Int))
+(pub :: mapLen (-> (Map v) Int))
 (pub fn (mapLen m)
   m.len)
 
 ;; How many slots the map has before it grows.
-(pub :: mapCap (-> Map Int))
+(pub :: mapCap (-> (Map v) Int))
 (pub fn (mapCap m)
   m.cap)
 
 ;; How many slots are live or hold a removed entry's marker: the number
 ;; that decides when the map rehashes.
-(pub :: mapUsed (-> Map Int))
+(pub :: mapUsed (-> (Map v) Int))
 (pub fn (mapUsed m)
   m.used)
 
 ; Hand back the share of the value in slot `i` and zero the word. A
 ; no-op on a plain table, which owns nothing it holds.
-(:: mapDropVal (-> Map Int Int))
+(:: mapDropVal (-> (Map v) Int Int))
 ;@axiom:effect(unsafe)
 (fn (mapDropVal m i)
   (if (mapOwnsVals m)
@@ -398,7 +399,7 @@
 ;
 ; Read from the header (word 6 is 1), not from the value array's shape
 ; word: see `mapAllocTable`.
-(pub :: mapOwnsVals (-> Map Bool))
+(pub :: mapOwnsVals (-> (Map v) Bool))
 (pub fn (mapOwnsVals m)
   (== m.refs 1))
 
@@ -419,7 +420,7 @@
 ; `vecGet`'s does. A slot that is inside the table but not live - one
 ; `mapLiveFrom` would have stepped over - reads the word it holds, 0 or
 ; a removed entry's leftover, and that is the caller's error.
-(pub :: mapKeyAt (-> Map Int Int))
+(pub :: mapKeyAt (-> (Map v) Int Int))
 (pub fn (mapKeyAt m i)
   (if (< i 0)
     __indexTrap
@@ -429,15 +430,16 @@
 
 ;; The value in slot `i`, for a slot `mapLiveFrom` answered. A slot
 ;; outside `0 .. (mapCap m) - 1` stops the program with status 77.
-(pub :: mapValAt (-> Map Int Int))
+(pub :: mapValAt (-> (Map v) Int v))
+;@axiom:effect(unsafe)
 (pub fn (mapValAt m i)
   (if (< i 0)
     __indexTrap
     (if (>= i m.cap)
       __indexTrap
-      (memGetWord m.vals i))))
+      (cast v (memGetWord m.vals i)))))
 
-(:: mapStateAt (-> Map Int Int))
+(:: mapStateAt (-> (Map v) Int Int))
 (fn (mapStateAt m i)
   (memGetByte m.states i))
 
@@ -520,7 +522,7 @@
 ; *every* find. Peeling puts the common case - the home slot decides -
 ; on a path with no recursion anywhere, which inlines into every
 ; caller; the call survives only for keys that actually collide.
-(:: mapFindSlot (-> Map Int Int))
+(:: mapFindSlot (-> (Map v) Int Int))
 (fn (mapFindSlot m key)
   (let (
     (cap (mapCap m))
@@ -581,7 +583,7 @@
 ; Reading
 ; ------------------------------------------------------------------
 ;; Whether `key` is in the map.
-(pub :: mapHas (-> Map Int Bool))
+(pub :: mapHas (-> (Map v) Int Bool))
 (pub fn (mapHas m key)
   (>= (mapFindSlot m key) 0))
 
@@ -623,36 +625,12 @@
 ; The default is caller-supplied rather than fixed at 0, and rather than
 ; returning `Option`, for the reason above: a heap-boxed `Option` on the
 ; hottest lookup in a compiler's symbol table.
-(pub :: mapGet (-> Map Int Int Int))
+(pub :: mapGet (-> (Map v) Int v v))
 (pub fn (mapGet m key dflt)
   (let ((i (mapFindSlot m key)))
     (if (< i 0)
       dflt
-      ; `mapValAt` answers the raw word, and so does this. No cast: the
-      ; declared result IS what the word is.
       (mapValAt m i))))
-
-;; The value for `key` read as a `String`, or `dflt` if `key` is absent.
-;
-; The typed half of the pair, exactly as `vecGetStr` is to `vecGet`. It
-; does NOT make the read safe - a `Map` still carries no element type,
-; and reading a table of Ints through this segfaults just as before.
-; What it buys is that the claim is made at the CALL SITE, in one word a
-; reader can see, instead of being inferred from a default argument
-; three tokens away.
-;
-; Spelled out rather than delegating to `mapGet`, which would need
-; `(cast Int dflt)` - a cast at an ARGUMENT root, which classifies that
-; value's evidence 0 and drops its retain (docs/memory-model.md
-; MM-LIFE-2d). The cast here is at a RETURN, which is the safe position
-; and the one `vecGetStr` uses.
-(pub :: mapGetStr (-> Map Int String String))
-;@axiom:effect(unsafe)
-(pub fn (mapGetStr m key dflt)
-  (let ((i (mapFindSlot m key)))
-    (if (< i 0)
-      dflt
-      (cast String (mapValAt m i)))))
 
 ; ------------------------------------------------------------------
 ; Writing
@@ -669,7 +647,7 @@
 ; afford 0.875; a scalar linear-probe table cannot.
 ;
 ; It is `used`, not `len`: see the module comment on tombstones.
-(:: mapNeedsGrow (-> Map Bool))
+(:: mapNeedsGrow (-> (Map v) Bool))
 (fn (mapNeedsGrow m)
   (>= (* (mapUsed m) 2) (mapCap m)))
 
@@ -694,7 +672,7 @@
 ; very next insert. At a quarter, `cap / 4` inserts must arrive before
 ; the next one can, so the rehash cost stays amortised O(1) per insert
 ; in both directions.
-(:: mapRehashCap (-> Map Int))
+(:: mapRehashCap (-> (Map v) Int))
 (fn (mapRehashCap m)
   (if (<= (* (mapLen m) 4) (mapCap m))
     (mapCap m)
@@ -723,7 +701,7 @@
 ; The value's share is taken here, by `__retainref`, whose answer
 ; settles what the table claims before the value goes in (word 6, see
 ; the module comment). The paths below store the bare word.
-(pub :: mapInsert (-> Map Int a Int))
+(pub :: mapInsert (-> (Map v) Int v Int))
 (pub fn (mapInsert m key value)
   (let ((counted (__retainref value)))
     {
@@ -764,7 +742,7 @@
 ; recursive loop cannot be inlined, and most inserts are decided at the
 ; home slot. A tombstone there falls into the loop remembering it, so
 ; the reuse rule is exactly the loop's.
-(:: mapInsertNoGrow (-> Map Int a Int))
+(:: mapInsertNoGrow (-> (Map v) Int Int Int))
 (fn (mapInsertNoGrow m key value)
   (let (
     (cap (mapCap m))
@@ -814,7 +792,7 @@
               h
               (- cap 1))))))))
 
-(:: mapInsertLoop (-> Map Int Int Int Int Int a Int Int Int Int))
+(:: mapInsertLoop (-> (Map v) Int Int Int Int Int Int Int Int Int Int))
 (fn (mapInsertLoop m keys vals states cap key value i firstTomb left)
   (if (<= left 0)
     0
@@ -899,7 +877,7 @@
 ; because the failure mode described above the probe loops is silent and
 ; stack-dependent, and this is the layer everything else is going to
 ; trust.
-(:: mapFillAt (-> Map Int Int Int Int Int a Int Int))
+(:: mapFillAt (-> (Map v) Int Int Int Int Int Int Int Int))
 (fn (mapFillAt m keys vals states i key value consumesEmpty)
   {
     (memSetWord keys i key)
@@ -920,7 +898,7 @@
 ; every probe run passing through it and orphan the entries after it.
 ; `len` drops, `used` does not - the slot is still not available to a
 ; probe as a stopping point, and only a rehash reclaims it.
-(pub :: mapRemove (-> Map Int Int))
+(pub :: mapRemove (-> (Map v) Int Int))
 (pub fn (mapRemove m key)
   (let ((i (mapFindSlot m key)))
     (if (< i 0)
@@ -957,7 +935,7 @@
 ; construction, because tombstones are simply not copied. That is the
 ; only way the space a removed entry occupies ever comes back, and it
 ; is why `mapRemove` can be O(1) and still leave the table healthy.
-(:: mapRehash (-> Map Int Int))
+(:: mapRehash (-> (Map v) Int Int))
 ;@axiom:effect(unsafe)
 ;@axiom:pre((&& (> newCap 0) (== (& newCap (- newCap 1)) 0)))
 (fn (mapRehash m newCap)
@@ -1128,7 +1106,7 @@
 ; Self-tail-recursive over `cap`, so it is a loop after TCO - the same
 ; shape `mapSumKeysFrom` has carried over the same range since this
 ; module was written.
-(pub :: mapLiveFrom (-> Map Int (Option Int)))
+(pub :: mapLiveFrom (-> (Map v) Int (Option Int)))
 (pub fn (mapLiveFrom m i)
   (if (>= i (mapCap m))
     None
@@ -1142,33 +1120,38 @@
 ; These allocate where the cursor does not, and both are here rather
 ; than only one of them because a caller that wants pairs otherwise
 ; walks the table twice.
-(pub :: mapKeys (-> Map (Vec Int)))
+(pub :: mapKeys (-> (Map v) (Vec Int)))
 (pub fn (mapKeys m)
-  (mapCollect m 0 (vecWithCapacity (mapLen m)) 1))
+  (mapKeysFrom m 0 (vecWithCapacity (mapLen m))))
 
 ;; Every live value, in the same slot order `mapKeys` uses, so the two
 ;; vectors zip element for element.
-(pub :: mapValues (-> Map (Vec Int)))
+(pub :: mapValues (-> (Map v) (Vec v)))
 (pub fn (mapValues m)
-  (mapCollect m 0 (vecWithCapacity (mapLen m)) 0))
+  (mapValuesFrom m 0 (vecWithCapacity (mapLen m))))
 
-; The walk both collectors share. `keys` picks which array is read, so
-; the traversal exists once: two copies of a probe loop is how this
+; The two collectors walk the table with the one cursor, `mapLiveFrom`,
+; so the traversal exists once: two copies of a probe loop is how this
 ; module's own `mapNextSlot` comment says `Intern` went wrong.
-(:: mapCollect (-> Map Int (Vec Int) Int (Vec Int)))
-(fn (mapCollect m i out keys)
+(:: mapKeysFrom (-> (Map v) Int (Vec Int) (Vec Int)))
+(fn (mapKeysFrom m i out)
   (match (mapLiveFrom m i)
     ((None) out)
     ((Some s)
       {
-        (vecPush
-          out
-          (if (== keys 1)
-            (mapKeyAt m s)
-            (mapValAt m s)))
-        (mapCollect m (+ s 1) out keys)
-      }
-    )))
+        (vecPush out (mapKeyAt m s))
+        (mapKeysFrom m (+ s 1) out)
+      })))
+
+(:: mapValuesFrom (-> (Map v) Int (Vec v) (Vec v)))
+(fn (mapValuesFrom m i out)
+  (match (mapLiveFrom m i)
+    ((None) out)
+    ((Some s)
+      {
+        (vecPush out (mapValAt m s))
+        (mapValuesFrom m (+ s 1) out)
+      })))
 
 ; ------------------------------------------------------------------
 ; Bulk reads
@@ -1181,11 +1164,11 @@
 ; asserts an implementation detail and breaks when the load factor
 ; changes. A sum over an unordered collection is exactly as strong a
 ; check as the collection's semantics allow.
-(pub :: mapSumVals (-> Map Int))
+(pub :: mapSumVals (-> (Map Int) Int))
 (pub fn (mapSumVals m)
   (mapSumValsFrom m 0 0))
 
-(:: mapSumValsFrom (-> Map Int Int Int))
+(:: mapSumValsFrom (-> (Map Int) Int Int Int))
 (fn (mapSumValsFrom m i acc)
   (if (>= i (mapCap m))
     acc
@@ -1197,11 +1180,11 @@
         acc))))
 
 ;; The sum of every key.
-(pub :: mapSumKeys (-> Map Int))
+(pub :: mapSumKeys (-> (Map v) Int))
 (pub fn (mapSumKeys m)
   (mapSumKeysFrom m 0 0))
 
-(:: mapSumKeysFrom (-> Map Int Int Int))
+(:: mapSumKeysFrom (-> (Map v) Int Int Int))
 (fn (mapSumKeysFrom m i acc)
   (if (>= i (mapCap m))
     acc
