@@ -170,13 +170,19 @@ echo "--- 1. user-level cast count does not grow ---"
 # invariance and aliasing. The remaining additions are diagnostic/help
 # mirrors, formatter/LSP source payloads and memory-layout/ownership
 # probes, including 964-967; the casts are their MM-VAL-23 subjects.
+# Baseline 950 adds eleven test occurrences to 939. Nine are in
+# semantic-token-updates.py: five scalar numeric/alias conversions and
+# four source, role and revision mirrors of them. Two are in
+# tests/mir/110-cast.ax: its integer-ascription comment and the explicit
+# Int-to-Float conversion that pins the floating-arithmetic refusal.
+# These are MM-VAL-23 test subjects; no application reference is forged.
 cast_count="$(git -C "$repo_root" grep -h -o '(as ' -- stdlib tests examples ':!tests/fuzz' | wc -l | tr -d ' ')"
 if [ "$cast_count" -eq 0 ]; then
   bad "user-level: the cast count read 0 - the measurement is broken, not the tree clean"
-elif [ "$cast_count" -le 939 ]; then
-  ok "user-level (cast count $cast_count <= 939)"
+elif [ "$cast_count" -le 950 ]; then
+  ok "user-level (cast count $cast_count <= 950)"
 else
-  bad "user-level (cast count $cast_count > 939): new casts need a MM-VAL-23 reason and a baseline bump"
+  bad "user-level (cast count $cast_count > 950): new casts need a MM-VAL-23 reason and a baseline bump"
 fi
 
 echo "--- 2. type-preserving casts keep ownership ---"
