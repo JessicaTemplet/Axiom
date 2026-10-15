@@ -16,6 +16,13 @@ its changelog too.
 
 ## Unreleased
 
+- `try` is gone from the language: it is not a keyword, not a reserved
+  word and not refused. The postfix `?` propagates an error, and `try`
+  is an ordinary name a program may use. `?`'s own names follow: the
+  diagnostic slug for a `?` with no tail is `propagate-position`
+  (AX3123), the expander's binders are `q.N`, and tree-sitter calls the
+  form `propagate_expression`.
+
 - A cast into a struct or `data` type another module keeps private is
   judged like any other cast into a reference: `(cast Map 4096)` in a
   user file forged a map header in safe code, and is AX3073 now. Tested
@@ -138,7 +145,7 @@ its changelog too.
   expander's walk for `?` visited a shared node once per path, so a
   macro that uses its parameter twice, nested forty deep, hung `check`
   and the language server for good; the walk now marks the nodes it
-  has seen. Tested by `tests/stdlib/891-try-on-forms.ax` and the
+  has seen. Tested by `tests/stdlib/891-propagate-on-forms.ax` and the
   server fuzzer's `lint-dag` session.
 
 - A unit type with a value: `()` is both the type and its one value. An
@@ -161,8 +168,8 @@ its changelog too.
   uses has no rest of the body to move, and is `AX3123`. The formatter,
   the language server and the REPL read it; `try` stays until the
   standard library moves over. Tested by
-  `tests/stdlib/847-try-operator.ax` and
-  `tests/diagnostics/1300-try-position.ax`.
+  `tests/stdlib/847-propagate.ax` and
+  `tests/diagnostics/1300-propagate-position.ax`.
 - Four defects a read-only audit found, fixed. `((vecGet v 0) 41)`
   passed 41 to `vecGet` and printed an address: a call that supplies
   more arguments than an imported callee declares now applies the rest

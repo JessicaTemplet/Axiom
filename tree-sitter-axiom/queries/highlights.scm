@@ -249,7 +249,7 @@
   (removed_form (identifier) @constructor)
   (extern_clause . (_) (identifier) @constructor)
   (field_expression object: (identifier) @constructor)
-  (try_expression operand: (identifier) @constructor)
+  (propagate_expression operand: (identifier) @constructor)
   (syntax_join_name left: (identifier) @constructor)
   (syntax_join_name right: (identifier) @constructor)
 ]
@@ -290,7 +290,7 @@
   (removed_form (identifier) @variable)
   (extern_clause . (_) (identifier) @variable)
   (field_expression object: (identifier) @variable)
-  (try_expression operand: (identifier) @variable)
+  (propagate_expression operand: (identifier) @variable)
   (syntax_join_name left: (identifier) @variable)
   (syntax_join_name right: (identifier) @variable)
 ]
@@ -357,7 +357,7 @@
   "..-"
 ] @operator
 (ellipsis) @operator
-(try_expression "?" @operator)
+(propagate_expression "?" @operator)
 
 [
   ":"

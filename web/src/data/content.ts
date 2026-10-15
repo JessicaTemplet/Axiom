@@ -167,7 +167,7 @@ export const STATUS_LIMITS: StatusRow[] = [
   { feature: 'Resource ownership', status: 'Functional', note: 'Files, sockets, terminal modes, channels and mutexes close or free themselves when their last owner lets go.' },
   { feature: 'FFI', status: 'Functional', note: 'Rust through `extern` blocks, sealed owners and callbacks borrowed for the call.' },
   { feature: 'Standard library', status: 'Functional', note: 'Collections, cryptography, optional binary obfuscation, dates, JSON, networking and an embedded database.' },
-  { feature: 'Error handling', status: 'Functional; adopted at the syscall seam', note: '`Result`, the `try` form, and handlers that skip a bad record without unwinding.' },
+  { feature: 'Error handling', status: 'Functional; adopted at the syscall seam', note: '`Result`, the postfix `?`, and handlers that skip a bad record without unwinding.' },
   { feature: 'Editor support', status: 'Functional', note: 'Language server plus a tree-sitter grammar.' },
 ]
 

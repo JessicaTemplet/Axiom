@@ -688,7 +688,7 @@ module.exports = grammar({
     // the variadic `if` covers it, so an editor must paint `(cond …)`
     // as an error the way the compiler reports it, not as the
     // conditional the `cond_expression` rule used to say it was.
-    removed_keyword: _ => choice('union', 'trait', 'impl', 'cond', 'try'),
+    removed_keyword: _ => choice('union', 'trait', 'impl', 'cond'),
     _removed_foreign: _ => 'foreign',
 
     // -----------------------------------------------------------------
@@ -913,7 +913,7 @@ module.exports = grammar({
       $.list_literal,
       $.removed_form,
       $.field_expression,
-      $.try_expression,
+      $.propagate_expression,
       // Application is last so that every special form gets first refusal
       // on the token after `(`. A head that is not a keyword falls through
       // to here, which is what makes `(+ 1 2)` and `(f x)` the same shape.
@@ -1166,7 +1166,7 @@ module.exports = grammar({
 
     // `e?`: propagate the error of `e`. The `?` touches what it follows,
     // as the compiler requires, and stacks: `(f x)??`.
-    try_expression: $ => prec.left(3, seq(
+    propagate_expression: $ => prec.left(3, seq(
       field('operand', $._expression),
       token.immediate('?'),
     )),

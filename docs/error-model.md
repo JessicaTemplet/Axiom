@@ -1167,7 +1167,7 @@ This section records the codes below. All of them are built, and
 | `AX3090` `recover-thunk-unseen` | a recovery point's thunk that isn't a lambda written at the call or a top-level function, so the region check can't walk it | An error. `tests/diagnostics/1033-recover-escape.ax` |
 | `AX3091` `inline-asm` | an `asm` form the compiler can't lower: an unknown architecture, operand kind or option, a second arm for one architecture, a template naming no operand or defining a named label, a second answered output, a `const` it can't fold, a `sym` with no symbol, or a register an arm can't name | An error, where the form is written. `tests/diagnostics/1044-inline-asm.ax`, `tests/diagnostics/1280-inline-asm-forms.ax` |
 | `AX3095` `precondition-removed` | a `;@axiom:precondition(...)` tag, which the language no longer has | An error wherever the tag stands. `tests/diagnostics/1043-precondition-removed.ax` |
-| `AX3123` `try-position` | a `?` with no tail to propagate to: inside a branch, a `let` body, a loop, a region or a handler whose value an expression around it still uses | `tests/diagnostics/1300-try-position.ax` |
+| `AX3123` `propagate-position` | a `?` with no tail to propagate to: inside a branch, a `let` body, a loop, a region or a handler whose value an expression around it still uses | `tests/diagnostics/1300-try-position.ax` |
 | `AX3116` `result-claim` | a `result(...)` claim the compiler cannot read: a value other than `owned`, or the claim on a function that is not a trusted encapsulation | `tests/diagnostics/1259-result-claim.ax` |
 | `AX3110` `axtag-never-checked` | an `effect(div)` claim, which names an effect nothing infers | An error, because no body can ever support it. `tests/diagnostics/359-div-not-inferred.ax` |
 | `AX3117` `inline-asm-rejected` | a line of an `asm` template the assembler rejects, or whose operands the register allocator can't place | An error when the program is built, at the template line, with status 1. `tests/embedded/asm-rejected.ax` |
@@ -1321,12 +1321,10 @@ no early return for it to expand into. `ERR-SUGAR-4` answers both: `?`
 is its own token, and it expands into the `match` this rule's
 successor already used, with the rest of the body in the `Ok` arm.
 
-**ERR-SUGAR-2 (R, superseded by `ERR-SUGAR-4`).** `(try x e body)` was
-a macro in `stdlib/Err.ax` that bound `x` to the `Ok` payload of `e`
-and answered an `Err` unchanged, by expanding to the match
-`ERR-SUGAR-4` shows. The postfix `?` does the same in place, so the
-macro is removed and the word is `AX2004`, which carries the rewrite:
-`(try x e body)` is `(let ((x e?)) body)`.
+**ERR-SUGAR-2 (R, superseded by `ERR-SUGAR-4`).** A propagation macro
+in `stdlib/Err.ax` bound a name to the `Ok` payload of a `Result` and
+answered an `Err` unchanged, by expanding to the match `ERR-SUGAR-4`
+shows. The postfix `?` does the same in place, and the macro is gone.
 
 **ERR-SUGAR-4 (H). `e?` propagates an error.** `e?` answers the `Ok`
 payload of the `Result` `e`. When `e` is an `Err`, the enclosing
@@ -1369,7 +1367,7 @@ the body's tail: a `let`'s body, a block's last expression, or an `if`
 branch or `match` arm in the tail. It is also anything evaluated on the
 way there: an argument, a `let`'s value, an `if` test, a `match`
 scrutinee or a block statement. Each sibling evaluated before the `?` is bound to a
-fresh `try.N` first, so `(f (g) (h)?)` still runs `(g)` before `(h)`.
+fresh `q.N` first, so `(f (g) (h)?)` still runs `(g)` before `(h)`.
 A `?` inside a branch, a `let` body, a loop, a `region` or a `handle`
 whose value an expression around it still uses has no rest of the body
 to move, and is refused with `AX3123`. A lambda is its own body: its
@@ -1377,9 +1375,9 @@ to move, and is refused with `AX3123`. A lambda is its own body: its
 
 The operand must be a `Result`. An `Option` converts first with
 `okOr`, and an error that needs another type is changed with `mapErr`
-before the `?`. Tested by `tests/stdlib/847-try-operator.ax`, which
+before the `?`. Tested by `tests/stdlib/847-propagate.ax`, which
 checks the order of effects in every shape, and
-`tests/diagnostics/1300-try-position.ax`.
+`tests/diagnostics/1300-propagate-position.ax`.
 
 **ERR-SUGAR-3 (H). A contextual wrapper is a function, not a form.**
 `(withContext r "reading the manifest")` replaces an `Err`'s `context`
@@ -1501,9 +1499,9 @@ runs the direct read and the routed one and compares their answers.
 | `ERR-DIAG-2` | P | No proposal is open: the last one, `AX3043`, is built (`1008-error-payload-untyped.ax`). `scripts/check-doc-drift.sh` fails on a proposal whose number is spent |
 | `ERR-DIAG-3` | **H, gated** | `tests/diagnostics/1380-poisoned-checks.ax` |
 | `ERR-SUGAR-1` | **R, superseded** | by `ERR-SUGAR-4` |
-| `ERR-SUGAR-2` | **R, superseded** | by `ERR-SUGAR-4`; `try` is `AX2004` |
+| `ERR-SUGAR-2` | **R, superseded** | by `ERR-SUGAR-4` |
 | `ERR-SUGAR-3` | **H, gated** | `withContext`; `371` term 2 |
-| `ERR-SUGAR-4` | **H, gated** | `?`; `tests/stdlib/847-try-operator.ax`, `tests/diagnostics/1300-try-position.ax` |
+| `ERR-SUGAR-4` | **H, gated** | `?`; `tests/stdlib/847-propagate.ax`, `tests/diagnostics/1300-propagate-position.ax` |
 
 Every rule marked **H** names what holds it. What remains open is
 `ERR-REC-5` and `ERR-DIAG-2`, whose rows say so, and the migration

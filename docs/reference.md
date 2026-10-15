@@ -101,7 +101,7 @@ The operand must be a `Result`, and the error passes through as it
 is. Convert an `Option` with `okOr`, and change an error's type with
 `mapErr`, before the `?`.
 
-Tested by `tests/stdlib/847-try-operator.ax`.
+Tested by `tests/stdlib/847-propagate.ax`.
 
 ## Syntax basics
 
@@ -1874,8 +1874,8 @@ committed seed and requires a self-hosting fixpoint. See
 Traits and `impl` are replaced by capability records. Use `Vec` for
 sequences and `struct`/`data` for products and sums. Printing uses
 `format`, `println` and `eprintln`; strings join with `concat`.
-`?` replaces `try`, `for` replaces `range`, and `restrict(no-trap)`
-replaces `restrict(no-untrapped)`.
+`for` replaces `range`, and `restrict(no-trap)` replaces
+`restrict(no-untrapped)`.
 
 Foreign libraries use `extern`; the older `foreign` keyword is reserved.
 See [compatibility](compatibility.md) and `compat/BREAKING` for migration
