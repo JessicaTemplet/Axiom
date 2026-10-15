@@ -20,7 +20,7 @@ def main():
     outputs = {}
     with tempfile.TemporaryDirectory(prefix='axiom-fmt-comments-') as directory:
         root = Path(directory)
-        for number in (254, 255, 256):
+        for number in (254, 255, 256, 267):
             paths = list(fixtures.glob(f'{number}-*.axp'))
             assert len(paths) == 1, paths
             source = definitions + paths[0].read_text()
@@ -60,6 +60,17 @@ def main():
         assert enclosing.index('(f\n', main) < enclosing.index('; head explanation') < enclosing.index('(g 1 2)', main)
         assert enclosing.index('(g 1 2)', main) < enclosing.index('; closing explanation') < enclosing.rindex('))'), (
             'a closing comment left its call')
+
+        chain = outputs[267].splitlines()
+        def column(marker):
+            line = next(line for line in chain if marker in line)
+            return len(line) - len(line.lstrip())
+        assert column('; first branch') == column('; first result')
+        assert column('; second branch') == column('; second result')
+        assert column('; first result') == column('; second test') + 2
+        assert column('; second result') == column('; second test') + 2
+        assert column('; fallback') == column('; second test')
+        assert column('30))') == column('; fallback')
 
         # Every token is short; an over-width row here is a layout defect.
         width_case = fixtures / '257-enclosing-width-budget.axp'

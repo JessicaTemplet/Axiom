@@ -47,7 +47,7 @@
 (pub :: lexKind (-> String String))
 (pub fn (lexKind w)
   (if (lexIn w
-        "fn lambda let set if match while for data struct type subtype effect handle region parallel macro import pub extern syntax/for alloc begin cond consume define union foreign trait impl emacro")
+        "fn lambda let set if match while for data struct type subtype effect handle region parallel macro import pub extern syntax/for alloc begin cond consume define union foreign trait impl emacro cast")
     "keyword"
     (if (lexIn w
           "mut in by is range :: -> .. ? _ |> as sizeof alignof asm syntax/join syntax/binders syntax/constructors syntax/arity syntax/fields decl")
@@ -106,8 +106,10 @@
                                     "(parallel ((name expr) ...) body)"
                                     (if (strEq w "macro")
                                       "(macro (name param ...) template)\n(macro name ((name pattern ...) template) ...)"
-                                      (if (strEq w "emacro")
-                                        "(emacro name rule ...)  ; removed: write (macro name rule ...)"
+                                      (if (lexIn w "emacro cast")
+                                        (if (strEq w "emacro")
+                                          "(emacro name rule ...)  ; removed: write (macro name rule ...)"
+                                          "(cast Type value)  ; removed: write (as value Type)")
                                         (if (strEq w "import")
                                           "(import Module)\n(import Module (name ...))"
                                           (if (strEq w "pub")
@@ -285,8 +287,10 @@
                                     "Evaluates its bindings at the same time, each on its own task, and runs the body once all of them have answered. A binding may capture a parent value only by borrowing it for the extent of the form (`AX3064`)."
                                     (if (strEq w "macro")
                                       "Declares a macro: a template substituted at its invocation before the type checker runs. The one-rule form names the parameters in the head; the multi-rule form lists patterns and a template for each, which is declarations or one expression, and where the macro is invoked picks which. Hygiene renames the binders a template introduces."
-                                      (if (strEq w "emacro")
-                                        "Removed. It was the multi-rule form for expression templates; `macro` takes the same rules, `(macro total ((total x) x) ((total x rest ...) (+ x (total rest ...))))`. The compiler refuses the word with `AX2004`."
+                                      (if (lexIn w "emacro cast")
+                                        (if (strEq w "emacro")
+                                          "Removed. It was the multi-rule form for expression templates; `macro` takes the same rules, `(macro total ((total x) x) ((total x rest ...) (+ x (total rest ...))))`. The compiler refuses the word with `AX2004`."
+                                          "Removed. Write `(as value Type)`, with the value before its target type. Numeric conversions change the number; reference conversions retain their checked ownership and unsafe obligations. The compiler refuses `cast` with `AX2004`.")
                                         (if (strEq w "import")
                                           "Brings a module's public names into scope, all of them or the ones listed. A module is a file in the standard library, on `AXIOM_PATH` or in a dependency. A name declared in two imported modules is `AX3014` when used bare."
                                           (if (strEq w "pub")
@@ -502,7 +506,7 @@
                                           (if (strEq w "asm")
                                             "inline-assembly"
                                             (if (lexIn w
-                                                  "alloc begin cond consume define union foreign trait impl")
+                                                  "alloc begin cond consume define union foreign trait impl emacro cast")
                                               "removed-features"
                                               (if (lexIn w "as sizeof alignof")
                                                 "types"
@@ -528,11 +532,11 @@
 (pub :: lexTagKeyDoc (-> String String))
 (pub fn (lexTagKeyDoc k)
   (if (strEq k "compute")
-    "Requires the named Int-to-Int callback to be a checked numeric computation (`AX3131`). It accepts canonical primitive captures, explicit conversions, numeric helpers and local accumulators. It rejects references, heap/raw stores, runtime observers, allocation, foreign/opaque calls and assembly, transitively. Forward only the exact parameter with the same contract. Local mutation retains its Mut effect; normal type and effect checks apply."
+      "Requires the named Int-to-Int callback to be a checked numeric computation (`AX3131`). It accepts canonical primitive captures, explicit conversions, numeric helpers and local accumulators. It rejects references, heap/raw stores, runtime observers, allocation, foreign/opaque calls and assembly, transitively. Forward only the exact parameter with the same contract. Local mutation retains its Mut effect; normal type and effect checks apply."
     (strEq k "scoped")
-    "Requires the named callback to return a scalar and retain none of each invocation's reference arguments or fresh allocations in captured state. Pass a lambda directly, a non-nullary function declaration, or a parameter carrying the same contract. Call the tagged function directly with all declared arguments (`AX3130`). Escaping stores are `AX3060`; ordinary type and effect checks still apply. Raw reclamation remains the callee's unsafe obligation."
+      "Requires the named callback to return a scalar and retain none of each invocation's reference arguments or fresh allocations in captured state. Pass a lambda directly, a non-nullary function declaration, or a parameter carrying the same contract. Call the tagged function directly with all declared arguments (`AX3130`). Escaping stores are `AX3060`; ordinary type and effect checks still apply. Raw reclamation remains the callee's unsafe obligation."
     (strEq k "effect")
-    "Claims the one effect the function performs: `io`, `unsafe` or `pure`. The checker compares the claim with what the body does and refuses a mismatch (`AX3010`); a required effect left undeclared is `AX3042`. One effect per tag (`AX3076`), and purity is spelled `effect(pure)` (`AX3078`)."
+      "Claims the one effect the function performs: `io`, `unsafe` or `pure`. The checker compares the claim with what the body does and refuses a mismatch (`AX3010`); a required effect left undeclared is `AX3042`. One effect per tag (`AX3076`), and purity is spelled `effect(pure)` (`AX3078`)."
     (if (strEq k "restrict")
       "Claims what the function never does, transitively: `no-alloc`, `no-io`, `no-unsafe`, `no-block`, `no-spawn`, `no-recursion`, `no-trap` and the others. A violated claim is `AX3049`; add `strict` to refuse a claim the walk cannot prove instead of receiving `AX3051`."
       (if (strEq k "pre")
@@ -683,6 +687,7 @@
       (vecPush v "trait")
       (vecPush v "impl")
       (vecPush v "emacro")
+      (vecPush v "cast")
       (vecPush v "mut")
       (vecPush v "in")
       (vecPush v "by")

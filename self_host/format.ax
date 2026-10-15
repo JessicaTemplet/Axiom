@@ -2740,13 +2740,12 @@
 
 (pub :: fpIf (-> Int Int Int))
 ; `(if test then else)`, and variadically `(if t1 b1 t2 b2 ... els)`:
-; one operand per line after the head, each at the same indent the
-; three-operand form always used. Three operands print exactly as
-; before; five or more are the flat spelling of the nested chain
-; `parseIfExpr` builds, so what `fmt` prints is what `check` reads.
-; An even count, or fewer than three, is `fpBad`: the parser refuses
-; those where an operand is missing, and the printer refuses what the
-; parser would.
+; one operand per line after the head. Two or three operands share one
+; indent. In a chain of two or more pairs, each branch sits two columns
+; deeper than its test, and a final else returns to the tests' indent.
+; Four or more operands spell the nested chain `parseIfExpr` builds.
+; A complete pair may end the chain without an else; an unmatched test
+; is refused by both the parser and the printer.
 (pub fn (fpIf p n)
   ; A chain that ends on a complete pair has no else and answers
   ; `()` (`parseIfTail`), so two operands and any even count print.
@@ -2790,6 +2789,7 @@
         {
           (let src (fpSrc p))
           (let o (fpOut p))
+          (let chain (>= (vecLen elems) 4))
           (let mut i 0)
           {
             (fpP p "(if ")
@@ -2800,14 +2800,19 @@
             (while (< i (vecLen elems))
               {
                 (let el (vecGet elems i))
+                (let branch (&& chain (== (% i 2) 1)))
                 {
                   (fpP p "\n")
+                  (if branch
+                    (foPushIndent o))
                   (flushLeading src (fpQ p) o (fpAnchor src el))
                   (foEmitIndent o)
                   (if (== i (- (vecLen elems) 1))
                     (fpExprTail p el 1)
                     (fpExpr p el))
                   (flushTrailing src (fpQ p) o (fpStartsVec p) (fpAnchor src el) (foNl o))
+                  (if branch
+                    (foPopIndent o))
                   (set i (+ i 1))
                 }
               })

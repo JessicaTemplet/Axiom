@@ -44,7 +44,23 @@ The compiler, library, documentation and editor tooling use these forms.
 Named unary function values use static descriptors; capturing lambdas keep
 counted environments.
 
+Thanks to [@JessicaTemplet](https://github.com/JessicaTemplet) for clearer
+conditional layout and migration documentation fixes.
+
 <!-- release-notes: end of highlights -->
+
+- Adopt [@JessicaTemplet's conditional layout](https://github.com/chrispaig3/Axiom/pull/43):
+  each branch in an `if` chain sits two columns deeper than its test,
+  and the final else returns to the tests' indent. Two- and three-operand
+  forms keep their layout. The implementation uses canonical block locals
+  and preserves comments and enclosing width budgets.
+  Tested by `tests/fmt/parity/267-if-chain-comments.axp` and
+  `tests/fmt/syntax-zoo.expected.ax`.
+- Complete the migration help identified in
+  [@JessicaTemplet's gate fixes](https://github.com/chrispaig3/Axiom/pull/41).
+  `axiom explain emacro` and `axiom explain cast` link to their replacements;
+  the retired `cast` spelling stays refused with `AX2004`.
+  Tested by `scripts/check-tools-selfhost.sh`.
 
 - CI scale and arena reset checks measure child commands with clock
   readings taken in one process. Failed or silent compiler checks remain

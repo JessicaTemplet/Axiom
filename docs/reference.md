@@ -1257,6 +1257,10 @@ and a 100-column target. Calls stay together when they fit; longer calls
 pack complete arguments into rows. Control flow and multiline arguments
 keep their structural breaks.
 
+In an `if` chain, each branch sits two columns deeper than its test.
+The final else returns to the tests' indent. Two- and three-operand
+forms share one branch indent.
+
 Headers, signatures, types, imports and positional patterns share the
 width budget. Comments stay beside their source elements. Long strings
 and other indivisible tokens remain whole.
@@ -2461,6 +2465,8 @@ sequences and `struct`/`data` for products and sums. Printing uses
 `format`, `println` and `eprintln`; strings join with `concat`.
 `for` replaces `range`, `macro` replaces `emacro`, and
 `restrict(no-trap)` replaces `restrict(no-untrapped)`.
+`as` replaces `cast`, with the value before its target type:
+`(as value Type)`.
 
 Foreign libraries use `extern`; the older `foreign` keyword is reserved.
 See [compatibility](compatibility.md) and `compat/BREAKING` for migration
