@@ -23,6 +23,9 @@ its changelog too.
   `as` as a literal receives it as written, and the expander turns one
   no macro took into the conversion. Tested by
   `tests/axqlite/620-macro-text.ax` and `tests/stdlib/943-as-numeric.ax`.
+- Document `as`: the reference's operators section, `axiom explain as`
+  and the language server's keyword completion all cover it now.
+- `axiom explain emacro` points at the reference's removed features.
 - Move `spineArity`, `spineArgAt` and `spineArgFromEnd` from the emitter
   to the parser, beside `spineHead`. The checker calls `spineArgAt`, so
   checking a file that imports the checker without the emitter, such as

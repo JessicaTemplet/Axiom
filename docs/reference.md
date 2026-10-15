@@ -287,9 +287,10 @@ payloads. An expected type does not convert a literal: `1` is `Int`,
 whereas `1.0` is `Float`.
 
 Float arithmetic uses two `Float` operands. Convert numeric types with
-`__intToFloat` and `__floatToInt`; for example, `(+ (__intToFloat 1) 2.0)`
-answers `3.0`. `cast` reinterprets bits and does not perform that numeric
-conversion. `String` equality reads contents; ordering uses `strCmp`.
+`as`, the value first: `(+ (as 1 Float) 2.0)` answers `3.0`, and
+`(as -3.75 Int)` drops the fraction to give `-3`. `as` lowers to the
+primitives `__intToFloat` and `__floatToInt`. `cast` reinterprets bits
+and does not perform that numeric conversion. `String` equality reads contents; ordering uses `strCmp`.
 
 An `(Option Int)` cannot stand in for `(Option Float)`. Convert the payload
 and construct a new `Option` with the required type.

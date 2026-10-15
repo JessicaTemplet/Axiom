@@ -48,7 +48,7 @@
 (pub fn (lexKind w)
   (if (lexIn w "fn lambda let set if match while for data struct type subtype effect handle region parallel macro import pub extern syntax/for alloc begin cond consume define union foreign trait impl emacro")
     "keyword"
-    (if (lexIn w "mut in by is range :: -> .. ? _ cast sizeof alignof asm syntax/join syntax/binders syntax/constructors syntax/arity syntax/fields decl")
+    (if (lexIn w "mut in by is range :: -> .. ? _ as cast sizeof alignof asm syntax/join syntax/binders syntax/constructors syntax/arity syntax/fields decl")
       "form"
       (if (lexIn w "Int Float Bool Char String Foreign Handle Vec Option Result Addr ()")
         "type"
@@ -155,8 +155,10 @@
                     "lo..hi"
                     (if (strEq w "_")
                       "(match v (_ body))\n(f _ 2)"
-                      (if (strEq w "cast")
-                        "(cast Type value)"
+                      (if (lexIn w "cast as")
+                        (if (strEq w "as")
+                          "(as value Type)"
+                          "(cast Type value)")
                         (if (strEq w "sizeof")
                           "(sizeof Type)"
                           (if (strEq w "alignof")
@@ -332,8 +334,10 @@
                     "A range, `lo` included and `hi` excluded in `for`, both included in a `subtype`'s `range`."
                     (if (strEq w "_")
                       "The wildcard. In a pattern it matches anything and binds nothing. In a call, `(f _ 2)` builds a lambda over the missing arguments from left to right."
-                      (if (strEq w "cast")
-                        "Changes the declared type of a value without changing its bits. It does not make an address valid or extend a lifetime, and casting a reference to `Int` drops its share. Raw-memory uses belong behind `;@axiom:effect(unsafe)`."
+                      (if (lexIn w "cast as")
+                        (if (strEq w "as")
+                          "Converts a value to a type, the value first. Between `Int` and `Float` it converts the number: `(as 42 Float)` is `42.0`, and `(as -3.75 Int)` drops the fraction to give `-3`. Any other pair, an alias included, is checked and lowered as `(cast Type value)`."
+                          "Changes the declared type of a value without changing its bits. It does not make an address valid or extend a lifetime, and casting a reference to `Int` drops its share. Raw-memory uses belong behind `;@axiom:effect(unsafe)`.")
                         (if (strEq w "sizeof")
                           "The size in bytes of a type's representation. Takes exactly one type (`AX3069`)."
                           (if (strEq w "alignof")
@@ -491,7 +495,7 @@
                                           "calling-rust"
                                           (if (strEq w "asm")
                                             "inline-assembly"
-                                            (if (lexIn w "alloc begin cond consume define union foreign trait impl")
+                                            (if (lexIn w "alloc begin cond consume define union foreign trait impl emacro")
                                               "removed-features"
                                               (if (lexIn w "cast sizeof alignof")
                                                 "types"
@@ -501,7 +505,9 @@
                                                     "primitive-types"
                                                     (if (strEq (lexKind w) "effect")
                                                       "effects"
-                                                      (if (strEq (lexKind w) "operator")
+                                                      (if (||
+                                                            (strEq (lexKind w) "operator")
+                                                            (strEq w "as"))
                                                         "operators"
                                                         (if (lexIn w "true false")
                                                           "literals"
@@ -675,6 +681,7 @@
       (vecPush v "..")
       (vecPush v "?")
       (vecPush v "_")
+      (vecPush v "as")
       (vecPush v "cast")
       (vecPush v "sizeof")
       (vecPush v "alignof")
