@@ -67,6 +67,11 @@ and selected entry roots; they do not establish aviation or space certification.
   including beside unrelated constructors named `Ok` or `Err`. Tested by
   `tests/stdlib/965-result-pair-reboxing.ax`.
 
+- Protocol modelling follows the consolidated Task APIs and their plain task
+  indices. Bounded word-pool scenarios cover ordered joins, spawn refusals,
+  cancellation and child reaping, with source-mutation controls. Tested by
+  `scripts/check-protocol-model.sh`.
+
 - Region diagnostic checks wait for background analysis before shutting
   down the language server. Tested by `tests/lsp/region-boundary-hints.py`.
 

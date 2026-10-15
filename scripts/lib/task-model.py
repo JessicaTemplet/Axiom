@@ -3,8 +3,8 @@
 
 The filename follows the script convention; importlib loads it by path.
 
-WHAT IS TRANSCRIBED. The pool's parent loop, `taskLoop`, and every step it
-takes on shared state or on a child: the token's cancel flag and event
+WHAT IS TRANSCRIBED. The budgeted pool's parent loop, `taskLoop`, and every
+step it takes on shared state or on a child: the token's cancel flag and event
 counter, a slot's state word, the spawn, the look at a child
 (`sysChildExited`), the kill, the join that reaps, the clock, and the
 sleep on the event counter. And the child's half, `taskChild` and the
@@ -12,12 +12,15 @@ sleep on the event counter. And the child's half, `taskChild` and the
 over the limit or not, and the bump that wakes the parent. The stack the
 answer runs on is the process's own, so the switch to it is no step.
 The parent's per-slot words (`st`) and its handles (`hs`) are its own, so
-their accesses are plain steps inside the one before them.
+their accesses are plain steps inside the one before them. The scalar-word
+pools, `taskMapWords` and `taskMapWordsChecked`, also transcribe their bounded
+handle rings, submit-order joins, and the checked pool's refusal cleanup.
 
 A TASK'S BODY is the program's `f`, which the model does not run: each
-task is given one of five behaviours, fixed or chosen at its start - it
+task is given a behaviour, fixed or chosen at its start - it
 answers within the limit, answers over it, traps (exit 72), runs for ever
-(`hang`), or answers and then cannot exit (`stuck`).
+(`hang`), answers and then cannot exit (`stuck`), answers after a delay,
+or exits without answering.
 
 TIME is a clock word, in units of the poll period's half (`POLL` is two
 units, the first exit nap one). The pool's own steps take no time; the
@@ -45,12 +48,15 @@ WHAT IS CHECKED, in every reachable state and at the end:
   liveness           every binding can still finish (the model's LOST
                      WAKEUP, DEADLOCK and LIVELOCK), given the clock.
 
-WHAT IT IS NOT. A proof about the model at its bounds (two and three tasks,
-widths one to three, a few units of time), not about Task.ax: the bytes of
-an answer are one word, the sink and the region around it are a delivery
-step, a spawn that is refused (78, which `taskStart` answers and `taskLoop`
-turns into a cancellation) and a parent killed from outside are outside it,
-and the clock is the model's.
+WHAT IT IS NOT. This proves properties of the model at its bounds (up to
+five tasks and three outstanding children, a few units of time), not about
+Task.ax: the bytes of an answer are one word, the sink and its region are a delivery
+step. The budgeted pool's spawn refusal (which `taskLoop` turns into a
+cancellation) and a parent killed from outside are outside it. Checked
+word-pool scenarios include refused spawns (70 and 78), traps, and races
+between child completion and refusal cleanup. The unchecked word pool's
+raising recovery sweep and external-command internals remain runtime
+obligations, exercised by check-task.sh. The clock is the model's.
 """
 
 TASK = "Task.ax"
@@ -113,13 +119,13 @@ def install(ns):
         ("ret", "0"),
     ])
     F("taskStart", ["st", "hs", "t", "w", "slab", "D"], ["s", "slot", "h", "c"], (TASK, "taskStart"), [
-        ("set", "s", "t % w", "(s (% t w))"),
-        ("set", "slot", "slab + %d * s" % SB, "(slot (+ slab (* (% t w) slotBytes)))"),
+        ("set", "s", "t % w", "(let s (% t w))"),
+        ("set", "slot", "slab + %d * s" % SB, "(let slot (+ slab (* (% t w) slotBytes)))"),
         ("astore", "slot", "1", "(taskStoreAt slot 1)"),
         ("pstore", "slot + 1", "0", "(memSetWord slot 1 0)"),
         ("pstore", "slot + 2", "0", "(memSetWord slot 2 0)"),
         ("ghost", "tStart", ["t", "w"]),
-        ("spawn", "h", "t * w + s", "t + 1", "(taskSpawn wrapper (+ (* t w) s) mark)"),
+        ("spawn", "h", "t", "t + 1", "(taskSpawn wrapper t mark)"),
         ("if", "t < w", "reuse", "(if (< t w)"),
         ("ghost", "tHandle", ["t", "w"]),
         ("pstore", "hs + t", "h", "(vecPush hs h)"),
@@ -191,7 +197,7 @@ def install(ns):
     F("taskResultAt", ["slot", "status", "why", "t"], ["state", "fin", "ans"], (TASK, "taskResultAt"), [
         ("aload", "state", "slot", "(taskLoadAt slot)"),
         ("set", "fin", "1 if status == 0 or (status == 137 and why >= 2) else 0",
-         "(finished (|| (== status 0) (&& (== status 137) (>= why 2))))"),
+         "(let finished (|| (== status 0) (&& (== status 137) (>= why 2))))"),
         ("if", "fin == 1 and state == 2", "big", "(if (&& finished (== state 2))"),
         ("pload", "ans", "slot + 3", "(taskCopyOut slot)"),
         ("ghost", "tDeliver", ["t", str(R_OK), "status", "why", "ans"]),
@@ -219,9 +225,9 @@ def install(ns):
     # `t`, the task's index, exists only in the model. The sink takes the
     # answers in submit order and needs none; the check uses it.
     F("taskDeliver", ["st", "s", "slab", "t"], ["slot", "status", "why"], (TASK, "taskDeliver"), [
-        ("set", "slot", "slab + %d * s" % SB, "(slot (+ slab (* s slotBytes)))"),
-        ("pload", "status", "st + 3 * s + 1", "(status (taskSt st s 1))"),
-        ("pload", "why", "st + 3 * s + 2", "(why (taskSt st s 2))"),
+        ("set", "slot", "slab + %d * s" % SB, "(let slot (+ slab (* s slotBytes)))"),
+        ("pload", "status", "st + 3 * s + 1", "(let status (taskSt st s 1))"),
+        ("pload", "why", "st + 3 * s + 2", "(let why (taskSt st s 2))"),
         ("call", None, "taskResultAt", ["slot", "status", "why", "t"], "(taskResultAt slot status why)"),
         ("ret", "0"),
     ])
@@ -231,7 +237,7 @@ def install(ns):
     ])
     F("taskWakeBy", ["st", "head", "nxt", "w", "now", "canPoll", "cancelling", "graceEnd", "slab", "nap"],
       ["wake", "running", "answered", "t", "s", "k", "a", "d", "p"], (TASK, "taskWakeBy"), [
-        ("set", "wake", "graceEnd if cancelling == 1 else -1", "(mut wake (if (== cancelling 1)"),
+        ("set", "wake", "graceEnd if cancelling == 1 else -1", "(let mut wake\n      (if (== cancelling 1)"),
         ("set", "running", "0"),
         ("set", "answered", "0"),
         ("set", "t", "head", "(for t in head..next"),
@@ -383,11 +389,11 @@ def install(ns):
         ("goto", "nap"),
         ("L", "work"),
         ("if", "b == %d" % TRAP, "runs", "(let r (f i))"),
-        ("ghost", "tTrap", ["arg // w", "72"]),
+        ("ghost", "tTrap", ["arg", "72"]),
         ("ret", "72"),
         ("L", "runs"),
         ("if", "b == %d" % QUIT, "stays"),
-        ("ghost", "tTrap", ["arg // w", str(QUIT_MARK)]),
+        ("ghost", "tTrap", ["arg", str(QUIT_MARK)]),
         ("ret", "0"),
         ("L", "stays"),
         ("if", "b == %d" % HANG, "answers"),
@@ -397,12 +403,12 @@ def install(ns):
         ("pstore", "slot + 1", "len", "(memSetWord slot 1 len)"),
         ("if", "len > lim", "fits", "(if (> len limit)"),
         ("astore", "slot", "3", "(taskStoreAt slot 3)"),
-        ("ghost", "tAnswer", ["arg // w", "2"]),
+        ("ghost", "tAnswer", ["arg", "2"]),
         ("goto", "bump"),
         ("L", "fits"),
-        ("pstore", "slot + 3", "arg // w", "(memCopy (+ slot 32) (strData r) len)"),
+        ("pstore", "slot + 3", "arg", "(memCopy (+ slot 32) (strData r) len)"),
         ("astore", "slot", "2", "(taskStoreAt slot 2)"),
-        ("ghost", "tAnswer", ["arg // w", "1"]),
+        ("ghost", "tAnswer", ["arg", "1"]),
         ("L", "bump"),
         ("call", None, "taskBump", ["tok"], "(taskBump tok)"),
         ("if", "b == %d" % STUCK, "exit"),
@@ -419,6 +425,176 @@ def install(ns):
     ])
     F("taskCanceller", ["tok"], [], None, [
         ("call", None, "taskCancel", ["tok"]),
+        ("ret", "0"),
+    ])
+
+    # ---- the scalar-word pool -------------------------------------------------
+    # Handles are the model's child pids. Each child's private answer page
+    # is one word at `answers + i`; join returns its exit status separately.
+    # The runtime transports the answer from that page when it reaps the
+    # child. Keeping both witnesses lets the checks distinguish a result
+    # from the next child, a trap, and a successful child killed too late.
+    F("taskMapWords", ["n", "width", "hs", "answers"],
+      ["w", "joined", "i", "h", "status", "ans"], (TASK, "taskMapWords"), [
+        ("set", "w", "max(1, width)", "(if (< width 1)"),
+        ("set", "joined", "0", "(let mut joined 0)"),
+        ("set", "i", "0", "(for i in 0..n"),
+        ("L", "fill"),
+        ("if", "i < n", "drain"),
+        ("L", "room"),
+        ("if", "i - joined >= w", "start", "(while (>= (- i joined) w)"),
+        ("pload", "h", "hs + joined % w"),
+        ("join", "status", "h", "(__proc_join (vecGet hs (% joined w)))"),
+        ("assert", "status == 0", "unchecked word scenarios supply successful workers"),
+        ("pload", "ans", "answers + joined"),
+        ("ghost", "wDeliver", ["joined", "h", "status", "ans"]),
+        ("set", "joined", "joined + 1", "(set joined (+ joined 1))"),
+        ("goto", "room"),
+        ("L", "start"),
+        ("ghost", "wStart", ["i", "w"]),
+        ("spawn", "h", "i", "i + 1", "(__proc_spawn f i)"),
+        ("if", "i < w", "reuse", "(if (< i w)"),
+        ("ghost", "tHandle", ["i", "w"]),
+        ("pstore", "hs + i", "h", "(vecPush hs h)"),
+        ("goto", "advance"),
+        ("L", "reuse"),
+        ("ghost", "tHandle", ["i % w", "w"]),
+        ("pstore", "hs + i % w", "h", "(vecSet hs (% i w) h)"),
+        ("L", "advance"),
+        ("set", "i", "i + 1"),
+        ("goto", "fill"),
+        ("L", "drain"),
+        ("if", "joined < n", "done", "(while (< joined n)"),
+        ("pload", "h", "hs + joined % w"),
+        ("join", "status", "h", "(__proc_join (vecGet hs (% joined w)))"),
+        ("assert", "status == 0", "unchecked word scenarios supply successful workers"),
+        ("pload", "ans", "answers + joined"),
+        ("ghost", "wDeliver", ["joined", "h", "status", "ans"]),
+        ("set", "joined", "joined + 1", "(set joined (+ joined 1))"),
+        ("goto", "drain"),
+        ("L", "done"),
+        ("ghost", "wDone", []),
+        ("ret", "0", "out"),
+    ])
+
+    for name, message in (
+        ("taskWordsJoinChecked", "parallel slot trapped"),
+        ("taskWordsJoinKilled", "parallel slot killed: a later spawn was refused"),
+    ):
+        F(name, ["h"], ["st"], (TASK, name), [
+            ("join", "st", "h", "(__proc_join_nr h cell)"),
+            ("set", "st", "st", "(let st (memGetWord cell 0))"),
+            ("if", "st == 0", "failed", "(if (== st 0)"),
+            ("ret", "0", "(Ok w)"),
+            ("L", "failed"),
+            ("ret", "st", '(Err (mkError st "%s"))' % message),
+        ])
+
+    F("taskWordsSpawn", ["i", "w", "refuseAt", "refuseCode"], ["h"], (TASK, "taskWordsSpawn"), [
+        # The recovery extent converts a refused fork/handle allocation
+        # into its status. Scenarios fix the refusal point and reason;
+        # success remains the same visible spawn as the budgeted pool.
+        ("if", "i == refuseAt", "start"),
+        ("ghost", "wRefused", ["i", "refuseCode"]),
+        ("ret", "refuseCode"),
+        ("L", "start"),
+        ("ghost", "wStart", ["i", "w"]),
+        ("spawn", "h", "i", "i + 1", "(__proc_spawn f i)"),
+        ("ret", "h"),
+    ])
+    F("taskWordsKill", ["h"], ["r"], (TASK, "taskWordsKill"), [
+        ("kill9", "r", "h", "(sysKill (__spawn_pid h) 9)"),
+        ("ret", "0"),
+    ])
+    F("taskMapWordsChecked", ["n", "width", "hs", "answers", "refuseAt", "refuseCode"],
+      ["w", "joined", "nxt", "refused", "h", "hw", "status", "ans", "k"],
+      (TASK, "taskMapWordsChecked"), [
+        ("set", "w", "max(1, width)", "(if (< width 1)"),
+        ("set", "joined", "0", "(let mut joined 0)"),
+        ("set", "nxt", "0", "(let mut next 0)"),
+        ("set", "refused", "0", "(let mut refused 0)"),
+        ("L", "fill"),
+        ("if", "nxt < n and refused == 0", "drain", "(while (&& (< next n) (== refused 0))"),
+        ("L", "room"),
+        ("if", "nxt - joined >= w", "start", "(while (>= (- next joined) w)"),
+        ("pload", "h", "hs + joined % w"),
+        ("call", "status", "taskWordsJoinChecked", ["h"],
+         "(taskWordsJoinChecked (vecGet hs (% joined w)) cell)"),
+        ("pload", "ans", "answers + joined"),
+        ("ghost", "wDeliver", ["joined", "h", "status", "ans"]),
+        ("set", "joined", "joined + 1", "(set joined (+ joined 1))"),
+        ("goto", "room"),
+        ("L", "start"),
+        ("call", "hw", "taskWordsSpawn", ["nxt", "w", "refuseAt", "refuseCode"], "(taskWordsSpawn f next)"),
+        ("if", "hw not in (70, 78)", "refuse", "(if (taskSpawned hw)"),
+        ("set", "h", "hw", "(taskHandleOf hw)"),
+        ("if", "nxt < w", "reuse", "(if (< next w)"),
+        ("ghost", "tHandle", ["nxt", "w"]),
+        ("pstore", "hs + nxt", "h", "(vecPush hs h)"),
+        ("goto", "advance"),
+        ("L", "reuse"),
+        ("ghost", "tHandle", ["nxt % w", "w"]),
+        ("pstore", "hs + nxt % w", "h", "(vecSet hs (% next w) h)"),
+        ("L", "advance"),
+        ("set", "nxt", "nxt + 1", "(set next (+ next 1))"),
+        ("goto", "fill"),
+        ("L", "refuse"),
+        ("set", "refused", "hw", "(set refused hw)"),
+        ("goto", "fill"),
+        ("L", "drain"),
+        ("if", "refused == 0", "kill", "(if (== refused 0)"),
+        ("L", "normal"),
+        ("if", "joined < n", "done", "(while (< joined n)"),
+        ("pload", "h", "hs + joined % w"),
+        ("call", "status", "taskWordsJoinChecked", ["h"],
+         "(taskWordsJoinChecked (vecGet hs (% joined w)) cell)"),
+        ("pload", "ans", "answers + joined"),
+        ("ghost", "wDeliver", ["joined", "h", "status", "ans"]),
+        ("set", "joined", "joined + 1", "(set joined (+ joined 1))"),
+        ("goto", "normal"),
+        ("L", "kill"),
+        ("set", "k", "joined", "(for k in joined..next"),
+        ("L", "killNext"),
+        ("if", "k < nxt", "reap"),
+        ("pload", "h", "hs + k % w"),
+        ("call", None, "taskWordsKill", ["h"], "(taskWordsKill (vecGet hs (% k w)))"),
+        ("set", "k", "k + 1"),
+        ("goto", "killNext"),
+        ("L", "reap"),
+        ("if", "joined < nxt", "notStarted", "(while (< joined next)"),
+        ("pload", "h", "hs + joined % w"),
+        ("call", "status", "taskWordsJoinKilled", ["h"],
+         "(taskWordsJoinKilled (vecGet hs (% joined w)) cell)"),
+        ("pload", "ans", "answers + joined"),
+        ("ghost", "wDeliver", ["joined", "h", "status", "ans"]),
+        ("set", "joined", "joined + 1", "(set joined (+ joined 1))"),
+        ("goto", "reap"),
+        ("L", "notStarted"),
+        ("set", "k", "nxt", "(for k in next..n"),
+        ("L", "refusedNext"),
+        ("if", "k < n", "done"),
+        ("ghost", "wNotStarted", ["k", "refused"]),
+        ("set", "k", "k + 1", '(Err (mkError refused "parallel slot not started: its spawn was refused"))'),
+        ("goto", "refusedNext"),
+        ("L", "done"),
+        ("ghost", "wDone", []),
+        ("ret", "0", "out"),
+    ])
+    F("taskWordChild", ["answers", "beh", "arg"], ["b", "work"], None, [
+        ("choose", "b", "beh"),
+        # One schedulable body step, represented by a private-page read.
+        # Without it a body made entirely of local instructions would
+        # finish during spawn normalisation, before a join could wait.
+        ("uload", "work", "answers + arg"),
+        ("if", "b == %d" % HANG, "work"),
+        ("block",),
+        ("L", "work"),
+        ("if", "b == %d" % TRAP, "answer"),
+        ("ghost", "tTrap", ["arg", "72"]),
+        ("ret", "72"),
+        ("L", "answer"),
+        ("pstore", "answers + arg", "17 * arg + 5"),
+        ("ghost", "tAnswer", ["arg", "1"]),
         ("ret", "0"),
     ])
 
@@ -496,6 +672,53 @@ def install(ns):
         if r != self.sc.ntasks:
             raise Violation("one slot each", "the pool answered %d deliveries of %d" % (r, self.sc.ntasks))
 
+    def g_wStart(self, c, b, t, w):
+        if c.ghost["wrefused"]:
+            raise Violation("spawn refusal", "task %d started after a spawn was refused" % t)
+        self.g_tStart(c, b, t, w)
+
+    def g_wRefused(self, c, b, t, code):
+        if c.ghost["wrefused"]:
+            raise Violation("spawn refusal", "word task %d's spawn was retried after refusal" % t)
+        if code not in (70, 78) or c.procs[self.sc.tasks[t]] != "-":
+            raise Violation("spawn refusal", "task %d's refusal does not describe an unstarted child" % t)
+        c.ghost["wrefused"] = code
+
+    def g_wDeliver(self, c, b, t, h, status, ans):
+        if t != c.ghost["deliv"]:
+            raise Violation("one slot each", "word task %d was delivered out of submit order" % t)
+        k = self.sc.tasks[t]
+        if h != self.sc.pids[k]:
+            raise Violation("one slot each", "word task %d was delivered from another task's handle" % t)
+        if c.procs[k] != "X":
+            raise Violation("nothing outlives", "word task %d was delivered before its child was reaped" % t)
+        started, answered, trapped, killed = c.ghost["fate"][t]
+        expected = c.mem[self.sc.exitword[k]]
+        good = started and status == expected
+        if status == 0:
+            good = good and answered == 1 and ans == 17 * t + 5
+        elif status == 137:
+            good = good and killed and c.ghost["wrefused"]
+        else:
+            good = good and status == trapped
+        if not good:
+            raise Violation("one slot each", "word task %d's result (%d, %d) disagrees with its child"
+                            % (t, status, ans))
+        c.ghost["deliv"] += 1
+
+    def g_wNotStarted(self, c, b, t, status):
+        if t != c.ghost["deliv"] or status != c.ghost["wrefused"] or not status:
+            raise Violation("spawn refusal", "word task %d has the wrong refusal result or position" % t)
+        if c.procs[self.sc.tasks[t]] != "-" or c.ghost["fate"][t][0]:
+            raise Violation("spawn refusal", "word task %d ran despite its not-started result" % t)
+        c.ghost["deliv"] += 1
+
+    def g_wDone(self, c, b):
+        self.g_tPoolDone(c, b, c.ghost["deliv"])
+        for t, k in enumerate(self.sc.tasks):
+            if c.procs[k] not in ("X", "-"):
+                raise Violation("nothing outlives", "the word pool returned with task %d unreaped" % t)
+
     def g_tAsleepAt(self, c, now, frames):
         """The clock is about to move past `now` while the pool sleeps."""
         lay, w = self.sc.lay, self.sc.width
@@ -515,7 +738,7 @@ def install(ns):
                                 % (now, grace_end, t))
 
     for name, fn in list(locals().items()):
-        if name.startswith("g_t"):
+        if name.startswith(("g_t", "g_w")):
             setattr(Model, name, fn)
 
     base_final = Model.final_check
@@ -552,7 +775,7 @@ def install(ns):
     def ghost0(self):
         g = base_ghost0(self)
         if self.kind == "task":
-            g.update(cseen=0, deliv=0, fate=tuple((0, 0, 0, 0) for _ in self.tasks))
+            g.update(cseen=0, deliv=0, wrefused=0, fate=tuple((0, 0, 0, 0) for _ in self.tasks))
         return g
 
     Scenario.ghost0 = ghost0
@@ -633,6 +856,48 @@ def install(ns):
 
     ns["EXTRA_SCENARIOS"].append(task_scenarios)
 
+    def word_pool(name, behaviours, width, checked=True, refuseAt=-1, refuseCode=78):
+        n, w = len(behaviours), max(1, width)
+        lay, mem = task_mem(n, min(n, w))
+        answers = len(mem)
+        mem.extend([0] * n)
+        driver = "taskMapWordsChecked" if checked else "taskMapWords"
+        args = (n, width, lay["hs"], answers)
+        if checked:
+            args += (refuseAt, refuseCode)
+        bindings = [(driver, args)] + [
+            ("taskWordChild", (answers, tuple(beh), -1)) for beh in behaviours]
+        sc = Scenario("word pool: " + name, "task", mem, bindings, progress=("n", "t", "c"))
+        sc.procs, sc.lay, sc.width, sc.ntasks = True, lay, w, n
+        sc.tasks = list(range(1, n + 1))
+        sc.parents = {k: 0 for k in sc.tasks}
+        sc.exitword = {k: lay["exit"] + k - 1 for k in sc.tasks}
+        sc.unspawned, sc.drains = frozenset(sc.tasks), False
+        # Word pools have no deadlines or timed sleeps: the only wait is
+        # a join, and a blocked worker can end only through refusal cleanup.
+        return sc
+
+    def word_scenarios(long=False):
+        out = [
+            word_pool("unchecked, 3 tasks reuse 2 handles", [(OK,)] * 3, 2, checked=False),
+            word_pool("unchecked, negative width clamps to 1", [(OK,)] * 2, -2, checked=False),
+            word_pool("unchecked, width exceeds input", [(OK,)] * 2, 5, checked=False),
+            word_pool("checked, 3 tasks reuse 2 handles, answers or traps", [A2] * 3, 2),
+            word_pool("checked, zero width clamps to 1", [A2] * 2, 0),
+            word_pool("checked, width exceeds input", [A2] * 2, 5),
+            word_pool("fork refused with two outstanding, answer/trap/kill races",
+                      [(OK, TRAP, HANG)] * 4, 3, refuseAt=2),
+            word_pool("page refused after ring reuse", [A2, A2, (OK,), (OK,)],
+                      1, refuseAt=2, refuseCode=70),
+            word_pool("fork refused after ring reuse, two outstanding",
+                      [A2, A2, (OK, HANG), (OK, HANG), (OK,)], 3, refuseAt=4),
+        ]
+        if long:
+            out.append(word_pool("checked, 4 tasks reuse 3 handles, answers or traps", [A2] * 4, 3))
+        return out
+
+    ns["EXTRA_SCENARIOS"].append(word_scenarios)
+
     # ---- planted defects ----------------------------------------------------------------
     replace = ns["replace"]
 
@@ -647,7 +912,7 @@ def install(ns):
 
     def d_wake_ignores_grace(fns):
         replace(fns, "taskWakeBy", [("set", "wake", "graceEnd if cancelling == 1 else -1",
-                                     "(mut wake (if (== cancelling 1)")], [("set", "wake", "-1")])
+                                     "(let mut wake\n      (if (== cancelling 1)")], [("set", "wake", "-1")])
 
     def d_no_grace_kill(fns):
         # check-task.sh's `grace` ablation.
@@ -712,6 +977,48 @@ def install(ns):
          d_wake_ignores_grace, "on time", pick("while a slow task works")),
     ])
 
+    def d_word_unbounded(fns):
+        replace(fns, "taskMapWords", [("if", "i - joined >= w", "start", "(while (>= (- i joined) w)")],
+                [("goto", "start")])
+
+    def d_word_slot_mixup(fns):
+        replace(fns, "taskMapWordsChecked", [("pload", "h", "hs + joined % w")],
+                [("pload", "h", "hs + (joined + 1) % w")], count=3)
+
+    def d_word_refusal_no_kill(fns):
+        replace(fns, "taskWordsKill", [("kill9", "r", "h", "(sysKill (__spawn_pid h) 9)")],
+                [("set", "r", "0")])
+
+    def d_word_refusal_no_join(fns):
+        replace(fns, "taskWordsJoinKilled", [("join", "st", "h", "(__proc_join_nr h cell)")],
+                [("set", "st", "137")])
+
+    def d_word_drop_refusal_results(fns):
+        replace(fns, "taskMapWordsChecked", [("if", "k < n", "done")], [("goto", "done")])
+
+    def d_word_retry_refusal(fns):
+        replace(fns, "taskMapWordsChecked", [
+            ("if", "nxt < n and refused == 0", "drain", "(while (&& (< next n) (== refused 0))")],
+            [("if", "nxt < n", "drain")])
+
+    def word_pick(*names):
+        return lambda: [s for s in word_scenarios() if any(n in s.name for n in names)]
+
+    ns["DEFECTS"].extend([
+        ("word pool spawned before joining", "the word ring admits a third child at width two",
+         d_word_unbounded, "bounded", word_pick("unchecked, 3 tasks")),
+        ("word pool joins its neighbour's slot", "the checked ring delivers the next handle's result",
+         d_word_slot_mixup, "one slot each", word_pick("checked, 3 tasks")),
+        ("word refusal leaves a running child", "spawn refusal omits SIGKILL before the non-raising joins",
+         d_word_refusal_no_kill, "deadlock", word_pick("fork refused with two")),
+        ("word refusal kills without reaping", "a killed word task is delivered without joining its handle",
+         d_word_refusal_no_join, "nothing outlives", word_pick("fork refused with two")),
+        ("word refusal drops unstarted results", "the refusal path omits the unstarted suffix",
+         d_word_drop_refusal_results, "one slot each", word_pick("fork refused with two")),
+        ("word pool retries a refused spawn", "submission continues after the first refused spawn",
+         d_word_retry_refusal, "spawn refusal", word_pick("fork refused with two")),
+    ])
+
     # ---- the transcription's tie to Task.ax ---------------------------------------------
     ns["UNREACHABLE"][("taskWakeBy", ("ret", "-1"))] = (
         "no task running: taskLoop asks only when nothing moved, and then one is, as every other case "
@@ -726,6 +1033,11 @@ def install(ns):
         (TASK, "taskNapNext", "(if (> (* nap 2) taskPollNanos)\n    taskPollNanos\n    (* nap 2))"),
         (TASK, "taskPollPeriod", "(if (== answered 1)\n    nap\n    taskPollNanos)"),
         (TASK, "taskSleepFor", "(if (> wake now)"),
+        (TASK, "taskMapRanges", "(taskMapWith"),
+        (TASK, "taskMapRanges", "(+ 1 (/ (- count 1) size)) opts)"),
+        (TASK, "taskRunCommand", "(sysRunPath (strDup (vecGetStr argv 0)) (taskArgvVector argv) sysEnvp)"),
+        (TASK, "taskRunCommands", "(taskMapWords (lambda (i) (taskRunCommandWord (vecGet cmds i))) (vecLen cmds) width)"),
+        (TASK, "taskMapCompute", "(taskMapDecodedWith (lambda (index) (taskComputeEncode (worker index))) taskComputeDecode count"),
     ])
     ns["NOT_MODELLED"][TASK] = {
         "taskOpts": "builds the options", "taskWithDeadline": "builds the options",
@@ -748,7 +1060,7 @@ def install(ns):
         "taskHandlePid": "the pid a handle names: in the model a handle is its child's pid; in WRAPPERS",
         "taskSpawn": "the spawn inside its own recovery point, which the model's spawn is, "
                      "whichever cell holds the mark; in WRAPPERS",
-        "taskSpawned": "whether taskSpawn answered a handle: the model's spawns are never refused",
+        "taskSpawned": "whether the recovery point answered a handle: a word-pool scenario fixes any refusal",
         "taskWordOf": "a handle as the word a recovery point answers: in the model a handle is a pid",
         "taskHandleOf": "that word back as a handle: in the model a handle is a pid",
         "taskScratch": "a scratch block of the parent's own", "taskScratchDone": "returns a scratch block",
@@ -771,5 +1083,13 @@ def install(ns):
         "taskDecodeResult": "the decoding sink's step on the delivered answer: a failure passes through",
         "taskFold": "an entry: a sink that folds the answers inside a region",
         "taskFoldOne": "the fold's sink: one step on the delivered answer",
+        "taskMapRanges": "partitions indices into worker bodies, then delegates to taskMapWith; in WRAPPERS",
+        "taskArgvVector": "constructs a null-terminated argument vector in the caller's arena",
+        "taskRunCommand": "an external command inside a worker body: sysRunPath's internals are outside this model; in WRAPPERS",
+        "taskRunCommandWord": "encodes the command body's Result as a scalar word",
+        "taskRunCommands": "delegates to the transcribed word pool, with a command body; in WRAPPERS",
+        "taskMapCompute": "encodes numeric worker bodies and delegates to the budgeted pool; in WRAPPERS",
+        "taskComputeEncode": "serialises the worker's scalar answer as eight bytes",
+        "taskComputeDecode": "checks the answer length and decodes eight bytes in the parent",
     }
     ns["PROCESS_OPS"][TASK] = r"__proc_\w+|__spawn_pid|sysKill\b|sysChildExited|sysTimeoutMicros"

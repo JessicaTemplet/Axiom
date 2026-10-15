@@ -6426,23 +6426,29 @@ deadline/cancellation handling. Tested by
   cancellation's kill, the saturating microseconds conversion and the
   exit wait, each on a copy of the library, and each turns its check
   red.
-- `scripts/check-protocol-model.sh` explores the pool, transcribed in
-  `scripts/lib/task-model.py`, in every interleaving of two and three
-  tasks at widths 1 to 3. Each task's body answers, answers over the
-  limit, traps, exits unanswered, runs for ever, cannot exit after
-  answering, or answers after a while, beside deadlines, a
-  cancellation from a sibling, fail-fast and no look at a child. The
-  model's clock moves only while the pool waits and nothing else can
-  step.
-- In every state of that model, every task is delivered once, in
-  submit order, as what happened to it. At most `width` children and
-  handles exist, and nothing starts once a cancellation is seen. The
-  pool never sleeps past a running task's deadline or the grace's end,
-  and every child is reaped when it returns. Nine planted defects, among
-  them the deadline's kill, the exit wait and the result slot above,
-  are each found with a schedule. §8 ablates the runtime's kill list and Darwin's libSystem fork
-  in copies of the compiler. §7 builds and runs the three programs in
-  `examples/concurrency/`, which check themselves, in both lowerings.
+- `scripts/check-protocol-model.sh` explores the pools transcribed in
+  `scripts/lib/task-model.py`. The budgeted pool has two or three tasks
+  at widths 1 to 3. Bodies answer, exceed the byte limit, trap, exit
+  unanswered, run for ever, fail to exit after answering, or answer
+  after a delay. Scenarios combine these with deadlines, cancellation,
+  fail-fast and an unavailable child look. The model's clock moves only
+  while the pool waits and nothing else can step.
+- Scalar-word pools run up to five tasks with at most three outstanding
+  children. Scenarios check ring reuse, nonpositive and oversized width
+  requests, trapped bodies and checked spawn refusals with status 70 or
+  78. Completion races with refusal cleanup: finished children keep their
+  answers or trap statuses; running children are killed and reaped.
+- Every task is delivered once, in submit order, as what happened to it.
+  At most `width` children and handles exist. Submission stops after a
+  cancellation is seen or a checked word spawn is refused. The budgeted
+  pool never sleeps past a deadline or the grace's end. Every started
+  child is reaped before its pool returns. Planted defects in these rules
+  are each found with a schedule. The model does not cover the unchecked
+  word pool's raising recovery sweep or external-command internals;
+  `scripts/check-task.sh` exercises those on real binaries.
+- `scripts/check-task.sh` §8 ablates the runtime's kill list and Darwin's
+  libSystem fork in copies of the compiler. §7 runs the programs in
+  `examples/concurrency/` in both lowerings.
 
 **MM-PAR-14 (H). A pure parallel computation answers what its parts
 answered, combined in index order, whatever finished first.** This

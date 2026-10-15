@@ -7,13 +7,13 @@ wait on a word. Their headers state the protocols in prose: the lock
 word that names its holder, which both share, and its dead-holder test
 and poisoning; the channel's change counter and the waiter announcement
 in word 2; the mutex's guard. `stdlib/Task.ax` (MM-PAR-13) runs a pool of
-forked tasks on a token and a slab; its transcription is in
+forked tasks on a token and a slab, and scalar-word pools with bounded
+handle rings and checked spawn-refusal cleanup; their transcription is in
 `task-model.py`, which this file installs. The load gates
 (`scripts/check-chan.sh`, `scripts/check-task.sh`,
 `scripts/check-race.sh`) run them and see the interleavings the hardware
 happened to make. This file is the other half: the same steps,
-transcribed, and every interleaving of two and three bindings at small
-bounds.
+transcribed, and every interleaving at the small bounds below.
 
 HOW THE PROTOCOLS ARE WRITTEN DOWN. Each function the protocols run is a
 short program in a tiny instruction set (`FUNCTIONS` below), written in
@@ -22,12 +22,13 @@ cites the exact spelling it transcribes: `('acas', 'r', 'ch', '0', 'me',
 '(__atomic_cas ch 0 me)')` is `chanLock`'s first compare-and-swap. The
 `transcription` command reads the real files and requires every cited
 spelling to occur in its function, in the model's order, and every
-function in the two modules to be either modelled or listed in
+function in the three protocol modules to be either modelled or listed in
 `NOT_MODELLED` with its reason.
 
 WHAT A STEP IS. One access to a shared word: an atomic load, store, add
 or compare-and-swap, the plain entry load of `sysWaitWordTimeout`, a
-kernel wait, a wake, or a `kill(pid, 0)`. Everything a binding does
+kernel wait, a wake, or a `kill(pid, 0)`. Task pools also step at spawns,
+joins, kills and clock reads. Everything a binding does
 between two such accesses (arithmetic, branches, calls, and the plain
 `chanGet`/`chanPut` accesses of words only the lock holder touches) runs
 inside the step before it. That merge is sound only while the lock
@@ -69,7 +70,9 @@ WHAT IS CHECKED, in every reachable state:
                      taken, and a call answers "poisoned" only when it is;
   the task pool      what `task-model.py` states: every task answers its own
                      slot once, the pool stays within its width, sleeps past
-                     no deadline or grace, and reaps every child.
+                     no deadline or grace, and reaps every child; the checked
+                     word pool stops and reaps its outstanding children on
+                     a spawn refusal, delivering an error for the unstarted suffix.
 And, over the whole graph, liveness in the model's terms: from every
 reachable state, every binding can still finish using protocol steps
 alone (plus timeouts and reaps where a scenario says the protocol relies
@@ -84,7 +87,9 @@ WHAT IT IS NOT. A proof about the model, at its bounds, not about the
 implementation: two bindings with one to four words each and three
 bindings with one and two (six and three under --long, and four
 bindings), capacities 1 and 2, one and two slices of time; two and three
-tasks at widths 1 to 3. The link between the two is the `transcription`
+budgeted tasks at widths 1 to 3, and up to five word tasks with at most
+three outstanding children, including nonpositive and oversized width
+requests. The link between the two is the `transcription`
 check (the cited operations are still there, in this order) and
 `replay`, which drives the model with the operation sequence an
 instrumented build recorded and requires every recorded answer to be the

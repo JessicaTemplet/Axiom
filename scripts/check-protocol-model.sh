@@ -5,7 +5,8 @@
 #
 # `stdlib/Chan.ax` and `stdlib/Sync.ax` build a channel and a mutex from
 # the five atomics and a kernel wait on a word. `stdlib/Task.ax` builds a
-# pool of forked tasks with deadlines and cancellation. `check-chan.sh`,
+# pool of forked tasks with deadlines and cancellation, and bounded
+# scalar-word pools with checked spawn-refusal cleanup. `check-chan.sh`,
 # `check-task.sh` and `check-race.sh` run them under load. This gate
 # explores every interleaving at small bounds, in
 # `scripts/lib/protocol-model.py` and `scripts/lib/task-model.py`, then
@@ -26,7 +27,8 @@
 #   3. The transcription. Every operation the model cites must still be
 #      in its function in stdlib/, in the model's order. Every function
 #      that touches a channel or mutex word, or a task's process, must be
-#      modelled or excused. Four mutated copies of the library must fail.
+#      transcribed or tied to a checked wrapper. Seven mutated copies of
+#      the library must fail, including word-ring and refusal mutations.
 #   4. Replay. An instrumented Chan.ax records every channel-word
 #      operation while tests/litmus/chan-trace.ax runs five forked
 #      bindings. The model must accept the record step by step. A change
@@ -69,14 +71,14 @@ bad() { echo "FAIL $*"; failed=$((failed + 1)); }
 
 model="$repo_root/scripts/lib/protocol-model.py"
 if (( long )); then
-  want_scenarios=109; want_states=6900000; budget=3600; trace_n=300; starve_ms=5000
+  want_scenarios=119; want_states=6900000; budget=3600; trace_n=300; starve_ms=5000
 else
-  want_scenarios=86; want_states=1300000; budget=900; trace_n=50; starve_ms=1500
+  want_scenarios=95; want_states=1300000; budget=900; trace_n=50; starve_ms=1500
 fi
 # Floors at the tree's current counts: transcribed steps the scenarios
 # execute, and operations the transcription check matches.
-want_reached=585
-want_matched=311
+want_reached=694
+want_matched=373
 
 # ---------------------------------------------------------------------
 echo "== 1. the model: every interleaving of the real protocols =="
@@ -141,6 +143,10 @@ for name in "park after release" "notify reads the announcement before the chang
             "task joined on its answer alone" "task answers into its neighbour's slot" \
             "task started after the cancellation" "task handle pushed for every task" \
             "task killed and not joined" "task wake ignores the grace" \
+            "word pool spawned before joining" "word pool joins its neighbour's slot" \
+            "word refusal leaves a running child" "word refusal kills without reaping" \
+            "word refusal drops unstarted results" \
+            "word pool retries a refused spawn" \
             "mutex release without a wake" "mutex lock by load then store" "mutex waiter without its mark" \
             "mutex guard compared with the counter" "mutex dead-holder test without its re-read" \
             "mutex child look removed"; do
@@ -186,6 +192,14 @@ cuts = {
   # A new function reads the lock word.
   "new": ("Chan.ax", "(pub :: chanCap (-> Chan Int))",
           "(pub :: chanPeekLock (-> Int Int))\n;@axiom:effect(unsafe)\n(pub fn (chanPeekLock ch)\n  (__atomic_load ch))\n\n(pub :: chanCap (-> Chan Int))", 1),
+  # Reuse a neighbouring word-pool handle in both the fill and drain.
+  "ring": ("Task.ax", "(__proc_join (vecGet hs (% joined w)))",
+           "(__proc_join (vecGet hs (% (+ joined 1) w)))", 2),
+  # Refusal cleanup must kill a live word task before its join.
+  "wordkill": ("Task.ax", "(sysKill (__spawn_pid h) 9)", "(sysKill (__spawn_pid h) 0)", 1),
+  # A new process operation must not escape source-coverage accounting.
+  "wordnew": ("Task.ax", "(pub :: taskMapWords (-> (-> Int Int) Int Int (Vec Int)))",
+              "(:: taskUncheckedJoin (-> Spawn Int))\n;@axiom:effect(io)\n;@axiom:effect(block)\n(fn (taskUncheckedJoin h) (__proc_join h))\n\n(pub :: taskMapWords (-> (-> Int Int) Int Int (Vec Int)))", 1),
 }
 for kind, (f, old, new, count) in cuts.items():
     d = os.path.join(base, kind)
@@ -197,7 +211,8 @@ for kind, (f, old, new, count) in cuts.items():
         sys.exit("seam %s: found %d times, wanted %d" % (kind, s.count(old), count))
     open(p, "w", encoding="utf-8").write(s.replace(old, new))
 PY
-for pair in "park:chanSend" "wake:syncRelease" "kill:taskKillJoin" "new:chanPeekLock"; do
+for pair in "park:chanSend" "wake:syncRelease" "kill:taskKillJoin" "new:chanPeekLock" \
+            "ring:taskMapWords" "wordkill:taskWordsKill" "wordnew:taskUncheckedJoin"; do
   kind="${pair%%:*}"; fn="${pair#*:}"
   [[ -d "$work/tx/$kind" ]] || continue
   rc=0; out="$(python3 "$model" transcription "$work/tx/$kind" --quiet 2>&1)" || rc=$?
