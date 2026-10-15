@@ -485,15 +485,20 @@ module.exports = grammar({
       ')',
     ),
 
-    // `(type Name (tyvars...) = Type)`. The `=` is optional in the
-    // parser, so it is optional here.
+    // Alias parameters use type-variable tokens in type position. Both
+    // bare runs and parenthesised lists end at the required `=`.
     type_alias: $ => seq(
       '(', optional(field('visibility', 'pub')), 'type',
       field('name', choice($.identifier, $.syntax_join_name)),
-      optional(field('type_parameters', $.type_parameters)),
-      optional('='),
+      optional(field('type_parameters', alias($.alias_type_parameters, $.type_parameters))),
+      '=',
       field('target', $._type),
       ')',
+    ),
+
+    alias_type_parameters: $ => choice(
+      seq('(', repeat($.type_variable), ')'),
+      repeat1($.type_variable),
     ),
 
     // `(subtype Name is Base range LO[..HI])` — Ada-style
@@ -922,23 +927,12 @@ module.exports = grammar({
       field('module', choice($.identifier, alias($.field_expression, $.dotted_module))), '::', field('name', $.identifier),
     )),
 
-    // `Mod::Name` where a TYPE stands - the same spelling expressions
-    // use, answered by the same module-aware lookup.
-    //
-    // `constructor_identifier`, NOT `identifier`, for every name here,
-    // and that is load-bearing rather than tidiness. Admitting the
-    // general `identifier` token into `_type` states flips the keyword
-    // tie-break everywhere: `Int` in `(:: stdout Int)` parsed as a
-    // `type_constructor`, and 37 of the 44 corpus cases with it -
-    // measured, not argued. Modules and type names are capitalized by
-    // the language's own rule (a lowercase name in type position is a
-    // variable), so the narrower token loses nothing the compiler
-    // accepts. A dotted path (`Mod.Sub::Name`) spells its segments
-    // structurally for the same reason: no new token may enter these
-    // states.
+    // Qualified types reuse existing type-name tokens for module segments,
+    // so lowercase package paths remain valid without changing builtin
+    // token precedence. The final type name is still a constructor name.
     qualified_type: $ => seq(
-      field('module', $.constructor_identifier),
-      repeat(seq('.', field('submodule', $.constructor_identifier))),
+      field('module', choice($.constructor_identifier, $.type_variable)),
+      repeat(seq('.', field('submodule', choice($.constructor_identifier, $.type_variable)))),
       '::', field('name', $.constructor_identifier),
     ),
 

@@ -814,6 +814,11 @@ unsaved files, malformed-source recovery and close/reopen.
   layout. Before/after native programs and comment-preservation checks
   accompany the width and fixed-point regressions.
 
+- Tree-sitter recognises bare and parenthesised generic alias parameters
+  and lowercase module paths in qualified types. Generated parser files
+  and namespace highlighting match those forms; the whole source corpus
+  parses without errors.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

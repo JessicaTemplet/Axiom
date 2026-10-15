@@ -92,8 +92,8 @@
   (#match? @type.parameter "^[a-z]"))
 (struct_declaration marker: (identifier) @type.parameter)
 
-(qualified_type module: (constructor_identifier) @module)
-(qualified_type submodule: (constructor_identifier) @module)
+(qualified_type module: (_) @module)
+(qualified_type submodule: (_) @module)
 ((qualified_type name: (constructor_identifier) @type.builtin)
   (#match? @type.builtin "^(Int|Float|Bool|Char|String|Foreign|Handle|Vec|Option|Result|Addr)$"))
 ((qualified_type name: (constructor_identifier) @type)
