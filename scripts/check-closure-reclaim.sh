@@ -237,6 +237,65 @@ else
   echo "     the compiler under test is $axc"
 fi
 
+# The typed cast in 462 grounds its literal lambda's argument to
+# String. Its store therefore takes a share without generic evidence.
+# Keep that control and exercise the cast spine with a closure returned
+# by a polymorphic factory: that lifted body must read the caller's bit.
+generic_surplus="$work/generic-surplus.ax"
+generic_want=15
+cat > "$generic_surplus" <<'EOF'
+(import Str)
+(import Vec)
+
+(struct Holder
+  (mut name : String))
+
+(:: mkParker (-> (Vec a) a Int))
+(fn (mkParker log)
+  (lambda (value)
+    {
+      (vecPush log value)
+      0
+    }))
+
+(:: parkedByte (-> Int Int))
+(fn (parkedByte path)
+  {
+    (let log vecNew)
+    (let holder (Holder :name (strDup "alice")))
+    (if (== path 0)
+      ((lambda (value)
+        {
+          (vecPush log value)
+          0
+        }) holder.name)
+      (if (== path 1)
+        (mkParker log holder.name)
+        ((as (mkParker log) (-> String Int)) holder.name)))
+    (set holder.name (strDup "bob"))
+    (strDup "zzzzz")
+    (strByte (vecGetStr log 0) 0)
+  })
+
+(:: main Int)
+(fn (main)
+  (+ 1
+    (+ (if (== (parkedByte 0) 97) 2 0)
+      (+ (if (== (parkedByte 1) 97) 4 0)
+        (if (== (parkedByte 2) 97) 8 0)))))
+EOF
+run_generic_surplus() {  # <compiler> -> exit status
+  ( "$1" run "$generic_surplus" ) >"$work/generic-surplus.$$" 2>&1
+  printf '%s' "$?"
+}
+rc_g="$(run_generic_surplus "$axc")"
+if [[ "$rc_g" == "$generic_want" ]]; then
+  ok "generic surplus callback exits $rc_g - direct, over-applied and typed cast paths"
+else
+  bad "generic surplus callback exits $rc_g, wanted $generic_want"
+  sed 's/^/     /' "$work/generic-surplus.$$" | head -10
+fi
+
 # THE ABLATION, in two halves, because the fix is in two places and a
 # single one would leave the other unproven. Each is planted on its own
 # COPY of the tree, for the reason the ablation above states.
@@ -266,61 +325,58 @@ open(p, "w").write(s.replace(needle, repl, 1))
 PY
   gate_build_tree "$axiom" "$tree" "$tree/stdlib" \
     "$work/axc-abl-$name" >"$work/abl-$name.build.log" 2>&1 || return 1
-  ( "$work/axc-abl-$name" run "$surplus" ) >"$work/abl-$name.run" 2>&1
-  printf '%s' "$?"
+  # A compiler refusal must not stand in for the native probe's red.
+  "$work/axc-abl-$name" build "$generic_surplus" -o "$work/surplus-$name" \
+    >"$work/abl-$name.probe-build.log" 2>&1 || return 1
+  local rc=0
+  ( "$work/surplus-$name" ) >"$work/abl-$name.run" 2>&1 || rc=$?
+  if [[ "$name" == checker ]]; then
+    local typed_rc; typed_rc="$(run_surplus "$work/axc-abl-$name")"
+    if [[ "$typed_rc" != "$surplus_want" ]]; then
+      echo "typed surplus control moved: $typed_rc, wanted $surplus_want" >&2
+      return 1
+    fi
+  fi
+  printf '%s' "$rc"
 }
 
-# The checker half: `cast`'s surplus goes unstamped again. It starts at
-# argument 2 because `checkCastForm` checks the value, argument 1, itself
-# (it keeps the value's type for the forging rule, R-B6). The needle
-# is the multi-line call the formatter writes; a single-line spelling
-# fails the verbatim match and proves nothing (measured 2026-09-19,
-# when both needles below matched zero times and the gate went red
-# without testing anything).
+# A typed `as` spine checks its surplus as ordinary applications.
+# Erase only that path's argument evidence; all other application
+# stamps, and 462's ground String callback, must stay correct.
+# A unique match is required before rebuilding, so source drift cannot
+# silently skip the negative control.
 rc_b="$(ablate_and_run checker self_host/typecheck.ax \
-  '      (checkCastArgs
-        tc
-        args
-        e
-        2
-        (vecLen args))' \
-  '(checkArgsFromIndex tc args 2)')" || rc_b=""
+  '(let c (evClassOf tc argTy))' \
+  '(let c (if (&& (== headIsVar 1) (&& (isValueCastForm hname) (> (spineArgs e 0) 2))) 0 (evClassOf tc argTy)))')" || rc_b=""
 if [[ -z "$rc_b" ]]; then
   bad "could not ablate the checker half - nothing was proven"
-elif [[ "$rc_b" == "$surplus_want" ]]; then
+elif [[ "$rc_b" == "$generic_want" ]]; then
   bad "the checker-ablated compiler still exits $rc_b - term 8 cannot fail"
-elif (( (surplus_want - rc_b) == 8 )); then
+elif (( (generic_want - rc_b) == 8 )); then
   ok "the checker-ablated compiler exits $rc_b - term 8 and nothing else"
 else
-  bad "the checker-ablated compiler exits $rc_b; wanted $((surplus_want - 8))"
-  echo "     $surplus_want - $rc_b = $((surplus_want - rc_b)), so a term other"
+  bad "the checker-ablated compiler exits $rc_b; wanted $((generic_want - 8))"
+  echo "     $generic_want - $rc_b = $((generic_want - rc_b)), so a term other"
   echo "     than the cast spine moved and the ablation is not isolated"
 fi
 
-# The emitter half: `emitApplyChain` passes `vecNew` again, which is
-# what it did until 2026-08-31, and takes BOTH of its callers with it.
-# Same verbatim-match note as the checker half above. The needle ends
-# at the call's own paren and leaves the enclosing `fn`'s paren in
-# place, as the original single-line needle did.
+# The emitter half drops evidence for both surplus callers: the
+# over-applied factory and `(as (mkParker log) (-> String Int))`.
+# The canonical call must match once before either park can lose its
+# share. Only the two generic terms may disappear from the bitmask.
 rc_a="$(ablate_and_run emitter self_host/codegen.ax \
-  '  (emitApplyChainOwned
-    args
-    cg
-    rec
-    i
-    0
-    evs
-    snode
-    0)' \
+  '(emitApplyChainOwned args cg rec i 0 evs snode 0)' \
   '(emitApplyChainOwned args cg rec i 0 vecNew snode 0)')" || rc_a=""
 if [[ -z "$rc_a" ]]; then
   bad "could not ablate the emitter half - nothing was proven"
-elif [[ "$rc_a" == "$surplus_want" ]]; then
+elif [[ "$rc_a" == "$generic_want" ]]; then
   bad "the emitter-ablated compiler still exits $rc_a - the evidence word is not load-bearing"
 elif [[ "$rc_a" == "139" ]]; then
   ok "the emitter-ablated compiler exits 139 - two uncounted parks, a segmentation fault"
+elif [[ "$rc_a" == "3" ]]; then
+  ok "the emitter-ablated compiler exits 3 - both generic surplus parks lost, direct control intact"
 else
-  ok "the emitter-ablated compiler exits $rc_a rather than $surplus_want"
+  bad "the emitter-ablated compiler exits $rc_a; wanted 3 or 139 from the two uncounted parks"
 fi
 
 # --------------------------------------------------------------------
@@ -423,6 +479,12 @@ else
       ok "stamp-ablated 462 still exits $surplus_want"
     else
       bad "stamp-ablated 462 exits $rc462a, wanted $surplus_want - the ablation is not isolated"
+    fi
+    rc_generic_a="$(run_generic_surplus "$work/axc-argabl")"
+    if [[ "$rc_generic_a" == "$generic_want" ]]; then
+      ok "stamp-ablated generic surplus still exits $generic_want"
+    else
+      bad "stamp-ablated generic surplus exits $rc_generic_a, wanted $generic_want - the ablation is not isolated"
     fi
   else
     bad "the stamp-ablated compiler did not build"

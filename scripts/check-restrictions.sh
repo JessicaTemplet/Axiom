@@ -56,7 +56,7 @@
 #      is not a restriction - and
 #      each copy must draw exactly one restriction diagnostic, of the
 #      code and on the declaration the plant names. The `no-cast`
-#      plant additionally requires the span to cover the word `cast`
+#      plant additionally requires the span to cover the keyword `as`
 #      and not the declaration: the local rule reports where the fix
 #      is.
 #
@@ -510,24 +510,24 @@ plant() {
 plant no-io      's/^\(fn \(quietIo n\) \(\+ n 1\)\)$/;\@axiom:effect(io)\n(fn (quietIo n) { (println "io") (+ n 1) })/' AX3049 quietIo
 plant no-alloc   's/^\(fn \(quietAlloc n\) \(\* n 2\)\)$/(fn (quietAlloc n) { (let v vecNew) { (vecPush v n) (* n 2) } })/' AX3049 quietAlloc
 plant no-cast    's/^\(fn \(quietCast n\) \(- n 3\)\)$/(fn (quietCast n) (- (as n Int) 3))/' AX3049 quietCast
-plant no-foreign 's/^\(import Vec\)$/(import Vec)\n\n(pub extern "axiom_demo"\n  (add :: (-> Int Int Int) (symbol "axffi_add")))/; s/^    \(println "native"\)$/    (add n 1)/' AX3049 quietForeign
+plant no-foreign 's/^\(import Err\)$/(import Err)\n\n(pub extern "axiom_demo"\n  (add :: (-> Int Int Int) (symbol "axffi_add")))/; s/^    \(println "native"\)$/    (add n 1)/' AX3049 quietForeign
 plant unknown    's/^;\@axiom:restrict\(no-cast\)$/;\@axiom:restrict(no-cast,no-fo)/' AX3052 quietCast
 plant no-recursion 's/^\(fn \(quietRec n\) \(quietCast n\)\)$/(fn (quietRec n) (if (<= n 0) 0 (quietRec (- n 1))))/' AX3049 quietRec
 plant no-wrap    's/^\(fn \(quietWrap n\) \(unwrapOr \(addChecked n 1\) 0\)\)$/(fn (quietWrap n) (+ n 1))/' AX3049 quietWrap
 plant no-trap 's/^\(fn \(quietTrap n\) \(unwrapOr \(divChecked n 2\) 0\)\)$/(fn (quietTrap n) (\/ n 2))/' AX3049 quietTrap
 
 # The local rule's span: the `no-cast` plant's diagnostic must cover
-# the word `cast` in the line it points at, not the declaration.
+# the keyword `as` in the line it points at, not the declaration.
 if [[ -f "$work/plant/no-cast.hits" ]]; then
   loc="$(awk '{print $3}' "$work/plant/no-cast.hits" | head -1)"
   line="${loc#*:}"; line="${line%%:*}"
   cols="${loc##*:}"; c1="${cols%-*}"; c2="${cols#*-}"
   src="$(sed -n "${line}p" "$work/plant/no-cast.ax")"
   covered="${src:$((c1 - 1)):$((c2 - c1))}"
-  if [[ "$covered" == "cast" ]]; then
-    ok "the no-cast plant is reported at the cast: span $loc covers \`cast\`"
+  if [[ "$covered" == "as" ]]; then
+    ok "the no-cast plant is reported at the conversion: span $loc covers \`as\`"
   else
-    bad "the no-cast plant's span $loc covers '$covered', not \`cast\`"
+    bad "the no-cast plant's span $loc covers '$covered', not \`as\`"
   fi
 fi
 
@@ -538,12 +538,7 @@ echo "== 4. a compiler that stops answering is caught =="
 # this feature existed. Built from a copy so the tree is untouched.
 mkdir -p "$work/ablate"
 cp -R "$repo_root/self_host" "$work/ablate/self_host"
-hook='          (checkRestricts
-            tc
-            d
-            own
-            sig
-            eff)'
+hook='          (checkRestricts tc d own sig eff)'
 if ! grep -qF "$hook" "$work/ablate/self_host/typecheck.ax"; then
   bad "the ablation target \`$hook\` is not in typecheck.ax - this probe no longer ablates anything"
 else

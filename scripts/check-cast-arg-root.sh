@@ -155,13 +155,28 @@ echo "--- 1. user-level cast count does not grow ---"
 # of a fixture whose forged `(cast Spawn w)` handles are its subject;
 # a human golden quotes the source lines it points at. The two left
 # with `vecFree`'s fixtures (48b43283).
+# Baseline 939 follows the explicit numeric-conversion and fixed-width
+# migrations. The census counts occurrences (`git grep -o`), including
+# test subjects, comments and diagnostic renderings; moving a nested
+# conversion to another line does not change it. The 939 are 75 in the
+# stdlib, 862 in tests and two unchanged example conversions.
+# New application conversions in AxqlEval and AxqlExec are numeric:
+# Int/Float comparisons, sums and averages now state their conversions.
+# Float's numeric helpers do likewise; its output-buffer word exposes
+# the header for a length write, rather than forging a reference.
+# Axqlite keeps its handle-word inspection for the runtime-liveness check.
+# Most new test occurrences pin precise integer boundaries and packed
+# fields (959, 948, 1431 and 949), explicit numeric conversion, generic
+# invariance and aliasing. The remaining additions are diagnostic/help
+# mirrors, formatter/LSP source payloads and memory-layout/ownership
+# probes, including 964-967; the casts are their MM-VAL-23 subjects.
 cast_count="$(git -C "$repo_root" grep -h -o '(as ' -- stdlib tests examples ':!tests/fuzz' | wc -l | tr -d ' ')"
 if [ "$cast_count" -eq 0 ]; then
   bad "user-level: the cast count read 0 - the measurement is broken, not the tree clean"
-elif [ "$cast_count" -le 476 ]; then
-  ok "user-level (cast count $cast_count <= 476)"
+elif [ "$cast_count" -le 939 ]; then
+  ok "user-level (cast count $cast_count <= 939)"
 else
-  bad "user-level (cast count $cast_count > 476): new casts need a MM-VAL-23 reason and a baseline bump"
+  bad "user-level (cast count $cast_count > 939): new casts need a MM-VAL-23 reason and a baseline bump"
 fi
 
 echo "--- 2. type-preserving casts keep ownership ---"
@@ -262,7 +277,16 @@ echo "--- 4. the compiler's erasures do not grow ---"
 # 31 results that returned a record through a declared `Int` and now
 # write `(cast Int ...)` because the implicit coercion is gone, plus
 # one in `tcWalkDecls` opening the erasure-site list itself.
-erasure_pin=836
+# Baseline 845 follows the reviewed compiler changes: fourteen added
+# sites and five removed. Seven added sites inspect existing nullable
+# handles: ctor field types, match binders, four module-name checks and
+# a function-index bucket. Seven cross existing word-based metadata
+# boundaries: four empty formatter comment queues, ComputeRequest and
+# ComputeWalk records, and the generic struct evidence variable list.
+# resolveDeclsPhase removed two sites; fpLambda, fpPat and fpPatVecAt
+# removed one each. The total therefore rises by nine without adding
+# an implicit conversion or widening the kinds the counter recognises.
+erasure_pin=845
 erasure_sum() {  # <axsym> -> the #erasures= total over self_host/ rows
   awk '$1 == "F" && index($3, "self_host/") == 1 {
          for (i = 4; i <= NF; i++)

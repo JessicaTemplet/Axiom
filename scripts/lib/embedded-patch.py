@@ -66,7 +66,7 @@ ABLATIONS = {
     # chunk lines in the anchor read the effective chunk, which the heap
     # ceiling flag can change, so re-anchor here if that code moves.
     "literal": (
-        '    (emitLine\n      cg\n      (concat\n        "  %big = icmp ugt i64 %need, "\n        (concat (fmtInt (arenaChunkBytes (memGetWord cg 26))) "")))\n    (emitLine\n      cg\n      (concat\n        "  %rounded0 = add i64 %need, "\n        (concat (fmtInt (- (targetArenaGrainBytes (memGetWord cg 26)) 1)) "")))\n    (emitLine\n      cg\n      (concat\n        "  %rounded = and i64 %rounded0, "\n        (concat (fmtInt (- 0 (targetArenaGrainBytes (memGetWord cg 26)))) "")))\n    (emitLine\n      cg\n      (concat\n        "  %chunk = select i1 %big, i64 %rounded, i64 "\n        (concat (fmtInt (arenaChunkBytes (memGetWord cg 26))) "")))',
+        '    (emitLine cg\n      (concat "  %big = icmp ugt i64 %need, "\n        (concat (fmtInt (arenaChunkBytes (memGetWord cg 26))) "")))\n    (emitLine cg\n      (concat "  %rounded0 = add i64 %need, "\n        (concat (fmtInt (- (targetArenaGrainBytes (memGetWord cg 26)) 1)) "")))\n    (emitLine cg\n      (concat "  %rounded = and i64 %rounded0, "\n        (concat (fmtInt (- 0 (targetArenaGrainBytes (memGetWord cg 26)))) "")))\n    (emitLine cg\n      (concat "  %chunk = select i1 %big, i64 %rounded, i64 "\n        (concat (fmtInt (arenaChunkBytes (memGetWord cg 26))) "")))',
         """    (emitLine cg "  %big = icmp ugt i64 %need, 1048576")
     (emitLine cg "  %rounded0 = add i64 %need, 65535")
     (emitLine cg "  %rounded = and i64 %rounded0, -65536")
@@ -180,8 +180,8 @@ ABLATIONS = {
     # memory clobber still keeps it here, so A15 reads the emitted
     # attributes, which is what the rule promises.
     "asmfx": (
-        '(kw (concat\n            (if (asmHasFlag flags 112)\n              ""\n              "sideeffect ")',
-        '(kw (concat (if (asmHasFlag flags 112)\n        ""\n        "")',
+        '          (if (asmHasFlag flags 112)\n            ""\n            "sideeffect ")',
+        '          (if (asmHasFlag flags 112)\n            ""\n            "")',
         "A15 - every inline-asm block being sideeffect",
     ),
     # An `asm` call carries no `!srcloc`, so llc names no cookie and a

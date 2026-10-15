@@ -163,9 +163,10 @@ deg empty-while-body 0 <<'AXEOF'
 AXEOF
 deg empty-set-val 1 <<'AXEOF'
 (:: main Int)
-(fn (main) (let mut ((x 1)) { (set x ()) x }))
+(fn (main) { (let mut x 1) (set x ()) x })
 AXEOF
-deg empty-ascribe 0 <<'AXEOF'
+# An ascription checks the value's type; unit cannot manufacture an Int.
+deg empty-ascribe 1 <<'AXEOF'
 (:: main Int)
 (fn (main) (:: () Int))
 AXEOF
@@ -553,7 +554,7 @@ fi
 # ---------------------------------------------------------------
 echo "== the language server survives an unfinished form =="
 lsp_out="$(python3 - "$axc" "$work" <<'PY' 2>&1
-import json, os, subprocess, sys
+import json, os, queue, subprocess, sys, threading, time
 axc, work = sys.argv[1], sys.argv[2]
 d = os.path.join(work, "lsp"); os.makedirs(d, exist_ok=True)
 uri = "file://" + os.path.join(d, "doc.ax")
@@ -568,36 +569,110 @@ texts = ["(:: main Int)\n(fn (main) 0)\n",
          "(:: main Int)\n(fn (main) ())\n",
          "(:: main Int)\n(fn (main) {})\n",
          "(:: main Int)\n(fn (main) 1)\n"]
-msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize",
-         "params": {"processId": None, "rootUri": None, "capabilities": {}}},
-        {"jsonrpc": "2.0", "method": "initialized", "params": {}},
-        {"jsonrpc": "2.0", "method": "textDocument/didOpen",
-         "params": {"textDocument": {"uri": uri, "languageId": "axiom",
-                                     "version": 1, "text": texts[0]}}}]
-for i, t in enumerate(texts[1:], start=2):
-    msgs.append({"jsonrpc": "2.0", "method": "textDocument/didChange",
-                 "params": {"textDocument": {"uri": uri, "version": i},
-                            "contentChanges": [{"text": t}]}})
-msgs += [{"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": None},
-         {"jsonrpc": "2.0", "method": "exit", "params": None}]
+p = subprocess.Popen([axc, "lsp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                     stderr=subprocess.PIPE, cwd=d)
+pending, messages, read_errors = queue.Queue(), [], []
+deadline = time.monotonic() + 120
 
-p = subprocess.run([axc, "lsp"], input=b"".join(frame(m) for m in msgs),
-                   capture_output=True, timeout=120, cwd=d)
-if p.returncode < 0:
-    print(f"FAIL lsp: the server was killed by signal {-p.returncode}")
+def read_messages():
+    try:
+        while True:
+            line = p.stdout.readline()
+            if not line:
+                pending.put(None)
+                return
+            headers = []
+            while line != b"\r\n":
+                if not line.endswith(b"\r\n"):
+                    raise ValueError("malformed response header")
+                headers.append(line[:-2])
+                line = p.stdout.readline()
+            lengths = [h.split(b":", 1)[1].strip() for h in headers
+                       if h.lower().startswith(b"content-length:")]
+            if len(lengths) != 1:
+                raise ValueError("response needs one Content-Length")
+            size = int(lengths[0])
+            if not 0 <= size <= 16 * 1024 * 1024:
+                raise ValueError("invalid response length")
+            body = p.stdout.read(size)
+            if len(body) != size:
+                raise ValueError("truncated response body")
+            msg = json.loads(body)
+            if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
+                raise ValueError("malformed JSON-RPC response")
+            messages.append(msg)
+            pending.put(msg)
+    except (ValueError, OSError) as e:
+        read_errors.append(str(e))
+        pending.put(None)
+
+reader = threading.Thread(target=read_messages, daemon=True)
+reader.start()
+
+def send(msg):
+    p.stdin.write(frame(msg))
+    p.stdin.flush()
+
+def wait_for(matches, label):
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("timed out waiting for " + label)
+        msg = pending.get(timeout=remaining)
+        if msg is None:
+            raise ValueError("server closed output before " + label)
+        if matches(msg):
+            return msg
+
+try:
+    send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+          "params": {"processId": None, "rootUri": None, "capabilities": {}}})
+    init = wait_for(lambda m: m.get("id") == 1, "initialize")
+    if "result" not in init or "error" in init:
+        raise ValueError("initialize did not succeed")
+    send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
+    # Background analysis may coalesce queued edits or cancel on shutdown.
+    # Wait for this version before editing again, so every malformed form
+    # is analysed and every publication carries its own version and URI.
+    for version, text in enumerate(texts, start=1):
+        if version == 1:
+            send({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+                  "params": {"textDocument": {"uri": uri, "languageId": "axiom",
+                                              "version": version, "text": text}}})
+        else:
+            send({"jsonrpc": "2.0", "method": "textDocument/didChange",
+                  "params": {"textDocument": {"uri": uri, "version": version},
+                             "contentChanges": [{"text": text}]}})
+        wait_for(lambda m: m.get("method") == "textDocument/publishDiagnostics"
+                 and m.get("params", {}).get("uri") == uri
+                 and m.get("params", {}).get("version") == version,
+                 "diagnostics for version %d" % version)
+    send({"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": None})
+    shutdown = wait_for(lambda m: m.get("id") == 2, "shutdown")
+    if "result" not in shutdown or shutdown["result"] is not None or "error" in shutdown:
+        raise ValueError("shutdown did not answer null")
+    send({"jsonrpc": "2.0", "method": "exit", "params": None})
+    p.stdin.close()
+    p.wait(timeout=max(0.01, deadline - time.monotonic()))
+    reader.join(timeout=5)
+    if reader.is_alive():
+        raise ValueError("server left its response stream open")
+    if p.returncode != 0:
+        raise ValueError("server exited %d" % p.returncode)
+    if read_errors:
+        raise ValueError(read_errors[0])
+    published = [m["params"]["version"] for m in messages
+                 if m.get("method") == "textDocument/publishDiagnostics"
+                 and m.get("params", {}).get("uri") == uri]
+    if published != list(range(1, len(texts) + 1)):
+        raise ValueError("diagnostic versions were %r" % published)
+except (ValueError, OSError, queue.Empty, subprocess.TimeoutExpired) as e:
+    if p.poll() is None:
+        p.kill()
+        p.wait()
+    print("FAIL lsp: %s (server exit %s)" % (str(e) or "response timed out", p.returncode))
     sys.exit(1)
-if p.returncode != 0:
-    print(f"FAIL lsp: the server exited {p.returncode}")
-    sys.exit(1)
-body = p.stdout.decode("utf-8", "replace")
-published = body.count('"method":"textDocument/publishDiagnostics"')
-if published != len(texts):
-    print(f"FAIL lsp: {published} publishDiagnostics for {len(texts)} document versions")
-    sys.exit(1)
-if '"id":2' not in body.replace(" ", ""):
-    print("FAIL lsp: the server never answered the shutdown request")
-    sys.exit(1)
-print(f"ok   the server answered {published} versions and its shutdown")
+print(f"ok   the server answered {len(published)} versions and its shutdown")
 PY
 )"; lsp_st=$?
 echo "$lsp_out" | sed 's/^/     /'
