@@ -16,12 +16,6 @@ its changelog too.
 
 ## Unreleased
 
-- Index named-struct declarations after declaration macros finish, so
-  ordinary variable and function lookups avoid scanning the whole module.
-  Generated structs retain their visibility and written evaluation order.
-  Tested by `tests/stdlib/969-generated-named-struct.ax` and
-  `scripts/check-name-scale.sh`.
-
 ## 0.7.9 — 2026-10-15
 
 This release adds explicit numeric conversions and fixed-width integers,
@@ -44,10 +38,19 @@ The compiler, library, documentation and editor tooling use these forms.
 Named unary function values use static descriptors; capturing lambdas keep
 counted environments.
 
+Indexed named-struct declarations keep ordinary name lookups independent
+of the module's struct count.
+
 Thanks to [@JessicaTemplet](https://github.com/JessicaTemplet) for clearer
 conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
+
+- Index named-struct declarations after declaration macros finish, so
+  ordinary variable and function lookups avoid scanning the whole module.
+  Generated structs retain their visibility and written evaluation order.
+  Tested by `tests/stdlib/969-generated-named-struct.ax` and
+  `scripts/check-name-scale.sh`.
 
 - The restricted-declaration census includes fixed-width arithmetic,
   exact conversion helpers, REPL colours and ownership regressions.

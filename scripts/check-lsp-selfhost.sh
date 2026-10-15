@@ -1057,7 +1057,7 @@ if [[ "$sweep_status" -ne 0 ]]; then
   status=1
 fi
 
-if ! python3 "$repo_root/tests/lsp/route-b.py" "$axc"; then
+if ! python3 "$repo_root/tests/lsp/route-b.py" "$work/stage1"; then
   echo "FAIL block-local and named-field editor behaviour"
   status=1
 fi
