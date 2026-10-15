@@ -27,7 +27,7 @@ shims across the FFI boundary.
 
 This repository's one recorded performance win was found by measuring,
 and it was in the place nobody predicted. `renderCG` built the emitted
-module by left-folding `strConcat` over a vector of lines. `strConcat`
+module by left-folding string concatenation over a vector of lines. `concat`
 allocates a fresh buffer and copies both operands, and the allocator was
 then a bump pointer with no free, so each line copied everything emitted so far
 and abandoned the previous copy: peak was the *sum* of every
@@ -59,7 +59,7 @@ this project. Do not tell anyone to consult one. What exists:
 | `scripts/measure-memory-baseline.sh` | RSS held flat across generations under the managed-memory contract, with the unmanaged twin as the negative control; `scripts/check-memory-baseline.sh` is the gate wrapper |
 | `axiom emit-llvm f.ax -o f.ll` | the actual IR, before `opt`. Reading it is the cheapest way to settle what the emitter did |
 | `axiom build --opt 0-3` | the optimisation level handed to the toolchain; default 1 |
-| `/usr/bin/time -l` (macOS) / `-v` (Linux) | peak footprint and wall clock, which is what the `strConcat` table above is |
+| `/usr/bin/time -l` (macOS) / `-v` (Linux) | peak footprint and wall clock, which is what the concatenation measurement above records |
 | `scripts/check-reproducible.sh` | that two compiles of one input agree byte for byte, which is the precondition for any before/after comparison meaning anything |
 
 Timing methodology this repository already settled, and that a new
@@ -87,16 +87,13 @@ State these correctly or not at all:
   Measure peak memory before assuming it is; that is why quadratic
   copying shows up as a memory catastrophe before it shows up as a slow
   one.
-- **Reclamation is the arena scope plus reference counting**, not
-  linearity and not a garbage collector. The arena is the strategy
-  (MM-ALLOC-22); reference counting (MM-LIFE-2a) is abandoned in place,
-  and what it already emits still reclaims. `linear T` and `consume`
-  parse but are not what the memory model relies on (MM-LIFE-7). What
-  linearity would still buy is retain/release-free moves and early
-  drops - say that, not that Axiom has linear types.
+- **Heap values use reference counting; regions reclaim an extent in
+  bulk.** Measure emitted retain/release calls and arena resets for the
+  operation being changed. Follow the enforced rules and their status
+  in `docs/memory-model.md`. `linear` and `consume` are refused syntax.
 - **`stdlib/Map.ax` is an open-addressing hash map with a separate state
-  array**, mutable, `Int` keys to machine-word values. It is not
-  persistent. `stdlib/Vec.ax` and `stdlib/Intern.ax` are the other two
+  array**. `(Map v)` has `Int` keys and values of type `v`; the value
+  type determines ownership. It is mutable. `stdlib/Vec.ax` and `stdlib/Intern.ax` are the other two
   structures the compiler leans on.
 - **Generated code calls no libc function**, by gate
   (`scripts/check-freestanding.sh`). "Just call `memcpy`" is not

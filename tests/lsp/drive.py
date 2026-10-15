@@ -932,11 +932,11 @@ expect_symbols += N + 1
 # else can be offered). A keyword the parser learns and the server
 # forgets fails here.
 #
-# `union`, `foreign` and - since 0.6.0 - `trait` and `impl` are named
-# by the parser only in order to REFUSE them (AX2004), so they are not
-# expected in a menu. `self_host/lsp.ax`'s `lspKeywords` carries the
-# same four, and this equality is what keeps the two in step. `region`
-# was the fifth until 2026-09-03; it is a keyword again and is offered.
+# Retired heads stay recognisable for migration diagnostics and colours,
+# while completion offers current syntax only. This independent set pins
+# the exclusions even if the server's shared list changes.
+RETIRED_KEYWORDS = {"union", "foreign", "trait", "impl", "cond", "begin", "alloc",
+                    "consume", "define", "emacro"}
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PARSER_AX = os.path.join(REPO, "self_host", "parser.ax")
 _psrc = open(PARSER_AX, encoding="utf-8").read()
@@ -950,6 +950,7 @@ if _missing:
              f"would be short and the equality below would be wrong")
 KEYWORDS = sorted((_kwlits | {_kwdefs[n] for n in _kwnames})
                   - {"union", "foreign", "trait", "impl"})
+CURRENT_KEYWORDS = sorted(set(KEYWORDS) - RETIRED_KEYWORDS)
 # An extraction that stops matching turns the equality into a comparison
 # of two short lists that happen to agree. It is refused before any
 # server starts, for the reason the manifest floors are.
@@ -1379,10 +1380,10 @@ elif "tagColour" in [i.get("label") for i in its16]:
 # The document no longer parses: a stray `(` ends it. The menu is the
 # head keywords derived from parser.ax, in order, then the names that
 # still parse around the error - this document's and the import's.
-elif [i.get("label") for i in its17 if i.get("kind") == 14] != KEYWORDS:
+elif [i.get("label") for i in its17 if i.get("kind") == 14] != CURRENT_KEYWORDS:
     nwhy = (f"a document that does not parse offered the keywords "
             f"{[i.get('label') for i in its17 if i.get('kind') == 14]},\n          want the "
-            f"{len(KEYWORDS)} head keywords parser.ax dispatches on: {KEYWORDS}")
+            f"{len(CURRENT_KEYWORDS)} current head keywords: {CURRENT_KEYWORDS}")
 elif offers(17, "Colour", 13) or offers(17, "bump", 3, "NavHelper"):
     nwhy = ("a document that does not parse must still offer what parses around "
             "the error: " + (offers(17, "Colour", 13) or offers(17, "bump", 3, "NavHelper")))
@@ -1406,7 +1407,7 @@ else:
     print(f"ok   completion ({len(its15)} item(s) all starting {PREFIX!r} with "
           f"`helper` : {HELPER_TYPE!r}, {len(its16)} at an empty prefix "
           f"carrying this document's 4 kinds and NavHelper's `bump`, and "
-          f"exactly the {len(KEYWORDS)} keywords derived from parser.ax on a "
+          f"exactly the {len(CURRENT_KEYWORDS)} current keywords derived from parser.ax on a "
           f"document that does not parse)")
     passed += 3
 shutil.rmtree(NAVDIR, ignore_errors=True)
@@ -5603,11 +5604,8 @@ HL_BUILTIN_TYPES = {w for w in hl_lexicon_row("type") if w[0].isupper()}
 HL_BUILTIN_EFFECTS = hl_lexicon_row("effect")
 if len(HL_BUILTIN_TYPES) < 5 or len(HL_BUILTIN_EFFECTS) < 3:
     sys.exit("FAIL: the lexicon's type or effect row is shorter than this file assumes")
-# The words the parser names only to refuse: lspKeywords offers five
-# of them, and `union`/`foreign`/`trait`/`impl` are the four the
-# completion test subtracts.
-HL_REMOVED = {"union", "foreign", "trait", "impl", "cond", "begin", "alloc",
-              "consume", "define"}
+# Retired heads still receive deprecated semantic tokens.
+HL_REMOVED = RETIRED_KEYWORDS
 HL_IDENT = r"[A-Za-z_][A-Za-z0-9_'!*+/<>=%&|^-]*"
 
 

@@ -16,6 +16,12 @@ its changelog too.
 
 ## Unreleased
 
+- Editor and REPL completion offer current syntax, excluding retired
+  heads such as `emacro`, `define` and `consume`. Migration diagnostics
+  and deprecated highlighting still identify old source. Contract
+  completion helpers use unit results. Tested by `tests/lsp/drive.py`
+  and `scripts/check-replcomp.sh`.
+
 - `--alloc-poison` overwrites a reusable block's payload when it is freed.
   Allocation still returns zeroed memory. CI builds poisoned compiler
   generations and compares their emitted IR. Tested by

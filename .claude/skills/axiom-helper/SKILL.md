@@ -415,12 +415,10 @@ top-level declaration:
 | `C` | Constructor |
 | `S` | Struct |
 | `A` | Type alias |
-| `T` | Trait |
 | `E` | Effect declaration |
 | `M` | Macro |
 
-Real output for a file declaring a `data`, a `struct`, a `trait` and two
-functions:
+An AXSYM stream names functions, types and constructors separately:
 
 ```
 F add main.ax:10:5-8 "(Int -> (Int -> Int))" @27bcb2cac184465e
@@ -432,7 +430,6 @@ D Maybe main.ax:1:7-12 "data Maybe" @247d1682b2330461 #ctors=Nothing,Just
 C Nothing main.ax:2:4-11 "Maybe a" #of=Maybe
 C Just main.ax:3:4-8 "(a -> Maybe a)" #of=Maybe
 S Point main.ax:5:9-14 "struct Point" @aa47cd1e9254cc56 #fields=x:Int,y:Int
-T Eq main.ax:7:9-11 "trait Eq" @ddac825b09c14c67 #methods=
 ```
 
 Three things to read off that:
@@ -473,6 +470,12 @@ Key facts:
 - Diagnostics from imported files are attributed to the actual file, not the entry file.
 
 ### 5.4 Common Axiom patterns
+
+Use `(:: main ())` for a program that runs for its effects. A procedure
+returns `()`; use an `Int` result when the value or exit status matters.
+An `if` without an else answers `()`, so it needs no filler zero.
+Propagate a `Result` with postfix `?` in a tail position.
+
 
 **Functions (modern `fn` style):**
 ```scheme
@@ -523,12 +526,10 @@ There is no `printf` and no `print` — probed, both are `AX3001`. `IO`'s
 ```scheme
 (import IO)
 
+(:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  {
-    (println "hello")
-    0
-  })
+  (println "hello"))
 ```
 
 ### 5.5 REPL commands for rapid prototyping
@@ -592,9 +593,9 @@ When you encounter an error code in AXDL output:
 - The gates share one preamble, `scripts/lib/gate.sh`. A gate opens with
   `gate_init` and `gate_build_axc axc`, after which `$repo_root`,
   `$axiom`, `$work` and `$axc` mean what they mean everywhere else.
-- Do NOT run `axiom fmt` over the repository: the tree is deliberately
-  not kept in the formatter's normal form (CONTRIBUTING.md says so), and
-  reformatting it buries real changes in churn.
+- Format each changed `.ax` file with `axiom fmt` before committing.
+  The tree is kept in the formatter's normal form. Use `fmt --check`
+  when inspecting a file, and keep a fix free of unrelated formatting.
 - Build the compiler with `./scripts/bootstrap-from-seed.sh --install
   .axiom-bin`. That path needs `llc` and `cc` and nothing else — no
   `cargo`, no `rustc`. The Rust toolchain is needed only for the FFI side

@@ -37,13 +37,11 @@ authority on its own behaviour:
 ./.axiom-bin/axiom emit-llvm f.ax -o f.ll                  # what it actually emits
 ```
 
-Write probes to a scratch directory outside the repository. Never run
-`axiom fmt` over the repository's files - it formats **in place**, and
-the tree is deliberately not in the formatter's normal form
-(CONTRIBUTING.md), so reformatting it buries every real change in churn.
-`axiom fmt f.ax --check` reports without writing, and
-`scripts/check-fmt.sh` is safe: it formats a scratch copy and re-runs the
-suites against it.
+Write probes to a scratch directory outside the repository. Keep each
+changed `.ax` file in the formatter's normal form with `axiom fmt`.
+Use `axiom fmt --check` for an inspection that writes nothing.
+`scripts/check-fmt.sh` checks the committed layout and exercises a
+formatted scratch copy. Avoid unrelated formatting changes in a fix.
 
 ## What the system actually is
 
@@ -59,14 +57,11 @@ Audit the thing that exists, not a generic compiler:
   and `axir.ax` are an intermediate form and its evaluator for analysis
   and tooling (`scripts/check-mir*.sh`), off the path a build takes -
   say which path a claim is about.
-- **Reclamation is the arena scope plus the reference counting that
-  already emits.** `__axiom_arena_mark`/`__axiom_arena_reset` are the
-  strategy (`docs/memory-model.md` MM-ALLOC-22); reference counting
-  (MM-LIFE-2a) is abandoned in place rather than pending, and what it
-  emits still reclaims. `linear T` and `consume` parse but the memory
-  model does not rely on them (MM-LIFE-7). An audit that reports on "the
-  linear type system" or "the ownership model" is auditing a language
-  this is not.
+- **Heap values use reference counting and regions reclaim in bulk.**
+  The emitted release walk visits owned fields and files reusable blocks.
+  Region marks reclaim their extent at scope end. Audit each enforced
+  rule and its evidence in `docs/memory-model.md`; rule status matters.
+  `linear` and `consume` are refused syntax, and products are `struct`.
 - **Effects are AXTAG claims checked against bodies** (`AX3010`, an
   **error** since 2026-08-25; `AX3037` for a claim the walk cannot
   check, still a warning). It rejects a claim, not an effect: an
@@ -94,7 +89,7 @@ Audit the thing that exists, not a generic compiler:
   LLVM emission, the driver's toolchain invocations. Look for
   inconsistencies, missing invariants, unclear semantics.
 - **Language design coherence.** Syntax, semantics, purity model,
-  recursion and tail-call behaviour, ADTs, pattern matching, traits,
+  recursion and tail-call behaviour, ADTs, pattern matching, capability records,
   macros, type-system ergonomics.
 - **Diagnostics.** Gaps, unclear paths, missing recovery, weak messages,
   inconsistent wording. Check codes against `explain --list` in both
