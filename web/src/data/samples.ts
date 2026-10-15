@@ -431,7 +431,7 @@ compilation failed due to 1 previous error`,
     points: [
       { at: "(withContext (okOr (strParseInt text) bad) (concat \"reading \" name))))", text: "`okOr` turns a missing number into an error with a message." },
       { at: "(withContext (mulChecked chunk parts) \"sizing the upload\"))", text: "`mulChecked` fails where `*` would wrap around." },
-      { at: "(let ((size (number \"chunk\" chunk)?)", text: "`?` binds each success and stops at the first failure." },
+      { at: "(size (number \"chunk\" chunk)?)", text: "`?` binds each success and stops at the first failure." },
     ],
     docs: { label: "The error model", href: `${LIB}docs/error-model.md` },
     output: `4096 x 256 = 1048576 bytes
