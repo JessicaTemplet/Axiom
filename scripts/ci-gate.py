@@ -106,7 +106,8 @@ def tool_context():
     result = {'platform': [platform.system(), platform.machine(), platform.release()],
               'image': [os.environ.get('ImageOS'), os.environ.get('ImageVersion')],
               'tools': {}}
-    for tool in ('opt', 'llc', 'cc', 'clang', 'ld.lld', 'lld-link', 'ar', 'nm',
+    for tool in ('opt', 'llc', 'llvm-extract', 'llvm-readobj', 'llvm-objdump',
+                 'llvm-nm', 'cc', 'clang', 'ld.lld', 'lld-link', 'ar', 'nm',
                  'python3', 'node', 'npm', 'cargo', 'rustc', 'rustfmt'):
         path = shutil.which(tool)
         if path is None:

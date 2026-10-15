@@ -547,7 +547,7 @@ cuts = {
   # nothing to hit. (Another word would be worse: an address whose low
   # 32 bits `kill` could read as 0 or negative, a process GROUP.)
   "layout": [("Task.ax", "(fn (taskHandlePid h)\n  (__spawn_pid h))", "(fn (taskHandlePid h)\n  (+ (__spawn_pid h) 1073741824))")],
-  "look": [("Sys.ax", "(Ok (!= (& (memGetWord buf 0) 4294967295) 0))", "(Ok false)")],
+  "look": [("Sys.ax", "(Ok (&& (!= (& (memGetWord buf 0) 4294967295) 0) (&& (>= code 1) (<= code 3))))", "(Ok false)")],
   "slot": [("Task.ax", "(let slot (+ slab (* (% arg w) slotBytes)))", "(let slot (+ slab (* (% (+ arg 1) w) slotBytes)))")],
   "limit": [("Task.ax", "        (if (> len limit)", "        (if (> len (* limit 1000))")],
   "grace": [("Task.ax", "(if (&& (== cancelling 1) (>= now graceEnd))", "(if (&& (== cancelling 2) (>= now graceEnd))")],

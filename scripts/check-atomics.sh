@@ -12,7 +12,9 @@
 #      for every target the compiler knows, put through the driver's own
 #      pipeline (opt -O<n>, llc -O<n> -relocation-model=pic) to assembly
 #      at -O0..-O3, and the ordering instructions are counted. Each count
-#      must equal the source's uses of its primitive:
+#      must equal the source's uses of its primitive. Extract the entry
+#      function before optimisation so runtime cancellation atomics do
+#      not enter the count or get inlined into it:
 #
 #        x86-64   store -> xchg          add -> lock xadd
 #                 cas   -> lock cmpxchg  fence -> lock or to the stack
@@ -161,6 +163,7 @@ gate_build_axc axc
 
 command -v llc >/dev/null || { echo "FAIL: llc is not on PATH"; exit 1; }
 command -v opt >/dev/null || { echo "FAIL: opt is not on PATH"; exit 1; }
+command -v llvm-extract >/dev/null || { echo "FAIL: llvm-extract is not on PATH"; exit 1; }
 
 failed=0
 checks=0
@@ -331,7 +334,8 @@ echo "== 1. machine code: every target, every level =="
 for t in $x86_targets $a64_targets; do
   for f in atomics control; do
     src="$fixture"; [[ "$f" == control ]] && src="$control"
-    if ! "$axc" --target="$t" emit-llvm "$src" -o "$work/$f.$t.ll" > "$work/$f.$t.emit" 2>&1; then
+    if ! "$axc" --target="$t" emit-llvm "$src" -o "$work/$f.$t.module.ll" > "$work/$f.$t.emit" 2>&1 \
+       || ! llvm-extract --func=__axiom_user_main "$work/$f.$t.module.ll" -S -o "$work/$f.$t.ll" >> "$work/$f.$t.emit" 2>&1; then
       bad "[$t] emit-llvm of $f failed"; continue
     fi
   done

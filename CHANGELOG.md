@@ -54,6 +54,14 @@ and selected entry roots; they do not establish aviation or space certification.
   and unit-returning branches. Tested by
   `tests/diagnostics/1451-discarded-block-results.ax`.
 
+- Atomic instruction checks isolate the program entry from runtime cancellation
+  atomics before optimisation. Tested by `scripts/check-atomics.sh`.
+
+- CI result keys include the LLVM inspection tools. Task and region regression
+  controls match the current implementation, and the pool-refusal fixture
+  declares its kernel I/O effect. Tested by `tests/ci/gate-cache.py` and
+  `tests/litmus/pool-refuse.ax`.
+
 - Region diagnostic checks wait for background analysis before shutting
   down the language server. Tested by `tests/lsp/region-boundary-hints.py`.
 

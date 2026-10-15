@@ -176,10 +176,10 @@ open(cgp, "w", encoding="utf-8").write(cg)
 
 # Kill 2, slices 2-4: `rgnStamping` (TC word 40) is never set, so the
 # post-fixpoint walks stamp nothing anywhere and every stamp spend
-# keeps its release. Both arms of `rgnCheckAll`, and only those.
+# keeps its release. The enabling store in `rgnCheckAll`, and only that.
 old40 = "(memSetWord tc 40 1)"
-if tc.count(old40) != 2:
-    sys.exit("kill 2: stamping set found %d times, wanted 2" % tc.count(old40))
+if tc.count(old40) != 1:
+    sys.exit("kill 2: stamping set found %d times, wanted 1" % tc.count(old40))
 tc = tc.replace(old40, "(memSetWord tc 40 0)")
 open(tcp, "w", encoding="utf-8").write(tc)
 PY
