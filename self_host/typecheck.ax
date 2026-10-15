@@ -533,9 +533,11 @@
 ; FLUSH: verify a pending lambda that escapes without a use. The
 ; standalone check runs with fresh parameters; its `{unknown}`
 ; refusals are dropped (no use witnesses them, so there is nothing
-; to refuse) and everything else is kept. The stamp is NOT touched:
-; a later use still grounds. Grounded and broken nodes are not
-; flushed - one is verified, the other's diagnostics are out.
+; to refuse) and everything else is kept. The stamp is restored after
+; checking so a later use still grounds. While checking, the in-progress
+; marker stops a recursive alias from flushing the same body again.
+; Grounded and broken nodes are not flushed - one is verified, the
+; other's diagnostics are out.
 ; Answers 0.
 ; Refuse a pending lambda where a ground value is required: the body
 ; is verified LENIENTLY first (its own errors are still reported -
@@ -612,23 +614,30 @@
         0
         (if (== (stampIsBroken s) 1)
           0
-          ; A partial node flushes with its PREFIX in scope: the
-          ; outer parameters are witnessed, and checking without
-          ; them would refuse names the grounding binds. The
-          ; `{unknown}` filter still drops what no use witnesses.
-          {
-            (let real (outvecSwapOut tc))
+          (if (== (stampIsProg s) 1)
             {
-              (let mark (vecLen (tcScopeVec tc)))
-              {
-                (if (== (stampIsPartial s) 1)
-                  (groundPushPrefix tc (partialEnts s) 0))
-                (checkLam tc t)
-                (scopeTrunc (tcScopeVec tc) mark)
-                (outvecRestoreFiltered tc real)
-              }
+              (groundStandalone tc t span)
+              0
             }
-          }))
+            ; A partial node flushes with its PREFIX in scope: the
+            ; outer parameters are witnessed, and checking without
+            ; them would refuse names the grounding binds. The
+            ; `{unknown}` filter still drops what no use witnesses.
+            {
+              (let real (outvecSwapOut tc))
+              {
+                (let mark (vecLen (tcScopeVec tc)))
+                {
+                  (if (== (stampIsPartial s) 1)
+                    (groundPushPrefix tc (partialEnts s) 0))
+                  (setLamStamp t (mkProgStamp))
+                  (checkLam tc t)
+                  (setLamStamp t s)
+                  (scopeTrunc (tcScopeVec tc) mark)
+                  (outvecRestoreFiltered tc real)
+                }
+              }
+            })))
     }))
 
 ; GROUND one application level: witness this level's argument

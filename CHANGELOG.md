@@ -46,6 +46,14 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- Pending-lambda validation detects recursive aliases before checking the
+  same body again. A partial function used as a number, condition or
+  discarded statement reports a type error instead of overflowing the
+  compiler's stack. Later valid applications retain their captured values
+  and infer their remaining parameters. Tested by
+  `tests/fuzz/partial-alias-numeric.axfuzz` and
+  `tests/selfhost/1024-lambda-flush-later-use.ax`.
+
 - Region analysis resolves callee parameter labels when reporting a
   parameter flow. Silent fixpoint rounds and parameters without stores
   avoid those whole-module lookups. Lifetime facts and diagnostic wording
