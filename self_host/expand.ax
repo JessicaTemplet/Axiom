@@ -2143,19 +2143,69 @@
 ; has been emitted - the poison convention the rest of this family
 ; uses.
 (pub struct FmtSpec
-  (align : Int)
-  (zero : Int)
+  (align : UInt8)
+  (zero : UInt8)
   (width : Int)
   (prec : Int)
-  (ty : Int)
-  (ok : Int))
+  (ty : UInt8)
+  (ok : UInt8))
 
-; Constructed through a function answering `Int`, which is `mkSpan`'s
-; pattern in `core.ax` and for the same reason: every reader indexes
-; the record with `memGetWord`, so the handle travels as a word.
+; The public compiler helpers keep Int handles and counts. Flags have
+; their proven byte ranges; accessors use the declared field layout.
 (pub :: mkFmtSpec (-> Int Int Int Int Int Int Int))
+;@axiom:pre((&& (|| (== align 60) (|| (== align 62) (== align 94))) (&& (&& (>= zero 0) (<= zero 1)) (&& (|| (== ty 0) (|| (== ty 88) (== ty 120))) (&& (>= ok 0) (<= ok 1))))))
 (pub fn (mkFmtSpec align zero width prec ty ok)
-  (as (FmtSpec align zero width prec ty ok) Int))
+  (as (FmtSpec (as align UInt8) (as zero UInt8) width prec (as ty UInt8) (as ok UInt8)) Int))
+
+; Accessors require a live handle returned by mkFmtSpec. The typed
+; view borrows that block; it does not create an ownership share.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: fmtSpecAlign (-> Int Int))
+;@axiom:effect(unsafe)
+(pub fn (fmtSpecAlign spec)
+  (let ((view
+    (as spec FmtSpec)))
+    (as view.align Int)))
+
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: fmtSpecZero (-> Int Int))
+;@axiom:effect(unsafe)
+(pub fn (fmtSpecZero spec)
+  (let ((view
+    (as spec FmtSpec)))
+    (as view.zero Int)))
+
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: fmtSpecWidth (-> Int Int))
+;@axiom:effect(unsafe)
+(pub fn (fmtSpecWidth spec)
+  (let ((view
+    (as spec FmtSpec)))
+    view.width))
+
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: fmtSpecPrec (-> Int Int))
+;@axiom:effect(unsafe)
+(pub fn (fmtSpecPrec spec)
+  (let ((view
+    (as spec FmtSpec)))
+    view.prec))
+
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: fmtSpecType (-> Int Int))
+;@axiom:effect(unsafe)
+(pub fn (fmtSpecType spec)
+  (let ((view
+    (as spec FmtSpec)))
+    (as view.ty Int)))
+
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: fmtSpecOk (-> Int Int))
+;@axiom:effect(unsafe)
+(pub fn (fmtSpecOk spec)
+  (let ((view
+    (as spec FmtSpec)))
+    (as view.ok Int)))
 
 ; The generated call `(f x)`, with `f` resolved the way a template's
 ; free identifier resolves - at the macro's DEFINITION site
@@ -2468,11 +2518,11 @@
 (pub :: expFmtHole (-> Int Int Int Int Int))
 (pub fn (expFmtHole env v spec vsp)
   (let (
-    (align (memGetWord spec 0))
-    (zero (memGetWord spec 1))
-    (width (memGetWord spec 2))
-    (prec (memGetWord spec 3))
-    (ty (memGetWord spec 4))
+    (align (fmtSpecAlign spec))
+    (zero (fmtSpecZero spec))
+    (width (fmtSpecWidth spec))
+    (prec (fmtSpecPrec spec))
+    (ty (fmtSpecType spec))
   )
     (let ((rendered
       (if (== ty 120)
@@ -2634,7 +2684,7 @@
                                     (if (== close j)
                                       (mkFmtSpec 62 0 0 (- 0 1) 0 1)
                                       (expFmtParseSpec env body (+ j 1) close base))))
-                                    (if (== (memGetWord spec 5) 0)
+                                    (if (== (fmtSpecOk spec) 0)
                                       (set ok 0)
                                       {
                                         (set acc (expFmtCatRun env acc chunk lsp))

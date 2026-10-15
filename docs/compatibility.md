@@ -121,6 +121,7 @@ break is wise. It checks that the break was intended.
 | an effect row narrows | allowed, silently |
 | a public name is removed | allowed, **declared** |
 | a signature changes | allowed, **declared** |
+| a checked `scoped` or `compute` callback precondition changes | allowed, **declared** |
 | a struct's fields are reordered or retyped | allowed, **declared** |
 | an effect row widens | allowed, **declared** |
 

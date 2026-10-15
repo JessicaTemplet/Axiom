@@ -221,6 +221,31 @@ else
   fi
 fi
 
+checks=$((checks + 1))
+if python3 - "$helper" "$repo_root/stdlib" <<'CALLBACK_CONTRACTS'
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("compat_contracts", sys.argv[1])
+compat = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(compat)
+raw = 'F kernel ' + sys.argv[2] + '/Task.ax:1:1-7 "(Int -> Int)" @0123456789abcdef'
+base = compat.normalise(raw, sys.argv[2], {"kernel"})
+assert len(base) == 1
+for tag in ("#scoped=step", "#compute=worker"):
+    current = compat.normalise(raw + " " + tag, sys.argv[2], {"kernel"})
+    assert len(current) == 1 and tag in current[0], current
+    changed = compat.normalise(raw + " " + tag.split("=")[0] + "=other", sys.argv[2], {"kernel"})
+    for before, after in ((base, current), (current, base), (current, changed)):
+        delta = compat.compare(before, after)
+        assert len(delta) == 1 and delta[0][:2] == ("CHANGED", ("F", "kernel")), delta
+CALLBACK_CONTRACTS
+then
+  ok "checked callback preconditions survive normalisation and their changes are breaking"
+else
+  bad "a scoped or compute callback precondition disappeared from its contract"
+fi
+
 # ---------------------------------------------------------------------
 # The negative probes. Each plants one defect in a COPY of `stdlib/` and
 # requires this gate to name the CLASSIFICATION it should produce - not

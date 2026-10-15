@@ -93,6 +93,7 @@ integrator would still need.
 | Editor and REPL completion exclude retired syntax | Done | `tests/lsp/drive.py`, `scripts/check-replcomp.sh` |
 | Fixed-width signed and unsigned integers through 64 bits, with explicit casts and width-correct operators | Done | `tests/stdlib/948-fixed-width-integers.ax`, `tests/stdlib/949-fixed-width-alias-callback.ax` |
 | Compact fixed-width integer struct fields, with aligned reference maps and native allocation measurements | Done | `tests/stdlib/959-compact-struct-fields.ax` |
+| Compiler bracket and format flags use guarded UInt8 storage with measured allocation savings | Done | `tests/selfhost/1018-compiler-byte-storage.ax`, `tests/selfhost/272-highlight.ax` |
 | Compact ADT and vector storage with complete generic storage evidence | Planned | |
 | Wider integer literals, widths beyond 64 bits and checked fixed-width FFI shims | Planned | |
 | Transparent type aliases support parameters, simultaneous substitution and finite expansion | Done | `tests/stdlib/946-generic-aliases.ax`, `tests/diagnostics/1420-generic-alias-arity.ax`, `tests/diagnostics/1421-generic-alias-parameters.axbad`, `tests/diagnostics/1422-recursive-alias.ax` |

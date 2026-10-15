@@ -16,6 +16,24 @@ its changelog too.
 
 ## Unreleased
 
+## 0.7.9 — 2026-10-15
+
+This release adds explicit numeric conversions and fixed-width integers,
+transparent type aliases, stricter generic checks and function pipelines.
+Imports form the module header. Compiler byte flags use compact storage.
+
+The formatter handles long calls, typed declarations and comments consistently,
+with transactional batch formatting and standard-input workflows. The language
+server adds revisioned background analysis, cancellation and workspace overlays;
+the VS Code extension and REPL share the updated language and diagnostics.
+
+Task APIs share one namespace, preserve fresh-process isolation and offer checked
+numeric callbacks with fixed-width results. RECAP documentation separates checked
+guarantees from unsafe obligations. Restricted reports preserve foreign provenance
+and selected entry roots; they do not establish aviation or space certification.
+
+<!-- release-notes: end of highlights -->
+
 - API generation reads complete multiline signatures and skips nested
   comments within them. Existing type cells stay complete after formatting.
   The source-signature probe in `scripts/check-stdlib-api.sh` checks exact
@@ -866,6 +884,24 @@ keeping field comments attached. Generated Rust bindings share these layouts.
 Native before/after programs cover the new cases in
 `tests/fmt/readability.py`; binding generation is covered by
 `rust/axiom-bindgen/tests/snapshot.rs`.
+
+### Compiler byte flags
+
+The compiler stores bracket and format flags as `UInt8`. Constructors that
+accept `Int` check flag domains before explicit conversion. Typed field access
+replaces raw word indexing; counts, positions and `-1` sentinels retain `Int`.
+Native probes measure each record at 48 bytes, including its ownership header
+and alignment, against 64-byte Int-field baselines. Repeated accessor reads
+preserve ownership counts. Tested by
+`tests/selfhost/1018-compiler-byte-storage.ax`.
+
+### Checked callback compatibility
+
+Compatibility snapshots retain `scoped` and `compute` callback preconditions.
+Adding, removing or changing either tag changes the recorded public contract.
+The compatibility checks cover each direction through source-stream normalisation.
+Nominal type qualification and parameterised Map APIs have explicit migration
+records in `compat/BREAKING`.
 
 ## 0.7.8 — 2026-10-07
 

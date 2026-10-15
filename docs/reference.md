@@ -2369,7 +2369,7 @@ Use `:help` for commands, Tab for completion and Ctrl-R to search history.
 Piped sessions keep plain output without prompts or colour.
 
 ```text
-Axiom 0.7.8 - REPL
+Axiom 0.7.9 - REPL
 ```
 
 For editor completion, navigation, formatting and fixes, configure

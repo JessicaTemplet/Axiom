@@ -53,13 +53,14 @@ ROW = re.compile(r'^(\S+) (\S+) (\S+) "(.*?)"(.*)$')
 # Everything AXSYM emits that a CALLER can depend on. Measured over the
 # whole surface rather than guessed: the keys that appear are
 # `#effects=`, `#effect=`, `#effects-overapprox`, `#effect-params=`,
-# `#of=`, `#fields=`, `#effects-incomplete`, `#ctors=` and `#methods=`.
+# `#of=`, `#fields=`, `#effects-incomplete`, `#ctors=`, `#methods=`,
+# `#scoped=` and `#compute=`.
 #
 # `#fields=` and `#methods=` are here because leaving them out was a
 # hole: a struct row without them is `"struct Error"` and nothing else,
 # so reordering `Error`'s fields, changing one's type, or deleting a
 # trait method all read as NO DIFFERENCE. Field ORDER is contract in
-# this language - a `struct` is positional and `cast` reinterprets a
+# this language - a `struct` is positional and `as` reinterprets a
 # block - which is the miscompile `AX3044` was built for, one module
 # along.
 #
@@ -69,8 +70,10 @@ ROW = re.compile(r'^(\S+) (\S+) (\S+) "(.*?)"(.*)$')
 # report a tag added over an unchanged body as a breaking change.
 # `#effects-overapprox` and `#effects-incomplete` are states of the
 # ANALYSIS, not promises to a caller.
+# Checked callback tags constrain legal arguments at compile time.
+# Dropping or changing them changes a caller's contract.
 CONTRACT_META = ("#effects=", "#ctors=", "#of=", "#effect-params=",
-                 "#fields=", "#methods=")
+                 "#fields=", "#methods=", "#scoped=", "#compute=")
 
 # Carried in the row so the baseline RECORDS it, and stripped by
 # `contract()` so it is not compared.
