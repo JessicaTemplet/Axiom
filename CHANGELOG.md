@@ -34,6 +34,12 @@ and selected entry roots; they do not establish aviation or space certification.
 
 <!-- release-notes: end of highlights -->
 
+- Cross-target checks assemble executable cases and exercise support
+  modules through their importers. Named support modules no longer produce
+  a missing-entry-point failure. Tested by
+  `tests/stdlib/954-nominal-identity.ax` and
+  `scripts/check-cross-targets.sh`.
+
 - CI preserves successful gate results across retries and reuses them
   when their inputs match. Changed sources, fixtures, compiler binaries,
   toolchains and gate switches invalidate results; failures run again.

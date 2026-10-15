@@ -186,7 +186,9 @@ fi
 
 status=0
 
-for case_file in tests/stdlib/*.ax; do
+# Digit-prefixed files are executable cases. Named siblings are imported
+# support modules and have no entry point of their own.
+for case_file in tests/stdlib/[0-9]*.ax; do
   name="$(basename "$case_file" .ax)"
   for target in "${targets[@]}"; do
     ir="$work/$name.$target.ll"
