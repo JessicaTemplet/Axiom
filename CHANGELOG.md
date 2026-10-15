@@ -34,6 +34,9 @@ and selected entry roots; they do not establish aviation or space certification.
 
 <!-- release-notes: end of highlights -->
 
+- Region diagnostic checks wait for background analysis before shutting
+  down the language server. Tested by `tests/lsp/region-boundary-hints.py`.
+
 - Native standard-library tests select executable cases, keeping imported
   support modules out of the entry-point check. Tested by
   `scripts/run-stdlib-tests.sh`.

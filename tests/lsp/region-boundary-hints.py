@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 
@@ -51,8 +52,10 @@ def check(compiler, name):
         frame({"id": 9, "method": "shutdown", "params": {}}),
         frame({"method": "exit", "params": {}}),
     ])
-    server = subprocess.run([compiler, "lsp"], input=wire, cwd=path.parent,
-                            env=os.environ, capture_output=True, timeout=30)
+    # Shutdown cancels background work. Wait for didOpen's publication
+    # before sending it, using the shared protocol driver.
+    session = runpy.run_path(str(Path(__file__).with_name("workspace-overlays.py")))["run_session"]
+    server = session(compiler, wire, cwd=path.parent, timeout=30)
     assert server.returncode == 0, (name, server.stderr)
     actual = [d for m in messages(server.stdout) if m.get("method") == "textDocument/publishDiagnostics"
               for d in m["params"]["diagnostics"] if d.get("code") in CODES]
