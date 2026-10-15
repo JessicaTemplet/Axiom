@@ -40,6 +40,10 @@ counted environments.
 
 <!-- release-notes: end of highlights -->
 
+- Vector overwrites release discarded branch results. Replacing elements
+  and assigning an existing owner preserve values and reclaim their shares.
+  Tested by `tests/stdlib/968-vec-set-reclaim.ax`.
+
 - Semantic highlighting retains its index buckets through typed containers.
   Type aliases, named struct construction and field reads work after edits.
   Tested by `tests/lsp/semantic-token-updates.py`.

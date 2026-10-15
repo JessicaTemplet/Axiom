@@ -1,0 +1,123 @@
+; Replacement and self-assignment preserve values and reclaim ownership.
+; Appending through the returned handle also updates the original vector.
+(import IO)
+(import Mem)
+(import Vec)
+
+(:: plain (-> Int Int))
+(fn (plain n)
+  {
+    (let payload (vecPush vecNew n))
+    (let vector (vecPush vecNew payload))
+    (+ (vecLen payload) (vecLen vector))
+  })
+
+(:: mutate (-> Int Int))
+(fn (mutate n)
+  {
+    (let payload (vecPush vecNew n))
+    (let vector (vecPush vecNew payload))
+    (vecSet vector 0 payload)
+    (+ (vecLen payload) (vecLen vector))
+  })
+
+(:: run (-> (-> Int Int) Int Int))
+(fn (run action count)
+  {
+    (let mut sum 0)
+    (for i in 0..count
+      (set sum (+ sum (action i))))
+    sum
+  })
+
+(:: live Int)
+(fn (live)
+  {
+    (let stats memStats)
+    stats.backlogBytes
+  })
+
+(:: flat (-> (-> Int Int) Bool))
+(fn (flat action)
+  {
+    (run action 100)
+    (let before live)
+    (let first (run action 1000))
+    (let after live)
+    (let second (run action 10000))
+    (let growth1 (- after before))
+    (let growth2 (- live after))
+    (&& (== first 2000) (&& (== second 20000) (&& (< growth1 4096) (< growth2 4096))))
+  })
+
+(struct Owner sealed
+  (handle : Handle))
+
+(:: makeOwner (-> (Vec Int) Int Owner))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (makeOwner hits n)
+  (Owner
+    :handle
+      (__resource_new
+        (lambda (value)
+          {
+            (vecPush hits value)
+            0
+          }
+        )
+        n)))
+
+(:: useOwner (-> Owner Int))
+;@axiom:effect(unsafe)
+(fn (useOwner owner)
+  (__resource_get owner.handle))
+
+(:: selfAssign (-> (Vec Int) Int))
+;@axiom:effect(io)
+(fn (selfAssign hits)
+  {
+    (let owner (makeOwner hits 10))
+    (let values (vecPush vecNew owner))
+    (let returned (vecSet values 0 owner))
+    (vecPush returned owner)
+    (if (== (vecLen values) 2)
+      (useOwner (vecGet returned 0))
+      0)
+  })
+
+(:: replace (-> (Vec Int) Int))
+;@axiom:effect(io)
+(fn (replace hits)
+  {
+    (let values (vecPush vecNew (makeOwner hits 20)))
+    (vecSet values 0 (makeOwner hits 30))
+    (let drops (vecLen hits))
+    (+ (* drops 100) (useOwner (vecGet values 0)))
+  })
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (let control (flat plain))
+    (let reclaimed (flat mutate))
+    (println control)
+    (println reclaimed)
+    (let selfHits (:: vecNew (Vec Int)))
+    (let same (selfAssign selfHits))
+    (let selfCount (vecLen selfHits))
+    (let selfOk (&& (== same 10) (&& (== selfCount 1) (== (vecGet selfHits 0) 10))))
+    (println selfOk)
+    (let replaceHits (:: vecNew (Vec Int)))
+    (let swapped (replace replaceHits))
+    (let replaceCount (vecLen replaceHits))
+    (let replaceOk
+      (&& (== swapped 130)
+        (&& (== replaceCount 2)
+          (&& (== (vecGet replaceHits 0) 20) (== (vecGet replaceHits 1) 30)))))
+    (println replaceOk)
+    (if (&& control (&& reclaimed (&& selfOk replaceOk)))
+      0
+      1)
+  })
