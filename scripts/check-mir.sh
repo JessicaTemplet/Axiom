@@ -482,14 +482,12 @@ ablate() {
 import re, sys
 p, which = sys.argv[1], sys.argv[2]
 s = open(p, encoding="utf-8").read()
-# Seams match whitespace-insensitively. `axiom fmt` rewrites a file in
-# place and can put a long constructor's arguments on one line, separated
-# by runs of spaces, so atoms are joined with `\s+`. Each seam must still
+# Seams match named fields across formatter line breaks. Each must
 # match exactly once, so a vanished seam fails loudly.
 if which == "1":
     # A binary operator's operands, swapped. Well-formed IR with the
     # wrong meaning: `sub`, `sdiv`, `srem` and every comparison invert.
-    pat = re.compile(r"(MO_BIN\s+\(mlcFresh lc\)\s+)\(vecGet out 0\)(\s+)\(vecGet out 1\)")
+    pat = re.compile(r"(:op\s+MO_BIN\s+:dst\s+\(mlcFresh lc\)\s+:a\s+)\(vecGet out 0\)(\s+:b\s+)\(vecGet out 1\)")
     rep = r"\g<1>(vecGet out 1)\g<2>(vecGet out 0)"
 elif which == "2":
     # Every unconditional branch dropped. Branchless fixtures are
@@ -515,11 +513,10 @@ elif which == "5":
     rep = r"\g<1>(- 0 1)"
 elif which == "6":
     # `true` lowered as 0: well-formed IR with the wrong meaning, like
-    # ablation 1, for the constant an operand swap cannot reach. The
-    # replacement builds its quotes with `chr(34)`: a backslash-escaped
-    # quote in this quoted heredoc lands in the source as AX1001.
-    pat = re.compile(r"\(mlcFresh lc\)\s+1\s+0\s+\"\"")
-    rep = "(mlcFresh lc)        0        0        " + chr(34) + chr(34)
+    # ablation 1, for the constant an operand swap cannot reach.
+    # Match the literal's named field, leaving its other fields intact.
+    pat = re.compile(r'(:op\s+MO_CONST\s+:dst\s+\(mlcFresh lc\)\s+:a\s+)1(\s+:b\s+0\s+:name\s+"")')
+    rep = r"\g<1>0\g<2>"
 elif which == "7":
     # `%` lowers to `srex`, which no rule writes and no consumer reads.
     # The seam names the `mBinOp` row, not the bare spelling: `srem`
@@ -804,7 +801,7 @@ fi
 # Without this drill the cast erasure is unpinned: ablations 1, 2 and 4
 # leave conversions alone. With the erasure deleted, every probe that
 # casts refuses and nothing else moves. The casting fixtures are read
-# from the sources (`(cast ` in NAME.ax), for ablation 2's reason.
+# from the sources (`(as ` in NAME.ax), for ablation 2's reason.
 if ! ablate 5; then
   bad "ABLATION 5 could not be built"
   sed 's/^/     /' "$work/abl5/build.log" 2>/dev/null | head -10

@@ -40,6 +40,10 @@ counted environments.
 
 <!-- release-notes: end of highlights -->
 
+- MIR mutation checks target named instruction fields, keeping operand
+  order and boolean values covered after the syntax migration.
+  Tested by `scripts/check-mir.sh`.
+
 - Documentation, website examples and generated programs use canonical
   locals and named struct fields. The API reference includes public type
   aliases and marks incomplete effect rows. Website highlighting covers
