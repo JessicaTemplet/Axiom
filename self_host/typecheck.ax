@@ -4197,6 +4197,8 @@
       ; unregistered head is AX3001 on a program that compiles.
       (regFn fns "__streq" (mkTArr mkStringTy (mkTArr mkStringTy mkBoolTy)))
       (regFn fns "__strne" (mkTArr mkStringTy (mkTArr mkStringTy mkBoolTy)))
+      (regFn fns "__floatToBits" (mkTArr mkFloatTy mkIntTy))
+      (regFn fns "__floatFromBits" (mkTArr mkIntTy mkFloatTy))
       (regFn fns "__intToFloat" (mkTArr mkIntTy mkFloatTy))
       (regFn fns "__floatToInt" (mkTArr mkFloatTy mkIntTy))
       (let (
@@ -7759,7 +7761,7 @@
                     (divTailOk decls (nodeB e) names depth)
                     (divConstTrue (nodeA e)))
                   (if (== tag TAG_E_APP)
-                    (if (strEq (divHeadName e) "cast")
+                    (if (isValueCastForm (divHeadName e))
                       ; The value being coerced. `(cast a x)` parses as
                       ; `((cast a) x)`, so it is this node's argument.
                       (divTailOk decls (nodeB e) names depth)
@@ -9192,7 +9194,7 @@
                                           ; are AX3001 now, as the sixth built-in effect
                                           ; `Unsafe` and the keywords `if`/`let`/`match`
                                           ; always were.
-                                          (if (strEq n "cast")
+                                          (if (isValueCastForm n)
                                             1
                                             (if (strEq n "sizeof")
                                               1
@@ -9447,9 +9449,49 @@
             "choose another name - the built-in effect names are `IO`, `Pure`, `Alloc`, `Mut`, `Div` and `Unsafe`")
           (concat (concat "`" (nodeAName d)) "` is a built-in effect"))))))
 
+(pub :: isValueCastForm (-> String Bool))
+(pub fn (isValueCastForm name)
+  (|| (strEq name "cast") (strEq name "__as_numeric")))
+
+; Numeric as uses the checked source and expanded target types. Every
+; other explicit cast retains its reference and ownership checks.
+(pub :: asNumericKind (-> Int Int Int))
+(pub fn (asNumericKind tc ty)
+  (let ((t (castNormTy tc ty)))
+    (if (== t 0)
+      0
+      (if (!= (nodeTag t) TAG_T_CON)
+        0
+        (if (strEq (nodeAName t) "Int")
+          1
+          (if (strEq (nodeAName t) "Float")
+            2
+            0))))))
+
+(pub :: rewriteNumericAs (-> Int Int Int Int ()))
+(pub fn (rewriteNumericAs tc e target source)
+  (let (
+    (from (asNumericKind tc source))
+    (to (asNumericKind tc target))
+    (primitive (if (&& (== from 1) (== to 2))
+      "__intToFloat"
+      (if (&& (== from 2) (== to 1))
+        "__floatToInt"
+        "")))
+    (head (spineHead e))
+  )
+    (if (== (strLen primitive) 0)
+      (memSetWord head 1 "cast")
+      (let ((value (spineArgAt e 1)))
+        {
+          (memSetWord e 0 TAG_E_APP)
+          (memSetWord e 1 (mkEVarAt primitive (nodeSpan head)))
+          (memSetWord e 2 value)
+        }))))
+
 (pub :: isCastLike (-> String Int))
 (pub fn (isCastLike n)
-  (if (strEq n "cast")
+  (if (isValueCastForm n)
     1
     (if (strEq n "sizeof")
       1
@@ -10598,11 +10640,11 @@
         (refuseBareForm
           tc
           name
-          (if (strEq name "cast")
+          (if (isValueCastForm name)
             2
             1)
           span
-          (if (strEq name "cast")
+          (if (isValueCastForm name)
             "write the value to convert after the type - `(cast Int e)` - or, for a function value, `(lambda (x) (cast Int x))`"
             (concat (concat "write the type it measures: `(" name) " Int)`"))
           "`cast`, `sizeof` and `alignof` are forms whose first argument is a type, not functions: there is nothing for a bare one to be")
@@ -11735,7 +11777,7 @@
 (pub fn (checkStoreWordRefusal tc e val)
   (if (!= (nodeTag val) TAG_E_APP)
     0
-    (if (strEq (divHeadName val) "cast")
+    (if (isValueCastForm (divHeadName val))
       (let ((oty (storeOperandTy tc (storeCastOperand val))))
         (if (== (cast Int oty) 0)
           0
@@ -11756,7 +11798,7 @@
 (pub fn (storeCastOperand v)
   (if (!= (nodeTag v) TAG_E_APP)
     v
-    (if (strEq (divHeadName v) "cast")
+    (if (isValueCastForm (divHeadName v))
       (let ((args (spineArgVec v vecNew)))
         (if (!= (vecLen args) 2)
           v
@@ -14014,7 +14056,7 @@
       ; its result is routinely a function value, and a surplus
       ; argument there is an application of it.
       (if (&&
-            (if (strEq hname "cast")
+            (if (isValueCastForm hname)
               false
               true)
             (> (vecLen args) 1))
@@ -14048,7 +14090,7 @@
       ; same `(cast Int e)` advice, and two reports would be one
       ; mistake said twice.
       (if (&&
-            (strEq hname "cast")
+            (isValueCastForm hname)
             (&&
               (< (vecLen args) 2)
               (|| (== (vecLen args) 0) (== (castTypeIsLiteral (vecGet args 0)) 0))))
@@ -14100,7 +14142,7 @@
                 "AX3002"
                 "undefined-type"
                 (spanOf (castTypeBadPart (vecGet args 0)))
-                (if (strEq hname "cast")
+                (if (isValueCastForm hname)
                   (if (== (castTypeIsLiteral (castTypeBadPart (vecGet args 0))) 1)
                     "a literal is not a type, and `cast` takes a type first"
                     "this expression is not a type, and `cast` takes a type first")
@@ -14109,10 +14151,10 @@
                     (concat (concat "this expression is not a type, and `" hname) "` takes a type")))
                 0
                 0
-                (if (strEq hname "cast")
+                (if (isValueCastForm hname)
                   "write the type to cast TO - `(cast Int e)` - or, for an ascription, `(:: e Int)`"
                   (concat (concat "write the type to measure - `(" hname) " Int)`"))
-                (if (strEq hname "cast")
+                (if (isValueCastForm hname)
                   "an unconvertible shape here used to answer a silent wildcard, which unifies with everything: the cast was performed, the result had no type anyone could object to, and a function returning it satisfied any declaration"
                   (concat
                     (concat "the operand used to be ignored in silence: `(" hname)
@@ -14120,7 +14162,7 @@
               "not a type"))
           (mkNode TAG_T_ERR 0 0 0)
         }
-        (if (strEq hname "cast")
+        (if (isValueCastForm hname)
           (if (>= (vecLen args) 1)
             (let ((targetTy (castTargetTy tc (vecGet args 0))))
               (let ((subBase
@@ -14141,6 +14183,8 @@
                     ; the program spelled; `castMayForge` expands it
                     (if (>= (vecLen args) 2)
                       (castNoteForge tc e (exprToType (vecGet args 0)) srcTy (vecGet args 1)))
+                    (if (strEq hname "__as_numeric")
+                      (rewriteNumericAs tc e targetTy srcTy))
                     targetTy
                   }
                   ; `(cast Subtype v)` is a CHECKED conversion: the value
@@ -23379,7 +23423,7 @@
         (if (strEq (memGetWordStr ent 0) "__arm_wfi")
           1
           0)
-        (if (strEq kind "cast")
+        (if (isValueCastForm kind)
           (if (> depth 0)
             (graphDeclCasts tc ent)
             0)
@@ -23423,7 +23467,7 @@
   (if (||
         (strEq kind "extern")
         (||
-          (strEq kind "cast")
+          (isValueCastForm kind)
           (|| (strEq kind "forge") (|| (strEq kind "syscall") (strEq kind "wfi")))))
     0
     (if (!= (memGetWord ent 3) 0)
@@ -23677,7 +23721,7 @@
           (let ((head (spineHead e)))
             {
               (if (== (nodeTag head) TAG_E_VAR)
-                (if (strEq (nodeAName head) "cast")
+                (if (isValueCastForm (nodeAName head))
                   (vecPush acc e))
                 (castScanInto head acc))
               (castScanVec (spineArgVec e vecNew) 0 acc)

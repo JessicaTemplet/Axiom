@@ -4558,108 +4558,110 @@
     (if (peekIs tokens pos TK_IDENT)
       (let ((kw (vecGet tokens pos)))
         (let ((name (tokenLexeme kw)))
-          (if (kwEq name kwImport)
-            (pErrCode pos "import-position")
-            (if (kwEq name kwPub)
-              ; `pub` marks a top-level declaration. In an expression it
-              ; used to be skipped, so `(pub "x")` read as `("x")`.
-              (pErrExp pos "an expression")
-              ; An anonymous function is spelled `lambda`. `fn` declares a
-              ; named function at the top level, and in expression position
-              ; it is refused with that advice (AX2004).
-              (if (kwEq name kwFn)
-                (pErrRemoved pos "fn")
-                (if (kwEq name "lambda")
-                  (parseLamExpr tokens (advance pos))
-                  (if (kwEq name kwLet)
-                    (parseLetExpr tokens (advance pos))
-                    (if (kwEq name kwIf)
-                      (parseIfExpr tokens (advance pos))
-                      (if (kwEq name kwMatch)
-                        (parseMatchExpr tokens (advance pos))
-                        ; `cond` is REMOVED, not parsed. A variadic `if`
-                        ; takes its place - `(if t1 b1 t2 b2 ... els)` -
-                        ; and `match` takes the rest. The keyword stays
-                        ; reserved so old source gets `AX2004` with that
-                        ; advice instead of an application of an undefined
-                        ; variable, the way `begin` and `consume` do below.
-                        (if (kwEq name "cond")
-                          (pErrRemoved pos "cond")
-                          (if (kwEq name "while")
-                            (parseWhileExpr tokens (advance pos))
-                            ; `for` is a KEYWORD and not a macro, and `stdlib/Pre.ax`'s `range`
-                            ; header records why: an expression macro has exactly ONE shape
-                            ; (MAC-LANG-14 - the rule form's templates are DECLARATIONS), and
-                            ; `for` has four, counted with its step and its element-index
-                            ; pair. Measured, range and container cannot even
-                            ; coexist as two macros: `stdlib/Html.ax` exported its own
-                            ; `(for x in xs body)` and a program importing it beside a range `for`
-                            ; resolved to Html's and answered `AX3001: undefined variable i`
-                            ; in the body rather than an ambiguity at the import. The container
-                            ; half additionally needs an ELEMENT type, which arrived with the
-                            ; parameterised `Vec`; this is the container loop in `docs/reference.md`. The typed element
-                            ; accessor makes the desugaring possible.
-                            ;
-                            ; The keyword span is passed through rather than recovered, exactly
-                            ; as the `alloc` arm below does: `advance pos` loses the token.
-                            (if (kwEq name "for")
-                              (parseForExpr tokens (advance pos) (tokenSpan kw))
-                              ; The keyword span is passed through, as the
-                              ; `alloc` arm below does: `advance pos` loses
-                              ; the token.
-                              (if (kwEq name "region")
-                                (parseRegionExpr tokens (advance pos) (tokenSpan kw))
-                                ; `parallel` is a KEYWORD for the reason `for` and `while` are:
-                                ; it binds names, and its binding list is not an
-                                ; expression. Desugared by `parseParallelExpr` into
-                                ; `let`s over the `__par_spawn`/`__par_join`
-                                ; primitives, so no AST tag was added and no consumer
-                                ; of one moves. The keyword span is passed through,
-                                ; as the `alloc` arm below does.
-                                (if (kwEq name "parallel")
-                                  (parseParallelExpr tokens (advance pos) (tokenSpan kw))
-                                  (if (kwEq name "set")
-                                    (parseSetExpr tokens (advance pos))
-                                    ; `struct` declares a type. A struct is built by
-                                    ; calling its name, `(Pt 3 4)`, so the keyword in
-                                    ; expression position is refused with that advice
-                                    ; (AX2004) rather than read as an application.
-                                    (if (kwEq name kwStruct)
-                                      (pErrRemoved pos "struct")
-                                      ; `consume` is RESERVED, not parsed. It was a
-                                      ; parse-time IDENTITY that kept the `Linear`
-                                      ; wrapper: consuming twice was accepted and the
-                                      ; form reclaimed nothing. What reclaims is the
-                                      ; reference counting every heap block carries.
-                                      (if (kwEq name "consume")
-                                        (pErrRemoved pos "consume")
-                                        ; `begin` is RESERVED here for the same
-                                        ; reason the other five are: it was the
-                                        ; sequencing form, `{ }` replaced it, and
-                                        ; until now it fell through to an
-                                        ; application of a bare name and drew
-                                        ; `AX3001 undefined variable begin` - a
-                                        ; diagnostic that names no replacement and
-                                        ; reads like a typo. `CHANGELOG.md`'s 0.2.0
-                                        ; Compatibility section recorded exactly
-                                        ; that gap.
-                                        (if (kwEq name "begin")
-                                          (pErrRemoved pos "begin")
-                                          (if (kwEq name "alloc")
-                                            (pErrRemoved pos "alloc")
-                                            ; `define` is RESERVED in expression
-                                            ; position too: it was the old
-                                            ; spelling of `fn`, so old source
-                                            ; nests it, and falling through
-                                            ; would report `AX3001 undefined
-                                            ; variable define` - a typo read
-                                            ; on a keyword with a known
-                                            ; replacement.
-                                            (if (kwEq name kwDefine)
-                                              (pErrRemoved pos "define")
-                                              (if (kwEq name "handle")
-                                                (parseHandleExpr tokens (advance pos))
-                                                (parseAppForm tokens pos))))))))))))))))))))))
+          (if (kwEq name "as")
+            (parseAsExpr tokens (advance pos))
+            (if (kwEq name kwImport)
+              (pErrCode pos "import-position")
+              (if (kwEq name kwPub)
+                ; `pub` marks a top-level declaration. In an expression it
+                ; used to be skipped, so `(pub "x")` read as `("x")`.
+                (pErrExp pos "an expression")
+                ; An anonymous function is spelled `lambda`. `fn` declares a
+                ; named function at the top level, and in expression position
+                ; it is refused with that advice (AX2004).
+                (if (kwEq name kwFn)
+                  (pErrRemoved pos "fn")
+                  (if (kwEq name "lambda")
+                    (parseLamExpr tokens (advance pos))
+                    (if (kwEq name kwLet)
+                      (parseLetExpr tokens (advance pos))
+                      (if (kwEq name kwIf)
+                        (parseIfExpr tokens (advance pos))
+                        (if (kwEq name kwMatch)
+                          (parseMatchExpr tokens (advance pos))
+                          ; `cond` is REMOVED, not parsed. A variadic `if`
+                          ; takes its place - `(if t1 b1 t2 b2 ... els)` -
+                          ; and `match` takes the rest. The keyword stays
+                          ; reserved so old source gets `AX2004` with that
+                          ; advice instead of an application of an undefined
+                          ; variable, the way `begin` and `consume` do below.
+                          (if (kwEq name "cond")
+                            (pErrRemoved pos "cond")
+                            (if (kwEq name "while")
+                              (parseWhileExpr tokens (advance pos))
+                              ; `for` is a KEYWORD and not a macro, and `stdlib/Pre.ax`'s `range`
+                              ; header records why: an expression macro has exactly ONE shape
+                              ; (MAC-LANG-14 - the rule form's templates are DECLARATIONS), and
+                              ; `for` has four, counted with its step and its element-index
+                              ; pair. Measured, range and container cannot even
+                              ; coexist as two macros: `stdlib/Html.ax` exported its own
+                              ; `(for x in xs body)` and a program importing it beside a range `for`
+                              ; resolved to Html's and answered `AX3001: undefined variable i`
+                              ; in the body rather than an ambiguity at the import. The container
+                              ; half additionally needs an ELEMENT type, which arrived with the
+                              ; parameterised `Vec`; this is the container loop in `docs/reference.md`. The typed element
+                              ; accessor makes the desugaring possible.
+                              ;
+                              ; The keyword span is passed through rather than recovered, exactly
+                              ; as the `alloc` arm below does: `advance pos` loses the token.
+                              (if (kwEq name "for")
+                                (parseForExpr tokens (advance pos) (tokenSpan kw))
+                                ; The keyword span is passed through, as the
+                                ; `alloc` arm below does: `advance pos` loses
+                                ; the token.
+                                (if (kwEq name "region")
+                                  (parseRegionExpr tokens (advance pos) (tokenSpan kw))
+                                  ; `parallel` is a KEYWORD for the reason `for` and `while` are:
+                                  ; it binds names, and its binding list is not an
+                                  ; expression. Desugared by `parseParallelExpr` into
+                                  ; `let`s over the `__par_spawn`/`__par_join`
+                                  ; primitives, so no AST tag was added and no consumer
+                                  ; of one moves. The keyword span is passed through,
+                                  ; as the `alloc` arm below does.
+                                  (if (kwEq name "parallel")
+                                    (parseParallelExpr tokens (advance pos) (tokenSpan kw))
+                                    (if (kwEq name "set")
+                                      (parseSetExpr tokens (advance pos))
+                                      ; `struct` declares a type. A struct is built by
+                                      ; calling its name, `(Pt 3 4)`, so the keyword in
+                                      ; expression position is refused with that advice
+                                      ; (AX2004) rather than read as an application.
+                                      (if (kwEq name kwStruct)
+                                        (pErrRemoved pos "struct")
+                                        ; `consume` is RESERVED, not parsed. It was a
+                                        ; parse-time IDENTITY that kept the `Linear`
+                                        ; wrapper: consuming twice was accepted and the
+                                        ; form reclaimed nothing. What reclaims is the
+                                        ; reference counting every heap block carries.
+                                        (if (kwEq name "consume")
+                                          (pErrRemoved pos "consume")
+                                          ; `begin` is RESERVED here for the same
+                                          ; reason the other five are: it was the
+                                          ; sequencing form, `{ }` replaced it, and
+                                          ; until now it fell through to an
+                                          ; application of a bare name and drew
+                                          ; `AX3001 undefined variable begin` - a
+                                          ; diagnostic that names no replacement and
+                                          ; reads like a typo. `CHANGELOG.md`'s 0.2.0
+                                          ; Compatibility section recorded exactly
+                                          ; that gap.
+                                          (if (kwEq name "begin")
+                                            (pErrRemoved pos "begin")
+                                            (if (kwEq name "alloc")
+                                              (pErrRemoved pos "alloc")
+                                              ; `define` is RESERVED in expression
+                                              ; position too: it was the old
+                                              ; spelling of `fn`, so old source
+                                              ; nests it, and falling through
+                                              ; would report `AX3001 undefined
+                                              ; variable define` - a typo read
+                                              ; on a keyword with a known
+                                              ; replacement.
+                                              (if (kwEq name kwDefine)
+                                                (pErrRemoved pos "define")
+                                                (if (kwEq name "handle")
+                                                  (parseHandleExpr tokens (advance pos))
+                                                  (parseAppForm tokens pos)))))))))))))))))))))))
       (if (peekIs tokens pos TK_DOUBLE_COLON)
         (parseTypeSigExpr tokens (advance pos))
         (if (peekIs tokens pos TK_RPAREN)
@@ -4707,6 +4709,27 @@
 ; The synthetic head carries the *inner expression's* span, because
 ; stage0's `Expr::span()` for `ETypeSig` delegates to it, and `mkEApp`
 ; copies the head's span to the application.
+; The source order is value, then type. The checking spine keeps its
+; type slot first so type operands never enter the expression walk.
+(pub :: parseAsExpr (-> (Vec Int) Int Int))
+(pub fn (parseAsExpr tokens pos)
+  (let ((value (parseExpr tokens pos)))
+    (if (== (memGetWord value 0) 0)
+      value
+      (let ((target (parseExpr tokens (memGetWord value 2))))
+        (if (== (memGetWord target 0) 0)
+          target
+          (let ((after (memGetWord target 2)))
+            (if (peekIs tokens after TK_RPAREN)
+              (pOk
+                (mkEApp
+                  (mkEApp
+                    (mkEVarAt "__as_numeric" (tokenSpan (vecGet tokens (- pos 1))))
+                    (memGetWord target 1))
+                  (memGetWord value 1))
+                (advance after))
+              (pErrExp after "the end of an as expression"))))))))
+
 (pub :: parseTypeSigExpr (-> (Vec Int) Int Int))
 (pub fn (parseTypeSigExpr tokens pos)
   (let ((er (parseExpr tokens pos)))
