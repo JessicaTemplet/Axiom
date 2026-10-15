@@ -43,6 +43,15 @@ its changelog too.
   `vecFree` left the library. Tested by
   `tests/stdlib/895-scalar-element-read.ax` and `scripts/check-task.sh`.
 
+- The assurance page and the memory model say what holds. Their ID
+  tables now name the same IDs with the same meanings, each row cites
+  the rule that states it and evidence that tests it, and the known
+  defects list only what is still open. The memory model's recovery
+  rule lists every trap a recovery point contains and the cleanup an
+  abort runs, the spawn-handle rule says what a trusted declaration and
+  the raw layer can still do, and the CI section says which tools'
+  LLVM major is compared: `llc`'s.
+
 - `IO.readInto` is removed. It read into a `String`, and a `String`
   is a value: a read into a slice or an alias changed every string
   sharing those bytes, and a literal's bytes are the loader's. Read

@@ -111,7 +111,8 @@ mapped bytes with `__axiom_mem_stat` (`MM-ALLOC-24`, `MM-ALLOC-25`).
 
 ## Assurance evidence
 
-These IDs group existing guarantees and their executable checks. The `MM-*`
+These IDs group existing guarantees and their executable checks, with
+the meanings [assurance](assurance.md) gives them row by row. The `MM-*`
 rules above and below define the contract. H2 (linux-aarch64) and H3
 (darwin-aarch64) run the supported-target gates; H1 (linux-x86_64) builds
 from seed but is source-only. E1 is an emission check. A passing gate on a
@@ -119,18 +120,18 @@ host does not extend its claim to other targets or hardware.
 
 | ID | Contract or boundary | Evidence |
 |---|---|---|
-| R-A1–A4 | Recovery, child sweeps, spawn failure and thread teardown (`MM-PAR-7`) | `scripts/check-parallel.sh` |
+| R-A1–A4 | Recovery, child sweeps and spawn failure (`MM-PAR-7`), and thread teardown (`MM-PAR-6a`) | `scripts/check-parallel.sh` |
 | R-A5, A7, A9 | Allocation refusal, free-list integrity and count overflow (`MM-ALLOC-7a`, `MM-LIFE-2k`, `MM-LIFE-2l`) | `scripts/check-runtime-model.sh` |
-| R-A6, A8, A10 | Unsafe effects, join ownership and name resolution | `scripts/check-diagnostics.sh`, `scripts/check-metamorphic.sh` |
+| R-A6, A8, A10 | Unsafe effects (`MM-EXEC-9c`, `MM-EXEC-9d`), join ownership (`MM-PAR-7`) and name resolution | `scripts/check-diagnostics.sh`, `scripts/check-parallel.sh`, `scripts/check-metamorphic.sh` |
 | R-A11 | Inline assembly checked at the form, and an assembler error reported at its line (`MM-FFI-9`) | `scripts/check-embedded.sh`, `scripts/check-diagnostics.sh` |
-| R-B1–B3 | Bounds, bounded pools and checked regions | `scripts/check-reclaim-soak.sh`, `scripts/check-region-escape.sh` |
-| R-B4–B6 | Program obligations, foreign captures and trusted Unsafe boundaries | `scripts/check-restrictions.sh` |
+| R-B1–B3 | Bounds (`MM-MUT-5a`), bounded pools (`MM-PAR-13`, `MM-PAR-17`) and checked regions (`MM-RGN-1` to `MM-RGN-6`) | `tests/stdlib/525-vec-set-bounds.ax`, `scripts/check-task.sh`, `scripts/check-region-escape.sh` |
+| R-B6 | Forging casts and the trusted boundary (`MM-EXEC-9d`) | `scripts/check-diagnostics.sh` |
 | R-B7–B10 | Iterative release, slab reuse, recovery and typed kernel buffers | `scripts/check-reclaim-soak.sh`, `tests/stdlib/610-typed-io-bounds.ax` |
-| R-C1, C3, C4 | Thread captures, sequentially consistent atomics and happens-before (`MM-PAR-9`) | `scripts/check-atomics.sh` |
+| R-C1, C3, C4 | Thread captures (`MM-PAR-6`), sequentially consistent atomics and happens-before (`MM-PAR-1`, `MM-PAR-9`), and misaligned atomics | `scripts/check-parallel.sh`, `scripts/check-atomics.sh`, `tests/stdlib/544-misaligned-atomic.ax` |
 | R-C2, C2a | Mutex, timed task and channel protocols (`MM-PAR-10`–`MM-PAR-13`) | `scripts/check-task.sh`, `scripts/check-protocol-model.sh` |
-| R-C5–C8 | Child cleanup, sealed handles, string lending and ordered results | `scripts/check-parallel.sh`, `scripts/check-handles.sh` |
-| R-D1, D2a–D2e | Restricted profile, device access, fault exits and embedded examples | `scripts/check-report.sh`, `scripts/check-embedded.sh` |
-| R-E1, E2 | Model, fuzz and race evidence; qualification gaps remain | `scripts/check-runtime-model.sh`, `scripts/check-fuzz.sh` |
+| R-C5–C10 | Threads inside a process binding, sealed handles, string lending, ordered results, monotonic sleeps and form arenas | `scripts/check-task.sh`, `scripts/check-handles.sh`, `scripts/check-parallel.sh` |
+| R-D1, D2a–D2c, D2e | Restricted profile, device access, fault exits and embedded examples | `scripts/check-report.sh`, `scripts/check-embedded.sh` |
+| R-E1, E2 | Model, fuzz and race evidence, and the self-hosting fixpoint | `scripts/check-runtime-model.sh`, `scripts/check-fuzz.sh`, `scripts/check-bootstrap.sh` |
 
 See [restricted builds](restricted-profile.md), [foreign calls](ffi.md)
 and [implementation status](status.md) for the conditions of use, and
@@ -647,8 +648,9 @@ operations:
   `x` isn't already a `T`. The reference types are `String`, `Vec`,
   `Handle`, a struct, a `data` type with a field, a function, a
   non-empty tuple, and a type variable, which a caller may instantiate
-  at any of them. A spawn handle, `Spawn`, counts as one too: only a
-  spawn makes one (`MM-PAR-8`).
+  at any of them. A spawn handle, `Spawn`, counts as one too: a spawn
+  primitive makes one, and so does a trusted declaration that vouches
+  for the word it casts (`MM-PAR-8`).
 
 An untagged operation is `AX3073`, even when the declaration claims
 another effect, such as `effect(io)`. Under `effect(pure)` it is
@@ -704,6 +706,14 @@ at. State a condition the arguments can show as a `;@axiom:pre(...)`
 contract, which is checked on every call and traps 80, and describe
 the rest in a comment. A `;@axiom:precondition(...)` tag is refused as
 `AX3095`.
+
+`vecGetStr` and `vecGetVec` go further: they read any slot of any
+vector as a reference, so safe code can forge a `String` or a `Vec` out
+of a vector of numbers. A vector's kind word can't tell numbers from a
+record whose strings were pushed as words, which is how the compiler
+builds its records, so no check in the accessor can refuse one. Not
+yet: these accessors leave safe code with the raw layer
+([roadmap](roadmap.md)).
 
 `restrict(no-unsafe)` refuses a body that performs an unsafe operation
 or reaches one through a callee that is not a trusted encapsulation,
@@ -2216,16 +2226,34 @@ unbracketed grows by about 16 KiB per generation, forever.
 **MM-ALLOC-23 (H, renumbered from a second `MM-ALLOC-17`). A trap may
 abort to a mark, and the abort discharges `MM-ALLOC-16b` on its own
 path.** `(__axiom_recover mark thunk)` arms a recovery point and runs
-`thunk`. Out of memory (70), an unhandled effect (71) and a division by
-zero (72) then answer the *arming call* with their status, instead of
-writing to fd 2 and exiting. With nothing armed, they behave as they
-always do. Recovery points nest, and an abort takes the innermost armed
-one. That is `MM-ALLOC-16a`'s ordering rule, and here the mechanism
-enforces it for the program.
+`thunk`. A trap inside it then answers the *arming call* with its
+status, instead of writing to fd 2 and exiting. These traps answer
+that way:
 
-The abort restores three things and runs nothing: the stack pointer,
-the arena (a reset to `mark`, `MM-ALLOC-13`), and every evidence slot.
-The third makes it sound where a program calling `__axiom_arena_reset`
+- out of memory, a size out of range and a count overflow (70);
+- an unhandled effect (71) and division by zero (72);
+- no syscall ABI on the target (74);
+- an index out of range (77);
+- a refused spawn or a failed join (78), and `parallel` unavailable
+  (79);
+- a violated contract (80);
+- a misaligned atomic (82), division overflow (83) and a shift out of
+  range (84);
+- a handle or a resource that isn't live (85);
+- a binding's own trap, re-raised at its join.
+
+The arena-reset traps (75, 76) end the program whatever is armed, and
+so do a CPU exception on bare metal (81) and a stack overflow into the
+guard below a mapped stack (86). With nothing armed, every trap
+behaves as it always does. Recovery points nest, and an abort takes
+the innermost armed one. That is `MM-ALLOC-16a`'s ordering rule, and
+here the mechanism enforces it for the program.
+
+The abort sweeps the children the extent spawned (`MM-PAR-7`) and
+restores three things: the stack pointer, the arena (a reset to `mark`,
+`MM-ALLOC-13`, which first runs the cleanup of the resource owners the
+extent made, `MM-EXEC-20`), and every evidence slot. The third makes it
+sound where a program calling `__axiom_arena_reset`
 by hand is not. `MM-ALLOC-16b` is a *program obligation* because a
 reset can't know which `handle` extents it cuts through. An abort can:
 the arm site snapshots every slot into the recovery record before the
@@ -2260,10 +2288,11 @@ max RSS holds at **1,376 KiB**, byte-identical at 10,000 and at
 resets, reaches **419,328 KiB** (`scripts/check-recover.sh`).
 
 This is not unwinding. There is no landing pad, no resumption and no
-way to catch anything at a chosen frame. The one code that runs on the
-way out is the cleanup of the resource owners the extent made, which
-the reset runs before it reclaims them (`MM-EXEC-20`). A recovery
-point can only contain one of the three traps. `ERR-REC-6` in
+way to catch anything at a chosen frame. The code that runs on the way
+out is the child sweep and the cleanup of the resource owners the
+extent made, which the reset runs before it reclaims them
+(`MM-EXEC-20`). A recovery point contains only the traps listed above.
+`ERR-REC-6` in
 [the error model](error-model.md) states what that does and doesn't
 buy.
 
@@ -2282,13 +2311,16 @@ program obligation:
   (`tests/diagnostics/1033-recover-escape.ax`). Carry the thunk's
   answer out as the arming call's result and store it afterwards
   (`tests/stdlib/561-failed-operations.ax` case 3).
-- **Resources the thunk acquired stay acquired.** A file descriptor
-  opened in an aborted extent stays open, a shared mapping stays mapped
-  and a mutex stays locked: the runtime can't know they were taken.
-  Acquire them outside the point, or release them before anything in
-  the extent can trap. The one resource the runtime owns, a child
-  spawned inside the extent, is swept by the abort (`MM-PAR-7`).
-  `scripts/check-reclaim-soak.sh` section 5 measures both halves.
+- **A resource held only through a raw word stays acquired.** An
+  owner the extent made is cleaned up by the reset: a `File` closes, a
+  mutex guard releases its lock, and a channel's or token's page is
+  unmapped (`MM-EXEC-20`). A descriptor or a mapping the program holds
+  as a bare `Int` is invisible to the runtime and stays open or mapped,
+  so acquire it outside the point, or release it before anything in
+  the extent can trap. A child spawned inside the extent is swept by
+  the abort (`MM-PAR-7`). `scripts/check-reclaim-soak.sh` section 5
+  measures both: the files the extent opened close, and its children
+  are swept.
 
 ### 3.4 The inferred arena model — withdrawn
 
@@ -5416,8 +5448,10 @@ and its output is byte for byte what it would be without the registry.
 **MM-PAR-8 (H). A spawn handle SHALL be a value the type system
 tracks, joined exactly once.** A spawn primitive answers a `Spawn`,
 and only a join, a checked join and `__spawn_pid` take one. `Spawn` is
-a builtin word type that safe code can't build: only a spawn primitive
-makes one, and only a join or `__spawn_pid` reads the page it names.
+a builtin word type that safe code can't cast a word to: a spawn
+primitive makes one, a trusted declaration can forge one and vouches
+for it (below), and only a join or `__spawn_pid` reads the page it
+names.
 So an `Int` joined, a handle used as an `Int` and a function declared
 `Int` that answers one are `AX3004`. A concurrent binding may not
 capture one (`AX3064`), because a join belongs to the binding that
@@ -5478,7 +5512,10 @@ it casts. The table traps 85 on a word that names no live slot, and the
 page's owner check traps 78 on a live handle another binding spawned.
 A copy of a live handle's word, in the binding that spawned it, still
 joins that child. The salt defends against a wrong word, not one read
-out of memory, and the unsafe layer can read the table.
+out of memory, and the unsafe layer can read the table. The raw layer
+reaches safe code too: `memSetWord` is trusted, so a program with no
+tag can write any word over a `Spawn` stored in a struct, and the join
+that reads it back traps 85 unless the word names a live slot.
 
 *Evidence.* `tests/stdlib/571-handle-table.ax`,
 `tests/stdlib/572-spawn-joined-twice.ax` and
@@ -5500,7 +5537,7 @@ finds no live handle. The guard's refusals are
 - a single-bit fault at each of a live handle's 64 bits
   (`tests/litmus/handle-bitflip.ax`);
 - the forging cast's refusals and the scan;
-- six ablations, one of which starts every slot at generation 1 again
+- four ablations, one of which starts every slot at generation 1 again
   and lets the scan find the child.
 
 **MM-PAR-9 (H). What orders memory between bindings, what the atomics
@@ -7134,7 +7171,7 @@ only written down.
 | `tests/stdlib/522-parallel-recover.ax` | PAR-7's recovery half: a trapping forked binding inside a recovery point answers 72 once, where the unfixed compiler printed twice |
 | `tests/diagnostics/1010-unsafe-primitives.ax` | EXEC-9c: the nine primitives refused under `restrict(no-unsafe)` and `pure`, with three controls silent |
 | `scripts/check-parallel.sh` section 12 | PAR-6a and PAR-7: thread churn holds address space flat, and no child outlives an abort, a trap or `main` |
-| `scripts/check-handles.sh` | VAL-10a and PAR-8: a freed or forged channel or mutex, and a spawn handle joined twice or of the other lowering's kind, trap 85 at every `--opt` and in both lowerings; the table holds under four bindings at once and exactly one of two racing frees returns; the capture rule holds under `build --threads`; a record holding a handle maps as one holding an `Int`; three ablations each go red |
+| `scripts/check-handles.sh` | VAL-10a and PAR-8: a freed or forged channel or mutex, and a spawn handle joined twice or of the other lowering's kind, trap 85 at every `--opt` and in both lowerings; the table holds under four bindings at once and exactly one of two racing frees returns; the capture rule holds under `build --threads`; a record holding a handle maps as one holding an `Int`; four ablations each go red |
 | `tests/selfhost/500-while-mut.ax` | MUT-1 in constant stack |
 | `tests/diagnostics/465-set-on-parameter.ax`, `466-set-captured.ax` | MUT-1a: both refusals, byte-pinned in all three renderings |
 | `tests/diagnostics/471-reserved-runtime-name.ax` | ALLOC-8's refusal arm (`AX3026`) |

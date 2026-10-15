@@ -58,7 +58,7 @@ integrator would still need.
 | `vecFree` and `mapFree` leave safe code, so an early drop can't free a block still in use | Done | `tests/stdlib/406-array-form-large-block.ax`, `tests/stdlib/489-map-free.ax` |
 | CI builds the compiler with a poisoned allocator and checks it still reaches its fixpoint | Not started | |
 | No cast, `Int` container or raw store lets a heap value become an untracked word in safe code | Not started | `MM-VAL-24` |
-| Raw-address functions leave the public library, so safe code can't forge an address | Not started | |
+| Raw-address functions and the word-to-reference accessors (`vecGetStr`, `vecGetVec`, `memGetWordStr`, `memGetWordVec`) leave the public library, so safe code can't forge an address or a reference | Not started | `MM-EXEC-9d` |
 | `fileFd` and the raw descriptor calls can't close a descriptor a `File` owns | Done | `MM-EXEC-17a`, `tests/diagnostics/1225-descriptor-hole.ax` |
 | Standard input, output and error are `File` values, with one owned poller and one terminal raw-mode guard | Done | `MM-EXEC-17b`, `tests/stdlib/785-stdio-file.ax`, `tests/stdlib/786-poller-owned.ax` |
 | Secrets and keys wipe themselves when dropped, and a child process is an owner | Not started | |
