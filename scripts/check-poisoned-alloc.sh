@@ -52,14 +52,14 @@ poison="$("$work/p/poison")"
 ok "the witness reads its former length normally and the poison pattern under the flag"
 
 cat > "$work/p/zero.ax" <<'AX'
+(import Str)
 (:: main Int)
 ;@axiom:effect(unsafe)
 (fn (main)
-  (let ((p (__alloc 8)))
+  (let ((s (strDup "reusable")) (p (cast Int s)))
     {
-      (__store64 p 0 99)
       (__release p)
-      (let ((q (__alloc 8)))
+      (let ((q (__alloc 24)))
         (if (&& (== p q) (== (__load64 q 0) 0)) 42 1))
     }))
 AX
