@@ -838,7 +838,7 @@ fd 2 and exiting:
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((status 
+  (let ((status
     (__axiom_recover __axiom_arena_mark (lambda (x) (divide 10 0)))))
     {
       (println "recovered {status}")

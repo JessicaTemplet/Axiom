@@ -46,10 +46,9 @@ fuses a unary minus into the literal, which moves the sign between the
 expression and the token without changing what the program computes.
 
 Also checked, on the formatted bytes alone: delimiters balance, no tabs,
-no CR, and the file ends in exactly one newline. Trailing spaces are NOT
-checked - the printer emits them (`(else ` before a line break, 15 of
-the 224 corpus files), the checked-in zoo golden contains them, and a
-gate must assert what is true rather than what would be tidy.
+no CR, no trailing layout whitespace, and exactly one final newline.
+Whitespace inside literals and comments is read as content by the scanner;
+only padding outside those tokens is subject to the layout check.
 
 Usage:  verify-fmt.py <pairs-file>
         each line: <original-path> <formatted-path>
@@ -102,11 +101,19 @@ def scan(text):
     # here rather than rescanned, because a second scanner over the
     # same bytes is the defect this file exists to be the opposite of.
     delim_lines = []
+    trailing_layout = []
     newlines = [m.start() for m in re.finditer('\n', text)]
     i, n = 0, len(text)
     while i < n:
         c = text[i]
-        if c in ' \t\r\n':
+        if c in ' \t':
+            j = i + 1
+            while j < n and text[j] in ' \t':
+                j += 1
+            if j == n or text[j] in '\r\n':
+                trailing_layout.append(bisect.bisect_left(newlines, i) + 1)
+            i = j
+        elif c in '\r\n':
             i += 1
         elif c == ';':
             j = text.find('\n', i)
@@ -172,7 +179,7 @@ def scan(text):
                 # which introduces a literal without changing a value.
                 numbers.append(abs(float(atom.replace('_', ''))))
             i = j if j > i else i + 1
-    return comments, strings, chars, delims, numbers, delim_lines
+    return comments, strings, chars, delims, numbers, delim_lines, trailing_layout
 
 
 def load(path):
@@ -333,12 +340,14 @@ def main(argv):
         except OSError as exc:
             failures.append(f'{orig}: cannot read the pair: {exc}')
             continue
-        b_com, b_str, b_chr, _, b_num, _ = scan(before)
-        a_com, a_str, a_chr, a_delims, a_num, a_delim_lines = scan(after)
+        b_com, b_str, b_chr, _, b_num, _, _ = scan(before)
+        a_com, a_str, a_chr, a_delims, a_num, a_delim_lines, a_trailing = scan(after)
         n_comments += compare('comments', b_com, a_com, orig, failures)
         n_strings += compare('string literals', b_str, a_str, orig, failures)
         n_chars += compare('character literals', b_chr, a_chr, orig, failures)
         n_numbers += compare('float values', b_num, a_num, orig, failures)
+        if a_trailing:
+            failures.append(f'{orig}: trailing layout whitespace on lines {a_trailing[:5]}')
         for problem in shape_problems(after, a_delims):
             failures.append(f'{orig}: the formatted output {problem}')
         failures.extend(indent_problems(after, a_delims, a_delim_lines,

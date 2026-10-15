@@ -497,7 +497,7 @@
 ; one whole UTF-8 sequence, quote.
 (pub :: scanCharLit (-> String Int Int Int))
 (pub fn (scanCharLit src pos len)
-  (let ((body 
+  (let ((body
     (if (>= pos len)
       pos
       (if (== (strByte src pos) 92)
@@ -1470,7 +1470,7 @@
 ; string.
 ; ------------------------------------------------------------------
 (pub struct FOut
-  (frags : (Vec Int))
+  (frags : (Vec String))
   (nl : Int)
   (indent : Int)
   (bad : Int)
@@ -1487,10 +1487,10 @@
 
 ; The `Vec` view of the same word. The cast is at the return,
 ; not the call sites - see `nodeCName`.
-(pub :: foFragsVec (-> Int (Vec a)))
+(pub :: foFragsVec (-> Int (Vec String)))
 ;@axiom:effect(unsafe)
 (pub fn (foFragsVec o)
-  (cast (Vec a) (foFrags o)))
+  (cast (Vec String) (foFrags o)))
 
 (pub :: foNl (-> Int Int))
 (pub fn (foNl o)
@@ -1520,9 +1520,41 @@
 (pub fn (foTrial o)
   (memGetWord o 4))
 
+; Remove layout padding before a line break. Literal newlines are
+; escaped by fpStrLit, so this never trims the contents of a string.
+(pub :: foTrimPadding (-> Int ()))
+(pub fn (foTrimPadding o)
+  (let (
+    (v (foFragsVec o))
+    (mut more true)
+  )
+    {
+      (while (&& more (> (vecLen v) 0))
+        (let ((i (- (vecLen v) 1)))
+          (let (
+            (s (vecGet v i))
+            (mut end (strLen (vecGet v i)))
+          )
+            {
+              (while (&& (> end 0) (|| (== (strByte s (- end 1)) 32) (== (strByte s (- end 1)) 9)))
+                (set end (- end 1)))
+              (memSetWord o 5 (- (memGetWord o 5) (- (strLen s) end)))
+              (if (== end 0)
+                (vecPop v)
+                {
+                  (if (< end (strLen s))
+                    (vecSet v i (strSlice s 0 end)))
+                  (set more false)
+                })
+            })))
+      ()
+    }))
+
 (pub :: foPush (-> Int String Int))
 (pub fn (foPush o s)
   {
+    (if (&& (> (strLen s) 0) (== (strByte s 0) 10))
+      (foTrimPadding o))
     (vecPush (foFragsVec o) s)
     (memSetWord o 5 (+ (memGetWord o 5) (strLen s)))
     (if (&& (== (foTrial o) 1) (> (memGetWord o 5) fmtWidth))
@@ -2149,7 +2181,7 @@
                 (if (< i e)
                   (let ((b (strByte src i)))
                     (if (== b 92)
-                      (let ((esc 
+                      (let ((esc
                         (if (< (+ i 1) e)
                           (strByte src (+ i 1))
                           0)))
@@ -2584,7 +2616,7 @@
 (pub fn (fpBindInit src b)
   (if (!= (fnKind b) FN_PAREN)
     (- 0 1)
-    (let ((i1 
+    (let ((i1
       (if (&& (> (fnLen b) 0) (fpIsAtomText src (fnKid b 0) "mut"))
         2
         1)))
@@ -2807,7 +2839,7 @@
         (fpIsAtomText src (vecGet elems 1) "in")
         false))
     )
-      (let ((isRange 
+      (let ((isRange
         (if (>= k 6)
           (fpIsAtomText src (vecGet elems 3) "..")
           false)))
@@ -3013,7 +3045,7 @@
     (if (|| (< (fnLen n) 3) (!= (vecLen vals) 1))
       (fpBad p)
       (let ((target (fnKid n 1)))
-        (let ((rootOk 
+        (let ((rootOk
           (if (== (fnKind target) FN_ATOM)
             (if (== (ftKind (fnTok target)) FT_IDENT)
               (if (isFOperChar (strByte src (fnStart target)))
@@ -3087,7 +3119,7 @@
   ; consumed a paren there as one), and with two the second must
   ; not be a paren the parser would have eaten as effects.
   (let ((elems (fpExprElems n 1)))
-    (let ((hasFx 
+    (let ((hasFx
       (if (== (vecLen elems) 3)
         (== (fnKind (vecGet elems 1)) FN_PAREN)
         false)))
@@ -3206,7 +3238,7 @@
     (if (fqAnyWithin q (fnStart n) (fnEnd n))
       ""
       (let ((o2 (mkFOut 0)))
-        (let ((p2 
+        (let ((p2
           (mkFPr (fpSrc p) (fpStarts p) (mkFCq (cast Int vecNew)) o2)))
           {
             (memSetWord o2 4 1)
@@ -3309,7 +3341,7 @@
           ; on one line however wide, since breaking it would not
           ; shorten anything.
           (let ((func (vecGet elems 0)))
-            (let ((inline 
+            (let ((inline
               (if (isSimpleForm src func)
                 (if (<= (- (vecLen elems) 1) 4)
                   (let (
@@ -3327,7 +3359,7 @@
                     })
                   false)
                 false)))
-              (let ((flat 
+              (let ((flat
                 (if (== (foTrial o) 1)
                   ""
                   (fpAppFlat p n elems))))
@@ -3453,7 +3485,7 @@
                     (fpBad p))))))))
       (if (== k FN_FIELD)
         (let ((base (fnKid n 0)))
-          (let ((baseOk 
+          (let ((baseOk
             (if (== (fnKind base) FN_ATOM)
               (== (ftKind (fnTok base)) FT_IDENT)
               (== (fnKind base) FN_FIELD))))
@@ -4655,7 +4687,7 @@
       ; Reading bare names as parameters printed `word shared` as `(word
       ; shared)`, a parameter list - a program with another meaning.
       (let ((mEnd (fpMarkersEnd n (+ b 2))))
-        (let ((tvEnd 
+        (let ((tvEnd
           (if (&& (< mEnd (fnLen n)) (fpIsTyvarList src (fnKid n mEnd)))
             (+ mEnd 1)
             mEnd)))
@@ -4706,7 +4738,7 @@
                           ; all three, which made the fixture that pins
                           ; AX3056 unformattable - the same shape the
                           ; effect printer above was given for AX3055.
-                          (let ((fb 
+                          (let ((fb
                             (if (&& (> (fnLen f) 0) (fpIsAtomText src (fnKid f 0) "mut"))
                               1
                               0)))
@@ -4882,7 +4914,7 @@
           (fpP p "fn (")
           ; Only `(fn (name params) body)` is a function. A bare name
           ; or a `define` head is refused, as the parser refuses it.
-          (let ((bodyFrom 
+          (let ((bodyFrom
             (if (== (fnKind x) FN_PAREN)
               (if (&& (> (fnLen x) 0) (fpIsIdentAtom (fnKid x 0)))
                 (let (
@@ -5408,10 +5440,8 @@
       (fpP p "\n")
     }))
 
-; Format a whole module: classify the top-level forms, hoist imports
-; above everything else (stage0 keeps them in `Module::imports` and
-; chains them first), and emit with the comment queue threaded
-; through.
+; Keep declarations in source order so comments and documentation remain
+; beside their declarations, including when an import appears later.
 (pub :: fmtPrint (-> String (Vec Int) Int (Vec Int) Int))
 (pub fn (fmtPrint src forms coms starts)
   (let (
@@ -5420,10 +5450,8 @@
   )
     (let (
       (p (mkFPr src (cast Int starts) q o))
-      (imports vecNew)
       (declTags vecNew)
       (declNodes vecNew)
-      (importTags vecNew)
       (mut pending vecNew)
       (mut i 0)
     )
@@ -5433,135 +5461,54 @@
             {
               (if (fpIsAxtagAtom f)
                 (vecPush pending (fnTok f))
-                (if (!= (fnKind f) FN_PAREN)
+                (if (|| (!= (fnKind f) FN_PAREN) (== (fnLen f) 0))
                   (foSetBad o)
-                  (if (== (fnLen f) 0)
-                    ; A bare `()` at the TOP level. The comment
-                    ; this replaces said `parse_module` skips the
-                    ; form, so the formatter deleted it. That was
-                    ; stage0's rule and it is not this compiler's:
-                    ; `check` on a file whose first form is `()`
-                    ; is `AX2003` at the `)`. So the formatter
-                    ; took a file the compiler REFUSES and wrote
-                    ; back one it accepts, reporting OK - the one
-                    ; rewrite a formatter may never make, and the
-                    ; only one that cannot be caught by asking
-                    ; whether the output means what the input
-                    ; meant, because the input means nothing.
-                    ; The parity golden recorded the deletion as
-                    ; correct, because that bank compares the
-                    ; formatter against its own previous output.
-                    (foSetBad o)
-                    (let ((h (fpDeclHead src f)))
-                      (if (strEq h "import")
-                        ; AXTAGs before an import are KEPT and
-                        ; reprinted. They used to be collected
-                        ; and thrown away, because stage0
-                        ; attached none to `DImport` - but an
-                        ; AXTAG is a comment the programmer
-                        ; wrote, and a formatter that deletes a
-                        ; comment has broken its one contract.
-                        ; `verify-fmt.py` counts AXTAGs among
-                        ; the comments it compares, and could
-                        ; not see this because no file in the
-                        ; corpus has one above an import.
-                        {
-                          (vecPush imports f)
-                          (vecPush importTags (cast Int pending))
-                          (set pending vecNew)
-                        }
-                        ; A known declaration head - or ANY
-                        ; identifier head, which is a
-                        ; declaration-macro invocation since
-                        ; 2026-08-14 (TAG_D_MACROCALL). A
-                        ; non-identifier head (`(1 2)`) stays
-                        ; a refusal, as it is in the parser.
-                        ; A bare `(pub)` has no head at all, so
-                        ; the length is asked before the kid is
-                        ; read: reading it trapped with 77, and
-                        ; `(pub` at the end of a buffer being
-                        ; typed took the language server's
-                        ; `formatting` down (scripts/lib/lspfuzz.py).
-                        (if (||
-                              (fpIsDeclHead h)
-                              (&&
-                                (> (fnLen f) (fpDeclBase src f))
-                                (let ((hk (fnKid f (fpDeclBase src f))))
-                                  (|| (fpIsIdentAtom hk) (== (fnKind hk) FN_QUAL)))))
-                          ; a qualified head - `Pre::when`
-                          ; - is one FN_QUAL node here
-                          {
-                            (vecPush declTags (cast Int pending))
-                            (vecPush declNodes f)
-                            (set pending vecNew)
-                          }
-                          (foSetBad o)))))))
+                  (let ((h (fpDeclHead src f)))
+                    (if (||
+                          (fpIsDeclHead h)
+                          (&&
+                            (> (fnLen f) (fpDeclBase src f))
+                            (let ((hk (fnKid f (fpDeclBase src f))))
+                              (|| (fpIsIdentAtom hk) (== (fnKind hk) FN_QUAL)))))
+                      {
+                        (vecPush declTags (cast Int pending))
+                        (vecPush declNodes f)
+                        (set pending vecNew)
+                      }
+                      (foSetBad o)))))
               (set i (+ i 1))
             }))
-        ; Trailing AXTAGs have no declaration to attach to: stage0's
-        ; parser fails at EOF looking for one.
         (if (> (vecLen pending) 0)
-          (foSetBad o)
-          o)
+          (foSetBad o))
         (let (
-          (mut emitted 0)
           (mut j 0)
           (mut prevHead "")
           (mut prevName "")
         )
-          {
-            (while (< j (vecLen imports))
-              (let ((f (vecGet imports j)))
+          (while (< j (vecLen declNodes))
+            (let ((f (vecGet declNodes j)))
+              (let (
+                (h (fpDeclHead src f))
+                (nm (fpDeclName src f))
+              )
                 {
-                  ; Imports stick to imports; the first emission of
-                  ; the file stands alone either way.
                   (fpEmitDecl
                     p
-                    (if (== emitted 0)
+                    (if (||
+                          (== j 0)
+                          (||
+                            (&& (strEq prevHead "import") (strEq h "import"))
+                            (&&
+                              (strEq prevHead "::")
+                              (&& (strEq h "fn") (&& (!= (strLen prevName) 0) (strEq prevName nm))))))
                       1
-                      (if (strEq prevHead "import")
-                        1
-                        0))
-                    (vecGetVec importTags j)
+                      0)
+                    (vecGetVec declTags j)
                     f)
-                  (set prevHead "import")
-                  (set prevName "")
-                  (set emitted (+ emitted 1))
+                  (set prevHead h)
+                  (set prevName nm)
                   (set j (+ j 1))
-                }))
-            (set j 0)
-            (while (< j (vecLen declNodes))
-              (let ((f (vecGet declNodes j)))
-                (let ((h0 (fpDeclHead src f)))
-                  (let (
-                    (h (if (strEq h0 "define")
-                      "fn"
-                      h0))
-                    (nm (fpDeclName src f))
-                  )
-                    {
-                      ; A `fn` sticks to its own `::`: same name, and
-                      ; a name at all - anything nameless takes the
-                      ; blank line, as does everything else.
-                      (fpEmitDecl
-                        p
-                        (if (== emitted 0)
-                          1
-                          (if (&&
-                                (strEq prevHead "::")
-                                (&&
-                                  (strEq h "fn")
-                                  (&& (!= (strLen prevName) 0) (strEq prevName nm))))
-                            1
-                            0))
-                        (vecGetVec declTags j)
-                        f)
-                      (set prevHead h0)
-                      (set prevName nm)
-                      (set emitted (+ emitted 1))
-                      (set j (+ j 1))
-                    }))))
-          })
+                }))))
         (flushRemaining src q o)
         o
       })))

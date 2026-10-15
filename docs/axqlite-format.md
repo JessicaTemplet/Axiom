@@ -28,7 +28,7 @@ This program makes a new database and asks how many pages it has:
       }
     )
     ((Ok p)
-      (let ((pages 
+      (let ((pages
         (unwrapOr (andThen (pagerBeginRead p) (lambda (_) (pagerPageCount p))) 0)))
         {
           (println "{pages} pages")

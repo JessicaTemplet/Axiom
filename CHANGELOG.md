@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- Formatting removes trailing layout whitespace and preserves declaration
+  order, so a late import cannot displace preceding doc comments.
+- Restored Cereal's displaced documentation and added literal-preservation
+  and late-import regressions to the formatter checks.
+
 - Handler values now propagate their effects as calls, including local
   lambdas and handler parameters. Built-in-only handles leave their
   unused handler expressions unevaluated in effect inference.

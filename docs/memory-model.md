@@ -2639,7 +2639,7 @@ saved position and answers the body's scalar result.
 ;@axiom:effect(io)
 (fn (main)
   (let ((id 42))
-    (let ((n 
+    (let ((n
       (region r
         (strLen (format "GET /orders/{id}")))))
       (println "rendered {n} bytes"))))

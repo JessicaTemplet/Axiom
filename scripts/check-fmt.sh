@@ -297,6 +297,25 @@ else
   failed=$((failed + 1))
 fi
 
+echo "== comments stay with declarations around a late import =="
+if python3 - "$axiom" "$repo_root" "$work" <<'PYTEST'
+import pathlib, subprocess, sys
+compiler, root, work = sys.argv[1:]
+p = pathlib.Path(work) / "late-import.ax"
+p.write_bytes((pathlib.Path(root) / "tests/fmt/parity/243-late-import-comments.axp").read_bytes())
+subprocess.run([compiler, "fmt", str(p)], check=True, capture_output=True)
+s = p.read_text()
+assert (s.index(";; First function") < s.index("(:: first") < s.index("(import Str)")
+        < s.index(";; Second function") < s.index("(:: second")), s
+subprocess.run([compiler, "fmt", "--check", str(p)], check=True, capture_output=True)
+print("ok   imports keep source order and each declaration keeps its doc comment")
+PYTEST
+then
+  :
+else
+  failed=$((failed + 1))
+fi
+
 echo "== the zoo formats to the checked-in golden =="
 golden="$repo_root/tests/fmt/syntax-zoo.expected.ax"
 if [[ ! -f "$golden" ]]; then

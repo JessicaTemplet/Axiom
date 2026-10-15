@@ -17,8 +17,8 @@ Every name listed is `pub` in the source. The columns are:
   line. `Mut` changes heap state that something else can see. `Unsafe`
   uses a raw-memory primitive. A blank cell means the compiler inferred
   no effect, and a macro's cell is always blank. Treat the column as a
-  lower bound: inference doesn't count the allocation a constructor
-  makes (`docs/memory-model.md` MM-EXEC-9a).
+  lower bound when a call reaches a function value inference cannot
+  resolve (`docs/memory-model.md` MM-EXEC-9a).
 - **Contracts**: the `pre` and `post` clauses checked on every call.
 - **Summary**: the first paragraph of the `;;` doc comment above the
   definition. A blank cell is a name with no doc comment yet.

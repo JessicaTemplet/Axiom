@@ -694,7 +694,7 @@ test: 4 pauses recorded, 0 ms slept`,
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((seen 
+  (let ((seen
     (:: vecNew (Vec Int))))
     (parallel scan (
       (us (vecLen (vecPush seen 1)))

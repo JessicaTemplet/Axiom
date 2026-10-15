@@ -7,154 +7,10 @@
 (import Fmt)
 (import Vec)
 (import Utf8)
+
 ; ------------------------------------------------------------------
 ; Tags
 ; ------------------------------------------------------------------
-; The nesting limit. See the note above: this is a frame budget, not a
-; grammar rule.
-; ------------------------------------------------------------------
-; Construction
-; ------------------------------------------------------------------
-;; The JSON `null` value.
-;; A JSON boolean: `true` for a non-zero `b`, `false` for 0.
-;; A number from an integer. The raw text is rendered from the value, so
-;; `jsonNumText` is total for constructed values as well as parsed ones.
-;; A JSON string holding `s`.
-;; An empty JSON array; add to it with `jsonArrPush`.
-;; An empty JSON object; add to it with `jsonObjPut`.
-; ------------------------------------------------------------------
-; Inspection
-; ------------------------------------------------------------------
-;; Whether the value is JSON `null`.
-;; A JSON boolean as 1 or 0, and 0 for any other value.
-;; The integer value of a number, and 0 for any other value. Test
-;; `jsonTag` first when 0 must mean the number.
-;; A JSON number as the text it was written with, and empty for any
-;; other value.
-;; A JSON string's text, and empty for any other value.
-;; How many elements a JSON array holds, and 0 for any other value.
-;; Element `i` of a JSON array, or JSON `null` when `v` is not an array
-;; or `i` is out of range.
-;; Append `x` to a JSON array. Any other value is left alone. Answers
-;; `v`.
-;; How many members a JSON object holds, and 0 for any other value.
-;; Add the member `key` with value `x` to a JSON object. A repeated key
-;; is appended, not replaced, and `jsonGet` answers the first.
-;
-; This is the only writer of the two parallel vectors, so they cannot
-; fall out of step.
-;; The value under `key` in a JSON object, or 0 when there is none.
-;; `jsonIsNull` answers true for both, so compare against 0 to tell an
-;; absent member from one set to `null`.
-;; The integer under `key` in a JSON object, or 0 when the key is
-;; absent or not a number.
-;; The string under `key` in a JSON object, or empty when the key is
-;; absent or not a string.
-; ------------------------------------------------------------------
-; Integer rendering uses the imported Fmt.fmtInt, including the most
-; negative Int. Parsed numbers retain their original text instead.
-; Tested by tests/stdlib/340-json.ax.
-; ------------------------------------------------------------------
-; Joining
-;
-; Two walks: sum the lengths, allocate once, copy each piece in. The
-; left-fold alternative is quadratic in a bump allocator and is the
-; single most expensive mistake this project has measured.
-; ------------------------------------------------------------------
-; ------------------------------------------------------------------
-; String escaping
-;
-; Two walks again, for the same reason. Escaped: `"` and `\` as their
-; two-character forms, the five control characters with short spellings,
-; and every other byte below 0x20 as `\u00XX`. Bytes above 0x7F that
-; form WELL-FORMED UTF-8 pass through unchanged: JSON is defined over
-; Unicode text, so re-encoding them as `\u` escapes would be legal and
-; pointless.
-;
-; A byte above 0x7F that begins no well-formed sequence
-; (`utf8WellFormedAt`: Unicode's Table 3-7, so an overlong form, an
-; encoded surrogate and a truncated sequence count) is written as
-; `�`, one per byte. "The input is already UTF-8" was an
-; assumption, and a `String` is bytes: the LSP writes a document's own
-; text back through here, and the compiler's JSON diagnostics - which
-; took the same rule on 2026-09-27 (`jsonEsc` in self_host/render.ax)
-; - were shown writing lines no strict reader parses. Not `\u00XX`:
-; that names the character U+00XX, not the byte.
-;
-; DEL (0x7F) is NOT escaped - JSON does not require it, and every
-; implementation this must interoperate with leaves it alone.
-; ------------------------------------------------------------------
-; The number of bytes `b` occupies once escaped.
-; The lower-case hex digit for the low nibble of `b`.
-; A one-byte string holding `b`. Needed for the control characters
-; Axiom's own string syntax cannot spell.
-; `skip` counts the continuation bytes still owed to a
-; well-formed sequence whose lead byte was just copied; they are
-; copied as they come. A byte that begins no well-formed sequence
-; is `�` - the rule `jsonEscapeLen` sized the buffer by.
-; One byte that is text: its escape, or itself, written at `off`.
-; ------------------------------------------------------------------
-; Serialisation
-; ------------------------------------------------------------------
-;; The value as JSON text, on one line with no spaces, strings escaped
-;; as JSON requires.
-; ------------------------------------------------------------------
-; Parsing
-;
-; The cursor is a record - position, and an error flag - passed down
-; and mutated, so no parse function allocates a pair per token. Once
-; the error flag is set every parse function returns immediately, so a
-; malformed input costs one pass and cannot loop.
-; ------------------------------------------------------------------
-; The byte at the cursor, or -1 at the end of the input.
-; JSON's insignificant whitespace is space, tab, LF
-; and CR - the same four bytes `strIsSpace` names, and
-; this used to say so a fourth time in its own idiom.
-;; Parse a whole document: one value, then nothing but whitespace.
-;; Answers 0 on any error, which is why every accessor tolerates 0.
-; A number, as its integer value plus the exact bytes it was written
-; with. The fraction and exponent are CONSUMED and preserved in the
-; text but do not contribute to the integer - see the header note.
-; A lone `-`, or `-.5`, is not a number.
-; A leading zero is a whole integer part, not a digit prefix.
-; Fraction and exponent: consumed so the cursor lands after the
-; whole literal, and kept in the text.
-; A string literal, answering its DECODED bytes. The cursor is left
-; after the closing quote.
-;
-; Escapes are decoded into a piece vector rather than a growing
-; concatenation, and the common case - a string with no escape at all -
-; takes a single slice and allocates nothing.
-; A raw control character is invalid JSON. It
-; is refused rather than passed through: a
-; server that accepts a bare newline inside a
-; string accepts a message its peer never
-; meant to send.
-; Decode one escape whose backslash was at `p - 1`, pushing its bytes.
-; Answers the offset just past the escape.
-; Backspace and formfeed have no Axiom string escape - the
-; lexer accepts only \n \t \r \\ \" \' \0 and makes anything
-; else a hard error - so their bytes are built rather than
-; written.
-; `\uXXXX`, including the surrogate pair a code point above the BMP is
-; written with. An unpaired surrogate is replaced by U+FFFD rather than
-; refused: it cannot be encoded as UTF-8, and refusing a whole message
-; over one bad character is the less useful of the two failures.
-; A high surrogate. A `\uXXXX` low surrogate must follow.
-; A low surrogate with no high one before it.
-; The four hex digits at `p` as one value, or `None` when any of them
-; is not a digit. Each `strHexVal` is matched directly and read from
-; registers; the four-deep nest is the shape a lookup that answers
-; `Option` asks of a caller that needs all four before it can answer.
-; Every element after the first is preceded
-; by a comma, and a trailing comma therefore
-; fails at the `]` that follows it.
-; The typed tree is shared by every codec. CNumber keeps exact decimal
-; text when a JSON number is fractional or outside Axiom's Int range.
-; CerealMember preserves dictionary order. The json* functions above remain
-; a migration interface; new code uses CerealValue and Result throughout.
-(import Err)
-
 (:: JNULL Int)
 (fn (JNULL)
   0)
@@ -179,10 +35,15 @@
 (fn (JOBJ)
   5)
 
+; The nesting limit. See the note above: this is a frame budget, not a
+; grammar rule.
 (:: jsonMaxDepth Int)
 (fn (jsonMaxDepth)
   64)
 
+; ------------------------------------------------------------------
+; Construction
+; ------------------------------------------------------------------
 (:: jsonMake (-> Int a b Int))
 (fn (jsonMake tag a b)
   (let ((v (memAlloc 24)))
@@ -193,10 +54,12 @@
       v
     }))
 
+;; The JSON `null` value.
 (pub :: jsonNull Int)
 (pub fn (jsonNull)
   (jsonMake JNULL 0 0))
 
+;; A JSON boolean: `true` for a non-zero `b`, `false` for 0.
 (pub :: jsonBool (-> Int Int))
 (pub fn (jsonBool b)
   (jsonMake
@@ -206,62 +69,80 @@
       1)
     0))
 
+;; A number from an integer. The raw text is rendered from the value, so
+;; `jsonNumText` is total for constructed values as well as parsed ones.
 (pub :: jsonNum (-> Int Int))
 (pub fn (jsonNum n)
   (jsonMake JNUM n (fmtInt n)))
 
+;; A JSON string holding `s`.
 (pub :: jsonStr (-> String Int))
 (pub fn (jsonStr s)
   (jsonMake JSTR s 0))
 
+;; An empty JSON array; add to it with `jsonArrPush`.
 (pub :: jsonArr Int)
 (pub fn (jsonArr)
   (jsonMake JARR vecNew 0))
 
+;; An empty JSON object; add to it with `jsonObjPut`.
 (pub :: jsonObj Int)
 (pub fn (jsonObj)
   (jsonMake JOBJ vecNew vecNew))
 
+; ------------------------------------------------------------------
+; Inspection
+; ------------------------------------------------------------------
 (:: jsonTag (-> Int Int))
 (fn (jsonTag v)
   (if (== v 0)
     JNULL
     (memGetWord v 0)))
 
+;; Whether the value is JSON `null`.
 (pub :: jsonIsNull (-> Int Bool))
 (pub fn (jsonIsNull v)
   (== (jsonTag v) JNULL))
 
+;; A JSON boolean as 1 or 0, and 0 for any other value.
 (pub :: jsonBoolVal (-> Int Int))
 (pub fn (jsonBoolVal v)
   (if (== (jsonTag v) JBOOL)
     (memGetWord v 1)
     0))
 
+;; The integer value of a number, and 0 for any other value. Test
+;; `jsonTag` first when 0 must mean the number.
 (pub :: jsonInt (-> Int Int))
 (pub fn (jsonInt v)
   (if (== (jsonTag v) JNUM)
     (memGetWord v 1)
     0))
 
+;; A JSON number as the text it was written with, and empty for any
+;; other value.
 (pub :: jsonNumText (-> Int String))
 (pub fn (jsonNumText v)
   (if (== (jsonTag v) JNUM)
     (memGetWordStr v 2)
     ""))
 
+;; A JSON string's text, and empty for any other value.
 (pub :: jsonStrVal (-> Int String))
 (pub fn (jsonStrVal v)
   (if (== (jsonTag v) JSTR)
     (memGetWordStr v 1)
     ""))
 
+;; How many elements a JSON array holds, and 0 for any other value.
 (pub :: jsonArrLen (-> Int Int))
 (pub fn (jsonArrLen v)
   (if (== (jsonTag v) JARR)
     (vecLen (memGetWordVec v 1))
     0))
 
+;; Element `i` of a JSON array, or JSON `null` when `v` is not an array
+;; or `i` is out of range.
 (pub :: jsonArrGet (-> Int Int Int))
 (pub fn (jsonArrGet v i)
   (if (== (jsonTag v) JARR)
@@ -270,6 +151,8 @@
       (vecGet (memGetWordVec v 1) i))
     0))
 
+;; Append `x` to a JSON array. Any other value is left alone. Answers
+;; `v`.
 (pub :: jsonArrPush (-> Int Int Int))
 (pub fn (jsonArrPush v x)
   {
@@ -278,6 +161,7 @@
     v
   })
 
+;; How many members a JSON object holds, and 0 for any other value.
 (pub :: jsonObjLen (-> Int Int))
 (pub fn (jsonObjLen v)
   (if (== (jsonTag v) JOBJ)
@@ -296,6 +180,11 @@
     0
     (vecGet (memGetWordVec v 2) i)))
 
+;; Add the member `key` with value `x` to a JSON object. A repeated key
+;; is appended, not replaced, and `jsonGet` answers the first.
+;
+; This is the only writer of the two parallel vectors, so they cannot
+; fall out of step.
 (pub :: jsonObjPut (-> Int String Int Int))
 (pub fn (jsonObjPut v k x)
   {
@@ -307,6 +196,9 @@
     v
   })
 
+;; The value under `key` in a JSON object, or 0 when there is none.
+;; `jsonIsNull` answers true for both, so compare against 0 to tell an
+;; absent member from one set to `null`.
 (pub :: jsonGet (-> Int String Int))
 (pub fn (jsonGet v key)
   (jsonGetFrom v key 0))
@@ -319,14 +211,29 @@
       (jsonObjValAt v i)
       (jsonGetFrom v key (+ i 1)))))
 
+;; The integer under `key` in a JSON object, or 0 when the key is
+;; absent or not a number.
 (pub :: jsonGetInt (-> Int String Int))
 (pub fn (jsonGetInt v key)
   (jsonInt (jsonGet v key)))
 
+;; The string under `key` in a JSON object, or empty when the key is
+;; absent or not a string.
 (pub :: jsonGetStr (-> Int String String))
 (pub fn (jsonGetStr v key)
   (jsonStrVal (jsonGet v key)))
 
+; ------------------------------------------------------------------
+; Integer rendering uses the imported Fmt.fmtInt, including the most
+; negative Int. Parsed numbers retain their original text instead.
+; Tested by tests/stdlib/340-json.ax.
+; ------------------------------------------------------------------
+; Joining
+;
+; Two walks: sum the lengths, allocate once, copy each piece in. The
+; left-fold alternative is quadratic in a bump allocator and is the
+; single most expensive mistake this project has measured.
+; ------------------------------------------------------------------
 (:: jsonJoin (-> (Vec a) String))
 (fn (jsonJoin pieces)
   (let ((total (jsonJoinLen pieces)))
@@ -364,6 +271,30 @@
       off
     }))
 
+; ------------------------------------------------------------------
+; String escaping
+;
+; Two walks again, for the same reason. Escaped: `"` and `\` as their
+; two-character forms, the five control characters with short spellings,
+; and every other byte below 0x20 as `\u00XX`. Bytes above 0x7F that
+; form WELL-FORMED UTF-8 pass through unchanged: JSON is defined over
+; Unicode text, so re-encoding them as `\u` escapes would be legal and
+; pointless.
+;
+; A byte above 0x7F that begins no well-formed sequence
+; (`utf8WellFormedAt`: Unicode's Table 3-7, so an overlong form, an
+; encoded surrogate and a truncated sequence count) is written as
+; `�`, one per byte. "The input is already UTF-8" was an
+; assumption, and a `String` is bytes: the LSP writes a document's own
+; text back through here, and the compiler's JSON diagnostics - which
+; took the same rule on 2026-09-27 (`jsonEsc` in self_host/render.ax)
+; - were shown writing lines no strict reader parses. Not `\u00XX`:
+; that names the character U+00XX, not the byte.
+;
+; DEL (0x7F) is NOT escaped - JSON does not require it, and every
+; implementation this must interoperate with leaves it alone.
+; ------------------------------------------------------------------
+; The number of bytes `b` occupies once escaped.
 (:: jsonEscLen (-> Int Int))
 (fn (jsonEscLen b)
   (if (|| (== b 34) (== b 92))
@@ -413,10 +344,13 @@
       n
     }))
 
+; The lower-case hex digit for the low nibble of `b`.
 (:: jsonHexDigit (-> Int Int))
 (fn (jsonHexDigit b)
   (strByte "0123456789abcdef" (& b 15)))
 
+; A one-byte string holding `b`. Needed for the control characters
+; Axiom's own string syntax cannot spell.
 (:: jsonEscapeFill (-> String String Int))
 ;@axiom:effect(unsafe)
 (fn (jsonEscapeFill s out)
@@ -427,6 +361,10 @@
     (d (strData out))
   )
     {
+      ; `skip` counts the continuation bytes still owed to a
+      ; well-formed sequence whose lead byte was just copied; they are
+      ; copied as they come. A byte that begins no well-formed sequence
+      ; is `�` - the rule `jsonEscapeLen` sized the buffer by.
       (for k in 0..len
         (let ((b (strByte s k)))
           (if (> skip 0)
@@ -435,7 +373,7 @@
               (set off (+ off 1))
               (set skip (- skip 1))
             }
-            (let ((w 
+            (let ((w
               (if (< b 128)
                 1
                 (utf8WellFormedAt s k len))))
@@ -457,6 +395,7 @@
       off
     }))
 
+; One byte that is text: its escape, or itself, written at `off`.
 (:: jsonEscapeOne (-> Int Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (jsonEscapeOne d off0 b)
@@ -521,6 +460,11 @@
       off
     }))
 
+; ------------------------------------------------------------------
+; Serialisation
+; ------------------------------------------------------------------
+;; The value as JSON text, on one line with no spaces, strings escaped
+;; as JSON requires.
 (pub :: jsonWrite (-> Int String))
 (pub fn (jsonWrite v)
   (let ((pieces vecNew))
@@ -590,6 +534,14 @@
       (vecPush pieces "}")
     }))
 
+; ------------------------------------------------------------------
+; Parsing
+;
+; The cursor is a record - position, and an error flag - passed down
+; and mutated, so no parse function allocates a pair per token. Once
+; the error flag is set every parse function returns immediately, so a
+; malformed input costs one pass and cannot loop.
+; ------------------------------------------------------------------
 (struct CjCursor
   (mut pos : Int)
   (mut bad : Int))
@@ -620,6 +572,7 @@
     0
   })
 
+; The byte at the cursor, or -1 at the end of the input.
 (:: jcPeek (-> String CjCursor Int))
 (fn (jcPeek src c)
   (if (>= (jcPos c) (strLen src))
@@ -632,9 +585,14 @@
     {
       (while (&& (< p (strLen src)) (strIsSpace (strByte src p)))
         (set p (+ p 1)))
+      ; JSON's insignificant whitespace is space, tab, LF
+      ; and CR - the same four bytes `strIsSpace` names, and
+      ; this used to say so a fourth time in its own idiom.
       (jcSetPos c p)
     }))
 
+;; Parse a whole document: one value, then nothing but whitespace.
+;; Answers 0 on any error, which is why every accessor tolerates 0.
 (pub :: jsonParse (-> String Int))
 (pub fn (jsonParse src)
   (let ((c jcNew))
@@ -700,6 +658,9 @@
         (jpMatches src at word (+ i 1))
         false))))
 
+; A number, as its integer value plus the exact bytes it was written
+; with. The fraction and exponent are CONSUMED and preserved in the
+; text but do not contribute to the integer - see the header note.
 (:: jpNumber (-> String CjCursor Int))
 (fn (jpNumber src c)
   (let ((start (jcPos c)))
@@ -721,10 +682,14 @@
             (set digits (+ digits 1))
             (set p (+ p 1))
           })
+        ; A lone `-`, or `-.5`, is not a number.
         (if (== digits 0)
           (jcFail c))
+        ; A leading zero is a whole integer part, not a digit prefix.
         (if (&& (> digits 1) (== (strByte src (+ start neg)) 48))
           (jcFail c))
+        ; Fraction and exponent: consumed so the cursor lands after the
+        ; whole literal, and kept in the text.
         (if (&& (< p (strLen src)) (== (strByte src p) 46))
           {
             (set p (+ p 1))
@@ -760,6 +725,12 @@
             (strSlice src start (- p start))))
       })))
 
+; A string literal, answering its DECODED bytes. The cursor is left
+; after the closing quote.
+;
+; Escapes are decoded into a piece vector rather than a growing
+; concatenation, and the common case - a string with no escape at all -
+; takes a single slice and allocates nothing.
 (:: jpString (-> String CjCursor String))
 ;@axiom:effect(unsafe)
 (fn (jpString src c)
@@ -800,6 +771,11 @@
                     (if (jcBad c)
                       (set done 1))
                   }
+                  ; A raw control character is invalid JSON. It
+                  ; is refused rather than passed through: a
+                  ; server that accepts a bare newline inside a
+                  ; string accepts a message its peer never
+                  ; meant to send.
                   (if (< b 32)
                     {
                       (jcFail c)
@@ -812,6 +788,8 @@
           (jsonJoin pieces))
       })))
 
+; Decode one escape whose backslash was at `p - 1`, pushing its bytes.
+; Answers the offset just past the escape.
 (:: jpEscape (-> String CjCursor Int (Vec String) Int))
 (fn (jpEscape src c p pieces)
   (if (>= p (strLen src))
@@ -835,6 +813,10 @@
               (vecPush pieces "/")
               (+ p 1)
             }
+            ; Backspace and formfeed have no Axiom string escape - the
+            ; lexer accepts only \n \t \r \\ \" \' \0 and makes anything
+            ; else a hard error - so their bytes are built rather than
+            ; written.
             (if (== b 98)
               {
                 (vecPush pieces (strFromByte 8))
@@ -867,12 +849,17 @@
                           p
                         }))))))))))))
 
+; `\uXXXX`, including the surrogate pair a code point above the BMP is
+; written with. An unpaired surrogate is replaced by U+FFFD rather than
+; refused: it cannot be encoded as UTF-8, and refusing a whole message
+; over one bad character is the less useful of the two failures.
 (:: jpUnicode (-> String CjCursor Int (Vec String) Int))
 (fn (jpUnicode src c p pieces)
   (let ((hi (jpHex4 src c p)))
     (if (jcBad c)
       p
       (if (&& (>= hi 55296) (<= hi 56319))
+        ; A high surrogate. A `\uXXXX` low surrogate must follow.
         (if (&&
               (< (+ p 6) (strLen src))
               (&& (== (strByte src (+ p 4)) 92) (== (strByte src (+ p 5)) 117)))
@@ -893,6 +880,7 @@
             (+ p 4)
           })
         (if (&& (>= hi 56320) (<= hi 57343))
+          ; A low surrogate with no high one before it.
           {
             (vecPush pieces (utf8FromChar utf8Replacement))
             (+ p 4)
@@ -918,6 +906,10 @@
         }
       ))))
 
+; The four hex digits at `p` as one value, or `None` when any of them
+; is not a digit. Each `strHexVal` is matched directly and read from
+; registers; the four-deep nest is the shape a lookup that answers
+; `Option` asks of a caller that needs all four before it can answer.
 (:: jpHexDigits (-> String Int (Option Int)))
 (fn (jpHexDigits src p)
   (match (strHexVal (strByte src p))
@@ -961,6 +953,9 @@
                     (jcFail c)
                     (set done 1)
                   }
+                  ; Every element after the first is preceded
+                  ; by a comma, and a trailing comma therefore
+                  ; fails at the `]` that follows it.
                   {
                     (if (== first 0)
                       (if (== b 44)
@@ -1046,6 +1041,12 @@
         0
         v)
     }))
+
+; The typed tree is shared by every codec. CNumber keeps exact decimal
+; text when a JSON number is fractional or outside Axiom's Int range.
+; CerealMember preserves dictionary order. The json* functions above remain
+; a migration interface; new code uses CerealValue and Result throughout.
+(import Err)
 
 ;; A parsed document from any of the three formats: null, a boolean, an
 ;; integer, a float, text, a list or an object of `CerealMember`s.
@@ -1379,7 +1380,7 @@
 ;; Include the field name in a record codec's error context.
 (pub :: cerealField (-> (Codec a) CerealValue String (Result a Error)))
 (pub fn (cerealField codec value key)
-  (let ((answer 
+  (let ((answer
     (match (cerealRequired value key)
       ((Err error) (Err error))
       ((Ok member) (cerealFromValue codec member)))))
@@ -2552,7 +2553,7 @@
       (cerealError "input byte limit exceeded")
       (if (! (cerealValidUtf8 source))
         (cerealError "invalid UTF-8 input")
-        (let ((parsed 
+        (let ((parsed
           (match format
             ((CerealJson) (cjDecode source limits))
             ((CerealToml)
@@ -2772,7 +2773,7 @@
                   (content (strSlice line n (- end n)))
                   (cut (cyScan content true))
                 )
-                  (let ((text 
+                  (let ((text
                     (strTrim
                       (if (< cut 0)
                         content
