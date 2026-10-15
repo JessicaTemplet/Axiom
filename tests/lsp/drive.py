@@ -2401,8 +2401,9 @@ shutil.rmtree(NAVREF_DIR, ignore_errors=True)
 #   ChSig.ax     a `(:: pending ...)` with no `fn` under it - the one
 #                case where `declaration` answers and `definition`
 #                cannot.
-#   ChBroken.ax  ChMain with an unclosed paren: every one of the four
-#                must answer null without the session dying.
+#   ChBroken.ax  ChMain with an unclosed paren. Its declarations are
+#                read from what parses around the error, so its
+#                `caller` is a caller of `bump` like ChMain's.
 #
 # WHAT MAKES THESE NON-VACUOUS, beyond deriving the positions:
 #
@@ -2803,6 +2804,7 @@ if not chwhy and chres(CH_PREP_BROKEN) != [ch_item(CH_BROKEN, BK_URI, "helper")]
 # only way to prove that.
 IT_HELPER = ch_item(CH_MAIN, M_URI, "helper")
 IT_CALLER = ch_item(CH_MAIN, M_URI, "caller")
+IT_CALLER_BK = ch_item(CH_BROKEN, BK_URI, "caller")
 IT_APPLY = ch_item(CH_MAIN, M_URI, "apply")
 IT_K = ch_item(CH_MAIN, M_URI, "k")
 IT_HANDOFF = ch_item(CH_MAIN, M_URI, "handoff")
@@ -2920,7 +2922,8 @@ if not chwhy:
         ("incoming calls to `caller`", CH_IN["caller"], "from",
          [ch_edges(IT_MAIN, CH_CALLER_CALLS_M), ch_edges(IT_RUN, CH_CALLER_CALLS_U)]),
         ("incoming calls to the imported `bump`", CH_IN["bump"], "from",
-         [ch_edges(IT_TWICE, CH_BUMP_IN_TWICE), ch_edges(IT_CALLER, [CH_BUMP_CALL])]),
+         [ch_edges(IT_TWICE, CH_BUMP_IN_TWICE), ch_edges(IT_CALLER, [CH_BUMP_CALL]),
+          ch_edges(IT_CALLER_BK, [CH_BUMP_CALL])]),
         ("outgoing calls from `main`", CH_OUT["main"], "to",
          [ch_edges(IT_CALLER, CH_CALLER_CALLS_M), ch_edges(IT_TWICE, [CH_TWICE_CALL])]),
         # The head of `(k v)` is `apply`'s own parameter, so there is no
@@ -4624,10 +4627,10 @@ elif fres(20) is not None:
     fwhy = f"formatting an unparseable document answered {fres(20)!r:.200}, want null"
 elif fres(21) != []:
     fwhy = f"codeAction on an unparseable document answered {fres(21)!r:.200}, want []"
-elif fres(22) is not None:
-    fwhy = f"typeDefinition on an unparseable document answered {fres(22)!r:.200}, want null"
-elif fres(23) != []:
-    fwhy = f"codeLens on an unparseable document answered {fres(23)!r:.200}, want []"
+elif landed_in(22, fix_uri, SHAPE_DECL, fresp):
+    fwhy = "typeDefinition on a recovered document: " + landed_in(22, fix_uri, SHAPE_DECL, fresp)
+elif fres(23) != fres(10):
+    fwhy = f"codeLens on a recovered document answered {fres(23)!r:.200}, want its parsing twin's lenses {fres(10)!r:.200}"
 elif fres(24) is not None:
     fwhy = f"expandMacro on an unparseable document answered {fres(24)!r:.200}, want null"
 # --- generated-name demand (MAC-TOOL-3) ------------------------------------
@@ -5419,7 +5422,7 @@ shutil.rmtree(CADIR2, ignore_errors=True)
 # `textDocument/semanticTokens/full` over the NAV documents - the
 # hover document, NavMain, NavUser, their helpers and NavBroken - and
 # one document written HERE carrying the roles those lack: an
-# `effect` and a `handle`, a rules-shaped `emacro`, a `subtype`, a
+# `effect` and a `handle`, a rule-form expression `macro`, a `subtype`, a
 # `type` alias, a `region`, `@r` annotations, a `for`, a `cast`, a
 # qualified call, `true`, a string with an escape, a char, a float and
 # a negative literal. Every obligation is DERIVED from the documents'
@@ -5470,7 +5473,7 @@ HL = r"""(import RefHelper)
   (tick :: (-> Int Int)))
 
 ;; An expression macro of one rule.
-(pub emacro twiceOf
+(pub macro twiceOf
   ((twiceOf e) (+ e e)))
 
 (pub data Shape (Dot) (Circle Int))
@@ -6155,7 +6158,7 @@ RC_ASK = [
     # (key, document, method, needle, offset into needle, extra params)
     ("hole-hover", "rc-hole.ax", "textDocument/hover", "(bump x)))\n", 1, {}),
     ("hole-def", "rc-hole.ax", "textDocument/definition", "(bump x)))\n", 1, {}),
-    ("hole-rename", "rc-hole.ax", "textDocument/prepareRename", "(fn (k x)", 8, {}),
+    ("hole-rename", "rc-hole.ax", "textDocument/prepareRename", "(fn (k x)", 7, {}),
     ("stray-hover", "rc-stray.ax", "textDocument/hover", "(bump (bump y)", 7, {}),
     ("stray-rename", "rc-stray.ax", "textDocument/prepareRename", "(bump (bump y)", 7, {}),
     ("stray-refs", "rc-stray.ax", "textDocument/references", "(bump (bump y)", 7,
