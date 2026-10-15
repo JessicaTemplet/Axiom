@@ -1209,11 +1209,14 @@ axiom fmt --emit stdout Main.ax
 cat Main.ax | axiom fmt -
 ```
 
-`fmt` gives your source one canonical layout: two-space indentation and
-a 100-column target. Calls stay together when they fit. Longer calls pack
-complete arguments into rows; control flow and multiline arguments keep
-their structural breaks. Comments stay beside the arguments they describe.
-Long strings and other indivisible tokens remain whole.
+`fmt` gives your source one canonical layout, with two-space indentation
+and a 100-column target. Calls stay together when they fit; longer calls
+pack complete arguments into rows. Control flow and multiline arguments
+keep their structural breaks.
+
+Headers, signatures, types, imports and positional patterns share the
+width budget. Comments stay beside their source elements. Long strings
+and other indivisible tokens remain whole.
 
 Every batch input is prepared and verified before writing starts. A
 formatting refusal leaves all batch files untouched. Unchanged files keep

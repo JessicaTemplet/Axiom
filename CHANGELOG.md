@@ -809,6 +809,11 @@ unsaved files, malformed-source recovery and close/reopen.
 - Child exit polling checks terminal status before joining. A stopped
   process remains cancellable instead of blocking the event loop.
 
+- Long function and lambda headers, signatures, nested types, aliases,
+  selective imports and positional patterns share bounded canonical list
+  layout. Before/after native programs and comment-preservation checks
+  accompany the width and fixed-point regressions.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

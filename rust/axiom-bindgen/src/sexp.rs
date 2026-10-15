@@ -299,15 +299,12 @@ pub fn decl_private_fn(name: &str, params: &[String], body: &Ex) -> String {
 
 fn decl_fn_vis(public: bool, name: &str, params: &[String], body: &Ex) -> String {
     let mut out = String::new();
-    out.push_str(if public { "(pub fn (" } else { "(fn (" });
-    out.push_str(name);
-    for p in params {
-        out.push(' ');
-        out.push_str(p);
-    }
-    // The head stands alone; the body goes on the next line, as
-    // `fpDeclFn` lays it out.
-    out.push_str(")\n  ");
+    out.push_str(if public { "(pub fn " } else { "(fn " });
+    let mut header = vec![atom(name)];
+    header.extend(params.iter().map(|parameter| atom(parameter)));
+    // A header is a complete pattern list, including the nullary case.
+    print_shape(&Ex::App(header), 0, 0, &mut out);
+    out.push_str("\n  ");
     print_shape(body, 2, 1, &mut out);
     out.push(')');
     out
@@ -420,6 +417,31 @@ mod tests {
             &mut s,
         );
         assert_eq!(s, "(let (\n    (x 1)\n    (y 2)\n  )\n    x)");
+    }
+
+    #[test]
+    fn long_parameter_headers_wrap() {
+        let parameters = [
+            "requestIdentifier",
+            "responseIdentifier",
+            "retryLimit",
+            "timeoutMilliseconds",
+            "bufferCapacity",
+            "workerCount",
+            "queueCapacity",
+            "maximumPayloadBytes",
+            "statusCode",
+        ]
+        .map(str::to_string);
+        let output = decl_fn("requestStatus", &parameters, &atom("statusCode"));
+        assert!(output.lines().all(|line| line.len() <= WIDTH), "{}", output);
+        assert!(output.lines().count() > 2, "{}", output);
+        for parameter in parameters {
+            assert_eq!(
+                output.matches(&parameter).count(),
+                if parameter == "statusCode" { 2 } else { 1 }
+            );
+        }
     }
 
     #[test]

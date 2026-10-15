@@ -110,13 +110,15 @@ have() { # have <got> <want> <what>
 # converts its raw preload result. No existing IO requirement is removed.
 # Background LSP work adds process lifecycle helpers and an Alloc,IO,Spawn
 # row. Dispatch returns packets for the parent to publish; sigChild is pure.
+# Long declaration layout adds bounded typed-list and pattern helpers.
+# IO and higher-order effect rows are unchanged.
 echo "== compiler view: symbols --calls self_host/main.ax =="
 "$axc" --diagnostic-format=ai symbols --calls self_host/main.ax > "$work/main.axsym" 2>"$work/main.err" \
   || { fail "could not read symbols over self_host/main.ax"; echo "check-effect-distribution: $failed failed"; exit 1; }
 rows="$(grep -c '^F ' "$work/main.axsym" || true)"
 (( rows >= 4000 )) && ok "$rows functions listed (floor 4000)" \
   || fail "only $rows functions listed; the floor is 4000 (the corpus moved or the read broke)"
-have "$(bucket "$work/main.axsym" 'Alloc,Mut')" 2845 "exactly Alloc,Mut"
+have "$(bucket "$work/main.axsym" 'Alloc,Mut')" 2858 "exactly Alloc,Mut"
 have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut')" 428 "Alloc,IO,Mut"
 have "$(bucket "$work/main.axsym" 'Mut')" 163 "exactly Mut"
 have "$(bucket "$work/main.axsym" 'Alloc')" 164 "exactly Alloc"

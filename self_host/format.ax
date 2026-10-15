@@ -1898,8 +1898,11 @@
     (let ((trial
       (mkFPr (fpSrc p) (fpStarts p) (mkFCq (as vecNew Int)) out)))
       {
+        (memSetWord out 4 1)
         (fpType trial n)
-        (strLen (foFinish out))
+        (if (|| (!= (foBad out) 0) (> (foNl out) 0))
+          0
+          (strLen (foFinish out)))
       })))
 
 (pub :: fpExprTail (-> Int Int Int Int))
@@ -2408,7 +2411,10 @@
 (pub :: fpTailBody (-> Int (Vec Int) Int Int))
 (pub fn (fpTailBody p elems from)
   (let ((o (fpOut p)))
-    (if (fpBodyVecSimple (fpSrc p) elems from)
+    (if (&& (fpBodyVecSimple (fpSrc p) elems from)
+          (let ((flat (fpExprFlat p (vecGet elems from))))
+            (&& (> (strLen flat) 0)
+              (<= (+ (+ (+ (foColumn o) 1) (strLen flat)) (+ 1 (fpSuffixWidth p))) fmtWidth))))
       {
         (fpP p " ")
         (fpBodyVec p elems from)
@@ -2429,24 +2435,10 @@
 (pub fn (fpLambda p n)
   (if (|| (< (fnLen n) 3) (!= (fnKind (fnKid n 1)) FN_PAREN))
     (fpBad p)
-    (let (
-      (params (fnKidsVec (fnKid n 1)))
-      (mut i 0)
-      (mut nth 0)
-    )
+    (let ((params (fnKidsVec (fnKid n 1))))
       {
-        (fpP p "(lambda (")
-        (if (== (as params Int) 0)
-          p
-          (while (< i (vecLen params))
-            {
-              (if (> nth 0)
-                (fpP p " ")
-                p)
-              (set i (fpPatVecAt p params i))
-              (set nth (+ nth 1))
-            }))
-        (fpP p ")")
+        (fpP p "(lambda ")
+        (fpList p (fnKid n 1) (fpPatItems p params 0) 1 "(" ")")
         (fpTailBody p (fpExprElems n 2) 0)
         (fpP p ")")
       })))
@@ -3522,16 +3514,17 @@
                                           (if (strEq h "sizeof")
                                             (if (== (fnLen n) 2)
                                               {
-                                                (fpP p "(sizeof ")
-                                                (fpType p (fnKid n 1))
+                                                (fpP p "(sizeof")
+                                                (fpTypeAfter p (fnKid n 1) (+ 1 (fpSuffixWidth p)))
                                                 (fpP p ")")
                                               }
                                               (fpBad p))
                                             (if (strEq h "alignof")
                                               (if (== (fnLen n) 2)
                                                 {
-                                                  (fpP p "(alignof ")
-                                                  (fpType p (fnKid n 1))
+                                                  (fpP p "(alignof")
+                                                  (fpTypeAfter p (fnKid n 1)
+                                                    (+ 1 (fpSuffixWidth p)))
                                                   (fpP p ")")
                                                 }
                                                 (fpBad p))
@@ -3539,10 +3532,12 @@
                                                 (if (== (fnLen n) 3)
                                                   {
                                                     (fpP p "(as ")
-                                                    (fpExprTail p (fnKid n 1)
-                                                      (+ 2 (fpTypeWidth p (fnKid n 2))))
-                                                    (fpP p " ")
-                                                    (fpType p (fnKid n 2))
+                                                    (let ((width (fpTypeWidth p (fnKid n 2))))
+                                                      (if (> width 0)
+                                                        (fpExprTail p (fnKid n 1) (+ 2 width))
+                                                        (fpExpr p (fnKid n 1))))
+                                                    (fpTypeAfter p (fnKid n 2)
+                                                      (+ 1 (fpSuffixWidth p)))
                                                     (fpP p ")")
                                                   }
                                                   (fpBad p))
@@ -3552,10 +3547,14 @@
                                                       (fpBad p)
                                                       {
                                                         (fpP p "(:: ")
-                                                        (fpExprTail p (vecGet elems 0)
-                                                          (+ 2 (fpTypeWidth p (vecGet elems 1))))
-                                                        (fpP p " ")
-                                                        (fpType p (vecGet elems 1))
+                                                        (let ((width (fpTypeWidth p
+                                                                       (vecGet elems 1))))
+                                                          (if (> width 0)
+                                                            (fpExprTail p (vecGet elems 0)
+                                                              (+ 2 width))
+                                                            (fpExpr p (vecGet elems 0))))
+                                                        (fpTypeAfter p (vecGet elems 1)
+                                                          (+ 1 (fpSuffixWidth p)))
                                                         (fpP p ")")
                                                       }))
                                                   ; Any other identifier head is an
@@ -3637,15 +3636,195 @@
     }))
 
 ; ------------------------------------------------------------------
+; Width-aware lists.
+; ------------------------------------------------------------------
+; Typed lists share the call layout: keep complete items on a row,
+; reserve the enclosing suffix and place comments by source ownership.
+; Modes: 0 type, 1 pattern, 2 imported name.
+(pub :: fpListItem (-> Int Int Int Int))
+(pub fn (fpListItem p n mode)
+  (if (== mode 0)
+    (fpType p n)
+    (if (== mode 1)
+      (fpPat p n)
+      (if (fpIsIdentAtom n)
+        (fpP p (fnText (fpSrc p) n))
+        (fpBad p)))))
+
+(pub :: fpListItemSuffix (-> Int Int Int Int Int))
+(pub fn (fpListItemSuffix p n mode width)
+  (let ((saved (fpSuffixWidth p)))
+    {
+      (memSetWord p 4 width)
+      (fpListItem p n mode)
+      (memSetWord p 4 saved)
+      p
+    }))
+
+(pub :: fpListItemFlat (-> Int Int Int String))
+(pub fn (fpListItemFlat p n mode)
+  (let ((out (mkFOut 0)))
+    (let ((trial
+      (mkFPr (fpSrc p) (fpStarts p) (mkFCq (as vecNew Int)) out)))
+      {
+        (memSetWord out 4 1)
+        (fpListItem trial n mode)
+        (if (|| (!= (foBad out) 0) (> (foNl out) 0))
+          ""
+          (foFinish out))
+      })))
+
+(pub :: fpListTrial (-> Int (Vec Int) Int String String Int))
+(pub fn (fpListTrial p elems mode open close)
+  (let ((mut i 0))
+    {
+      (fpP p open)
+      (while (&& (< i (vecLen elems)) (== (foBad (fpOut p)) 0))
+        {
+          (if (> i 0)
+            (fpP p " "))
+          (fpListItemSuffix p (vecGet elems i) mode 0)
+          (set i (+ i 1))
+        })
+      (fpP p close)
+    }))
+
+(pub :: fpListFlat (-> Int Int (Vec Int) Int String String String))
+(pub fn (fpListFlat p n elems mode open close)
+  (if (fqAnyWithin (fpQ p) (fnStart n) (fnEnd n))
+    ""
+    (let ((out (mkFOut 0)))
+      (let ((trial
+        (mkFPr (fpSrc p) (fpStarts p) (mkFCq (as vecNew Int)) out)))
+        {
+          (memSetWord out 4 1)
+          (fpListTrial trial elems mode open close)
+          (if (|| (!= (foBad out) 0) (> (foNl out) 0))
+            ""
+            (foFinish out))
+        }))))
+
+(pub :: fpList (-> Int Int (Vec Int) Int String String Int))
+(pub fn (fpList p n elems mode open close)
+  (if (== (foTrial (fpOut p)) 1)
+    (fpListTrial p elems mode open close)
+    (let ((flat (fpListFlat p n elems mode open close)))
+      (if (&& (> (strLen flat) 0)
+            (<= (+ (+ (foColumn (fpOut p)) (strLen flat)) (fpSuffixWidth p)) fmtWidth))
+        (fpP p flat)
+        (fpListRows p n elems mode open close)))))
+
+(pub :: fpListRows (-> Int Int (Vec Int) Int String String Int))
+(pub fn (fpListRows p n elems mode open close)
+  (let (
+    (out (fpOut p))
+    (src (fpSrc p))
+    (saved (foIndent (fpOut p)))
+    (column (foColumn (fpOut p)))
+    (comments (fqAnyWithin (fpQ p) (fnStart n) (fnEnd n)))
+    (mut previousBroken false)
+    (mut lastTrailing false)
+    (mut i 0)
+  )
+    {
+      (fpP p open)
+      (foSetIndent out (+ column 2))
+      (while (< i (vecLen elems))
+        (let (
+          (item (vecGet elems i))
+          (suffix (if (== i (- (vecLen elems) 1))
+            (+ (strLen close) (fpSuffixWidth p))
+            0))
+          (rowSuffix (if (== i (- (vecLen elems) 1))
+            (+ (strLen close) (fpSuffixWidth p))
+            (strLen close)))
+        )
+          {
+            (if comments
+              {
+                (if (|| (> i 0) (fqAnyWithin (fpQ p) (fnStart n) (fnStart item)))
+                  {
+                    (fpP p "\n")
+                    (flushLeading src (fpQ p) out (fnStart item))
+                    (foEmitIndent out)
+                  })
+                (let ((mark (foNl out)))
+                  {
+                    (fpListItemSuffix p item mode suffix)
+                    (set lastTrailing (fpAppTrailing p item
+                                        (if (< (+ i 1) (vecLen elems))
+                                          (fnStart (vecGet elems (+ i 1)))
+                                          (fnEnd n))
+                                        mark))
+                  })
+              }
+              (if (== i 0)
+                (let ((mark (foNl out)))
+                  {
+                    (fpListItemSuffix p item mode suffix)
+                    (set previousBroken (> (foNl out) mark))
+                  })
+                (let ((flat (fpListItemFlat p item mode)))
+                  (if (|| (== (strLen flat) 0)
+                        (> (+ (+ (foIndent out) (strLen flat)) rowSuffix) fmtWidth))
+                    {
+                      (fpP p "\n")
+                      (foEmitIndent out)
+                      (fpListItemSuffix p item mode suffix)
+                      (set previousBroken true)
+                    }
+                    {
+                      (if (|| previousBroken
+                            (> (+ (+ (+ (foColumn out) 1) (strLen flat)) rowSuffix) fmtWidth))
+                        {
+                          (fpP p "\n")
+                          (foEmitIndent out)
+                        }
+                        (fpP p " "))
+                      (fpP p flat)
+                      (set previousBroken false)
+                    }))))
+            (set i (+ i 1))
+          }))
+      (if (|| lastTrailing (fqAnyWithin (fpQ p) (fnStart n) (fnEnd n)))
+        {
+          (fpP p "\n")
+          (flushLeading src (fpQ p) out (fnEnd n))
+          (foSetIndent out saved)
+          (foEmitIndent out)
+        }
+        (foSetIndent out saved))
+      (fpP p close)
+    }))
+
+; A declaration places a type beside its name when it fits, otherwise
+; on a fresh indented line. Trial text is canonical, without comments.
+(pub :: fpTypeAfter (-> Int Int Int Int))
+(pub fn (fpTypeAfter p n suffix)
+  (let ((flat (fpListItemFlat p n 0)))
+    (if (&& (> (strLen flat) 0)
+          (&& (! (fqAnyWithin (fpQ p) 0 (fnEnd n)))
+            (<= (+ (+ (+ (foColumn (fpOut p)) 1) (strLen flat)) suffix) fmtWidth)))
+      {
+        (fpP p " ")
+        (fpP p flat)
+      }
+      (let ((out (fpOut p)))
+        {
+          (fpP p "\n")
+          (foPushIndent out)
+          (flushLeading (fpSrc p) (fpQ p) out (fnStart n))
+          (foEmitIndent out)
+          (fpListItemSuffix p n 0 suffix)
+          (foPopIndent out)
+        }))))
+
+; ------------------------------------------------------------------
 ; Types.
 ;
-; Over the form tree the tuple/application distinction stage0's parser
-; makes changes nothing: both print as `(head rest...)` with every
-; component recursively wrapped, which is why one printer serves both.
-; Probed: `(:: g (-> (Int Int) Int))` and `(:: g (-> (Box Int) Int))`
-; round-trip identically. The arrow flattens its right spine only -
-; `(-> a (-> b c))` is `(-> a b c)` and an arrow ARGUMENT keeps its
-; parens.
+; Tuple and application types share the same `(head rest...)` layout.
+; An arrow flattens its right spine: `(-> a (-> b c))` becomes
+; `(-> a b c)`. An arrow used as an argument keeps its parentheses.
 ; ------------------------------------------------------------------
 (pub :: fpTypeUnwrap (-> Int Int))
 (pub fn (fpTypeUnwrap n)
@@ -3690,21 +3869,28 @@
                       })
                   }))
               (set go 0))))
-        (fpP p "(-> ")
-        (let ((mut k 0))
-          (while (< k (vecLen elems))
-            {
-              (if (> k 0)
-                (fpP p " ")
-                p)
-              (fpType p (vecGet elems k))
-              (set k (+ k 1))
-            }))
-        (fpP p ")")
+        (let (
+          (all (vecPush vecNew (fnKid n 0)))
+          (mut k 0)
+        )
+          {
+            (while (< k (vecLen elems))
+              {
+                (vecPush all (vecGet elems k))
+                (set k (+ k 1))
+              })
+            (fpList p n all 0 "(" ")")
+          })
       })))
 
 (pub :: fpType (-> Int Int Int))
 (pub fn (fpType p n)
+  (if (&& (== (foTrial (fpOut p)) 1) (!= (foBad (fpOut p)) 0))
+    p
+    (fpTypeLive p n)))
+
+(pub :: fpTypeLive (-> Int Int Int))
+(pub fn (fpTypeLive p n)
   (let ((k (fnKind n)))
     (if (== k FN_ATOM)
       (if (== (ftKind (fnTok n)) FT_IDENT)
@@ -3714,7 +3900,7 @@
         (if (== (fnLen n) 1)
           {
             (fpP p "[")
-            (fpType p (fnKid n 0))
+            (fpListItemSuffix p (fnKid n 0) 0 (+ 1 (fpSuffixWidth p)))
             (fpP p "]")
           }
           (fpBad p))
@@ -3726,35 +3912,15 @@
                 (fpArrow p n)
                 (if (strEq h "*")
                   (if (== (fnLen n) 2)
-                    {
-                      (fpP p "(* ")
-                      (fpType p (fnKid n 1))
-                      (fpP p ")")
-                    }
+                    (fpList p n (fnKidsVec n) 0 "(" ")")
                     (fpBad p))
                   (if (strEq h "linear")
                     (if (== (fnLen n) 2)
-                      {
-                        (fpP p "(linear ")
-                        (fpType p (fnKid n 1))
-                        (fpP p ")")
-                      }
+                      (fpList p n (fnKidsVec n) 0 "(" ")")
                       (fpBad p))
                     (if (== (fnLen n) 1)
                       (fpType p (fnKid n 0))
-                      (let ((mut i 0))
-                        {
-                          (fpP p "(")
-                          (while (< i (fnLen n))
-                            {
-                              (if (> i 0)
-                                (fpP p " ")
-                                p)
-                              (fpType p (fnKid n i))
-                              (set i (+ i 1))
-                            })
-                          (fpP p ")")
-                        })))))))
+                      (fpList p n (fnKidsVec n) 0 "(" ")")))))))
           ; `Mod::Name`, and `Mod.Sub::Name`, where a type stands: the
           ; reader builds the same FN_QUAL chain expressions build, so
           ; the printer answers the same way - the module path on the
@@ -3857,39 +4023,68 @@
       n
     }))
 
+; Canonicalise the parser's two-token pattern spellings before layout.
+; The synthetic group retains the complete original source span.
+(pub :: fpPatItem (-> Int (Vec Int) Int Int))
+(pub fn (fpPatItem p v i)
+  (if (== (fpPatWidth (fpSrc p) v i) 1)
+    (vecGet v i)
+    (if (fpIsMinusAtom (vecGet v i))
+      (fpFusedAtom (vecGet v i) (vecGet v (+ i 1)))
+      (let (
+        (group (vecGet v (+ i 1)))
+        (kids (vecPush vecNew (vecGet v i)))
+        (mut j 0)
+      )
+        {
+          (while (< j (fnLen group))
+            {
+              (vecPush kids (fnKid group j))
+              (set j (+ j 1))
+            })
+          (mkFNode FN_PAREN (fnTok group) kids (fnStart (vecGet v i)) (fnEnd group))
+        }))))
+
+(pub :: fpPatItems (-> Int (Vec Int) Int (Vec Int)))
+(pub fn (fpPatItems p v from)
+  (let (
+    (items vecNew)
+    (mut i from)
+  )
+    {
+      (while (< i (vecLen v))
+        {
+          (vecPush items (fpPatItem p v i))
+          (set i (+ i (fpPatWidth (fpSrc p) v i)))
+        })
+      items
+    }))
+
+; A function or constructor name is the head, rather than a pattern
+; that can fuse with the following parameter.
+(pub :: fpHeadPatItems (-> Int Int (Vec Int)))
+(pub fn (fpHeadPatItems p n)
+  (let (
+    (items (vecPush vecNew (fnKid n 0)))
+    (args (fpPatItems p (fnKidsVec n) 1))
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen args))
+        {
+          (vecPush items (vecGet args i))
+          (set i (+ i 1))
+        })
+      items
+    }))
+
 ; Print one pattern starting at `v[i]`, answering the index past it.
 (pub :: fpPatVecAt (-> Int (Vec Int) Int Int))
 (pub fn (fpPatVecAt p v i)
-  (let ((src (fpSrc p)))
-    (if (&& (== (fpPatWidth src v i) 2) (fpIsMinusAtom (vecGet v i)))
-      ; A negative literal: one fused atom over both kids, printed as
-      ; the expression path prints it (`fpExprElems`).
-      {
-        (fpPat p (fpFusedAtom (vecGet v i) (vecGet v (+ i 1))))
-        (+ i 2)
-      }
-      (if (== (fpPatWidth src v i) 2)
-        (let (
-          (args (fnKidsVec (vecGet v (+ i 1))))
-          (mut j 0)
-        )
-          {
-            (fpP p "(")
-            (fpP p (fnText src (vecGet v i)))
-            (if (== (as args Int) 0)
-              p
-              (while (< j (vecLen args))
-                {
-                  (fpP p " ")
-                  (set j (fpPatVecAt p args j))
-                }))
-            (fpP p ")")
-            (+ i 2)
-          })
-        {
-          (fpPat p (vecGet v i))
-          (+ i 1)
-        }))))
+  {
+    (fpPat p (fpPatItem p v i))
+    (+ i (fpPatWidth (fpSrc p) v i))
+  })
 
 ; A named-field pattern group's fields: `(Name { w = p, h })`.
 (pub :: fpPatNamed (-> Int Int Int Int))
@@ -3940,6 +4135,12 @@
 
 (pub :: fpPat (-> Int Int Int))
 (pub fn (fpPat p n)
+  (if (&& (== (foTrial (fpOut p)) 1) (!= (foBad (fpOut p)) 0))
+    p
+    (fpPatLive p n)))
+
+(pub :: fpPatLive (-> Int Int Int))
+(pub fn (fpPatLive p n)
   (let (
     (k (fnKind n))
     (src (fpSrc p))
@@ -3962,25 +4163,7 @@
                   (fpCharLit p (fnTok n))
                   (fpBad p)))))))
       (if (== k FN_BRACK)
-        (let (
-          (kids (fnKidsVec n))
-          (mut i 0)
-          (mut nth 0)
-        )
-          {
-            (fpP p "[")
-            (if (== (as kids Int) 0)
-              p
-              (while (< i (vecLen kids))
-                {
-                  (if (> nth 0)
-                    (fpP p " ")
-                    p)
-                  (set i (fpPatVecAt p kids i))
-                  (set nth (+ nth 1))
-                }))
-            (fpP p "]")
-          })
+        (fpList p n (fpPatItems p (fnKidsVec n) 0) 1 "[" "]")
         (if (== k FN_PAREN)
           (if (== (fnLen n) 0)
             ; `(match e (() 0))` - a pattern is parsed by `parseExpr`
@@ -3993,20 +4176,7 @@
               ; binder - so nullary constructors keep them.
               (if (&& (== (fnLen n) 2) (== (fnKind (fnKid n 1)) FN_BRACE))
                 (fpPatNamed p (fnKid n 0) (fnKid n 1))
-                (let (
-                  (kids (fnKidsVec n))
-                  (mut i 1)
-                )
-                  {
-                    (fpP p "(")
-                    (fpP p (fnText src (fnKid n 0)))
-                    (while (< i (vecLen kids))
-                      {
-                        (fpP p " ")
-                        (set i (fpPatVecAt p kids i))
-                      })
-                    (fpP p ")")
-                  }))
+                (fpList p n (fpHeadPatItems p n) 1 "(" ")"))
               ; Not a constructor head: the group is a paren list of
               ; patterns - one unwraps to itself, several are a
               ; tuple - counted through the constructor fusion, so
@@ -4018,22 +4188,7 @@
                     (fpPatVecAt p kids 0)
                     p
                   }
-                  (let (
-                    (mut i 0)
-                    (mut nth 0)
-                  )
-                    {
-                      (fpP p "(")
-                      (while (< i (vecLen kids))
-                        {
-                          (if (> nth 0)
-                            (fpP p " ")
-                            p)
-                          (set i (fpPatVecAt p kids i))
-                          (set nth (+ nth 1))
-                        })
-                      (fpP p ")")
-                    })))))
+                  (fpList p n (fpPatItems p kids 0) 1 "(" ")")))))
           (fpBad p))))))
 
 (pub :: fpAnchor (-> String Int Int))
@@ -4660,8 +4815,8 @@
             (fpP p "type ")
             (fpP p (fnText src (fnKid n (+ b 1))))
             (fpTyvars p n (+ b 2) tvEnd 0)
-            (fpP p " = ")
-            (fpType p (fnKid n (+ tvEnd 1)))
+            (fpP p " =")
+            (fpTypeAfter p (fnKid n (+ tvEnd 1)) 1)
             (fpP p ")")
           })))))
 
@@ -4735,8 +4890,7 @@
         (fpVis p n)
         (fpP p ":: ")
         (fpP p (fnText src (fnKid n (+ b 1))))
-        (fpP p " ")
-        (fpType p (fnKid n (+ b 2)))
+        (fpTypeAfter p (fnKid n (+ b 2)) 1)
         (fpP p ")")
       })))
 
@@ -4753,25 +4907,16 @@
         {
           (fpP p "(")
           (fpVis p n)
-          (fpP p "fn (")
+          (fpP p "fn ")
           ; Only `(fn (name params) body)` is a function. A bare name
           ; or a `define` head is refused, as the parser refuses it.
           (let ((bodyFrom
             (if (== (fnKind x) FN_PAREN)
               (if (&& (> (fnLen x) 0) (fpIsIdentAtom (fnKid x 0)))
-                (let (
-                  (kids (fnKidsVec x))
-                  (mut i 1)
-                )
-                  {
-                    (fpP p (fnText src (fnKid x 0)))
-                    (while (< i (vecLen kids))
-                      {
-                        (fpP p " ")
-                        (set i (fpPatVecAt p kids i))
-                      })
-                    (+ b 2)
-                  })
+                {
+                  (fpList p x (fpHeadPatItems p x) 1 "(" ")")
+                  (+ b 2)
+                }
                 {
                   (fpBad p)
                   (+ b 2)
@@ -4781,25 +4926,22 @@
                 (+ b 2)
               })))
             (let ((body (fpExprElems n bodyFrom)))
-              {
-                (fpP p ")")
-                (if (== (vecLen body) 0)
-                  (fpBad p)
-                  ; The head stands alone; the body goes on the next
-                  ; indent level, single or braced. A short body does
-                  ; not cuddle onto the head line: `(pub fn (name)`
-                  ; is a landmark, and landmarks do not share. The
-                  ; closing paren stacks onto the body's last line.
-                  {
-                    (fpP p "\n")
-                    (foPushIndent o)
-                    (flushLeading src (fpQ p) o (fpBodyVecAnchor src body 0))
-                    (foEmitIndent o)
-                    (fpBodyVec p body 0)
-                    (foPopIndent o)
-                    (fpP p ")")
-                  })
-              }))
+              (if (== (vecLen body) 0)
+                (fpBad p)
+                ; The head stands alone; the body goes on the next
+                ; indent level, single or braced. A short body does
+                ; not cuddle onto the head line: `(pub fn (name)`
+                ; is a landmark, and landmarks do not share. The
+                ; closing paren stacks onto the body's last line.
+                {
+                  (fpP p "\n")
+                  (foPushIndent o)
+                  (flushLeading src (fpQ p) o (fpBodyVecAnchor src body 0))
+                  (foEmitIndent o)
+                  (fpBodyVec p body 0)
+                  (foPopIndent o)
+                  (fpP p ")")
+                })))
         }))))
 
 (pub :: fpDeclImport (-> Int Int Int))
@@ -4815,10 +4957,7 @@
           (fpP p "(import ")
           (fpImportPath p path)
           (if (== (fnLen n) (+ b 3))
-            (let (
-              (names (fnKid n (+ b 2)))
-              (mut i 0)
-            )
+            (let ((names (fnKid n (+ b 2))))
               (if (!= (fnKind names) FN_PAREN)
                 (fpBad p)
                 ; An EMPTY name list is omitted entirely:
@@ -4826,23 +4965,29 @@
                 ; so `(import A.B ())` prints `(import A.B)`.
                 (if (== (fnLen names) 0)
                   p
-                  {
-                    (fpP p " (")
-                    (while (< i (fnLen names))
-                      (if (fpIsIdentAtom (fnKid names i))
-                        {
-                          (if (> i 0)
-                            (fpP p " ")
-                            p)
-                          (fpP p (fnText src (fnKid names i)))
-                          (set i (+ i 1))
-                        }
-                        {
-                          (fpBad p)
-                          (set i (fnLen names))
-                        }))
-                    (fpP p ")")
-                  })))
+                  (let (
+                    (flat (fpListFlat p names (fnKidsVec names) 2 "(" ")"))
+                    (out (fpOut p))
+                  )
+                    (if (&& (> (strLen flat) 0)
+                          (<= (+ (+ (foColumn out) (strLen flat)) 2) fmtWidth))
+                      {
+                        (fpP p " ")
+                        (fpP p flat)
+                      }
+                      {
+                        (fpP p "\n")
+                        (foPushIndent out)
+                        (flushLeading src (fpQ p) out (fnStart names))
+                        (foEmitIndent out)
+                        (let ((saved (fpSuffixWidth p)))
+                          {
+                            (memSetWord p 4 1)
+                            (fpList p names (fnKidsVec names) 2 "(" ")")
+                            (memSetWord p 4 saved)
+                          })
+                        (foPopIndent out)
+                      })))))
             p)
           (fpP p ")")
         }))))

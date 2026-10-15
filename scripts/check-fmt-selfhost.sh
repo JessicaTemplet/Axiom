@@ -319,6 +319,14 @@ else
   failed=$((failed + 1))
 fi
 
+echo "== long declarations and typed lists =="
+if python3 "$repo_root/tests/fmt/readability.py" "$axc"; then
+  echo "ok   long layouts preserve native results"
+else
+  echo "FAIL formatter readability"
+  failed=$((failed + 1))
+fi
+
 echo "== parity bank: tests/fmt/parity.golden =="
 parity_golden="$repo_root/tests/fmt/parity.golden"
 mkdir -p "$work/parity-out"

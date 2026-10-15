@@ -153,6 +153,7 @@ ADT instantiation.
 |---|---|
 | Formatting preserves the import header, doc-comment attachment and literal contents, without trailing layout whitespace | Done |
 | Width-aware argument packing and attached call comments, with batch preflight, stdin/stdout and non-writing diffs | Done |
+| Long function headers, signatures, types, aliases, selective imports and positional patterns share canonical list layout | Done |
 | Doc comments: `;;` documents the declaration below and `;;!` the module, and hover, the library reference and `axiom doc` read them | Done |
 | Hover explains every word of the language: keywords, builtin types, effects, operators, AXTAG keys and values, and imported modules | Done |
 | Every public standard library name carries a doc comment, and every module a `;;!` block | Done |
