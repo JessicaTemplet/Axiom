@@ -20114,9 +20114,57 @@
                       "bind the scrutinee in a `let` and answer the recursive call from a match arm, where the self call is a tail call and the loop conversion fires")
                     (concat (concat "recursive call to `" (bareOf name)) "`")))))))))))
 
+; A bare name in a pattern that names a constructor tests that
+; constructor, exactly as `(None)` does. The parser can't tell the two
+; apart, because it hasn't seen the declarations, so it builds a
+; variable pattern and the node is retagged here. This runs before the
+; arms are checked, and the emitter reads the same nodes afterwards, so
+; the checker, the exhaustiveness walk and the emitted tests all see a
+; constructor. Any other bare name stays a binder. Only the arguments of
+; a fieldful pattern are visited: its head is the constructor itself.
+; Tested by `tests/selfhost/1016-bare-ctor-pattern.ax`.
+(pub :: normCtorPat (-> Int Int Int))
+(pub fn (normCtorPat tc pat)
+  (let ((tag (nodeTag pat)))
+    (if (== tag TAG_E_VAR)
+      (if (!= (findCtor tc (nodeAName pat)) 0)
+        {
+          (memSetWord pat 0 TAG_P_CON0)
+          0
+        }
+        0)
+      (if (== tag TAG_E_APP)
+        (normCtorPats tc (spineArgVec pat vecNew) 0)
+        (if (== tag TAG_P_CONNAMED)
+          (normCtorPats tc (nodeCVec pat) 0)
+          0)))))
+
+(pub :: normCtorPats (-> Int (Vec Int) Int Int))
+(pub fn (normCtorPats tc pats i)
+  (if (>= i (vecLen pats))
+    0
+    {
+      (normCtorPat tc (vecGet pats i))
+      (normCtorPats tc pats (+ i 1))
+    }))
+
+; The arms of one `match`. A `for` arm holds no pattern.
+(pub :: normArmPats (-> Int (Vec Int) Int Int))
+(pub fn (normArmPats tc arms i)
+  (if (>= i (vecLen arms))
+    0
+    {
+      (let ((arm (vecGet arms i)))
+        (if (== (nodeTag arm) TAG_M_FOR)
+          0
+          (normCtorPat tc (nodeA arm))))
+      (normArmPats tc arms (+ i 1))
+    }))
+
 (pub fn (checkMatch tc e disc)
   (let (
     (errsBefore (countErrorDiags (tcOutVec tc)))
+    (normed (normArmPats tc (nodeBVec e) 0))
     (scrutTy (checkExprH tc (nodeA e) 0))
     (recWarn (checkRecursionInScrutinee tc e scrutTy errsBefore))
     (covered vecNew)
@@ -20585,7 +20633,8 @@
 ; check produced, which is what keeps the existing goldens.
 ; ------------------------------------------------------------------
 ; Does this pattern bind unconditionally? Only a bare identifier does
-; - `_` and any binder - and `true`/`false` are the exception, since
+; - `_` and any binder, a bare constructor name having been retagged by
+; `normCtorPat` before this runs - and `true`/`false` are the exception, since
 ; those are literal TESTS (codegen agrees, and `armsBoolComplete`
 ; above reads them the same way). Every other shape can fail to match.
 (pub :: patIrrefutable (-> Int Int))

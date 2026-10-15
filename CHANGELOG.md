@@ -16,6 +16,16 @@ its changelog too.
 
 ## Unreleased
 
+- Fix bare constructor names in patterns. `(None 0)` as an arm bound
+  every value to a variable named `None`, so it answered 0 for
+  `(Some 5)`, and the exhaustiveness check counted it as a catch-all.
+  A bare name that names a constructor now tests that constructor, as
+  `(None)` does, and a match it leaves uncovered is `AX3005`.
+  Self-host case 485 pinned the old rule as stage0's; it is now
+  `tests/selfhost/485-bare-ctor-tests-tag.ax` and expects the second
+  arm. Tested by `tests/selfhost/1016-bare-ctor-pattern.ax` and
+  `tests/diagnostics/1396-bare-ctor-pattern.ax`.
+
 - Numeric conversion policy follows explicit primitive conversions:
   expected types never insert conversions into calls, returns, assignments
   or ADT payloads. Regression cases cover both directions, generic ADTs

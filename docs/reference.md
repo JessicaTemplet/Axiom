@@ -629,7 +629,9 @@ renderable data types; no derive is needed for printing.
 ```
 
 Arms can match constructors, nested patterns or literals. `_` matches
-anything and binds nothing. Every possible constructor must be covered,
+anything and binds nothing. A nullary constructor can be written bare
+or in parentheses: `None` and `(None)` both test for `None`, and any
+other bare name binds the value. Every possible constructor must be covered,
 or the compiler reports AX3005. Constructor patterns need the right
 number of fields, and arm results must agree in type.
 
