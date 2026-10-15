@@ -49,6 +49,14 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- Effect call-graph checks recognise allocation through an unshadowed
+  constructor stored into a field. Mixed effects still require source
+  evidence. IO origins are read from complete primitive registrations,
+  including wrapped declarations. The generated-name census accounts for
+  two derivers in the migrated prelude example.
+  Tested by `tests/tools/effect-totality.py` and
+  `scripts/check-macro-demand.sh`.
+
 - REPL evaluation keeps unit, Float and fixed-width integer results
   in their checked types. Unit expressions run before their result is
   displayed, preserving effects. Numeric conversions remain explicit.

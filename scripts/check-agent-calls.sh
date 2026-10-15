@@ -23,7 +23,8 @@
 #   set is `Mut`: a field `set` is the one effect-bearing form that is
 #   not a call, so `(fn (f c x) { (set c.v x) 0 })` prints
 #   `#effects=Mut` and no `#calls=`. Only the exact set `{Mut}` is
-#   excused. `Alloc,Mut` with no edge is still an effect from nowhere.
+#   excused without further evidence. `Alloc,Mut` requires source proof
+#   of a direct, unshadowed constructor stored into a field.
 #
 #   Silence by default. Without `--calls`, no row carries the key.
 #   `check-tools-selfhost.sh` compares `tests/tools/symbols-zoo.golden`
@@ -247,13 +248,11 @@ echo "== totality: an inferred effect has an edge that accounts for it =="
 #
 # `Alloc,IO` is still reported: a function that allocates and reaches a
 # syscall has a call somewhere, and a missing edge there is a finding.
-missing=$(awk -v p="$stdlib_prefix" '
-  $1 == "F" && index($3, p) == 1 &&
-  /#effects=/ && !/#calls=/ &&
-  !/#effects=Mut( |$)/ &&
-  !/#effects=Alloc( |$)/ &&
-  !(/#syscall=/ && /#effects=(Block|Spawn|Entropy)( |$)/) &&
-  index($3, p "Ffi.ax:") != 1 { print $2, $3 }' "$work/calls" | LC_ALL=C sort -u || true)
+# A constructor in a field store seeds both Alloc and Mut without a
+# function call. Read its body rather than exempting every mixed row.
+totality="$repo_root/tests/tools/effect-totality.py"
+python3 "$totality" --selftest
+missing=$(python3 "$totality" "$stdlib_prefix" "$work/calls" | LC_ALL=C sort -u)
 if [[ -n "$missing" ]]; then
   echo "FAIL: these rows carry an inferred effect and no edge explaining it:"
   echo "$missing" | sed 's/^/     /' | head -20
@@ -262,7 +261,7 @@ if [[ -n "$missing" ]]; then
   echo '     `tcAddExtern` does - in which case name it in this gate.'
   exit 1
 fi
-echo "ok   every inferred effect row carries an edge, extern, field-set, constructor and tagged-syscall rows excepted"
+echo "ok   every inferred effect row has an edge or a justified local seed"
 
 echo
 echo "== negative probes: every assertion can go red =="
@@ -306,8 +305,8 @@ fi
 echo "ok   a caller whose row omits a callee's effect fails containment"
 
 # Totality can see an effect with no edge, the Ffi exemption is
-# anchored to the span, and the field-set exemption is exactly `{Mut}`:
-# zeta is excused, and eta (`Mut` with `Alloc` and no edge) is not.
+# anchored to the span, and a mixed row needs source evidence:
+# zeta is excused, and eta (`Mut` with `Alloc` and no source) is not.
 cat > "$work/tot.axsym" <<'TOT'
 F gamma /x/stdlib/B.ax:1:1-2 "(Int -> Int)" @c #effects=IO
 F delta /x/stdlib/Ffi.ax:1:1-2 "(Int -> Int)" @d #effects=IO
@@ -315,10 +314,7 @@ F epsilon /x/stdlib/C.ax:1:1-2 "(Int -> Int)" @e #effects=IO #calls=Ffi.ax
 F zeta /x/stdlib/D.ax:1:1-2 "(Int -> Int)" @f #effects=Mut
 F eta /x/stdlib/D.ax:2:1-2 "(Int -> Int)" @g #effects=Alloc,Mut
 TOT
-hits=$(awk -v p="/x/stdlib/" '
-  $1 == "F" && index($3, p) == 1 && /#effects=/ && !/#calls=/ &&
-  !/#effects=Mut( |$)/ &&
-  index($3, p "Ffi.ax:") != 1 { print $2 }' "$work/tot.axsym" | tr '\n' ' ' || true)
+hits=$(python3 "$totality" "/x/stdlib/" "$work/tot.axsym" | awk '{print $1}' | tr '\n' ' ')
 if [[ "$hits" != "gamma eta " ]]; then
   echo "FAIL negative: the totality matcher reported '$hits', wanted exactly 'gamma eta '"
   echo "               (delta is the anchored Ffi exemption; epsilon has an edge"
@@ -326,7 +322,7 @@ if [[ "$hits" != "gamma eta " ]]; then
   echo "                is a field set, Mut alone; eta carries Alloc too)"
   exit 1
 fi
-echo "ok   totality sees an unexplained effect, the Ffi exemption is anchored, and only {Mut} is a field set"
+echo "ok   totality refuses unproved mixed effects and keeps the Ffi exemption anchored"
 
 # Silence can see the key arriving unasked.
 printf 'F zeta /x/stdlib/D.ax:1:1-2 "Int" @f #effects=IO #calls=D$eta\n' > "$work/sil.axsym"
@@ -355,17 +351,14 @@ echo "== grounding: every inferred IO reaches a primitive through the graph =="
 # The origin list is read from `self_host/typecheck.ax`, never copied:
 # `regFnEff <name> <type> (builtinEff "IO")`, or `regFnEff2` for a
 # primitive with a second effect (a spawn's `Spawn`, a join's `Block`).
-# A floor under the count catches a grep that stops matching. The
-# `|| true` keeps that floor reachable: under `set -e` and `pipefail`, a
-# grep that matched nothing would kill the script with no message.
-io_prims="$(grep -E 'regFnEff2? fns "' "$repo_root/self_host/typecheck.ax" \
-  | grep 'builtinEff "IO"' \
-  | sed -E 's/.*regFnEff2? fns "([^"]*)".*/\1/' | LC_ALL=C sort -u | tr '\n' ',' || true)"
+# Registrations may wrap across lines. Read their complete forms and
+# both effect slots, so layout cannot silently drop a real origin.
+io_prims="$(python3 "$totality" --io-primitives "$repo_root/self_host/typecheck.ax" | tr '\n' ',')"
 n_io_prims="$(printf '%s' "$io_prims" | tr ',' '\n' | grep -c . || true)"
 if [[ "$n_io_prims" -lt 4 ]]; then
   echo "FAIL: only $n_io_prims IO-registering primitive(s) found in self_host/typecheck.ax;"
   echo "      the floor is 4 (8 on 2026-09-03: __argc, __argv and the six spawn/join"
-  echo "      primitives). The grep has stopped matching \`regFnEff\`, and a grounding"
+  echo "      primitives). The reader has stopped matching \`regFnEff\`, and a grounding"
   echo "      check with no origins grounds nothing."
   exit 1
 fi

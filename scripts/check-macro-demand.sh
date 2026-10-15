@@ -38,7 +38,11 @@ fail() { echo "FAIL: $*"; failed=$((failed + 1)); }
 # do generate carry a row each). It landed without moving this number,
 # which is the drift the pin exists to catch; no request that needs
 # expansion arrived, so MAC-TOOL-3 holds.
-WANT_POPULATION=132
+# 132 -> 134 follows removal of Pre's `when` and `unless` aliases.
+# 370-pre-import.ax now exercises its two remaining derivers, adding
+# `eqTone` and `arityPair`. The remaining population stays at 132,
+# and no editor request targeting a generated name was added.
+WANT_POPULATION=134
 WANT_DEMAND=4
 
 echo "== population: every #generated= row over the corpus =="
