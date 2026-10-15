@@ -98,24 +98,30 @@ have() { # have <got> <want> <what>
 # Scoped callback contracts add seven Alloc,Mut helpers and two pure
 # helpers. Signed literal parsing shares existing pure bounds. Existing
 # effect rows and all stdlib buckets are unchanged.
+# Nominal declaration identity removes name-building from structural equality
+# and ownership classifiers; qualified type resolution adds its checked helpers.
+# Workspace overlays add seven Alloc,IO,Mut readers/publishers. The existing
+# parseModuleOrDieUnit loses Unsafe through typed preloaded units. Imported
+# extern registration removes five duplicate Ffi IO,Unsafe rows from the library
+# view; the five source declarations remain, with their required effects.
 echo "== compiler view: symbols --calls self_host/main.ax =="
 "$axc" --diagnostic-format=ai symbols --calls self_host/main.ax > "$work/main.axsym" 2>"$work/main.err" \
   || { fail "could not read symbols over self_host/main.ax"; echo "check-effect-distribution: $failed failed"; exit 1; }
 rows="$(grep -c '^F ' "$work/main.axsym" || true)"
 (( rows >= 4000 )) && ok "$rows functions listed (floor 4000)" \
   || fail "only $rows functions listed; the floor is 4000 (the corpus moved or the read broke)"
-have "$(bucket "$work/main.axsym" 'Alloc,Mut')" 2824 "exactly Alloc,Mut"
-have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut')" 404 "Alloc,IO,Mut"
-have "$(bucket "$work/main.axsym" 'Mut')" 157 "exactly Mut"
-have "$(bucket "$work/main.axsym" 'Alloc')" 160 "exactly Alloc"
+have "$(bucket "$work/main.axsym" 'Alloc,Mut')" 2822 "exactly Alloc,Mut"
+have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut')" 411 "Alloc,IO,Mut"
+have "$(bucket "$work/main.axsym" 'Mut')" 160 "exactly Mut"
+have "$(bucket "$work/main.axsym" 'Alloc')" 164 "exactly Alloc"
 have "$(bucket "$work/main.axsym" 'Alloc,IO')" 15 "Alloc,IO"
 have "$(bucket "$work/main.axsym" 'IO')" 12 "exactly IO"
 have "$(bucket "$work/main.axsym" 'IO,Mut')" 1 "IO,Mut"
-have "$(bucket "$work/main.axsym" 'Alloc,Mut,Unsafe')" 259 "Alloc,Mut,Unsafe"
-have "$(bucket "$work/main.axsym" 'Unsafe')" 116 "exactly Unsafe"
-have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut,Unsafe')" 64 "Alloc,IO,Mut,Unsafe"
+have "$(bucket "$work/main.axsym" 'Alloc,Mut,Unsafe')" 255 "Alloc,Mut,Unsafe"
+have "$(bucket "$work/main.axsym" 'Unsafe')" 120 "exactly Unsafe"
+have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut,Unsafe')" 63 "Alloc,IO,Mut,Unsafe"
 have "$(bucket "$work/main.axsym" 'Mut,Unsafe')" 23 "Mut,Unsafe"
-have "$(bucket "$work/main.axsym" 'Alloc,Unsafe')" 5 "Alloc,Unsafe"
+have "$(bucket "$work/main.axsym" 'Alloc,Unsafe')" 6 "Alloc,Unsafe"
 have "$(bucket "$work/main.axsym" 'Alloc,IO,Unsafe')" 20 "Alloc,IO,Unsafe"
 have "$(bucket "$work/main.axsym" 'IO,Mut,Unsafe')" 0 "IO,Mut,Unsafe"
 have "$(bucket "$work/main.axsym" 'IO,Unsafe')" 13 "IO,Unsafe"
@@ -135,7 +141,7 @@ have "$(bucket "$work/main.axsym" 'IO,Spawn,Unsafe')" 1 "IO,Spawn,Unsafe"
 have "$(bucket "$work/main.axsym" 'Spawn')" 2 "Spawn"
 have "$(bucket "$work/main.axsym" 'Alloc,Block,IO,Mut')" 5 "Alloc,Block,IO,Mut"
 have "$(bucket "$work/main.axsym" 'Block,IO')" 1 "Block,IO"
-have "$(grep '^F ' "$work/main.axsym" | grep -vc '#effects=\|#effects-incomplete' || true)" 2098 "pure (neither row nor mark)"
+have "$(grep '^F ' "$work/main.axsym" | grep -vc '#effects=\|#effects-incomplete' || true)" 2112 "pure (neither row nor mark)"
 have "$(grep '^F ' "$work/main.axsym" | grep -o '#effects=[^ #]*' | LC_ALL=C sort -u | wc -l | tr -d ' ')" 29 "distinct compiler effect rows"
 have "$(grep -c '#effects-incomplete' "$work/main.axsym" || true)" 35 "incomplete rows"
 have "$(grep -c '#effect-params' "$work/main.axsym" || true)" 11 "effect-params rows"
@@ -180,7 +186,7 @@ have "$(bucket "$work/lib.axsym" 'Alloc,Unsafe')" 7 "Alloc,Unsafe"
 have "$(bucket "$work/lib.axsym" 'Alloc,IO,Unsafe')" 30 "Alloc,IO,Unsafe"
 have "$(bucket "$work/lib.axsym" 'Alloc,Assert,IO,Mut,Unsafe')" 0 "Alloc,Assert,IO,Mut,Unsafe"
 have "$(bucket "$work/lib.axsym" 'IO,Mut,Unsafe')" 3 "IO,Mut,Unsafe"
-have "$(bucket "$work/lib.axsym" 'IO,Unsafe')" 25 "IO,Unsafe"
+have "$(bucket "$work/lib.axsym" 'IO,Unsafe')" 20 "IO,Unsafe"
 have "$(bucket "$work/lib.axsym" 'Alloc,IO,Spawn')" 1 "Alloc,IO,Spawn"
 have "$(bucket "$work/lib.axsym" 'Alloc,IO,Mut,Spawn,Unsafe')" 3 "Alloc,IO,Mut,Spawn,Unsafe"
 have "$(bucket "$work/lib.axsym" 'Alloc,Block,IO,Mut')" 25 "Alloc,Block,IO,Mut"

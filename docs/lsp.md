@@ -102,7 +102,9 @@ being answered. See the [roadmap](roadmap.md#tools).
 ### Diagnostics
 
 The server publishes diagnostics on every accepted `didOpen` and
-`didChange`, under the document's own URI and version. They are `axiom check`'s diagnostics. As
+`didChange`, under the document's own URI and version. It also rechecks
+open documents that import the changed file, including through another
+module. Closing a dependency refreshes its importers from disk. They are `axiom check`'s diagnostics. As
 in the compiler, the first stage that fails decides what you see:
 
 1. a lexical error;
@@ -138,11 +140,16 @@ in the `depend` and `crate` directories of an `axiom.pkg`, then in
 `$AXIOM_PATH`. If `axiom check f.ax` finds the standard library from
 the shell your editor launches, the server finds it too.
 
-A half-typed `(import Fo` doesn't break anything. Requests are
-answered from that document alone, never with an error response, and
-the server keeps running. This works because `lspPreflight` in
-`self_host/lsp.ax` walks the imports without failing before anything
-resolves.
+An open module's unsaved text is used by checks, hover, navigation,
+completion and fixes in every document that imports it. A module can
+be empty or have no saved file. Closing it returns imports to disk.
+The search order and target-specific suffixes stay the compiler's.
+
+A half-typed import or a malformed dependency leaves the server running.
+Requests fall back to the document's own declarations. Open the broken
+module to see its diagnostic at the right location.
+
+Tested by `tests/lsp/workspace-overlays.py`.
 
 ## Editor setup
 

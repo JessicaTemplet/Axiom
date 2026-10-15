@@ -690,13 +690,23 @@ are refused, including unused ones. Use `data` or `struct` for recursive types.
 Tested by `tests/stdlib/946-generic-aliases.ax` and
 `tests/diagnostics/1422-recursive-alias.ax`.
 
+`data`, `struct` and `subtype` declarations keep their module identity.
+`A::Thing` and `B::Thing` are different types even when their layouts
+match. Aliases and generic arguments preserve that identity. You can
+use a bare name in its declaring module; qualify a name shared by
+several imports.
+
+Tested by `tests/stdlib/954-nominal-identity.ax` and
+`tests/diagnostics/1438-nominal-module-boundaries.ax`.
+
 ### Range-constrained subtypes
 
 `(subtype Percent is Int range 0..101)` makes a distinct integer type.
 The upper bound is excluded. Narrowing with `(as n Percent)`, or at
 a declared parameter/result boundary, checks the range at run time and
 traps with status 80 on failure. Widening to `Int` needs no check.
-Arithmetic does not prove that its result stays within the range.
+Arithmetic does not prove that its result stays within the range. Passing between different modules’ same-named
+subtypes checks the target range too.
 
 Use an alias for naming, a subtype for a checked integer range, and a
 `struct` or `data` wrapper for another nominal type.

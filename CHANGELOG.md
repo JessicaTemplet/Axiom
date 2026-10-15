@@ -704,6 +704,44 @@ calling a converted function checks its remaining arguments. Tested by
   NASA software engineering and assurance requirements alongside FAA
   and ECSS guidance.
 
+### Unsaved imports share the editor workspace
+
+The language server resolves imports against open document text, including
+new files and empty modules, for diagnostics, navigation, hover, completion
+and fixes. Accepted changes refresh open transitive importers at their own
+versions; closing a module restores its disk source. Malformed imported
+source cannot enter the compiler's fatal CLI parse path. The independent
+`tests/lsp/workspace-overlays.py` session exercises dependency edits,
+unsaved files, malformed-source recovery and close/reopen.
+
+- Nominal types retain their declaring module through aliases,
+  constructors, fields and generic substitution. Distinct types with the
+  same name cannot cross module boundaries, and subtype conversions
+  check the target's range. Tested by `tests/stdlib/954-nominal-identity.ax`
+  and `tests/stdlib/955-nominal-subtype-range.ax`.
+
+- Editor checks and navigation use unsaved imported documents. Changes
+  refresh transitive importers, and malformed dependencies produce
+  diagnostics without terminating the language server.
+
+- Reviewed assembly in the restricted profile requires `nostack` on
+  every selected target arm. The report reads blocks before optimisation;
+  the promise and the instructions remain review obligations.
+
+- Imported foreign declarations retain their module and source identity.
+  Module-local calls use the declared linker symbol when names overlap.
+  Restricted-report exceptions apply to the exact declaration reviewed.
+  Tested by `scripts/check-report.sh`.
+- Restricted reports follow checked Spawn and Block effects and refuse
+  unknown kernel entries in nonblocking code. Handled custom effects
+  stay removed from the caller's trap set. Foreign review obligations
+  remain visible after an exception. Tested by `scripts/check-report.sh`.
+
+- Stack reports include the assembled IRQ save area and dispatch path,
+  require a machine bound for every selected source entry, and retain
+  program entries when extra roots are requested. Unknown IRQ stack
+  instructions fail closed. Tested by `scripts/check-report.sh`.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

@@ -502,6 +502,155 @@
       missing
     }))
 
+; Open documents are immutable source overlays for one request. A closed
+; document is omitted, so its imports return to the on-disk source.
+(pub :: lspWorkspaceNew (-> (Vec String) (Vec String) (Vec Int) (Vec Int)))
+;@axiom:effect(unsafe)
+(pub fn (lspWorkspaceNew uris texts meta)
+  (let (
+    (out vecNew)
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen uris))
+        {
+          (if (lspDocIsOpen meta i)
+            (vecPush
+              out
+              (as (CUnit2 (lspUriToPath (vecGetStr uris i)) (vecGetStr texts i) (as 0 String)) Int)))
+          (set i (+ i 1))
+        })
+      out
+    }))
+
+(pub :: lspWorkspacePath (-> (Vec Int) String Int))
+;@axiom:effect(io)
+(pub fn (lspWorkspacePath workspace path)
+  (let (
+    (absolute (pathClean
+                (if (pathIsAbsolute path)
+                  path
+                  (pathJoin (unwrapOr cwd ".") path))))
+    (mut i 0)
+    (mut found 0)
+  )
+    {
+      (while (&& (== found 0) (< i (vecLen workspace)))
+        {
+          (let ((unit (vecGet workspace i)))
+            (if (strEq absolute (pathClean (memGetWordStr unit 0)))
+              (set found unit)))
+          (set i (+ i 1))
+        })
+      found
+    }))
+
+; Preserve the compiler's suffix and directory precedence, including an
+; open file that has not been saved yet and a valid empty module.
+(pub :: lspWorkspaceModulePath (-> (Vec Int) String Int String String))
+;@axiom:effect(io)
+(pub fn (lspWorkspaceModulePath workspace name tcode entryDir)
+  (let (
+    (stem (modPathToFile name))
+    (dirs (moduleSearchDirs entryDir))
+    (suffixes vecNew)
+    (mut si 0)
+    (mut found "")
+  )
+    {
+      (vecPush suffixes (targetOsArchSuffix tcode))
+      (vecPush suffixes (targetOsSuffix tcode))
+      (vecPush suffixes ".ax")
+      (while (&& (< si (vecLen suffixes)) (== (strLen found) 0))
+        {
+          (let (
+            (base (concat stem (vecGetStr suffixes si)))
+            (mut di 0)
+          )
+            (while (&& (! (stemEscapes base)) (&& (< di (vecLen dirs)) (== (strLen found) 0)))
+              {
+                (let ((candidate (concat (vecGetStr dirs di) base)))
+                  (if (||
+                        (!= (lspWorkspacePath workspace candidate) 0)
+                        (!= (strLen (unwrapOr (readFile candidate) "")) 0))
+                    (set found candidate)))
+                (set di (+ di 1))
+              }))
+          (set si (+ si 1))
+        })
+      found
+    }))
+
+; Read and validate each dependency once, before the shared resolver can
+; take a fatal CLI path. The table is also the resolver's source input.
+; The first failure carries its own unit; callers never index it using
+; the entry document's bytes.
+(pub :: lspWorkspacePreflight (-> (Vec Int) (Vec Int) Int String (Vec Int) Int Int))
+;@axiom:effect(io)
+(pub fn (lspWorkspacePreflight workspace decls tcode entryDir units owner)
+  (let (
+    (mut i 0)
+    (mut failure 0)
+  )
+    {
+      (while (&& (== failure 0) (< i (vecLen decls)))
+        {
+          (let ((site (vecGet decls i)))
+            (if (== (nodeTag site) TAG_D_IMPORT)
+              (let ((name (nodeAName site)))
+                (if (< (unitIndexOf units name 0) 0)
+                  (let ((path (lspWorkspaceModulePath workspace name tcode entryDir)))
+                    (if (== (strLen path) 0)
+                      (let ((d (mkDiag
+                                 SEV_ERROR
+                                 "AX5001"
+                                 "module-not-found"
+                                 (nodeSpan site)
+                                 (concat (concat "cannot resolve import `" name) "`")
+                                 0
+                                 ""
+                                 (importHelpText name tcode entryDir))))
+                        {
+                          (diagSetUnit d owner)
+                          (set failure d)
+                        })
+                      (let ((overlay (lspWorkspacePath workspace path)))
+                        (let (
+                          (src (if (== overlay 0)
+                            (unwrapOr (readFile path) "")
+                            (memGetWordStr overlay 1)))
+                          (unit (vecLen units))
+                        )
+                          {
+                            (vecPush units (as (CUnit2 path src name) Int))
+                            (let ((toks (lex src)))
+                              (let ((lexD (lexErrDiag toks src)))
+                                (let ((pr
+                                  (if (== lexD 0)
+                                    (parseModuleWith toks (scanAxtags src))
+                                    (pErr 0))))
+                                  (if (|| (!= lexD 0) (== (memGetWord pr 0) 0))
+                                    (let ((d
+                                      (if (== lexD 0)
+                                        (parseErrDiag toks pr src)
+                                        lexD)))
+                                      {
+                                        (diagSetUnit d unit)
+                                        (set failure d)
+                                      })
+                                    (set failure (lspWorkspacePreflight
+                                                   workspace
+                                                   (memGetWordVec pr 1)
+                                                   tcode
+                                                   entryDir
+                                                   units
+                                                   unit))))))
+                          }))))))))
+          (set i (+ i 1))
+        })
+      failure
+    }))
+
 ; ------------------------------------------------------------------
 ; Checking one document
 ;
@@ -514,10 +663,10 @@
 ; would put it in the wrong editor tab. Reporting those under their own
 ; URIs is a later slice.
 ; ------------------------------------------------------------------
-(pub :: lspCheckDoc (-> String String Int))
+(pub :: lspCheckDoc (-> (Vec Int) String String Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
-(pub fn (lspCheckDoc path src)
+(pub fn (lspCheckDoc workspace path src)
   ; A lexical error is reported before a parse one, as it is in the
   ; compiler: an editor should point at the bad escape rather than at
   ; whatever the parser tripped over afterwards.
@@ -546,10 +695,19 @@
             (decls (memGetWordVec pr 1))
             (tcode (checkedTargetCode hostTarget))
             (entryDir (pathDir path))
+            (units (let ((v vecNew))
+              {
+                (vecPush v (as (CUnit2 path src (as 0 String)) Int))
+                v
+              }))
           )
-            (let ((missing (lspPreflight decls tcode entryDir vecNew)))
-              (if (> (strLen missing) 0)
-                (lspOneDiag src "AX5001" (concat (concat "cannot resolve import `" missing) "`"))
+            (let ((failure (lspWorkspacePreflight workspace decls tcode entryDir units 0)))
+              (if (!= failure 0)
+                (if (== (diagUnit failure) 0)
+                  (jsonArrPush
+                    jsonArr
+                    (lspDiagJson failure src (lspLineIndex src) (lspPathToUri path)))
+                  jsonArr)
                 ; Same order as `compileFile`: expansion, then the
                 ; checker. An editor that reported a different set
                 ; of diagnostics from `axiom check` on the same file
@@ -583,11 +741,6 @@
                   (bares vecNew)
                   (fulls vecNew)
                   (mods vecNew)
-                  (units (let ((v vecNew))
-                    {
-                      (vecPush v (as (CUnit2 path src (as 0 String)) Int))
-                      v
-                    }))
                 )
                   (let ((allDecls (resolveImports decls bares fulls mods tcode entryDir units)))
                     (let (
@@ -2406,10 +2559,10 @@
 ; error while the user was mid-word would make navigation feel broken
 ; exactly when the file is.
 ; ------------------------------------------------------------------
-(pub :: lspResolveFor (-> String String (Vec Int) Int))
+(pub :: lspResolveFor (-> (Vec Int) String String (Vec Int) Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
-(pub fn (lspResolveFor path src decls)
+(pub fn (lspResolveFor workspace path src decls)
   (let (
     (bares vecNew)
     (fulls vecNew)
@@ -2423,8 +2576,8 @@
           (vecPush v (as (CUnit2 path src (as 0 String)) Int))
           v
         })))
-      (let ((missing (lspPreflight decls tcode entryDir vecNew)))
-        (if (> (strLen missing) 0)
+      (let ((failure (lspWorkspacePreflight workspace decls tcode entryDir units 0)))
+        (if (!= failure 0)
           0
           (let ((allDecls (resolveImports decls bares fulls mods tcode entryDir units)))
             (let ((r (memAlloc 40)))
@@ -2467,9 +2620,9 @@
 ; A position that is not a name still answers null, which is the
 ; protocol's way of saying "nothing here" and what an editor expects
 ; for every other word in the file.
-(pub :: lspDefinition (-> String String Int String Int))
+(pub :: lspDefinition (-> (Vec Int) String String Int String Int))
 ;@axiom:effect(io)
-(pub fn (lspDefinition src uri params gen)
+(pub fn (lspDefinition workspace src uri params gen)
   (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonNull
@@ -2511,7 +2664,12 @@
                           ; every answer given before standing, and
                           ; reading a string is what keeps this arm
                           ; on MAC-TOOL-3's side of expansion.
-                          (let ((imp (lspDefinitionImported (lspUriToPath uri) src decls w)))
+                          (let ((imp (lspDefinitionImported
+                                       workspace
+                                       (lspUriToPath uri)
+                                       src
+                                       decls
+                                       w)))
                             (if (jsonIsNull imp)
                               (lspGenDefinition gen uri src w)
                               imp)))))))))))))))
@@ -2521,10 +2679,10 @@
 ; cannot disagree about what this document imports - and answer a
 ; Location in whichever module declares `w`. A resolver failure is
 ; null rather than a diagnostic, for the reason `lspResolveFor` gives.
-(pub :: lspDefinitionImported (-> String String (Vec Int) String Int))
+(pub :: lspDefinitionImported (-> (Vec Int) String String (Vec Int) String Int))
 ;@axiom:effect(io)
-(pub fn (lspDefinitionImported path src decls w)
-  (let ((r (lspResolveFor path src decls)))
+(pub fn (lspDefinitionImported workspace path src decls w)
+  (let ((r (lspResolveFor workspace path src decls)))
     (if (== r 0)
       jsonNull
       (let (
@@ -2931,12 +3089,12 @@
 ; its path, read through the same resolver `definition` uses. Null
 ; when `w` is not an imported module's name or the resolver has no
 ; unit for it.
-(pub :: lspModuleHover (-> String String (Vec Int) String Int Int))
+(pub :: lspModuleHover (-> (Vec Int) String String (Vec Int) String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspModuleHover path src decls w range)
+(pub fn (lspModuleHover workspace path src decls w range)
   (if (== (lspFixFindImport decls w (- (vecLen decls) 1)) 0)
     jsonNull
-    (let ((r (lspResolveFor path src decls)))
+    (let ((r (lspResolveFor workspace path src decls)))
       (if (== r 0)
         jsonNull
         (let ((units (memGetWordVec r 1)))
@@ -2955,14 +3113,14 @@
                           (concat "\n" doc))))
                     range))))))))))
 
-(pub :: lspHover (-> String String Int String Int))
+(pub :: lspHover (-> (Vec Int) String String Int String Int))
 ; A field path is resolved as a path first: the word under the
 ; cursor in `base.field` is only the field, and answering it as a
 ; top-level name (or nothing) would be the wrong question. When the
 ; path does not resolve, the word falls through to the ordinary
 ; lookup below rather than answering null outright.
 ;@axiom:effect(io)
-(pub fn (lspHover src uri params gen)
+(pub fn (lspHover workspace src uri params gen)
   (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonNull
@@ -3013,6 +3171,7 @@
                                     ; the module an import names, then the
                                     ; language itself.
                                     (let ((hov (lspHoverImported
+                                                 workspace
                                                  (lspUriToPath uri)
                                                  src
                                                  decls
@@ -3022,6 +3181,7 @@
                                         (let ((g (lspGenHover gen src w range)))
                                           (if (jsonIsNull g)
                                             (let ((m (lspModuleHover
+                                                       workspace
                                                        (lspUriToPath uri)
                                                        src
                                                        decls
@@ -3113,10 +3273,10 @@
 ; declaration's span indexes that file, and names the module it found
 ; it in, because "where did this come from" is most of what a reader
 ; hovering an imported name is asking.
-(pub :: lspHoverImported (-> String String (Vec Int) String Int Int))
+(pub :: lspHoverImported (-> (Vec Int) String String (Vec Int) String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspHoverImported path src decls w range)
-  (let ((r (lspResolveFor path src decls)))
+(pub fn (lspHoverImported workspace path src decls w range)
+  (let ((r (lspResolveFor workspace path src decls)))
     (if (== r 0)
       jsonNull
       (let (
@@ -3795,9 +3955,9 @@
       ()
     }))
 
-(pub :: lspCompletion (-> String String Int Int))
+(pub :: lspCompletion (-> (Vec Int) String String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspCompletion src uri params)
+(pub fn (lspCompletion workspace src uri params)
   (let (
     (ix (lspLineIndex src))
     (out jsonArr)
@@ -3827,7 +3987,7 @@
                     (lspOffsetOf src ix (jsonGet params "position"))
                     prefix)
                   (lspComplLocal out seen src decls prefix)
-                  (lspComplImported out seen (lspUriToPath uri) src decls prefix)
+                  (lspComplImported workspace out seen (lspUriToPath uri) src decls prefix)
                 }))
             (lspComplList out)
           })))))
@@ -4068,10 +4228,10 @@
 ; not match the names the checker will accept is worse than no list.
 ; A resolver failure is an empty addition rather than a diagnostic -
 ; half-typed imports are the normal state of a file being edited.
-(pub :: lspComplImported (-> Int (Vec String) String String (Vec Int) String Int))
+(pub :: lspComplImported (-> (Vec Int) Int (Vec String) String String (Vec Int) String Int))
 ;@axiom:effect(io)
-(pub fn (lspComplImported out seen path src decls prefix)
-  (let ((r (lspResolveFor path src decls)))
+(pub fn (lspComplImported workspace out seen path src decls prefix)
+  (let ((r (lspResolveFor workspace path src decls)))
     (if (== r 0)
       0
       (let (
@@ -4545,13 +4705,97 @@
     (jsonArrPush jsonArr (jsonStr "("))))
 
 ; Check the document behind `uri` and publish the result.
-(pub :: lspRecheck (-> (Vec String) (Vec String) (Vec String) String Int Int))
+(pub :: lspRecheck (-> (Vec Int) (Vec String) (Vec String) (Vec String) String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspRecheck uris texts gens uri version)
+(pub fn (lspRecheck workspace uris texts gens uri version)
   {
-    (docPutGen uris gens uri (lspGenFill (lspUriToPath uri) (docText uris texts uri)))
-    (lspPublishVersion uri version (lspCheckDoc (lspUriToPath uri) (docText uris texts uri)))
+    (docPutGen uris gens uri (lspGenFill workspace (lspUriToPath uri) (docText uris texts uri)))
+    (lspPublishVersion
+      uri
+      version
+      (lspCheckDoc workspace (lspUriToPath uri) (docText uris texts uri)))
   })
+
+; Dependency discovery continues past a broken sibling. That keeps an
+; edit to a later import able to invalidate the document while another
+; dependency is being repaired.
+(pub :: lspWorkspaceDepends (-> (Vec Int) String String String Bool))
+;@axiom:effect(io)
+(pub fn (lspWorkspaceDepends workspace path src changed)
+  (let (
+    (todo vecNew)
+    (seen vecNew)
+    (mut at 0)
+    (mut found false)
+    (entryDir (pathDir path))
+    (tcode (checkedTargetCode hostTarget))
+  )
+    {
+      (vecPush todo src)
+      (while (&& (! found) (< at (vecLen todo)))
+        {
+          (let ((pr (parseModuleWith (lex (vecGetStr todo at)) (scanAxtags (vecGetStr todo at)))))
+            (if (!= (memGetWord pr 0) 0)
+              (let (
+                (decls (memGetWordVec pr 1))
+                (mut i 0)
+              )
+                (while (&& (! found) (< i (vecLen decls)))
+                  {
+                    (let ((d (vecGet decls i)))
+                      (if (== (nodeTag d) TAG_D_IMPORT)
+                        (let ((name (nodeAName d)))
+                          (if (! (lspSeenHas seen name))
+                            {
+                              (vecPush seen name)
+                              (let ((dependency (lspWorkspaceModulePath workspace name tcode entryDir)))
+                                (if (> (strLen dependency) 0)
+                                  (if (strEq (pathClean dependency) (pathClean changed))
+                                    (set found true)
+                                    (let ((overlay (lspWorkspacePath workspace dependency)))
+                                      (vecPush
+                                        todo
+                                        (if (== overlay 0)
+                                          (unwrapOr (readFile dependency) "")
+                                          (memGetWordStr overlay 1)))))))
+                            }))))
+                    (set i (+ i 1))
+                  }))))
+          (set at (+ at 1))
+        })
+      found
+    }))
+
+; The source mutation has committed before this runs. Both dependency
+; graphs matter: closing a new unsaved module removes it from the new
+; graph, and changing imports can remove an old edge.
+(pub :: lspRecheckAffected (-> (Vec Int) (Vec String) (Vec String) (Vec String) (Vec Int) String Int))
+;@axiom:effect(io)
+(pub fn (lspRecheckAffected before uris texts gens meta changedUri)
+  (let (
+    (workspace (lspWorkspaceNew uris texts meta))
+    (changed (lspUriToPath changedUri))
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen uris))
+        {
+          (if (lspDocIsOpen meta i)
+            (let (
+              (uri (vecGetStr uris i))
+              (src (vecGetStr texts i))
+            )
+              (let ((path (lspUriToPath uri)))
+                (if (||
+                      (strEq uri changedUri)
+                      (||
+                        (lspWorkspaceDepends before path src changed)
+                        (lspWorkspaceDepends workspace path src changed)))
+                  (lspRecheck workspace uris texts gens uri (vecGet meta (* 2 i)))))))
+          (set i (+ i 1))
+        })
+      0
+    }))
 
 ; The URI a `textDocument`-shaped params object names.
 (pub :: lspParamsUri (-> Int String))
@@ -4782,15 +5026,15 @@
     (lspNavHandles method)
     (|| (lspViewHandles method) (|| (lspFixHandles method) (lspHlHandles method)))))
 
-(pub :: lspExtDispatch (-> String Int Int (Vec String) (Vec a) (Vec String) (Vec String) Int))
+(pub :: lspExtDispatch (-> (Vec Int) String Int Int (Vec String) (Vec a) (Vec String) (Vec String) Int))
 ;@axiom:effect(io)
-(pub fn (lspExtDispatch method id params uris texts gens highlights)
+(pub fn (lspExtDispatch workspace method id params uris texts gens highlights)
   (if (lspNavHandles method)
-    (lspNavDispatch method id params uris texts gens)
+    (lspNavDispatch workspace method id params uris texts gens)
     (if (lspViewHandles method)
-      (lspViewDispatch method id params uris texts)
+      (lspViewDispatch workspace method id params uris texts)
       (if (lspFixHandles method)
-        (lspFixDispatch method id params uris texts)
+        (lspFixDispatch workspace method id params uris texts)
         (lspHlDispatch method id params uris texts highlights)))))
 
 ; ==================================================================
@@ -6619,10 +6863,10 @@
 ; if THAT file is open in the store, its URI is answered, so its own
 ; occurrences can be listed. "" when the name is not an import, or
 ; the declaring file is not open.
-(pub :: lspNavHomeUri (-> String String (Vec Int) String (Vec String) String))
+(pub :: lspNavHomeUri (-> (Vec Int) String String (Vec Int) String (Vec String) String))
 ;@axiom:effect(io)
-(pub fn (lspNavHomeUri path src decls w uris)
-  (let ((r (lspResolveFor path src decls)))
+(pub fn (lspNavHomeUri workspace path src decls w uris)
+  (let ((r (lspResolveFor workspace path src decls)))
     (if (== r 0)
       ""
       (let (
@@ -6646,9 +6890,9 @@
 ; document's, each in offset order. Null when nothing is under the
 ; cursor, which is what a keyword, a literal and a comment are.
 ; ------------------------------------------------------------------
-(pub :: lspReferences (-> String String Int (Vec String) (Vec a) String Int))
+(pub :: lspReferences (-> (Vec Int) String String Int (Vec String) (Vec a) String Int))
 ;@axiom:effect(io)
-(pub fn (lspReferences src uri params uris texts gen)
+(pub fn (lspReferences workspace src uri params uris texts gen)
   (let ((decls (lspNavParse src)))
     (if (== (as decls Int) 0)
       jsonNull
@@ -6682,6 +6926,7 @@
                   (lspNavForeignLocations out uri (lspNavBareOfKey key) uris texts)
                   (if (== (strByte key 0) 63)
                     (lspNavHomeLocations
+                      workspace
                       out
                       (lspUriToPath uri)
                       src
@@ -6723,13 +6968,13 @@
 ; isn't, its uses can't be listed without reading every file on disk,
 ; but the declaration itself is one lookup away - the one `definition`
 ; makes - so a request that includes the declaration still gets it.
-(pub :: lspNavHomeLocations (-> Int String String (Vec Int) String Int (Vec String) (Vec a) Int))
+(pub :: lspNavHomeLocations (-> (Vec Int) Int String String (Vec Int) String Int (Vec String) (Vec a) Int))
 ;@axiom:effect(io)
-(pub fn (lspNavHomeLocations out path src decls bare incl uris texts)
-  (let ((huri (lspNavHomeUri path src decls bare uris)))
+(pub fn (lspNavHomeLocations workspace out path src decls bare incl uris texts)
+  (let ((huri (lspNavHomeUri workspace path src decls bare uris)))
     (if (== (strLen huri) 0)
       (if (== incl 1)
-        (let ((loc (lspDefinitionImported path src decls bare)))
+        (let ((loc (lspDefinitionImported workspace path src decls bare)))
           (if (jsonIsNull loc)
             0
             {
@@ -7681,9 +7926,9 @@
 ; with no `fn` under it - a half-written declaration, or one whose
 ; body is still to come. There IS a declaration there, so saying where
 ; it is beats saying nothing.
-(pub :: lspDeclaration (-> String String Int String Int))
+(pub :: lspDeclaration (-> (Vec Int) String String Int String Int))
 ;@axiom:effect(io)
-(pub fn (lspDeclaration src uri params gen)
+(pub fn (lspDeclaration workspace src uri params gen)
   (let ((decls (lspNavParse src)))
     (if (== (as decls Int) 0)
       jsonNull
@@ -7712,7 +7957,12 @@
                               ; A GENERATED NAME, last, for `definition`'s
                               ; reason: the invocation head is what a
                               ; generated name is declared by.
-                              (let ((dec (lspDeclarationImported (lspUriToPath uri) src decls w)))
+                              (let ((dec (lspDeclarationImported
+                                           workspace
+                                           (lspUriToPath uri)
+                                           src
+                                           decls
+                                           w)))
                                 (if (jsonIsNull dec)
                                   (lspGenDefinition gen uri src w)
                                   dec)))))))))))))))))
@@ -7727,10 +7977,10 @@
 ; comparison is against `bareOf`, because an imported name is mangled
 ; (`Vec$vecPush`) and `resolveImports` mangles a signature and its
 ; definition the same way.
-(pub :: lspDeclarationImported (-> String String (Vec Int) String Int))
+(pub :: lspDeclarationImported (-> (Vec Int) String String (Vec Int) String Int))
 ;@axiom:effect(io)
-(pub fn (lspDeclarationImported path src decls w)
-  (let ((r (lspResolveFor path src decls)))
+(pub fn (lspDeclarationImported workspace path src decls w)
+  (let ((r (lspResolveFor workspace path src decls)))
     (if (== r 0)
       jsonNull
       (let (
@@ -8189,9 +8439,9 @@
 ; it imports is answered from the module that declares it, resolved
 ; the way `lspDefinitionImported` resolves it - and paid for ONCE, on
 ; the first callee that needs it, rather than per callee.
-(pub :: lspOutgoingCalls (-> Int (Vec String) (Vec a) Int))
+(pub :: lspOutgoingCalls (-> (Vec Int) Int (Vec String) (Vec a) Int))
 ;@axiom:effect(io)
-(pub fn (lspOutgoingCalls params uris texts)
+(pub fn (lspOutgoingCalls workspace params uris texts)
   (let ((s (lspChSubject params uris texts)))
     (if (== s 0)
       jsonNull
@@ -8231,7 +8481,7 @@
                           (lspChRanges src ix (memGetWordVec g 1))))
                       {
                         (if (< r 0)
-                          (set r (lspResolveFor (lspUriToPath uri) src decls)))
+                          (set r (lspResolveFor workspace (lspUriToPath uri) src decls)))
                         (if (! (<= r 0))
                           (let ((item (lspChImportedItem r (memGetWordStr g 0))))
                             (if (! (== item 0))
@@ -8512,9 +8762,9 @@
 ; imported module, or among the builtins. A local, a constructor, an
 ; effect name, a value no type shares a spelling with, and a document
 ; that does not parse are all null.
-(pub :: lspPrepareTypeHierarchy (-> String String Int Int))
+(pub :: lspPrepareTypeHierarchy (-> (Vec Int) String String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspPrepareTypeHierarchy src uri params)
+(pub fn (lspPrepareTypeHierarchy workspace src uri params)
   (let ((decls (lspNavParse src)))
     (if (== (as decls Int) 0)
       jsonNull
@@ -8542,7 +8792,7 @@
                       (let ((d (lspThFindType decls w (- (vecLen decls) 1))))
                         (if (!= d 0)
                           (jsonArrPush jsonArr (lspThItem src ix uri d))
-                          (let ((r (lspResolveFor (lspUriToPath uri) src decls)))
+                          (let ((r (lspResolveFor workspace (lspUriToPath uri) src decls)))
                             (let ((item
                               (if (<= r 0)
                                 0
@@ -8592,9 +8842,9 @@
 ; of a `subtype`, resolved declaration-before-builtin like `prepare`.
 ; A `data`, `struct`, alias or builtin derives from nothing, which is
 ; `[]` and not null: the subject resolved and the answer is empty.
-(pub :: lspSupertypes (-> Int (Vec String) (Vec a) Int))
+(pub :: lspSupertypes (-> (Vec Int) Int (Vec String) (Vec a) Int))
 ;@axiom:effect(io)
-(pub fn (lspSupertypes params uris texts)
+(pub fn (lspSupertypes workspace params uris texts)
   (let ((s (lspThSubject params uris texts)))
     (if (== s 0)
       jsonNull
@@ -8612,7 +8862,7 @@
                 (let ((dd (lspThFindType decls h (- (vecLen decls) 1))))
                   (if (!= dd 0)
                     (jsonArrPush jsonArr (lspThItem src (lspLineIndex src) uri dd))
-                    (let ((r (lspResolveFor (lspUriToPath uri) src decls)))
+                    (let ((r (lspResolveFor workspace (lspUriToPath uri) src decls)))
                       (let ((item
                         (if (<= r 0)
                           0
@@ -8704,16 +8954,16 @@
                       (strEq method "typeHierarchy/supertypes")
                       (strEq method "typeHierarchy/subtypes"))))))))))))
 
-(pub :: lspNavDispatch (-> String Int Int (Vec String) (Vec a) (Vec String) Int))
+(pub :: lspNavDispatch (-> (Vec Int) String Int Int (Vec String) (Vec a) (Vec String) Int))
 ;@axiom:effect(io)
-(pub fn (lspNavDispatch method id params uris texts gens)
+(pub fn (lspNavDispatch workspace method id params uris texts gens)
   (let (
     (uri (lspParamsUri params))
     (src (docText uris texts (lspParamsUri params)))
     (gen (docGen uris gens (lspParamsUri params)))
   )
     (if (strEq method "textDocument/references")
-      (lspReply id (lspReferences src uri params uris texts gen))
+      (lspReply id (lspReferences workspace src uri params uris texts gen))
       (if (strEq method "textDocument/documentHighlight")
         (lspReply id (lspDocumentHighlight src params))
         (if (strEq method "textDocument/prepareRename")
@@ -8721,7 +8971,7 @@
           (if (strEq method "textDocument/rename")
             (lspReply id (lspRename src uri params uris texts))
             (if (strEq method "textDocument/declaration")
-              (lspReply id (lspDeclaration src uri params gen))
+              (lspReply id (lspDeclaration workspace src uri params gen))
               (if (strEq method "textDocument/prepareCallHierarchy")
                 (lspReply id (lspPrepareCallHierarchy src uri params))
                 ; The two hierarchy requests carry an ITEM and no
@@ -8731,15 +8981,15 @@
                 (if (strEq method "callHierarchy/incomingCalls")
                   (lspReply id (lspIncomingCalls params uris texts))
                   (if (strEq method "callHierarchy/outgoingCalls")
-                    (lspReply id (lspOutgoingCalls params uris texts))
+                    (lspReply id (lspOutgoingCalls workspace params uris texts))
                     ; The three type-hierarchy requests: `prepare`
                     ; reads the requesting document, and the other two
                     ; carry an ITEM and no `textDocument`, like the
                     ; call-hierarchy pair above.
                     (if (strEq method "textDocument/prepareTypeHierarchy")
-                      (lspReply id (lspPrepareTypeHierarchy src uri params))
+                      (lspReply id (lspPrepareTypeHierarchy workspace src uri params))
                       (if (strEq method "typeHierarchy/supertypes")
-                        (lspReply id (lspSupertypes params uris texts))
+                        (lspReply id (lspSupertypes workspace params uris texts))
                         (if (strEq method "typeHierarchy/subtypes")
                           (lspReply id (lspSubtypes params uris texts))
                           (lspError id (- 0 32601) (concat "method not found: " method)))))))))))))))
@@ -8809,17 +9059,17 @@
           (strEq method "textDocument/selectionRange")
           (|| (strEq method "textDocument/documentLink") (strEq method "workspace/symbol")))))))
 
-(pub :: lspViewDispatch (-> String Int Int (Vec String) (Vec a) Int))
+(pub :: lspViewDispatch (-> (Vec Int) String Int Int (Vec String) (Vec a) Int))
 ;@axiom:effect(io)
-(pub fn (lspViewDispatch method id params uris texts)
+(pub fn (lspViewDispatch workspace method id params uris texts)
   (if (strEq method "workspace/symbol")
-    (lspReply id (lspWorkspaceSymbols uris texts params))
+    (lspReply id (lspWorkspaceSymbols workspace uris texts params))
     (let ((uri (lspParamsUri params)))
       (let ((src (docText uris texts uri)))
         (if (strEq method "textDocument/signatureHelp")
-          (lspReply id (lspSignatureHelp src uri params))
+          (lspReply id (lspSignatureHelp workspace src uri params))
           (if (strEq method "textDocument/inlayHint")
-            (lspReply id (lspInlayHints src uri params))
+            (lspReply id (lspInlayHints workspace src uri params))
             (if (strEq method "textDocument/foldingRange")
               (lspReply id (lspFoldingRanges src))
               (if (strEq method "textDocument/selectionRange")
@@ -9076,9 +9326,9 @@
 ; label - the protocol's array form, so the client bolds the active
 ; one without searching the string.
 ; ------------------------------------------------------------------
-(pub :: lspSignatureHelp (-> String String Int Int))
+(pub :: lspSignatureHelp (-> (Vec Int) String String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspSignatureHelp src uri params)
+(pub fn (lspSignatureHelp workspace src uri params)
   (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonNull
@@ -9111,7 +9361,7 @@
                 (let ((local (lspViewSigLocal src decls head)))
                   (let ((found
                     (if (== local 0)
-                      (lspViewSigImported (lspUriToPath uri) src decls head)
+                      (lspViewSigImported workspace (lspUriToPath uri) src decls head)
                       local)))
                     (if (== found 0)
                       jsonNull
@@ -9211,10 +9461,10 @@
 ; The second lookup, over the merged list: an imported `fn`, read in
 ; the unit that declares it so the type and the paragraph are its
 ; own text; else an imported constructor.
-(pub :: lspViewSigImported (-> String String (Vec Int) String Int))
+(pub :: lspViewSigImported (-> (Vec Int) String String (Vec Int) String Int))
 ;@axiom:effect(io)
-(pub fn (lspViewSigImported path src decls head)
-  (let ((r (lspResolveFor path src decls)))
+(pub fn (lspViewSigImported workspace path src decls head)
+  (let ((r (lspResolveFor workspace path src decls)))
     (if (== r 0)
       0
       (let (
@@ -9508,10 +9758,10 @@
 ; The `fn` declarations a call can name, by bare name: this document's
 ; and, when its imports resolve, every module's. A failed preflight -
 ; a half-typed import - is this document alone.
-(pub :: lspViewFnIndexFor (-> String String (Vec Int) (Vec a)))
+(pub :: lspViewFnIndexFor (-> (Vec Int) String String (Vec Int) (Vec a)))
 ;@axiom:effect(io)
-(pub fn (lspViewFnIndexFor path src decls)
-  (let ((r (lspResolveFor path src decls)))
+(pub fn (lspViewFnIndexFor workspace path src decls)
+  (let ((r (lspResolveFor workspace path src decls)))
     (lspViewFnIndex
       (if (== r 0)
         decls
@@ -9581,9 +9831,9 @@
 ; body is walked, which is what keeps a request for the visible
 ; window from paying for the whole file.
 ; ------------------------------------------------------------------
-(pub :: lspInlayHints (-> String String Int Int))
+(pub :: lspInlayHints (-> (Vec Int) String String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspInlayHints src uri params)
+(pub fn (lspInlayHints workspace src uri params)
   (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonArr
@@ -9604,7 +9854,7 @@
           (re (if (== range 0)
             n
             (lspOffsetOf src ix (jsonGet range "end"))))
-          (fns (lspViewFnIndexFor (lspUriToPath uri) src decls))
+          (fns (lspViewFnIndexFor workspace (lspUriToPath uri) src decls))
           (sigs (lspViewSigIndex decls))
           (locals (lspNavLocalIndex src decls rs re))
           (occs (lspNavOccurrences src decls))
@@ -10403,9 +10653,9 @@
 ; is not a directory listing. A declaration reached twice - a module
 ; two open documents both import - is listed once, by URI and offset.
 ; ------------------------------------------------------------------
-(pub :: lspWorkspaceSymbols (-> (Vec String) (Vec a) Int Int))
+(pub :: lspWorkspaceSymbols (-> (Vec Int) (Vec String) (Vec a) Int Int))
 ;@axiom:effect(io)
-(pub fn (lspWorkspaceSymbols uris texts params)
+(pub fn (lspWorkspaceSymbols workspace uris texts params)
   (let (
     (query (jsonGetStr params "query"))
     (out jsonArr)
@@ -10427,7 +10677,7 @@
                   (let ((decls (memGetWordVec pr 1)))
                     {
                       (lspViewSymsLocal out seen query uri src decls)
-                      (lspViewSymsImported out seen query (lspUriToPath uri) src decls)
+                      (lspViewSymsImported workspace out seen query (lspUriToPath uri) src decls)
                     }))))
             (set j (+ j 1))
           }))
@@ -10474,10 +10724,10 @@
 ; up and before its URI and line index are built - the cheap question
 ; first, as `lspComplWants` asks it - and a unit's URI and index are
 ; made once, when it first has a symbol to place.
-(pub :: lspViewSymsImported (-> Int (Vec String) String String String (Vec Int) Int))
+(pub :: lspViewSymsImported (-> (Vec Int) Int (Vec String) String String String (Vec Int) Int))
 ;@axiom:effect(io)
-(pub fn (lspViewSymsImported out seen query path src decls)
-  (let ((r (lspResolveFor path src decls)))
+(pub fn (lspViewSymsImported workspace out seen query path src decls)
+  (let ((r (lspResolveFor workspace path src decls)))
     (if (== r 0)
       0
       (let (
@@ -10711,20 +10961,20 @@
         (strEq method "textDocument/typeDefinition")
         (|| (strEq method "textDocument/codeLens") (strEq method "axiom/expandMacro"))))))
 
-(pub :: lspFixDispatch (-> String Int Int (Vec String) (Vec a) Int))
+(pub :: lspFixDispatch (-> (Vec Int) String Int Int (Vec String) (Vec a) Int))
 ;@axiom:effect(io)
-(pub fn (lspFixDispatch method id params uris texts)
+(pub fn (lspFixDispatch workspace method id params uris texts)
   (let ((uri (lspParamsUri params)))
     (let ((src (docText uris texts uri)))
       (if (strEq method "textDocument/formatting")
         (lspReply id (lspFormatting src))
         (if (strEq method "textDocument/codeAction")
-          (lspReply id (lspCodeAction src uri params))
+          (lspReply id (lspCodeAction workspace src uri params))
           (if (strEq method "textDocument/typeDefinition")
-            (lspReply id (lspTypeDefinition src uri params))
+            (lspReply id (lspTypeDefinition workspace src uri params))
             (if (strEq method "textDocument/codeLens")
               (lspReply id (lspCodeLens src uri))
-              (lspReply id (lspExpandMacro src uri params)))))))))
+              (lspReply id (lspExpandMacro workspace src uri params)))))))))
 
 ; `codeActionProvider` is an object rather than a boolean so a client
 ; can see which kinds are on offer before it asks; `codeLensProvider`
@@ -10804,10 +11054,10 @@
 ; `expAttachFrames` wants. The checker is NOT run here: one caller
 ; refuses to run it and the other decides after reading word 2.
 ; ------------------------------------------------------------------
-(pub :: lspFixExpand (-> String String (Vec Int) Int))
+(pub :: lspFixExpand (-> (Vec Int) String String (Vec Int) Int))
 ;@axiom:effect(io)
-(pub fn (lspFixExpand path src decls)
-  (let ((r (lspResolveFor path src decls)))
+(pub fn (lspFixExpand workspace path src decls)
+  (let ((r (lspResolveFor workspace path src decls)))
     (if (== r 0)
       0
       (let (
@@ -10883,9 +11133,9 @@
 ; AX3053 - the lint two run the same walk the publish path runs,
 ; the third the same diagnostic list as the import.
 ; ------------------------------------------------------------------
-(pub :: lspCodeAction (-> String String Int Int))
+(pub :: lspCodeAction (-> (Vec Int) String String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspCodeAction src uri params)
+(pub fn (lspCodeAction workspace src uri params)
   (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
     (if (== (memGetWord pr 0) 0)
       jsonArr
@@ -10903,7 +11153,7 @@
             (path (lspUriToPath uri))
             (out jsonArr)
           )
-            (let ((ex (lspFixExpand path src decls)))
+            (let ((ex (lspFixExpand workspace path src decls)))
               {
                 (if (! (== ex 0))
                   (let ((eds (memGetWordVec ex 2)))
@@ -12595,9 +12845,9 @@
 ; `Int`, a type variable, a tuple, a list, the prelude's spanless
 ; `Option`: null, which the protocol reads as "nothing here".
 ; ------------------------------------------------------------------
-(pub :: lspTypeDefinition (-> String String Int Int))
+(pub :: lspTypeDefinition (-> (Vec Int) String String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspTypeDefinition src uri params)
+(pub fn (lspTypeDefinition workspace src uri params)
   (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonNull
@@ -12612,11 +12862,11 @@
               (let ((w (strSlice src (spanStart wsp) (- (spanEnd wsp) (spanStart wsp)))))
                 (let ((t (lspLocalTypeOf src decls off w)))
                   (if (!= t 0)
-                    (lspTypeLocation (lspUriToPath uri) src uri decls "" t)
+                    (lspTypeLocation workspace (lspUriToPath uri) src uri decls "" t)
                     (let ((dat (lspFindCtorData decls w (- (vecLen decls) 1))))
                       (if (!= dat 0)
                         (lspLocationJson uri src (nodeSpan dat))
-                        (lspTypeLocation (lspUriToPath uri) src uri decls w 0)))))))))))))
+                        (lspTypeLocation workspace (lspUriToPath uri) src uri decls w 0)))))))))))))
 
 ; The type node this document alone can answer for the word at `off`:
 ; a parameter in the header the cursor is in, else a signed `fn`'s
@@ -12900,16 +13150,16 @@
 ; declarations are asked first, which is the language's shadowing rule
 ; and `lspDefinition`'s order; the imports are resolved only when they
 ; have to be, and once, whichever of the two questions is being asked.
-(pub :: lspTypeLocation (-> String String String (Vec Int) String Int Int))
+(pub :: lspTypeLocation (-> (Vec Int) String String String (Vec Int) String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspTypeLocation path src uri decls w t)
+(pub fn (lspTypeLocation workspace path src uri decls w t)
   (let ((local
     (if (== t 0)
       0
       (lspTypeLocalOf src uri decls t))))
     (if (!= local 0)
       local
-      (lspTypeLocationImported path src uri decls w t))))
+      (lspTypeLocationImported workspace path src uri decls w t))))
 
 ; A `TAG_T_CON` naming a declaration in this document, or 0.
 (pub :: lspTypeLocalOf (-> String String (Vec Int) Int Int))
@@ -12924,10 +13174,10 @@
 ; The import preamble of `lspDefinitionImported`, verbatim, and then
 ; the two lookups it can answer: the result type of an imported signed
 ; `fn` when `t` is 0, and the module declaring a type name.
-(pub :: lspTypeLocationImported (-> String String String (Vec Int) String Int Int))
+(pub :: lspTypeLocationImported (-> (Vec Int) String String String (Vec Int) String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspTypeLocationImported path src uri decls w given)
-  (let ((r (lspResolveFor path src decls)))
+(pub fn (lspTypeLocationImported workspace path src uri decls w given)
+  (let ((r (lspResolveFor workspace path src decls)))
     (if (== r 0)
       jsonNull
       (let (
@@ -13076,16 +13326,16 @@
 ; fails is skipped: its names miss the cache and answer as they did
 ; before.
 ; ------------------------------------------------------------------
-(pub :: lspGenFill (-> String String String))
+(pub :: lspGenFill (-> (Vec Int) String String String))
 ;@axiom:effect(io)
-(pub fn (lspGenFill path src)
+(pub fn (lspGenFill workspace path src)
   (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
     (if (== (memGetWord pr 0) 0)
       "[]"
       (let ((calls (lspGenCallSites (memGetWordVec pr 1))))
         (if (== (vecLen calls) 0)
           "[]"
-          (jsonWrite (lspGenEntries path src (memGetWordVec pr 1) calls)))))))
+          (jsonWrite (lspGenEntries workspace path src (memGetWordVec pr 1) calls)))))))
 
 ; Indices of the top-level declarations that are macro invocations
 ; with a span to answer at.
@@ -13130,9 +13380,9 @@
 ; One JSON object per generated name, first invocation winning: the
 ; temporary list merges one call's own products (`::` preferred),
 ; then merges into the answer by name.
-(pub :: lspGenEntries (-> String String (Vec Int) (Vec Int) Int))
+(pub :: lspGenEntries (-> (Vec Int) String String (Vec Int) (Vec Int) Int))
 ;@axiom:effect(io)
-(pub fn (lspGenEntries path src decls calls)
+(pub fn (lspGenEntries workspace path src decls calls)
   (let (
     (out vecNew)
     (nc (vecLen calls))
@@ -13141,7 +13391,7 @@
     {
       (while (< c nc)
         {
-          (lspGenOneCall path src decls (vecGet calls c) out)
+          (lspGenOneCall workspace path src decls (vecGet calls c) out)
           (set c (+ c 1))
         })
       (lspGenToJson out)
@@ -13150,9 +13400,9 @@
 ; One call's products, attributed the way `lspExpandAt` attributes
 ; them: the isolated list is resolved AND expanded together, because
 ; the resolution is handle-bound to the list it ran on.
-(pub :: lspGenOneCall (-> String String (Vec Int) Int (Vec Int) Int))
+(pub :: lspGenOneCall (-> (Vec Int) String String (Vec Int) Int (Vec Int) Int))
 ;@axiom:effect(io)
-(pub fn (lspGenOneCall path src decls idx out)
+(pub fn (lspGenOneCall workspace path src decls idx out)
   (let ((pr2 (parseModuleWith (lex src) (scanAxtags src))))
     (if (== (memGetWord pr2 0) 0)
       0
@@ -13161,7 +13411,7 @@
           (before (lspDeclHandles decls2))
           (wasCall (lspDeclIsCall decls2))
         )
-          (let ((ex (lspFixExpand path src decls2)))
+          (let ((ex (lspFixExpand workspace path src decls2)))
             (if (== ex 0)
               0
               (if (> (countErrorDiags (memGetWordVec ex 2)) 0)
@@ -13438,9 +13688,9 @@
 ; is not one to show, and the refusal is already on screen as a
 ; diagnostic.
 ; ------------------------------------------------------------------
-(pub :: lspExpandMacro (-> String String Int Int))
+(pub :: lspExpandMacro (-> (Vec Int) String String Int Int))
 ;@axiom:effect(io)
-(pub fn (lspExpandMacro src uri params)
+(pub fn (lspExpandMacro workspace src uri params)
   (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
     (if (== (memGetWord pr 0) 0)
       jsonNull
@@ -13451,7 +13701,7 @@
         (let ((site (lspMacroSiteAt src decls (lspOffsetOf src ix (jsonGet params "position")))))
           (if (< site 0)
             jsonNull
-            (lspExpandAt (lspUriToPath uri) src decls site)))))))
+            (lspExpandAt workspace (lspUriToPath uri) src decls site)))))))
 
 ; The INDEX of the invocation or macro declaration whose name or form
 ; holds `off`, or -1. The name is asked first because it is one
@@ -13504,10 +13754,10 @@
       out
     }))
 
-(pub :: lspExpandAt (-> String String (Vec Int) Int Int))
+(pub :: lspExpandAt (-> (Vec Int) String String (Vec Int) Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
-(pub fn (lspExpandAt path src decls idx)
+(pub fn (lspExpandAt workspace path src decls idx)
   (let (
     (site (vecGet decls idx))
     (pr2 (parseModuleWith (lex src) (scanAxtags src)))
@@ -13526,7 +13776,7 @@
             (before (lspDeclHandles decls2))
             (wasCall (lspDeclIsCall decls2))
           )
-            (let ((ex (lspFixExpand path src decls2)))
+            (let ((ex (lspFixExpand workspace path src decls2)))
               (if (== ex 0)
                 jsonNull
                 (if (> (countErrorDiags (memGetWordVec ex 2)) 0)
@@ -16693,6 +16943,10 @@
             (gens (memGetWordVec store 2))
             (meta (memGetWordVec store 3))
             (highlights (memGetWordVec store 4))
+            (workspace (lspWorkspaceNew
+                         (memGetWordVec store 0)
+                         (memGetWordVec store 1)
+                         (memGetWordVec store 3)))
           )
             (match (rpcRead r)
               ; The client went away without saying `exit`, or its
@@ -16730,20 +16984,22 @@
                               (set running 0)
                               (if (strEq method "textDocument/didOpen")
                                 (if (lspDocOpen uris texts meta params)
-                                  (lspRecheck
+                                  (lspRecheckAffected
+                                    workspace
                                     uris
                                     texts
                                     gens
-                                    (lspParamsUri params)
-                                    (jsonGetInt (jsonGet params "textDocument") "version")))
+                                    meta
+                                    (lspParamsUri params)))
                                 (if (strEq method "textDocument/didChange")
                                   (if (lspDocChange uris texts meta params)
-                                    (lspRecheck
+                                    (lspRecheckAffected
+                                      workspace
                                       uris
                                       texts
                                       gens
-                                      (lspParamsUri params)
-                                      (jsonGetInt (jsonGet params "textDocument") "version")))
+                                      meta
+                                      (lspParamsUri params)))
                                   (if (strEq method "textDocument/documentSymbol")
                                     (lspReply
                                       id
@@ -16753,6 +17009,7 @@
                                       (lspReply
                                         id
                                         (lspDefinition
+                                          workspace
                                           (docText uris texts (lspParamsUri params))
                                           (lspParamsUri params)
                                           params
@@ -16761,6 +17018,7 @@
                                         (lspReply
                                           id
                                           (lspHover
+                                            workspace
                                             (docText uris texts (lspParamsUri params))
                                             (lspParamsUri params)
                                             params
@@ -16769,6 +17027,7 @@
                                           (lspReply
                                             id
                                             (lspCompletion
+                                              workspace
                                               (docText uris texts (lspParamsUri params))
                                               (lspParamsUri params)
                                               params))
@@ -16778,6 +17037,13 @@
                                                 {
                                                   (lspHlForget uris highlights uri)
                                                   (lspPublish uri jsonArr)
+                                                  (lspRecheckAffected
+                                                    workspace
+                                                    uris
+                                                    texts
+                                                    gens
+                                                    meta
+                                                    uri)
                                                 }))
                                             ; Everything the three extension sections
                                             ; answer - navigation, views, fixes - is
@@ -16786,6 +17052,7 @@
                                             ; original questions.
                                             (if (lspExtHandles method)
                                               (lspExtDispatch
+                                                workspace
                                                 method
                                                 id
                                                 params

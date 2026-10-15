@@ -347,10 +347,8 @@
 ; Field 35 = dataTyNames (Vec of Str, every declared data TYPE name -
 ;            the registry's rows are per-CONSTRUCTOR, so `Maybe` in a
 ;            field's declared type finds nothing there; this Vec is
-;            what MM-LIFE-2d's field classifier asks. Bare names only:
-;            a module-qualified type spelling in a field position
-;            classifies as unknown and the block stays a leaf, which
-;            under-reclaims and never over-frees)
+;            what MM-LIFE-2d's field classifier asks. Names include
+;            their declaring module, matching checked type identities.)
 ; Field 36 = curDeclNode (the top-level declaration being emitted;
 ;            an evidence stamp names its author, and `evStampOk`
 ;            refuses a stamp another declaration wrote - a
@@ -402,7 +400,7 @@
   (effDecls : (Vec Int))
   (effOps : (Vec Int))
   (curModule : Int)
-  (dataTyNames : (Vec Int))
+  (dataTyNames : (Vec String))
   (curDeclNode : Int)
   (sigIntern : Int)
   (sigById : (Vec Int))
@@ -1054,9 +1052,10 @@
         "__axiom_user_main"
         ; The ANSWER comes out of the index, not out of a second
         ; concatenation. A hit means the Intern already holds a string
-        ; whose content is `m$name` - it is the entry in field 12
-        ; that put the id there - so `bares[first[hit]]` is that
-        ; spelling, borrowed, where rebuilding it allocated and
+        ; whose content is `m$name`. Its mapped value in field 13 is
+        ; the same spelling for an Axiom function, or the actual linker
+        ; symbol for an extern item. Both are borrowed; rebuilding
+        ; the name allocated and
         ; copied a second time on every module-local reference. The
         ; probe's own `concat` stays an ARGUMENT, which is what makes
         ; `releaseOwnedArgs` hand it back on the same line; a `let`
@@ -1070,7 +1069,7 @@
               (internFind bi (concat m (concat "$" name))))))
             (match hit
               ((Some h) (vecGetStr
-                          (memGetWordVec cg 12)
+                          (memGetWordVec cg 13)
                           (vecGet (vecGet (memGetWordVec cg 40) 0) h)))
               ((None) (mangledForModCg cg bi name m)))))))))
 
@@ -4229,7 +4228,7 @@
           (ctors (nodeBVec node))
         )
           {
-            (vecPush (memGetWordVec cg 35) (as name Int))
+            (vecPush (memGetWordVec cg 35) (cgDeclaredTypeName node))
             (scanCtors ctors cg 0 (ctorsRep ctors (memGetWord cg 4)) (nodeModuleName node))
           })
         (if (== tag TAG_D_STRUCT)
@@ -7655,7 +7654,6 @@
 ; from a declaration's `module` stamp.
 (pub :: parseModuleOrDieUnit (-> String Int String (Vec Int) String Int (Vec a)))
 ;@axiom:effect(io)
-;@axiom:effect(unsafe)
 (pub fn (parseModuleOrDieUnit name tcode entryDir units parentName site)
   (let ((parent
     (vecGet
@@ -7664,15 +7662,22 @@
         0
         (unitIndexOf units parentName 0)))))
     {
-      (if (== (unitIndexOf units name 0) (- 0 1))
-        (vecPush
-          units
-          (as (CUnit2
-                (moduleSrcPath name tcode entryDir)
-                (readModuleSrcOr name tcode entryDir "")
-                name) Int))
-        (as 0 (Vec Int)))
-      (parseModuleOrDie name tcode entryDir parent (nodeSpan site))
+      (if (< (unitIndexOf units name 0) 0)
+        (let ((path (moduleSrcPath name tcode entryDir)))
+          (if (== (strLen path) 0)
+            (dieImportDiag name tcode entryDir parent (nodeSpan site))
+            (let ((unit (CUnit2 path (unwrapOr (readFile path) "") name)))
+              {
+                (vecPush units (as unit Int))
+                0
+              }))))
+      (parseModuleSourceOrDie
+        name
+        tcode
+        entryDir
+        parent
+        (nodeSpan site)
+        (memGetWordStr (vecGet units (unitIndexOf units name 0)) 1))
     }))
 
 (pub :: unitIndexOf (-> (Vec Int) String Int Int))
@@ -7840,17 +7845,22 @@
       ; entry file's do, or `symbols` prints `#effects=IO` beside a
       ; missing `#effect=io` claim and every tag check on imported
       ; code silently never runs.
-      ((Some src)
-        (let ((toks (lex src)))
-          (let ((lexD (lexErrDiag toks src)))
-            (let ((pr
-              (if (== lexD 0)
-                (parseModuleWith toks (scanAxtags src))
-                (pErr 0))))
-              (if (|| (> lexD 0) (== (memGetWord pr 0) 0))
-                (dieModuleParse name src toks pr lexD tcode entryDir)
-                (memGetWord pr 1)))))
-      ))))
+      ((Some src) (parseModuleSourceOrDie name tcode entryDir parent span src)))))
+
+; Parse the source already recorded in the unit table. Editor clients
+; can seed that table with unsaved sources without changing resolution.
+(pub :: parseModuleSourceOrDie (-> String Int String Int Int String Int))
+;@axiom:effect(io)
+(pub fn (parseModuleSourceOrDie name tcode entryDir parent span src)
+  (let ((toks (lex src)))
+    (let ((lexD (lexErrDiag toks src)))
+      (let ((pr
+        (if (== lexD 0)
+          (parseModuleWith toks (scanAxtags src))
+          (pErr 0))))
+        (if (|| (> lexD 0) (== (memGetWord pr 0) 0))
+          (dieModuleParse name src toks pr lexD tcode entryDir)
+          (memGetWord pr 1))))))
 
 (pub :: seenHas (-> (Vec String) String Bool))
 (pub fn (seenHas seen name)
@@ -7901,7 +7911,7 @@
         (mangledForIn (memGetWordVec cg 12) (memGetWordVec cg 13) name 0)
         (let ((local (concat m (concat "$" name))))
           (if (mangleHasIn (memGetWordVec cg 12) local 0)
-            local
+            (mangledForIn (memGetWordVec cg 12) (memGetWordVec cg 13) local 0)
             (mangledForModIn (memGetWordVec cg 12) (memGetWordVec cg 13) name)))))))
 
 ; `mangledForModCg`'s answer by scanning, for the paths with no index.
@@ -19181,7 +19191,7 @@
         ; field. Those live PAST THE TAG WORD, so the offset is
         ; index + 1 where a struct's is index - a struct carries no
         ; tag. stage0 searches every data type, first match winning.
-        (let ((di (findDataField (memGetWordVec cgB 3) (nodeBName node))))
+        (let ((di (resolveDataField (memGetWordVec cgB 3) node)))
           (if (== di 0)
             (dieCodegenDiag "unknown struct field: " (nodeBName node))
             (let ((cgL (loadWordAt cgB base (+ (nodeA di) 1))))
@@ -19197,6 +19207,32 @@
 
 ; A data constructor's named field as an inert (index, floatFlag)
 ; node, or 0. Searched in registry order, first match winning.
+; The checker stamps a resolved constructor on a typed data-field read.
+; Its entry supplies the correct slot and Float flag across modules.
+(:: resolveDataField (-> (Vec Int) Int Int))
+;@axiom:effect(unsafe)
+(fn (resolveDataField types node)
+  (if (== (nodeBinderTy node) 0)
+    (findDataField types (nodeBName node))
+    (let ((entry
+      (lookupType types (as (nodeBinderTy node) String))))
+      (if (== entry 0)
+        0
+        (dataFieldOfEntry entry (nodeBName node))))))
+
+(:: dataFieldOfEntry (-> Int String Int))
+(fn (dataFieldOfEntry entry name)
+  (let ((i (dataFieldIndexIn (eFieldNamesVec entry) name 0)))
+    (if (< i 0)
+      0
+      (mkNode
+        TAG_FIELD
+        i
+        (if (< i (vecLen (eFieldFlagsVec entry)))
+          (vecGet (eFieldFlagsVec entry) i)
+          0)
+        0))))
+
 (pub :: findDataField (-> (Vec Int) String Int))
 (pub fn (findDataField types fname)
   (findDataFieldFrom types fname 0))
@@ -23978,20 +24014,22 @@
     1
     0))
 
-(pub :: dataTyKnown (-> (Vec Int) String Int Int))
-;@axiom:effect(unsafe)
-(pub fn (dataTyKnown names n i)
-  ; `bareOf`: a qualified spelling names the same declaration its
-  ; bare spelling does, and data-ness is a property of the
-  ; declaration, not of the spelling. The widening can only turn a
-  ; silent leaf into a mapped reference, never the reverse: scalars
-  ; are decided before this is asked, and a struct sharing a data
-  ; type's bare name is a reference either way.
+; Canonical names distinguish data references from another module's
+; homonymous word struct or subtype. The field map may only follow the
+; declaration that the checked field type names.
+(:: cgDeclaredTypeName (-> Int String))
+(fn (cgDeclaredTypeName decl)
+  (if (== (nodeModule decl) 0)
+    (nodeAName decl)
+    (concat (nodeModuleName decl) (concat "$" (nodeAName decl)))))
+
+(pub :: dataTyKnown (-> (Vec String) String Int Int))
+(pub fn (dataTyKnown names name i)
   (if (>= i (vecLen names))
     0
-    (if (|| (strEq (as (vecGet names i) String) n) (strEq (as (vecGet names i) String) (bareOf n)))
+    (if (strEq (vecGet names i) name)
       1
-      (dataTyKnown names n (+ i 1)))))
+      (dataTyKnown names name (+ i 1)))))
 
 ; 0 = machine scalar, 2 = reference, 1 = unclassifiable (forces leaf)
 (pub :: fldClass (-> Int Int Int))
@@ -24531,7 +24569,7 @@
               (if (== (vecLen args) 1)
                 (pairArgClassOK cg (vecGet args 0))
                 0)
-              (if (strEq tn "Result")
+              (if (|| (strEq tn "Result") (strEq tn "Err$Result"))
                 (if (== (vecLen args) 2)
                   (if (== (pairArgClassOK cg (vecGet args 0)) 1)
                     (pairArgClassOK cg (vecGet args 1))
@@ -24569,13 +24607,13 @@
   (let ((args (nodeBVec rt)))
     (if (== (as args Int) 0)
       (- 0 1)
-      (if (strEq cname "Err")
+      (if (|| (strEq cname "Err") (strEq cname "Err$Err"))
         (if (< (vecLen args) 2)
           (- 0 1)
           (fldClass cg (vecGet args 1)))
         (if (strEq cname "Some")
           (fldClass cg (vecGet args 0))
-          (if (strEq cname "Ok")
+          (if (|| (strEq cname "Ok") (strEq cname "Err$Ok"))
             (fldClass cg (vecGet args 0))
             (- 0 1)))))))
 
@@ -24628,7 +24666,11 @@
 ; must agree or the effect row is wrong about a leaf.
 (pub :: pairCtorNamed (-> String Int))
 (pub fn (pairCtorNamed n)
-  (if (|| (strEq n "None") (|| (strEq n "Some") (|| (strEq n "Ok") (strEq n "Err"))))
+  (if (||
+        (strEq n "None")
+        (||
+          (strEq n "Some")
+          (|| (strEq n "Ok") (|| (strEq n "Err") (|| (strEq n "Err$Ok") (strEq n "Err$Err"))))))
     1
     0))
 
@@ -28499,15 +28541,7 @@
                       (while (< i (vecLen decls))
                         {
                           (let ((d (vecGet decls i)))
-                            (if (&&
-                                  (== (nodeTag d) TAG_D_DATA)
-                                  (||
-                                    (strEq (nodeAName d) n)
-                                    (&&
-                                      (!= (nodeModule d) 0)
-                                      (strEq
-                                        (concat (nodeModuleName d) (concat "$" (nodeAName d)))
-                                        n))))
+                            (if (&& (== (nodeTag d) TAG_D_DATA) (strEq (cgDeclaredTypeName d) n))
                               (let (
                                 (ctors (nodeBVec d))
                                 (mut j 0)

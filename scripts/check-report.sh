@@ -24,7 +24,8 @@
 #      its name gives, and by no other. RP-8 is an interrupt handler that
 #      may block, read off the syscall-number constant its body passes.
 #      RP-9 is a function holding an `asm` form, admitted by
-#      `--allow-asm` and listed as an obligation either way.
+#      `--allow-asm` only with nostack on every selected arm, and remains
+#      a review obligation either way.
 #   4. The stack bound, where llc can build an AArch64 ELF object: the
 #      conforming program and tests/embedded/blink.ax are bounded under
 #      the 8 KiB the baremetal-aarch64 link reserves; tree recursion is
@@ -293,7 +294,12 @@ rp1-recursion.ax||RP-1
 rp2-indirect.ax||RP-2
 rp3-foreign.ax||RP-3
 rp3-foreign.ax|--allow-foreign add|none
+rp3-imported.ax||RP-3
+rp3-imported.ax|--allow-foreign add --allow-foreign mods.ForeignLeft$add --allow-foreign mods.ForeignRight$add|none
+rp3-imported-bare.ax|--allow-foreign mods.ForeignLeft$add|none
+rp3-imported-selective.ax|--allow-foreign mods.ForeignLeft$add|none
 rp4-spawn.ax||RP-4
+rp4-syscall-spawn.ax||RP-4
 rp5-steady.ax|--steady step|RP-5
 rp5-steady.ax||none
 rp5-selected-root.ax||none
@@ -302,8 +308,15 @@ rp8-selected-root.ax||none
 rp8-selected-root.ax|--nonblocking later|RP-8
 rp8-selected-root.ax|--nonblocking main|none
 rp8-blocking.ax||RP-8
+rp8-number.ax|--nonblocking main|RP-8
+rp8-kernel-unknown.ax|--nonblocking main|RP-8
+rp8-tagged-block.ax|--nonblocking main|RP-8
 rp9-asm.ax||RP-9
 rp9-asm.ax|--allow-asm spin|none
+rp9-stack.ax|--allow-asm pushUnknown --allow-asm erased|RP-9
+rp9-multiple.ax|--allow-asm spin|RP-9
+rp9-target-arm.ax|--target linux-aarch64 --allow-asm spin|none
+rp9-target-arm.ax|--target linux-x86_64 --allow-asm spin|RP-9
 ROWS
 
 echo
@@ -381,6 +394,115 @@ if [[ "$rc" == 0 && -z "$(rules_of "$work/qualified-both.json")" ]]; then
   ok "two reviewed qualified exceptions admit both asm items"
 else
   bad "two qualified exceptions: exit $rc, expected 0"
+fi
+
+# Checking unoptimised IR keeps an unknown-stack pure block visible
+# even if a later optimiser would discard its unused answer.
+report "$tool" "$work/asm-stack.json" "$fxdir/rp9-stack.ax" --profile restricted --allow-asm pushUnknown --allow-asm erased; rc=$?
+if [[ "$rc" == 1 ]] && python3 - "$work/asm-stack.json" <<'PYTEST'
+import json, sys
+r = json.load(open(sys.argv[1]))
+assert sorted((v['rule'], v['path'][-1]) for v in r['refusals']) == [('RP-9', 'erased'), ('RP-9', 'pushUnknown')]
+assert all('nostack' in v['message'] for v in r['refusals'])
+PYTEST
+then
+  ok "unknown stack use is refused in both side-effecting and removable pure blocks"
+else
+  bad "unknown asm stack use: exit $rc, expected RP-9 for both blocks"
+fi
+
+# Foreign declarations keep their own source and checked type, even
+# when their Axiom spellings match. No duplicate row may be hidden by
+# the evidence reader, and one exception must never admit another item.
+report "$tool" "$work/foreign.json" "$fxdir/rp3-imported.ax" --profile restricted; rc=$?
+if [[ "$rc" == 1 ]] && python3 - "$work/foreign.json" <<'PYTEST'
+import json, sys
+r = json.load(open(sys.argv[1]))
+want = {'add', 'mods.ForeignLeft$add', 'mods.ForeignRight$add'}
+assert {q for q, f in r['functions'].items() if f['extern']} == want
+assert {v['path'][-1] for v in r['refusals'] if v['rule'] == 'RP-3'} == want
+assert r['functions']['main']['unsafe']
+assert {v['path'][-1] for v in r['obligations'] if v['kind'] == 'foreign'} == want
+PYTEST
+then
+  ok "three same-spelled foreign declarations retain separate evidence identities"
+else
+  bad "foreign provenance: exit $rc, expected three distinct RP-3 items"
+  head -3 "$work/foreign.json.err" | sed 's/^/     /'
+fi
+report "$tool" "$work/foreign-one.json" "$fxdir/rp3-imported.ax" --profile restricted --allow-foreign add; rc=$?
+if [[ "$rc" == 1 ]] && python3 - "$work/foreign-one.json" <<'PYTEST'
+import json, sys
+r = json.load(open(sys.argv[1]))
+assert {v['path'][-1] for v in r['refusals']} == {'mods.ForeignLeft$add', 'mods.ForeignRight$add'}
+PYTEST
+then
+  ok "an exact entry-file exception leaves both imported items refused"
+else
+  bad "entry-file exception: exit $rc, expected both imported items refused"
+fi
+"$axc" --diagnostic-format=ai symbols --calls "$fxdir/rp3-imported.ax" > "$work/foreign.axsym"
+"$axc" --diagnostic-format=ai symbols --axir "$fxdir/rp3-imported.ax" > "$work/foreign.axir"
+if python3 - "$work/foreign.axsym" "$work/foreign.axir" <<'PYTEST'
+import re, sys
+pat = re.compile(r'^(F \S+ \S+ "[^"]*"(?: @[0-9a-f]+)?)')
+def headers(path):
+    return [pat.match(l).group(1) for l in open(path) if l.startswith('F ')]
+a, b = map(headers, sys.argv[1:])
+assert a == b and len(a) == len(set(a))
+assert sum(l.startswith('F add ') for l in a) == 3
+PYTEST
+then
+  ok "foreign AXSYM and AXIR headers agree in order, without duplicate evidence"
+else
+  bad "foreign AXSYM/AXIR evidence identities differ"
+fi
+# Exercise real linker-symbol selection, rather than only checking the
+# compiler's own account of its calls. The three C bodies differ, and
+# the entry-file item also has a different checked Axiom type.
+cat > "$work/foreign.c" <<'C'
+#include <stdint.h>
+int64_t assurance_left_add(int64_t a, int64_t b) { return a + b; }
+int64_t assurance_right_add(int64_t a, int64_t b) { return a * b; }
+int64_t assurance_bool_add(int64_t a, int64_t b) { return a || b; }
+C
+if cc -c "$work/foreign.c" -o "$work/foreign.o" && ar rcs "$work/libassurance_demo.a" "$work/foreign.o"; then
+  for fx in rp3-imported rp3-imported-bare rp3-imported-selective; do
+    for level in 0 2; do
+      if "$axc" --diagnostic-format=ai build --opt "$level" --link-search "$work" "$fxdir/$fx.ax" -o "$work/$fx" > "$work/$fx.build" 2>&1 && "$work/$fx"; then
+        ok "$fx at O$level: native foreign calls reach their declared linker symbols"
+      else
+        bad "$fx at O$level: foreign call routing or build failed"
+        head -3 "$work/$fx.build" | sed 's/^/     /'
+      fi
+    done
+  done
+else
+  bad "cannot build the foreign-call evidence archive"
+fi
+
+# Built-in IO refinements are not unhandled user effects. Handler
+# subtraction must also survive the report's own call-graph closure.
+for fx in effect-entropy effect-handled rp4-syscall-spawn rp8-tagged-block; do
+  report "$tool" "$work/$fx.json" "$fxdir/$fx.ax"
+done
+if python3 - "$work" <<'PYTEST'
+import json, pathlib, sys
+base = pathlib.Path(sys.argv[1])
+for name in ('effect-entropy', 'effect-handled', 'rp4-syscall-spawn', 'rp8-tagged-block'):
+    r = json.loads((base / (name + '.json')).read_text())
+    assert 71 not in r['functions']['main']['traps'], name
+    if name == 'effect-handled':
+        assert r['functions']['asker']['traps'] == [71]
+    if name == 'rp8-tagged-block':
+        assert r['functions']['main']['blocks']
+    if name == 'rp4-syscall-spawn':
+        assert r['functions']['main']['spawn_effect']
+PYTEST
+then
+  ok "built-in effect refinements and handled custom effects do not invent trap 71"
+else
+  bad "trap or blocking facts disagree with the checked effect rows"
 fi
 
 echo
@@ -471,6 +593,70 @@ PY
       rm -rf "$(dirname "$objf")"
     done
   fi
+fi
+
+echo
+echo "== 4a. every selected root and the full interrupt extent =="
+if ! command -v llc >/dev/null 2>&1 || ! command -v opt >/dev/null 2>&1; then
+  skip "llc/opt not on PATH: selected-root and IRQ object evidence unavailable"
+else
+  report "$tool" "$work/selected-stack.json" "$fxdir/rp7-selected-root.ax" --target baremetal-aarch64 --profile restricted --root later --stack; rc=$?
+  if [[ "$rc" == 1 && "$(rules_of "$work/selected-stack.json")" == "RP-1 RP-7" ]]; then
+    ok "an uncalled selected callback is not cleared through main's stack bound"
+  else
+    bad "selected callback stack: exit $rc, expected RP-1 RP-7"
+  fi
+  report "$tool" "$work/extra-stack.json" "$fxdir/rp1-recursion.ax" --target baremetal-aarch64 --profile restricted --stack-root __axiom_mmu_tables --stack; rc=$?
+  if [[ "$rc" == 1 && "$(rules_of "$work/extra-stack.json")" == "RP-1 RP-7" ]]; then
+    ok "an additional machine root cannot suppress the required program entry"
+  else
+    bad "additional machine root: exit $rc, expected RP-1 RP-7"
+  fi
+  report "$tool" "$work/irq.json" "$repo_root/tests/embedded/periodic.ax" --target baremetal-aarch64 --profile restricted --stack --stack-budget 2048 --keep; rc=$?
+  if [[ "$rc" == 0 ]] && python3 - "$work/irq.json" > "$work/irq-budget" <<'PYTEST'
+import json, sys
+st = json.load(open(sys.argv[1]))['stack']
+irq = st['irq_stub']
+assert irq['frame_bytes'] == st['frames'][irq['entry']] > 0
+res = st['results'][irq['entry']]
+assert res['bounded'] and res['path'][0] == irq['entry']
+assert res['bytes'] == sum(st['frames'][f] for f in res['path'] if not f.endswith('~>'))
+assert res['bytes'] >= irq['frame_bytes']
+total = st['results']['_start']['bytes'] + res['bytes']
+assert 0 < total <= 2048
+print(total)
+PYTEST
+  then
+    total="$(cat "$work/irq-budget")"
+    ok "the IRQ bound includes the assembled save area and dispatch path ($total bytes with main)"
+    report "$tool" "$work/irq-low.json" "$repo_root/tests/embedded/periodic.ax" --target baremetal-aarch64 --profile restricted --stack --stack-budget "$((total - 1))"; rc=$?
+    if [[ "$rc" == 1 && "$(rules_of "$work/irq-low.json")" == "RP-7" ]]; then
+      ok "one byte below the interrupted-program bound is refused"
+    else
+      bad "IRQ low budget: exit $rc, expected RP-7"
+    fi
+    report "$tool" "$work/irq-exact.json" "$repo_root/tests/embedded/periodic.ax" --target baremetal-aarch64 --profile restricted --stack --stack-budget "$total"; rc=$?
+    if [[ "$rc" == 0 ]]; then
+      ok "the complete interrupted-program bound fits exactly"
+    else
+      bad "IRQ exact budget: exit $rc, expected 0"
+    fi
+    if python3 "$repo_root/tests/profile/verify-irq-stack.py" "$tool" "$work/irq.json" > "$work/irq-mutants.out" 2>&1; then
+      ok "$(tail -1 "$work/irq-mutants.out")"
+    else
+      bad "assembled IRQ stack mutants:"
+      head -8 "$work/irq-mutants.out" | sed 's/^/     /'
+    fi
+  else
+    bad "the complete IRQ object bound is unavailable (exit $rc)"
+    head -5 "$work/irq.json.err" | sed 's/^/     /'
+  fi
+  python3 - "$work/irq.json" <<'PYTEST'
+import json, shutil, sys
+r = json.load(open(sys.argv[1]))
+if r.get('stack', {}).get('workdir'):
+    shutil.rmtree(r['stack']['workdir'])
+PYTEST
 fi
 
 echo
@@ -589,6 +775,85 @@ if ablate selected-roots "for flag in ('root', 'steady', 'nonblocking'):" "for f
 else
   bad "ablation selected roots: the seam did not match exactly once"
 fi
+if ablate asm-stack "nostack = not re.search(r'\\balignstack\\b', m.group(1))" "nostack = True"; then
+  report "$work/abl-asm-stack.py" "$work/a-asm-stack.json" "$fxdir/rp9-multiple.ax" --profile restricted --allow-asm spin; rc=$?
+  if [[ "$rc" == 0 && -z "$(rules_of "$work/a-asm-stack.json")" ]]; then
+    ok "ablation asm stack: ignoring the emitted stack claim admits an unknown-stack arm"
+  else
+    bad "ablation asm stack: unknown-stack arm still exits $rc"
+  fi
+else
+  bad "ablation asm stack: the seam did not match exactly once"
+fi
+if ablate spawn-effect "if fa['spawn_effect'] and not concurrent and not any(" "if False and not any("; then
+  report "$work/abl-spawn-effect.py" "$work/a-spawn-effect.json" "$fxdir/rp4-syscall-spawn.ax" --profile restricted; rc=$?
+  if [[ "$rc" == 0 && -z "$(rules_of "$work/a-spawn-effect.json")" ]]; then
+    ok "ablation Spawn: ignoring the checked effect misses raw process creation"
+  else
+    bad "ablation Spawn: raw process creation still exits $rc"
+  fi
+else
+  bad "ablation Spawn: the seam did not match exactly once"
+fi
+if ablate block-effect "if 'Block' in f.effects and not any(" "if False and not any("; then
+  report "$work/abl-block-effect.py" "$work/a-block-effect.json" "$fxdir/rp8-tagged-block.ax" --profile restricted --nonblocking main; rc=$?
+  if [[ "$rc" == 0 && -z "$(rules_of "$work/a-block-effect.json")" ]]; then
+    ok "ablation Block: ignoring the checked effect misses an unfamiliar wait binding"
+  else
+    bad "ablation Block: unfamiliar wait binding still exits $rc"
+  fi
+else
+  bad "ablation Block: the seam did not match exactly once"
+fi
+if ablate kernel-block "if JOIN_RE.match(l) or KERNEL_RE.match(l)]" "if JOIN_RE.match(l)]"; then
+  report "$work/abl-kernel-block.py" "$work/a-kernel-block.json" "$fxdir/rp8-kernel-unknown.ax" --profile restricted --nonblocking main; rc=$?
+  if [[ "$rc" == 0 && -z "$(rules_of "$work/a-kernel-block.json")" ]]; then
+    ok "ablation kernel blocking: ignoring unknown kernel entries grants false clearance"
+  else
+    bad "ablation kernel blocking: unknown kernel entry still exits $rc"
+  fi
+else
+  bad "ablation kernel blocking: the seam did not match exactly once"
+fi
+if ablate handled-effect "[t for t in facts[q]['trap_direct'] if t != 71]" "facts[q]['trap_direct']"; then
+  report "$work/abl-handled-effect.py" "$work/a-handled-effect.json" "$fxdir/effect-handled.ax"
+  if python3 - "$work/a-handled-effect.json" <<'PYTEST'
+import json, sys
+r = json.load(open(sys.argv[1]))
+assert 71 in r['functions']['main']['traps']
+PYTEST
+  then
+    ok "ablation handling: blindly closing trap 71 over calls undoes the handler"
+  else
+    bad "ablation handling: handler trap facts did not change"
+  fi
+else
+  bad "ablation handling: the seam did not match exactly once"
+fi
+if ablate selected-machine-roots "machine_roots += [q for q in roots if q != 'main' and q not in machine_roots]" "machine_roots += [q for q in isrs if q not in machine_roots]"; then
+  if command -v llc >/dev/null 2>&1 && command -v opt >/dev/null 2>&1; then
+    report "$work/abl-selected-machine-roots.py" "$work/a-selected-machine.json" "$fxdir/rp7-selected-root.ax" --target baremetal-aarch64 --profile restricted --root later --stack; rc=$?
+    if [[ "$rc" == 0 ]]; then
+      ok "ablation machine roots: an omitted callback receives false recursion clearance"
+    else
+      bad "ablation machine roots: omitted callback still exits $rc"
+    fi
+  fi
+else
+  bad "ablation machine roots: the seam did not match exactly once"
+fi
+if ablate irq-frame "frames[IRQ_STACK_ENTRY] = irq_stub['frame_bytes']" "frames[IRQ_STACK_ENTRY] = 0"; then
+  if [[ -s "$work/irq-budget" ]]; then
+    report "$work/abl-irq-frame.py" "$work/a-irq-frame.json" "$repo_root/tests/embedded/periodic.ax" --target baremetal-aarch64 --profile restricted --stack --stack-budget "$(( $(cat "$work/irq-budget") - 1 ))"; rc=$?
+    if [[ "$rc" == 0 ]]; then
+      ok "ablation IRQ frame: omitting the save area falsely admits the low budget"
+    else
+      bad "ablation IRQ frame: low budget still exits $rc without the save area"
+    fi
+  fi
+else
+  bad "ablation IRQ frame: the seam did not match exactly once"
+fi
 # With no trap leaves the exact statuses above must come out wrong, and
 # with no blocking kernel entry RP-8's fixture must pass. Each shows the
 # fact is read off the graph.
@@ -602,11 +867,11 @@ else
   bad "ablation traps: the seam did not match exactly once"
 fi
 if ablate blocking "BLOCKING_KERNEL = {" "BLOCKING_KERNEL = set() and {"; then
-  report "$work/abl-blocking.py" "$work/a-blocking.json" "$fxdir/rp8-blocking.ax" --profile restricted; rc=$?
+  report "$work/abl-blocking.py" "$work/a-blocking.json" "$fxdir/rp8-number.ax" --profile restricted --nonblocking main; rc=$?
   if [[ "$rc" == 0 && -z "$(rules_of "$work/a-blocking.json")" ]]; then
-    ok "ablation blocking: with no blocking kernel entry, rp8-blocking.ax passes - RP-8 reads the syscall its body names"
+    ok "ablation blocking: with no blocking kernel entry, rp8-number.ax passes - RP-8 reads the syscall its body names"
   else
-    bad "ablation blocking: rp8-blocking.ax still exits $rc with no blocking kernel entry"
+    bad "ablation blocking: rp8-number.ax still exits $rc with no blocking kernel entry"
   fi
 else
   bad "ablation blocking: the seam did not match exactly once"

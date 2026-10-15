@@ -173,6 +173,8 @@ def run(compiler):
                                     "position": position(fixed, fixed.index("answer"))}})
 
         # Metadata remains aligned across several documents and request resets.
+        # Opening an imported document also refreshes its existing importer.
+        expected_publications.append((uri, 23, []))
         opening(other, -5, state[other])
         snapshot("second-document", other)
         messages.append({"method": "textDocument/didClose",

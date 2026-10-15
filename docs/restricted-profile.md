@@ -33,9 +33,11 @@ It never exits 0 for an answer it did not compute.
 
 Entry names must identify source functions. Exceptions must identify
 one foreign item or assembly-containing function; use `Module$name`
-when a bare name matches several declarations. Missing, ambiguous or
+when an imported bare name matches several declarations. An exact
+entry-file name selects that declaration. Missing, ambiguous or
 wrong-kind exceptions are errors. Stack budgets require `--stack` and a
-positive byte count, and optimisation levels are 0 to 3.
+positive byte count, and optimisation levels are 0 to 3. `--stack-root`
+adds a machine entry; it does not replace the required program entries.
 
 ## Using Axiom in a critical system
 
@@ -78,7 +80,9 @@ The stack half is the object `llc` writes for the same IR at the same
 `--opt`, with `-stack-size-section -function-sections` added: each
 function's static frame from `.stack_sizes`, and its direct calls and
 tail calls from the relocations `llc` had to leave for them
-(`R_AARCH64_CALL26`, `R_AARCH64_JUMP26`). Where a function's address
+(`R_AARCH64_CALL26`, `R_AARCH64_JUMP26`). For a bare-metal IRQ entry,
+`llvm-objdump` reads the assembled register-save sequence, whose frame
+LLVM does not report. Unknown stack instructions are refused. Where a function's address
 escapes, which indirect calls exist, and which functions hold a
 dynamically sized `alloca` or inline assembly are read from the
 post-`opt` IR, which can tell an escape from a comparison.
@@ -95,12 +99,12 @@ reachable from those roots is held to:
 | RP-1 | a call-graph cycle (recursion, direct or mutual) | a cycle's stack is bounded by its input, not by its depth. With `--stack`, a cycle the machine code shows holds no frame across it - LLVM made it a loop, or every edge is a tail call - is admitted and listed as an obligation instead: the stack is bounded, termination stays the program's |
 | RP-2 | a call the graph cannot follow: a body calling a parameter, a row that admits it is a bound, `__call_word` | an edge nobody can name is an edge nothing below can check |
 | RP-3 | an `extern` item, except those named by `--allow-foreign` | foreign code carries none of the facts above |
-| RP-4 | a spawn or join primitive | the profile is one thread of control plus interrupt handlers |
+| RP-4 | a spawn or join primitive, or a checked `Spawn` effect | the profile is one thread of control plus interrupt handlers |
 | RP-5 | allocation reachable from a steady root: every `isr`, every declaration claiming `restrict(no-alloc)`, every `--steady NAME` | "no allocation after initialisation" is a property of the steady-state code, so it is stated by naming that code |
 | RP-6 | a `#calls=` edge that resolves to no row | fail closed: an edge this tool cannot resolve is a refusal, never a silent leaf |
 | RP-7 | with `--stack`: no bound (a non-tail cycle, a dynamic `alloca`, a call into code with no frame size), or a bound over `--stack-budget` counting one interrupt's worth of stack | a stack is either bounded or it is not; "usually small" is not a bound |
-| RP-8 | a call that may block, reachable from an `isr` or from a `--nonblocking NAME` root: a join, or a body passing a blocking syscall number (read, write, open, a child wait, accept, connect, a poll wait, a futex or ulock wait) | an interrupt handler that waits can wait for ever, and "nonblocking" is a claim the graph can check |
-| RP-9 | an `asm` form, except in a function named by `--allow-asm` | the tool can't see whether the instructions allocate, block, trap or use stack, so each one is a reviewed exception ([memory-model.md](memory-model.md) `MM-FFI-9`) |
+| RP-8 | a call that may block, reachable from an `isr` or `--nonblocking NAME` entry: a checked `Block` effect, a join, a known blocking syscall number or a raw kernel entry | an interrupt handler that waits can wait for ever, and "nonblocking" is a claim the graph can check |
+| RP-9 | an `asm` form, except in a function named by `--allow-asm` whose selected arms all promise `nostack` | the report checks the stack claim in unoptimised IR; allocation, blocking, traps and the truth of the claim still need review ([memory-model.md](memory-model.md) `MM-FFI-9`) |
 
 And it lists, without refusing, the obligations that are the explicit
 trusted boundary rather than defects: every reachable function that
@@ -113,6 +117,11 @@ no-syscall trap, status 74), and the stack analysis's own assumptions.
 It also lists, for each root, the trap statuses a call from it can end
 the process with, and whether it may block, with the path.
 
+Every reachable foreign item remains a review obligation, including an
+allowed exception. Its declared type and effects do not bound its body.
+Raw kernel entries and assembly also need review for hidden concurrency
+and resource use. Profile guarantees depend on those trusted contracts.
+
 ### Traps
 
 Each function's trap set is closed over the call graph, with the
@@ -121,10 +130,10 @@ statuses of [memory-model.md](memory-model.md) `MM-EXEC-16`:
 | Status | Source in the graph |
 |---|---|
 | 70 | `Alloc` in the function's row: out of memory |
-| 71 | a declared effect in the row, unless a caller handles it |
+| 71 | a custom effect remaining in the checked row after handlers; built-in `Entropy`, `Spawn` and `Block` do not raise it |
 | 72 | `/` or `%`: a zero divisor |
-| 83 | `/` or `%`: `INT_MIN / -1` |
-| 84 | `<<` or `>>`: a shift amount outside 0 to 63 |
+| 83 | signed `/` or `%`: the operand type's minimum divided by `-1` |
+| 84 | `<<` or `>>`: a shift amount outside the operand type's width |
 | 75, 76 | `__axiom_arena_reset`: a bad mark, or a mark past a live handle |
 | 77 | `__indexTrap`: `vecGet`'s range check |
 | 78 | a spawn or join |
@@ -159,6 +168,19 @@ roots. Everything else - the type system, effects, regions, the
 standard library - is the language as it is. The profile adds no
 syntax, and a program outside it still compiles; the refusal is the
 report's, not the compiler's.
+
+### Review inline assembly
+
+An `--allow-asm` exception requires `(options nostack)` on every assembly
+block selected for your deployment architecture. The report reads the
+emitted source blocks before optimisation, including unused pure blocks.
+An arm for another architecture cannot supply the claim.
+
+`nostack` is a trusted promise: the tool does not inspect instructions
+for stack use, hidden calls, allocation or blocking. Review the templates
+and their clobbers before granting the exception.
+
+Tested by `tests/profile/rp9-multiple.ax` and `tests/profile/rp9-target-arm.ax`.
 
 ## The stack bound
 
@@ -217,11 +239,13 @@ The linker script reserves 8 KiB of stack (`baremetalLinkScript`,
 - Inline assembly, the compiler's own (the trap exits, the recovery
   point, `_start`) and a program's `asm` forms, uses no stack beyond
   its function's frame. A program's `asm` form keeps that promise when
-  it says `nostack`; one that doesn't may push, and the bound doesn't
-  count what it pushes. Each such function is named in the report.
-- An interrupt adds one handler's bound on top of the interrupted
-  code's (no nesting); the vector stub's register save area is not in
-  the object and is not counted.
+  it says `nostack`. The restricted profile requires that promise
+  before admitting an assembly exception. A general report still lists
+  unknown assembly stack use as an assumption; each function is named.
+- An interrupt adds one complete entry extent above the interrupted
+  code, with no nesting. On bare metal this includes the assembled
+  register-save frame, dispatch wrapper and handler path. Each selected
+  source entry also needs its own machine-code bound.
 - An `isr(fault)` hook is not an interrupt: it runs on the 8 KiB fault
   stack, never on top of another stack. With a hook bound, the fault
   exit (`__axiom_cpu_exception`, `__axiom_fault_trap`) is a root of its
@@ -241,9 +265,10 @@ The linker script reserves 8 KiB of stack (`baremetalLinkScript`,
   retains the compiler emits, stack exhaustion, and a CPU fault from an
   Unsafe access aren't in any function's trap set. The report names
   them every time.
-- **"May block" comes from the syscall number, not the descriptor.** A
-  `read` or `write` of a regular file is marked too, because the graph
-  can't tell a file from a pipe.
+- **Blocking is an upper bound.** Checked `Block` effects, joins and
+  known wait numbers propagate through the graph. Every raw kernel entry
+  is also marked: its arguments are absent from the graph, so the report
+  cannot clear an unfamiliar operation as nonblocking.
 - **The stack half reads ELF only**, for AArch64 and x86-64
   (`baremetal-aarch64`, the Linux and FreeBSD targets), not Mach-O or
   PE. On x86-64, indirect call sites come from the IR alone, because
@@ -272,14 +297,14 @@ The linker script reserves 8 KiB of stack (`baremetalLinkScript`,
    options fail closed. Each
    `tests/profile/rpN-*.ax` is refused by exactly RP-N; `--allow-foreign`,
    `--allow-asm` and a missing `--steady` each lift their refusal.
-4. The stack: `ok-periodic.ax` and `blink.ax` bounded under 8 KiB; tree
-   recursion (`rp1-recursion.ax`) unbounded; a 64-byte budget refused;
-   each bound equal to the sum of the frames on its own path; and the
-   tool's `.stack_sizes` reader agreeing with `llvm-readobj
-   --stack-sizes`, an independent parser, on every function.
+4. The stack: `ok-periodic.ax` and `blink.ax` stay under 8 KiB; tree
+   recursion (`rp1-recursion.ax`) is unbounded, and a 64-byte budget is refused.
+   Each bound equals its path's frame sum. Selected callbacks and the full
+   IRQ extent are checked against exact budgets. The `.stack_sizes` reader
+   agrees with `llvm-readobj --stack-sizes` on every LLVM function.
 5. Ablations: each of RP-1..RP-5, RP-8 and RP-9 disabled in a copy of the
    tool lets its own fixture through. With no trap leaves, the trap
    statuses come out wrong. With no blocking kernel entry,
-   `tests/profile/rp8-blocking.ax` passes. With the bound's cycle check
+   `tests/profile/rp8-number.ax` passes. With the bound's cycle check
    removed, three selftest cases fail and tree recursion comes out
    bounded.

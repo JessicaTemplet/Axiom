@@ -35,7 +35,7 @@ reachable from the roots - `main`, every `#isr` row, and `--root NAME`:
                       `#effects-possible=`), or a call to `__call_word`.
   RP-3 foreign        no `extern` item, except one named by
                       `--allow-foreign NAME`.
-  RP-4 concurrency    no spawn or join primitive: the profile is one
+  RP-4 concurrency    no Spawn effect or spawn/join primitive: one
                       thread of control plus interrupt handlers.
   RP-5 steady state   from each steady root - every `#isr`, every row
                       claiming `restrict(no-alloc)`, and `--steady NAME`
@@ -49,30 +49,30 @@ reachable from the roots - `main`, every `#isr` row, and `--root NAME`:
                       frame size) and, with `--stack-budget N`, is at
                       most N bytes including one interrupt frame.
   RP-8 blocking       no `#isr` row, and no `--nonblocking NAME` root,
-                      reaches a call that may suspend it: a join, or a
-                      body passing one of `BLOCKING_KERNEL`'s syscall
-                      numbers (read, write, open, a child wait, accept,
-                      connect, a poll wait, a futex or ulock wait).
+                      reaches a checked Block effect, a join, a known
+                      blocking syscall number or a raw kernel entry
+                      whose arguments the graph cannot preserve.
   RP-9 inline asm     no `asm` form (MM-FFI-9), except in a function
-                      named by `--allow-asm NAME`. The tool can't see
-                      what the instructions do - whether they allocate,
-                      block, trap or use stack - so each is a reviewed
-                      exception rather than a fact it reads.
+                      named by `--allow-asm NAME` whose selected arms all
+                      promise `nostack`. The claim is read from emitted
+                      IR before optimisation; the instructions still
+                      need review for allocation, blocking and traps.
 
 and obligations it lists but does not refuse, because they are the
 explicit trusted boundary rather than a defect: every reachable function
 that calls an Unsafe primitive directly (`#effect=unsafe`), every function
 holding an `asm` form, every kernel
 entry (`__syscallN`; on baremetal-aarch64 the compiler lowers these to
-the no-syscall trap), IO, the stack analysis's assumptions, and each
+the no-syscall trap), every foreign item, IO, the stack analysis's assumptions, and each
 root's trap statuses and whether it may block.
 
 TRAPS. Each function's `traps` is the set of MM-EXEC-16 statuses a call
 from it can end the process with: 72 and 83 for `/` and `%`, 84 for
 `<<` and `>>`, 77 for `__indexTrap`, 80 for a contract, 82 for an
 atomic, 75 and 76 for an arena reset, 78 for a spawn or join, 70
-wherever the row has `Alloc`, and 71 wherever it holds a declared
-effect (unless a caller handles it). The set is closed over the call
+wherever the row has `Alloc`, and 71 wherever its checked row still
+holds a custom effect after handlers. Built-in effect refinements do
+not produce an unhandled-operation trap. The set is closed over the call
 graph. Until 0.8.0 the `INT_MIN / -1` and overshift corners were
 undefined rather than trapped, and the report listed them per function
 under `undefined`; that field is gone with them.
@@ -137,7 +137,7 @@ TRAP_LEAVES = {'/': (72, 83), '%': (72, 83), '<<': (84,), '>>': (84,),
                '__indexTrap': (77,), '__contract': (80,),
                '__axiom_arena_reset': (75, 76), '__axiom_arena_reset_keeping': (75, 76)}
 ATOMIC_RE = re.compile(r'^__atomic_')
-BUILTIN_EFFECTS = {'IO', 'Alloc', 'Mut', 'Unsafe', 'Div', 'Pure'}
+BUILTIN_EFFECTS = {'IO', 'Alloc', 'Mut', 'Unsafe', 'Div', 'Pure', 'Entropy', 'Spawn', 'Block'}
 
 # The kernel entries that may suspend the caller until another party
 # acts, named by the syscall-number constants every `Sys.Platform`
@@ -467,6 +467,8 @@ IRNAME = r'@("(?:[^"\\]|\\.)*"|[-A-Za-z0-9_$.]+)'
 FAULT_STACK_ENTRY = '__axiom_trap_entry'
 FAULT_ROOTS = ('__axiom_cpu_exception', '__axiom_fault_trap')
 FAULT_STACK_BYTES = 8192
+IRQ_STACK_ENTRY = '__axiom_irq_entry'
+IRQ_DISPATCH = '__axiom_irq_dispatch'
 
 
 def ir_facts(ir):
@@ -638,6 +640,80 @@ def bound_graph(frames, calls, tails, problems, roots, names):
     return results
 
 
+def irq_stub_frame(obj, elf):
+    """Measure the bare-metal interrupt veneer in the assembled object.
+    Its register-save frame is absent from LLVM's .stack_sizes. Accept
+    only a linear save/restore sequence around one relocated dispatch
+    call; unknown instructions or stack adjustments are not a bound.
+    """
+    entries = [s for s in elf.syms if s['name'] == IRQ_STACK_ENTRY and s['shndx'] != 0]
+    if not entries:
+        return None
+    if len(entries) != 1 or elf.machine != EM_AARCH64:
+        raise ReportError('cannot identify one AArch64 IRQ entry in ' + obj)
+    entry = entries[0]
+    p = subprocess.run(['llvm-objdump', '-d', '--no-show-raw-insn',
+                        '--disassemble-symbols=' + IRQ_STACK_ENTRY, obj], capture_output=True, text=True)
+    if p.returncode != 0:
+        raise ReportError('cannot disassemble the IRQ entry: ' + p.stderr[:1000])
+    rows = []
+    active = False
+    for line in p.stdout.splitlines():
+        if re.match(r'^[0-9a-f]+ <' + IRQ_STACK_ENTRY + r'>:$', line.strip()):
+            active = True
+            continue
+        if not active:
+            continue
+        m = re.match(r'^\s*([0-9a-f]+):\s+([a-z0-9.]+)\s*(.*?)\s*$', line)
+        if m:
+            rows.append((int(m.group(1), 16), m.group(2), re.sub(r'\s+', ' ', m.group(3)).lower()))
+            if m.group(2) == 'eret':
+                break
+        elif line.strip():
+            raise ReportError('cannot read the IRQ entry instruction: ' + line.strip())
+    bad = 'unrecognised IRQ stack sequence in ' + obj
+    if len(rows) < 4 or rows[0][0] != entry['value'] or rows[-1][1:] != ('eret', ''):
+        raise ReportError(bad)
+    if any(a != entry['value'] + 4 * i for i, (a, _, _) in enumerate(rows)):
+        raise ReportError(bad + ': non-contiguous instructions')
+    adjust = re.compile(r'sp, sp, #(0x[0-9a-f]+|[0-9]+)$')
+    first, last = adjust.fullmatch(rows[0][2]), adjust.fullmatch(rows[-2][2])
+    if rows[0][1] != 'sub' or rows[-2][1] != 'add' or not first or not last:
+        raise ReportError(bad + ': missing fixed frame or restore')
+    frame = int(first.group(1), 0)
+    if frame <= 0 or frame % 16 or int(last.group(1), 0) != frame:
+        raise ReportError(bad + ': invalid or mismatched frame size')
+    relocs = {off: (typ, sym['name']) for off, typ, sym, _ in elf.relas(entry['shndx'])}
+    memory = re.compile(r'((?:[xq][0-9]+)(?:, [xq][0-9]+)?), \[sp(?:, #(0x[0-9a-f]+|[0-9]+))?\]$')
+    calls = 0
+    for addr, op, operands in rows[1:-2]:
+        if op in ('stp', 'ldp', 'str', 'ldr'):
+            m = memory.fullmatch(operands)
+            if not m:
+                raise ReportError(bad + ': unsupported stack addressing')
+            regs = m.group(1).split(', ')
+            if len(regs) != (2 if op in ('stp', 'ldp') else 1) or len({r[0] for r in regs}) != 1:
+                raise ReportError(bad + ': unsupported register width')
+            if any(int(r[1:]) > (30 if r[0] == 'x' else 31) for r in regs):
+                raise ReportError(bad + ': unsupported register')
+            extent = (16 if regs[0][0] == 'q' else 8) * len(regs)
+            if int(m.group(2) or '0', 0) + extent > frame:
+                raise ReportError(bad + ': save or restore exceeds its frame')
+        elif op == 'mrs':
+            if not re.fullmatch(r'x(?:[0-9]|[12][0-9]|30), (?:elr_el1|spsr_el1|fpcr|fpsr)', operands):
+                raise ReportError(bad + ': unsupported system-register read')
+        elif op == 'msr':
+            if not re.fullmatch(r'(?:elr_el1|spsr_el1|fpcr|fpsr), x(?:[0-9]|[12][0-9]|30)', operands):
+                raise ReportError(bad + ': unsupported system-register write')
+        elif op == 'bl' and relocs.get(addr) == (R_AARCH64_CALL26, IRQ_DISPATCH):
+            calls += 1
+        else:
+            raise ReportError(bad + ': unsupported instruction ' + op)
+    if calls != 1:
+        raise ReportError(bad + ': expected one IRQ dispatch call')
+    return dict(entry=IRQ_STACK_ENTRY, dispatch=IRQ_DISPATCH, frame_bytes=frame, instructions=len(rows))
+
+
 def stack_bound(axiom, src, target, opt, roots, workdir):
     """Answers a dict: per-root bound and worst path, or the reason a
     root is unbounded, plus the analysis's facts and assumptions."""
@@ -770,6 +846,12 @@ def stack_bound(axiom, src, target, opt, roots, workdir):
     for f in ir_indirect:
         # An indirect site may reach any address-taken function.
         calls.setdefault(f, set()).update(address_taken)
+    irq_stub = irq_stub_frame(obj, elf)
+    if irq_stub:
+        frames[IRQ_STACK_ENTRY] = irq_stub['frame_bytes']
+        calls[IRQ_STACK_ENTRY] = {IRQ_DISPATCH}
+        names.add(IRQ_STACK_ENTRY)
+        roots = list(roots) + ([IRQ_STACK_ENTRY] if IRQ_STACK_ENTRY not in roots else [])
     # On x86-64 a call pushes its 8-byte return address below the
     # caller's frame, and `.stack_sizes` counts neither: every frame is
     # charged 8 more. A tail jump reuses its caller's slot, so the sum is
@@ -778,7 +860,7 @@ def stack_bound(axiom, src, target, opt, roots, workdir):
     charged = {f: v + extra for f, v in frames.items()} if extra else frames
     results = bound_graph(charged, calls, tails, problems, roots, names)
     return dict(results=results, frames=frames, frame_extra=extra, machine='x86-64' if x86 else 'aarch64',
-                fault_entry=fault_entry,
+                fault_entry=fault_entry, irq_stub=irq_stub,
                 indirect_sites=sorted(ir_indirect),
                 indirect_targets=indirect_targets, asm=sorted(ir_asm),
                 symtab_excluded=irf['symtab_excluded'], symtab_users=irf['symtab_users'],
@@ -815,7 +897,13 @@ def facts_of(g, q):
         traps.add(71)
     blocking = [t for t in g.edges.get(q, [])
                 if t.split('$')[-1] in BLOCKING_KERNEL and g.fns[t].module.endswith('Platform')]
-    blocking += [l for l in leaves if JOIN_RE.match(l)]
+    blocking += [l for l in leaves if JOIN_RE.match(l) or KERNEL_RE.match(l)]
+    # A checked Block row may originate in a user-supplied syscall
+    # number, whose spelling this tool cannot anticipate. Keep the
+    # nearest effect source as a witness. Raw syscall arguments are not
+    # preserved in this graph, so a kernel entry may also block.
+    if 'Block' in f.effects and not any('Block' in g.fns[t].effects for t in g.edges.get(q, [])):
+        blocking.append('effect(Block)')
     return dict(
         trap_direct=sorted(traps),
         block_direct=blocking,
@@ -825,6 +913,7 @@ def facts_of(g, q):
         extern=f.flag('extern'),
         isr=f.flag('isr'),
         spawn=[l for l in leaves if SPAWN_RE.match(l)],
+        spawn_effect='Spawn' in f.effects,
         join=[l for l in leaves if JOIN_RE.match(l)],
         kernel=[l for l in leaves if KERNEL_RE.match(l)],
         asm=[l for l in leaves if ASM_RE.match(l)],
@@ -864,6 +953,47 @@ def first_hit(g, par_roots, pred):
     return None
 
 
+def source_asm_contracts(axiom, src, target):
+    """Read each selected source asm arm before optimisation can erase it.
+    The emitter marks source blocks with `axiom-asm-site`; runtime asm
+    has no such marker. `alignstack` means the source did not promise
+    `nostack`. This checks the claim's presence, not the instructions.
+    """
+    with tempfile.TemporaryDirectory(prefix='axiom-report-asm.') as work:
+        ll = os.path.join(work, 'source.ll')
+        cmd = [axiom, '--diagnostic-format=ai', 'emit-llvm', src, '-o', ll]
+        if target:
+            cmd.append('--target=' + target)
+        p = subprocess.run(cmd, capture_output=True)
+        if p.returncode != 0 or not os.path.isfile(ll):
+            raise ReportError('cannot inspect allowed assembly:\n' + p.stderr.decode('utf-8', 'replace')[:2000])
+        ir = open(ll).read()
+    contracts = {}
+    cur, pending = None, False
+    for line in ir.splitlines():
+        m = re.match(r'^define [^@]*' + IRNAME + r'\(', line)
+        if m:
+            if pending:
+                raise ReportError('missing emitted assembly contract in ' + cur)
+            cur, pending = m.group(1).strip('"'), False
+        elif line.startswith('}'):
+            if pending:
+                raise ReportError('missing emitted assembly contract in ' + cur)
+            cur, pending = None, False
+        elif cur is not None and line.lstrip().startswith('; axiom-asm-site '):
+            pending = True
+        elif pending and line.strip() and not line.lstrip().startswith(';'):
+            m = re.search(r'\bcall\b[^"\n]*\basm\b([^"\n]*)"', line)
+            if not m:
+                raise ReportError('cannot read the emitted assembly contract in ' + cur)
+            nostack = not re.search(r'\balignstack\b', m.group(1))
+            contracts[cur] = contracts.get(cur, True) and nostack
+            pending = False
+    if pending:
+        raise ReportError('missing emitted assembly contract in ' + cur)
+    return contracts
+
+
 def build_report(args):
     fns = load_source_graph(args.axiom, args.file, args.target)
     roots = []
@@ -888,8 +1018,8 @@ def build_report(args):
     for flag, marker in (('allow_foreign', 'extern'), ('allow_asm', 'asm')):
         resolved = []
         for name in getattr(args, flag):
-            candidates = [q for q, f in fns.items() if not f.builtin
-                          and (q == name if '$' in name else f.name == name)]
+            candidates = ([name] if name in fns and not fns[name].builtin else
+                          [q for q, f in fns.items() if not f.builtin and f.name == name])
             if len(candidates) != 1:
                 raise ReportError('--%s %s names %s; use an exact module-qualified name' % (
                     flag.replace('_', '-'), name, 'no source function' if not candidates else 'more than one function'))
@@ -905,10 +1035,13 @@ def build_report(args):
     par = g.reach(roots)
     reach = list(par)
     facts = {q: facts_of(g, q) for q in reach}
-    traps = close_over(g, reach, {q: facts[q]['trap_direct'] for q in reach})
+    # Status 71 follows the checker's residual custom-effect row. A
+    # handled callee can carry that status while its caller cannot;
+    # blindly closing 71 over call edges would undo effect handling.
+    traps = close_over(g, reach, {q: [t for t in facts[q]['trap_direct'] if t != 71] for q in reach})
     blocks = close_over(g, reach, {q: facts[q]['block_direct'] for q in reach})
     for q in reach:
-        facts[q]['traps'] = sorted(traps[q])
+        facts[q]['traps'] = sorted(traps[q] | ({71} if any(e not in BUILTIN_EFFECTS for e in fns[q].effects) else set()))
         facts[q]['blocks'] = bool(blocks[q])
     refusals, obligations = [], []
 
@@ -920,10 +1053,15 @@ def build_report(args):
 
     comps = [c for c in g.sccs(reach) if len(c) > 1 or c[0] in g.edges.get(c[0], [])]
     cycles = [g.cycle_through(c) for c in comps]
+    asm_contracts = {}
+    allowed_asm = [q for q in reach if facts[q]['asm'] and q in args.allow_asm]
+    if allowed_asm:
+        asm_contracts = source_asm_contracts(args.axiom, args.file, args.target)
     stack = None
     if args.stack:
-        machine_roots = list(args.stack_root) or (['_start'] if args.target == 'baremetal-aarch64' else ['main'])
-        machine_roots += [fns[q].name for q in isrs if fns[q].name not in machine_roots]
+        machine_roots = (['_start'] if args.target == 'baremetal-aarch64' else ['main']) if 'main' in roots else []
+        machine_roots += [r for r in args.stack_root if r not in machine_roots]
+        machine_roots += [q for q in roots if q != 'main' and q not in machine_roots]
         # A fault hook runs on the fault stack, from the fault exit, so
         # the exit's roots are bounded there, covering the report, the
         # hook's door and the hook.
@@ -935,7 +1073,7 @@ def build_report(args):
         finally:
             if not args.keep:
                 shutil.rmtree(work, ignore_errors=True)
-            else:
+            elif stack is not None:
                 stack['workdir'] = work
     if args.profile == 'restricted':
         # RP-1
@@ -952,12 +1090,20 @@ def build_report(args):
                 refuse('RP-2', '%s makes a call the graph cannot follow (%s)' % (q, '; '.join(fa['indirect'])), pth)
             if fa['extern'] and q not in args.allow_foreign:
                 refuse('RP-3', '%s is an `extern` item' % q, pth)
-            for l in fa['spawn'] + fa['join']:
+            concurrent = fa['spawn'] + fa['join']
+            if fa['spawn_effect'] and not concurrent and not any(facts.get(t, {}).get('spawn_effect') for t in g.edges.get(q, [])):
+                concurrent.append('effect(Spawn)')
+            for l in concurrent:
                 refuse('RP-4', '%s calls %s' % (q, l), pth + [l])
             for u in fa['unresolved']:
                 refuse('RP-6', '%s calls `%s`, which resolves to no row' % (q, u), pth + [u])
-            if fa['asm'] and q not in args.allow_asm:
-                refuse('RP-9', '%s holds inline assembly' % q, pth)
+            if fa['asm']:
+                irname = '__axiom_user_main' if q == 'main' else q
+                allowed = q in args.allow_asm
+                nostack = asm_contracts.get(irname) is True
+                if not allowed or not nostack:
+                    reason = 'is not a reviewed exception' if not allowed else 'has no checked `nostack` claim for every selected arm'
+                    refuse('RP-9', '%s holds inline assembly and %s' % (q, reason), pth)
         # RP-5
         steady = sorted(set(isrs + [q for q in reach if 'no-alloc' in facts[q]['restrict']] + list(args.steady)))
         for s in steady:
@@ -977,7 +1123,8 @@ def build_report(args):
         if stack is not None:
             # One interrupt's frames sit on top of the interrupted stack.
             # A fault hook's never do, because it runs on the fault stack.
-            worst_isr = 0
+            irq = stack['results'].get(IRQ_STACK_ENTRY)
+            worst_isr = irq['bytes'] if irq and irq.get('bounded') else 0
             for q in isrs:
                 if q in fault_hooks:
                     continue
@@ -993,13 +1140,15 @@ def build_report(args):
                     refuse('RP-7', 'the fault exit from %s is %d bytes, over the %d-byte fault stack' % (r, res['bytes'], FAULT_STACK_BYTES), res['path'])
             if args.stack_budget is not None:
                 for r, res in stack['results'].items():
-                    if res.get('bounded') and r not in [fns[q].name for q in isrs] and r not in on_fault_stack:
+                    if res.get('bounded') and r not in [fns[q].name for q in isrs] + [IRQ_STACK_ENTRY] and r not in on_fault_stack:
                         total = res['bytes'] + worst_isr
                         if total > args.stack_budget:
                             refuse('RP-7', 'stack from %s is %d bytes (%d + %d for one interrupt), over the %d-byte budget' % (r, total, res['bytes'], worst_isr, args.stack_budget), res['path'])
     # Obligations, whatever the profile
     for q in reach:
         fa = facts[q]
+        if fa['extern']:
+            oblige('foreign', '%s is foreign code (%s): its declared type and effects do not bound its allocation, stack, blocking, concurrency or traps; review the implementation and its operational contract' % (q, fns[q].loc), g.path(par, q))
         if fa['unsafe']:
             oblige('unsafe', '%s calls an Unsafe primitive directly (%s): its preconditions are the trusted boundary' % (q, fns[q].loc), g.path(par, q))
         for l in fa['kernel']:
@@ -1014,6 +1163,9 @@ def build_report(args):
             ('; the backtrace table @__axiom_symtab is excluded as never called, read only by %s, none of which holds an indirect call' % stack['symtab_users']) if stack.get('symtab_excluded') else '',
             stack['asm'] or 'none',
             ('; %s switches to the %d-byte fault stack and never returns, so a trap\'s exit adds nothing past it, and the fault exit (%s) is bounded on that stack' % (FAULT_STACK_ENTRY, FAULT_STACK_BYTES, ', '.join(FAULT_ROOTS))) if stack.get('fault_entry') else ''))
+    if stack is not None and stack.get('irq_stub'):
+        irq = stack['irq_stub']
+        oblige('stack', 'the assembled IRQ entry saves %d bytes before its dispatch frame and handler; one interrupt extent is charged above each interrupted root (no interrupt nesting)' % irq['frame_bytes'])
     for r in roots:
         ts = facts[r]['traps']
         if ts:
@@ -1030,7 +1182,7 @@ def build_report(args):
                 profile=args.profile, roots=roots, isrs=isrs,
                 reachable=len(reach), functions=facts,
                 cycles=cycles, refusals=refusals, obligations=obligations,
-                stack=stack and {k: v for k, v in stack.items() if k in ('results', 'frames', 'frame_extra', 'machine', 'indirect_sites', 'indirect_targets', 'asm', 'undefined', 'functions', 'symtab_excluded', 'symtab_users', 'workdir', 'obj')})
+                stack=stack and {k: v for k, v in stack.items() if k in ('results', 'frames', 'frame_extra', 'machine', 'indirect_sites', 'indirect_targets', 'asm', 'undefined', 'functions', 'symtab_excluded', 'symtab_users', 'workdir', 'obj', 'irq_stub')})
 
 
 def render_text(rep, out):
@@ -1045,7 +1197,7 @@ def render_text(rep, out):
         marks = ''.join([
             'A' if fa['alloc'] else '.', 'I' if fa['io'] else '.', 'U' if fa['unsafe'] else '.',
             'X' if fa['extern'] else '.', 'R' if q in rec else '.', '~' if fa['indirect'] else '.',
-            'S' if (fa['spawn'] or fa['join']) else '.', 'K' if fa['kernel'] else '.',
+            'S' if (fa['spawn'] or fa['join'] or fa['spawn_effect']) else '.', 'K' if fa['kernel'] else '.',
             'T' if fa['traps'] else '.', 'B' if fa['blocks'] else '.'])
         w('  %s %s%s%s\n' % (marks, q, '  [isr]' if fa['isr'] else '',
                              ('  traps ' + ','.join(str(t) for t in fa['traps'])) if fa['traps'] else ''))
@@ -1133,7 +1285,7 @@ def main(argv):
         ap.error('--allow-foreign and --allow-asm require --profile restricted')
     try:
         rep = build_report(args)
-    except ReportError as e:
+    except (ReportError, OSError) as e:
         sys.stderr.write('axiom-report: %s\n' % e)
         return 2
     if args.format == 'json':

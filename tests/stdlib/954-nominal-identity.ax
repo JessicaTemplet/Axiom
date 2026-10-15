@@ -1,0 +1,83 @@
+; Nominal identities survive modules, aliases, generics and emitter lookup.
+(import IO)
+(import Str)
+(import Vec)
+(import NominalA)
+(import NominalB)
+
+(type Chosen = NominalA::PublicThing)
+
+(type Wrapped a = (NominalB::Box a))
+
+(:: identity (-> a a))
+(fn (identity value)
+  value)
+
+(:: chosen (-> Chosen NominalA::Thing))
+(fn (chosen value)
+  value)
+
+(:: wrapped (-> (Wrapped NominalA::Thing) NominalA::Thing))
+(fn (wrapped value)
+  (bUnbox value))
+
+(struct WordHolder
+  (word : NominalB::Token)
+  (label : String))
+
+(:: ownsWordAndReference Bool)
+(fn (ownsWordAndReference)
+  (let ((holder (WordHolder (bToken 100000000) "kept")))
+    (&& (== (bTokenInt holder.word) 100000000) (strEq holder.label "kept"))))
+
+(:: ownsNominal Bool)
+(fn (ownsNominal)
+  (let ((values (vecPush vecNew (aMake 13))))
+    (let ((other (aMake 99)))
+      (&& (== (aRead (vecGet values 0)) 13) (== (aRead other) 99)))))
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  {
+    (println
+      (if (&& (== (aRead (chosen (aMake 42))) 42) (== (bRead (bMake "four")) 4))
+        "nominal aliases: correct"
+        "wrong"))
+    (println
+      (if (&& (== (aPacketRead (aPacket 7 "left")) 7) (== (bPacketRead (bPacket 8 "right")) 8))
+        "data field layouts: correct"
+        "wrong"))
+    (println
+      (if (&& (== (aConfigRead (aConfig 9)) 9) (== (bConfigRead (bConfig "seven77")) 7))
+        "struct layouts: correct"
+        "wrong"))
+    (println
+      (if (&&
+            (== (aRead (wrapped (bBox (identity (aMake 11))))) 11)
+            (== (bRead (aPatternBox (aBox (bMake "five5")))) 5))
+        "generic substitution and patterns: correct"
+        "wrong"))
+    (println
+      (if (&&
+            (== (aRead (vecGet (vecPush vecNew (aMake 13)) 0)) 13)
+            (== (bRead (bPatternBox (bBox (bMake "six666")))) 6))
+        "containers and constructor identities: correct"
+        "wrong"))
+    (println
+      (if ownsNominal
+        "nominal ownership after allocation: correct"
+        "wrong ownership"))
+    (println
+      (if ownsWordAndReference
+        "homonymous data and word ownership: correct"
+        "wrong ownership"))
+    (println
+      (if (== (aObserve (aMake 19)) 19)
+        "effect type identity: correct"
+        "wrong"))
+    (println
+      (if (&& (== (aAcceptLevel (bLevel 5)) 5) (== (bAcceptLevel (aLevel 5)) 5))
+        "subtype boundaries: correct"
+        "wrong"))
+  })

@@ -634,6 +634,9 @@ fi
 if ! python3 tests/lsp/semantic-token-updates.py "$work/stage1"; then
   status=1
 fi
+if ! python3 tests/lsp/workspace-overlays.py "$work/stage1"; then
+  status=1
+fi
 
 echo "swept $fixtures fixtures (floor $floor), $rows manifest rows, $orows outline rows"
 

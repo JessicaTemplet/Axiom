@@ -169,6 +169,10 @@
 
 (pub :: tyRenderIn (-> Int (Vec String) String))
 (pub fn (tyRenderIn t0 names)
+  (tyRenderScoped t0 names 0))
+
+(:: tyRenderScoped (-> Int (Vec String) Int String))
+(fn (tyRenderScoped t0 names owner)
   ; render what a placeholder was PINNED to, not the placeholder
   (let ((t (tyResolve t0)))
     (if (== t 0)
@@ -180,36 +184,56 @@
               (nodeAName t)
               (tyVarLabel i)))
           (if (== tag TAG_T_CON)
-            (tyRenderApp (nodeAName t) (nodeBVec t) 0 names)
+            (tyRenderAppScoped (typeNameForScope (nodeAName t) owner) (nodeBVec t) 0 names owner)
             (if (== tag TAG_T_ARR)
               (concat
                 (concat
-                  (concat (concat "(" (tyRenderIn (nodeA t) names)) " -> ")
-                  (tyRenderIn (nodeB t) names))
+                  (concat (concat "(" (tyRenderScoped (nodeA t) names owner)) " -> ")
+                  (tyRenderScoped (nodeB t) names owner))
                 ")")
               (if (== tag TAG_T_TUP)
-                (concat (concat "(" (tyRenderJoin (nodeAVec t) 0 "" names)) ")")
+                (concat (concat "(" (tyRenderJoinScoped (nodeAVec t) 0 "" names owner)) ")")
                 (if (== tag TAG_T_PTR)
-                  (concat "*" (tyRenderIn (nodeA t) names))
+                  (concat "*" (tyRenderScoped (nodeA t) names owner))
                   "{unknown}")))))))))
 
 (pub :: tyRenderApp (-> String (Vec Int) Int (Vec String) String))
 (pub fn (tyRenderApp acc args i names)
+  (tyRenderAppScoped acc args i names 0))
+
+(:: tyRenderAppScoped (-> String (Vec Int) Int (Vec String) Int String))
+(fn (tyRenderAppScoped acc args i names owner)
   (if (>= i (vecLen args))
     acc
-    (tyRenderApp (concat (concat acc " ") (tyRenderIn (vecGet args i) names)) args (+ i 1) names)))
+    (tyRenderAppScoped
+      (concat (concat acc " ") (tyRenderScoped (vecGet args i) names owner))
+      args
+      (+ i 1)
+      names
+      owner)))
 
 (pub :: tyRenderJoin (-> (Vec Int) Int String (Vec String) String))
 (pub fn (tyRenderJoin xs i acc names)
+  (tyRenderJoinScoped xs i acc names 0))
+
+(:: tyRenderJoinScoped (-> (Vec Int) Int String (Vec String) Int String))
+(fn (tyRenderJoinScoped xs i acc names owner)
   (if (>= i (vecLen xs))
     acc
-    (tyRenderJoin
+    (tyRenderJoinScoped
       xs
       (+ i 1)
       (if (== i 0)
-        (tyRenderIn (vecGet xs 0) names)
-        (concat (concat acc ", ") (tyRenderIn (vecGet xs i) names)))
-      names)))
+        (tyRenderScoped (vecGet xs 0) names owner)
+        (concat (concat acc ", ") (tyRenderScoped (vecGet xs i) names owner)))
+      names
+      owner)))
+
+(:: typeNameForScope (-> String Int String))
+(fn (typeNameForScope name owner)
+  (if (== (typeModuleSame (modOf name) owner) 1)
+    (bareOf name)
+    (srcSpelling name)))
 
 ; ------------------------------------------------------------------
 ; Type predicates and constructors.
@@ -1274,24 +1298,13 @@
 
 (pub :: tyCompat (-> Int Int Int Int))
 
-; Do two `TAG_T_CON` spellings name one declaration? Resolved
-; through the same module-aware lookup bare names use, so a
-; qualified spelling meets the bare one exactly when they name the
-; same type - and a miss answers 0, which is today's behaviour for
-; every pair this does not join. No diagnostics: ambiguity and
-; privacy are refused where the reference stands, not where two
-; types are compared.
+; Checked nominal names already include declaration identity. Builtins
+; keep their canonical names and entry-file types keep their bare names.
 (pub :: tySameDecl (-> Int Int Int Int))
 (pub fn (tySameDecl tc a b)
-  (let (
-    (ea (tyFind tc TY_ANY (nodeAName a) 0))
-    (eb (tyFind tc TY_ANY (nodeAName b) 0))
-  )
-    (if (|| (== ea 0) (== eb 0))
-      0
-      (if (== ea eb)
-        1
-        0))))
+  (if (strEq (nodeAName a) (nodeAName b))
+    1
+    0))
 
 (pub fn (tyCompat tc a0 b0)
   ; RESOLVE FIRST - a placeholder pinned by an earlier comparison must be read as what it was pinned TO
@@ -1341,17 +1354,7 @@
                 (if (== (vecLen (nodeBVec a)) (vecLen (nodeBVec b)))
                   (if (strEq (nodeAName a) (nodeAName b))
                     (tyCompatVec tc (nodeBVec a) (nodeBVec b) 0)
-                    ; Different spellings of what may be one declaration:
-                    ; a qualified reference spells what its declaration
-                    ; carries, a bare one spells what its module wrote, and
-                    ; string equality cannot see they meet. Resolve both
-                    ; and compare declarations, so `Err$Result` meets bare
-                    ; `Result` wherever a bare name and a qualified one
-                    ; name the same type - and nothing else changes, since
-                    ; different declarations still answer 0 below.
-                    (if (== (tySameDecl tc a b) 1)
-                      (tyCompatVec tc (nodeBVec a) (nodeBVec b) 0)
-                      0))
+                    0)
                   0)
                 (if (&& (== ta TAG_T_ARR) (== tb TAG_T_ARR))
                   (if (== (tyCompat tc (nodeA a) (nodeA b)) 1)
@@ -1387,12 +1390,7 @@
 
 (pub :: tySubtypeDeclByName (-> Int String Int Int Int))
 (pub fn (tySubtypeDeclByName tc n i lim)
-  (if (>= i lim)
-    0
-    (let ((d (vecGet (tcSubtypesVec tc) i)))
-      (if (strEq (nodeAName d) n)
-        d
-        (tySubtypeDeclByName tc n (+ i 1) lim)))))
+  (tyFindAnyVis tc TY_SUBTYPE n))
 
 ; Look up a type name in the subtype table and return its base type,
 ; or 0 when the name is not a subtype.
@@ -1446,7 +1444,7 @@
         (let ((actDecl (tySubtypeDecl tc actual)))
           (if (!= expDecl 0)
             (if (!= actDecl 0)
-              (if (strEq (nodeAName expDecl) (nodeAName actDecl))
+              (if (== expDecl actDecl)
                 1
                 (let (
                   (expBase (nodeB expDecl))
@@ -1850,42 +1848,16 @@
           0)))))
 
 (pub :: evDataTyKnown (-> Int String Int))
-;@axiom:effect(unsafe)
-(pub fn (evDataTyKnown tc n)
-  (let (
-    (ds (tcDatasVec tc))
-    (mut i 0)
-    (mut found 0)
-  )
-    {
-      (while (< i (vecLen ds))
-        {
-          (if (strEq (memGetWordStr (vecGet ds i) 0) n)
-            (set found 1))
-          (set i (+ i 1))
-        })
-      (if (== found 1)
-        1
-        (let (
-          (ss (tcStructsVec tc))
-          (mut j 0)
-          (mut sf 0)
-        )
-          {
-            (while (< j (vecLen ss))
-              {
-                (if (strEq (as (memGetWord (vecGet ss j) 0) String) n)
-                  (set sf 1))
-                (set j (+ j 1))
-              })
-            sf
-          }))
-    }))
+(pub fn (evDataTyKnown tc name)
+  (if (|| (!= (findDataAnyVis tc name) 0) (!= (findStructAnyVis tc name) 0))
+    1
+    0))
 
 ; Classify one witness type: 0 scalar-or-unknowable, 1 reference,
-; 2+k the enclosing signature's own variable k. The 0 default is the
-; safe direction everywhere - a missed bit under-reclaims, a wrong
-; bit is a use-after-free.
+; 2+k the enclosing signature's own variable k. Unknown types carry
+; no reference bit. A known nominal reference must retain its bit
+; through qualified names and private signatures; losing it can free
+; a value still stored in a generic container.
 ; The witness for "this lifted lambda's own argument", read at run time
 ; out of the evidence word its APPLICATION passes. It is a code in the
 ; same small-int space as the others - 0 not a reference, 1 a
@@ -4345,6 +4317,7 @@
           ; unexpanded spelling - which is the shape of the defect this
           ; fixes, one level up. Expanding before collection means there
           ; is no second reader to keep in step.
+          (tcIndexTypeDecls tc allDecls 0)
           (tcCollectAliasDecls tc allDecls 0)
           (tcCheckAliasDecls tc allDecls 0)
           (tcCheckAliasCycles tc allDecls 0)
@@ -4915,9 +4888,10 @@
           0
           vecNew) Int)))
 
-; Every item in an `extern` block, and the `Mod$name` spelling too when
-; the block came from an imported module - the same double registration
-; `tcCollectEffectOps` does, for the same reason.
+; An imported item has one checker identity, `Mod$name`, like an
+; ordinary imported function. Bare references resolve through the module
+; view. Registering a second bare entry loses declaration provenance
+; when several modules export the same name.
 (pub :: tcCollectExternItems (-> Int (Vec Int) Int String Int))
 (pub fn (tcCollectExternItems tc fields i modName)
   (if (== (as fields Int) 0)
@@ -4926,8 +4900,8 @@
       0
       (let ((f (vecGet fields i)))
         {
-          (tcAddExtern tc (nodeAName f) (nodeB f))
-          (if (! (== (as modName Int) 0))
+          (if (== (as modName Int) 0)
+            (tcAddExtern tc (nodeAName f) (nodeB f))
             (tcAddExtern tc (concat (concat (as modName String) "$") (nodeAName f)) (nodeB f)))
           (tcCollectExternItems tc fields (+ i 1) modName)
         }))))
@@ -4988,7 +4962,7 @@
       {
         (tvNamesToNodes tvs tvNodes 0)
         (let (
-          (resTy (mkTCon (nodeAName d) tvNodes))
+          (resTy (mkTCon (nominalName (nodeAName d) (nodeModule d)) tvNodes))
           (ctors vecNew)
         )
           {
@@ -5813,100 +5787,18 @@
 ; ------------------------------------------------------------------
 ; THE TYPE NAMESPACE, AND ITS INDEX.
 ;
-; A type name resolves through ONE table from here on, and the table
-; is a hash index rather than a scan. Both halves of that sentence are
-; one change on purpose; the rest of this comment is why.
+; Type names resolve through a bucketed namespace index. A reference
+; chooses its own module's declaration, then an entry-file declaration,
+; then a unique visible imported declaration. Ambiguous references are
+; refused before expansion can erase their spelling.
 ;
-; WHAT WAS WRONG. `mangleDecl` (self_host/namespace.ax) rewrites `fn`
-; and `::` declarations to `Mod$name` and rewrites nothing else, so
-; `data`, `struct` and `type` names arrive in the merged declaration
-; list spelled exactly as their module wrote them. The four lookups
-; this section replaces - `findStructFrom`, `findDataFrom`,
-; `findCtorFrom`, `tcAliasFindFrom` - were linear scans of that list
-; that returned the FIRST match, and the list is ordered
-; dependencies-first by import order. So two modules that each declare
-; `Config` had one winner for the whole program, decided by which
-; `(import ...)` line came first, and the loser's own body was checked
-; and emitted against the winner's field offsets:
+; Checked data, struct and subtype names include their declaring module.
+; Canonical names survive generic instantiation, substitution, alias
+; expansion and all type cloning. Comparing names therefore compares
+; declarations rather than whichever type the caller's scope selects.
 ;
-;   TeamA.ax  (pub struct Config (port : Int) (retries : Int))
-;   TeamB.ax  (pub struct Config (retries : Int) (port : Int))
-;             (pub fn (bPort) (let ((c (Config 3 99))) c.port))
-;   app.ax    (import TeamA) (import TeamB) (fn (main) (bPort))
-;
-; `check` said OK, the program ran, and `bPort` answered 3 - TeamA's
-; slot 0 - where TeamB's own declaration says 99. Swapping the two
-; imports answered 99. No diagnostic from any pass, at any level.
-; `tests/selfhost/402`..`405` and `scripts/check-type-namespace.sh`
-; pin it.
-;
-; THE RULE NOW, which is the one the VALUE namespace already applies
-; through `mangledFor`, `findFnEnt` and `checkAmbiguous`:
-;
-;   a. a declaration in the REFERENCING module wins;
-;   b. otherwise a module-less declaration - the entry file, or a
-;      builtin like `Option` - wins;
-;   c. otherwise, if exactly one module declares the name, that one;
-;   d. otherwise the reference is refused, naming every module that
-;      declares it (AX3044).
-;
-; LOOKUP-SIDE, NOT RENAME-SIDE, and this was the decision to argue.
-; The obvious alternative is to teach `mangleDecl` to rewrite type
-; declarations to `Mod$Name` the way it rewrites functions. Against
-; it, measured:
-;
-;   * The parser cannot express the escape. `parseTypeAtom`
-;     (parser.ax) has no `::` arm at all - a capitalised name becomes
-;     `mkTCon s vecNew` and `(:: f (-> M::Config Int))` is AX2001,
-;     `expected type, found ::`. Renaming declarations to a spelling
-;     no reference can be written in means the ONLY way to name a type
-;     is the bare form, which is exactly the form the rename was
-;     supposed to disambiguate. A rename therefore drags a parser
-;     change, a `tyCompat` change (its TAG_T_CON arm is bare `strEq`)
-;     and a `checkStructConAt` change (`mkTCon (bareOf ...)` throws the
-;     module away again) behind it.
-;   * The entries ALREADY carry their declaring module - `StructEnt`
-;     and `DataEnt` word 2, and an alias node's word 8 - so the module
-;     identity a rename would encode into the string is already beside
-;     the name, unread. `declMatches` already checks it for a
-;     QUALIFIED reference. The only thing missing was asking.
-;   * The emitter is already namespace-capable: `addQualified`
-;     (codegen.ax) registers a `Mod$Name` alias for every imported
-;     struct and constructor, and `stampFieldStruct` already writes
-;     `Mod$Name` into the field-access node the emitter reads. Nothing
-;     downstream needed the declaration renamed; it needed the checker
-;     to pick the right one and stamp it.
-;   * Blast radius: a rename moves every AXSYM golden, every
-;     diagnostic that prints a type name, and the emitted symbol
-;     names. This change moves none of them.
-;
-; What lookup-side does NOT fix, and is recorded rather than hidden:
-; `tyCompat`'s TAG_T_CON arm is still `strEq` on the bare name, so
-; TeamA's `Config` and TeamB's `Config` are still the same type TO THE
-; UNIFIER. Passing one where the other is expected is not refused. It
-; cannot be reached without a bare reference from a third place, which
-; is now AX3044 - but the unifier is not what refuses it, and closing
-; that needs the parser work above.
-;
-; WHY THE INDEX IS IN THE SAME CHANGE. Rules (a)-(d) cannot exit on
-; the first match: deciding that a name is unambiguous means looking
-; at every declaration of it. On the old linear list that turns an
-; early-exit scan (average half the table) into a full scan of the
-; whole program's types, at every type reference - a straight
-; regression of the compile-time ceiling, paid on every program
-; including the ones with no collision at all. Bucketed by bare name,
-; "every declaration of this name" is the bucket, which is one entry
-; for all 46 type declarations in this repository. Measured on
-; `check self_host/main.ax`: 0.49s before, 0.49s after. Measured on a
-; program whose type table is twice the size with the same number of
-; references (`scripts/check-type-namespace.sh`, the scale half):
-; 1.45x before, ~1.00x after.
-;
-; The index carries CONSTRUCTORS too, which were the worst of the four
-; - `findCtorFrom` scanned every `data` and, inside each, every
-; constructor, so its cost was the program's total constructor count
-; per reference.
-; ------------------------------------------------------------------
+; Constructors and field accesses retain the resolved declaration for
+; codegen, whose registry contains matching qualified entries.
 ; The four things a name can be bound to in this table. `TY_ANY` is
 ; not a kind an entry carries - it is the QUESTION a `TAG_T_CON` asks,
 ; "anything a type annotation may name", which is the three declared
@@ -5937,6 +5829,68 @@
 (pub :: TY_SUBTYPE Int)
 (pub fn (TY_SUBTYPE)
   5)
+
+; Source declarations resolve nominal identity before fields and aliases
+; are expanded. They do not participate in ordinary type lookups.
+(:: TY_DECL Int)
+(fn (TY_DECL)
+  6)
+
+(:: tcIndexTypeDecls (-> Int (Vec Int) Int Int))
+(fn (tcIndexTypeDecls tc decls i)
+  (if (>= i (vecLen decls))
+    0
+    {
+      (let ((d (vecGet decls i)))
+        (if (== (declNamespace (nodeTag d)) NS_TYPE)
+          (tyIdxPut tc (nodeAName d) TY_DECL (nodeModule d) d 0)))
+      (tcIndexTypeDecls tc decls (+ i 1))
+    }))
+
+; A checked nominal name includes its declaring module. Every type
+; transformation keeps this string, so substitution and instantiation
+; cannot resolve an imported type again in a caller's namespace.
+(:: nominalName (-> String Int String))
+;@axiom:effect(unsafe)
+(fn (nominalName name owner)
+  (if (== owner 0)
+    (bareOf name)
+    (concat (as owner String) (concat "$" (bareOf name)))))
+
+(:: tyNominalName (-> Int String String))
+(fn (tyNominalName tc name)
+  (if (|| (!= (as (typeKeywordCanon name) Int) 0) (!= (modOf name) 0))
+    name
+    (if (== (tySourceAmbiguous tc name) 1)
+      name
+      (let ((d (tyCanonicalDecl tc name)))
+        (if (|| (== d 0) (== (nodeTag d) TAG_D_ALIAS))
+          name
+          (nominalName (nodeAName d) (nodeModule d)))))))
+
+; Public signatures can expose an opaque private type. When no visible
+; declaration owns a written name, preserve the identity of a unique
+; private declaration too. Several private candidates remain unresolved.
+(:: tyCanonicalDecl (-> Int String Int))
+(fn (tyCanonicalDecl tc name)
+  (let ((visible (tyFind tc TY_DECL name 0)))
+    (if (!= visible 0)
+      visible
+      (let (
+        (first (tyFindAnyVisFrom tc TY_DECL name 0))
+        (last (tyFindAnyVisFrom tc TY_DECL name 1))
+      )
+        (if (== first last)
+          first
+          0)))))
+
+(:: tySourceAmbiguous (-> Int String Int))
+(fn (tySourceAmbiguous tc name)
+  (if (|| (!= (modOf name) 0) (== (tyMultiDecl tc TY_DECL name) 0))
+    0
+    (if (>= (vecLen (tyAmbigMods tc TY_DECL name)) 2)
+      1
+      0)))
 
 ; `module` is the module that DECLARED it, 0 for the entry file and
 ; for builtins. `ent` is what the lookup answers - a `StructEnt`, a
@@ -6037,7 +5991,7 @@
 (pub :: tyEntMatches (-> Int Int String Int))
 (pub fn (tyEntMatches te kind ref)
   (if (== kind TY_ANY)
-    (if (== (memGetWord te 1) TY_CTOR)
+    (if (|| (== (memGetWord te 1) TY_CTOR) (== (memGetWord te 1) TY_DECL))
       0
       (declMatches (memGetWord te 2) (memGetWordStr te 0) ref))
     (if (!= (memGetWord te 1) kind)
@@ -6415,8 +6369,12 @@
 ; `tyFind` is - the referencing module's own, then a module-less one,
 ; then any - with no privacy set.
 (pub :: tyFindAnyVis (-> Int Int String Int))
-;@axiom:effect(unsafe)
 (pub fn (tyFindAnyVis tc kind name)
+  (tyFindAnyVisFrom tc kind name 0))
+
+(:: tyFindAnyVisFrom (-> Int Int String Int Int))
+;@axiom:effect(unsafe)
+(fn (tyFindAnyVisFrom tc kind name last)
   (let ((v (tyIdxBucket tc name)))
     (if (== (as v Int) 0)
       0
@@ -6426,14 +6384,14 @@
       )
         (let ((te
           (if (!= (modOf name) 0)
-            (tyPick v kind name none curMod 0 0)
-            (let ((own (tyPick v kind name none curMod 0 1)))
+            (tyPick v kind name none curMod last 0)
+            (let ((own (tyPick v kind name none curMod last 1)))
               (if (!= own 0)
                 own
-                (let ((glob (tyPick v kind name none curMod 0 2)))
+                (let ((glob (tyPick v kind name none curMod last 2)))
                   (if (!= glob 0)
                     glob
-                    (tyPick v kind name none curMod 0 0))))))))
+                    (tyPick v kind name none curMod last 0))))))))
           (if (== te 0)
             0
             (memGetWord te 3)))))))
@@ -7052,7 +7010,9 @@
     0
     (let ((tg (nodeTag t)))
       (if (== tg TAG_T_CON)
-        (if (!= (tcAliasFind tc (nodeAName t)) 0)
+        (if (||
+              (!= (tcAliasFind tc (nodeAName t)) 0)
+              (! (strEq (tyNominalName tc (nodeAName t)) (nodeAName t))))
           1
           (tyHasAliasConVec tc (nodeBVec t) 0))
         (if (== tg TAG_T_ARR)
@@ -7090,10 +7050,12 @@
       (if (== tg TAG_T_CON)
         (let (
           (args (tyExpandAliasPathVec tc (nodeBVec t) seen vecNew 0))
-          (al (tcAliasFind tc (nodeAName t)))
+          (al (if (== (tySourceAmbiguous tc (nodeAName t)) 1)
+            0
+            (tcAliasFind tc (nodeAName t))))
         )
           (if (== al 0)
-            (mkTCon (nodeAName t) args)
+            (mkTCon (tyNominalName tc (nodeAName t)) args)
             (if (|| (== (aliasPathHas seen al 0) 1) (!= (vecLen args) (aliasParamCount al)))
               mkTErr
               (let (
@@ -7493,7 +7455,7 @@
                     "type-argument-arity"
                     span
                     (concat
-                      (concat "type `" (concat (nodeAName t) "` takes "))
+                      (concat "type `" (concat (srcSpelling (nodeAName t)) "` takes "))
                       (concat
                         (fmtInt arity)
                         (concat " type argument(s), found " (fmtInt (vecLen (nodeBVec t))))))
@@ -7731,10 +7693,27 @@
             (if (== tg TAG_D_STRUCT)
               (tcExpandFieldAliasesOf tc (nodeBVec d) 0)
               (if (== tg TAG_D_DATA)
-                (tcExpandCtorAliases tc (nodeBVec d) 0)))
+                (tcExpandCtorAliases tc (nodeBVec d) 0)
+                (if (== tg TAG_D_SUBTYPE)
+                  (memSetWord d 2 (tyExpandAliases tc (nodeB d) 0))
+                  (if (== tg TAG_D_EFFECT)
+                    (tcResolveOperationTypes tc (nodeCVec d) 0)))))
             (memSetWord tc 16 0)
           }))
       (tcExpandFieldAliases tc decls (+ i 1))
+    }))
+
+; An operation's inline arrow lives in its field's b slot. Resolve it
+; before the operation becomes a callable entry, in the effect module.
+(:: tcResolveOperationTypes (-> Int (Vec Int) Int Int))
+(fn (tcResolveOperationTypes tc fields i)
+  (if (|| (== (as fields Int) 0) (>= i (vecLen fields)))
+    0
+    {
+      (let ((field (vecGet fields i)))
+        (if (!= (nodeB field) 0)
+          (memSetWord field 2 (tyExpandAliases tc (nodeB field) 0))))
+      (tcResolveOperationTypes tc fields (+ i 1))
     }))
 
 (pub :: tcExpandCtorAliases (-> Int (Vec Int) Int Int))
@@ -9360,7 +9339,11 @@
     {
       (tyVarsInto want names)
       (tyVarsInto got names)
-      (emitMismatch tc (tyRenderIn want names) (tyRenderIn got names) span)
+      (emitMismatch
+        tc
+        (tyRenderScoped want names (memGetWord tc 16))
+        (tyRenderScoped got names (memGetWord tc 16))
+        span)
     }))
 
 (pub :: emitMismatch (-> Int String String Int Int))
@@ -9633,13 +9616,17 @@
           "assign-to-immutable"
           tspan
           (concat
-            (concat (concat (concat "cannot assign to field `" fname) "` of `") tyname)
+            (concat
+              (concat (concat "cannot assign to field `" fname) "` of `")
+              (srcSpelling tyname))
             "`: the field is not declared `mut`")
           0
           0
           (concat
             (concat
-              (concat (concat "declare it mutable where `" tyname) "` is defined: `(mut ")
+              (concat
+                (concat "declare it mutable where `" (srcSpelling tyname))
+                "` is defined: `(mut ")
               fname)
             (concat (concat " : " fty) ")`"))
           "a struct field is immutable unless its declaration marks it `mut`, the rule `let` already follows; until 0.6.0 the marker was parsed and discarded and this store compiled in silence")
@@ -10710,6 +10697,15 @@
 ; are registered directly into the tables and never pass through a
 ; declaration list, so without the check two imports defining a
 ; `None` constructor would make the BUILTIN spelling ambiguous.
+(:: ownCtor (-> Int String Int))
+(fn (ownCtor tc name)
+  (let ((ctor (findCtor tc name)))
+    (if (== ctor 0)
+      0
+      (if (== (typeModuleSame (modOf (nodeAName (memGetWord ctor 2))) (memGetWord tc 16)) 1)
+        ctor
+        0))))
+
 (pub :: checkAmbiguous (-> Int String Int Int))
 (pub fn (checkAmbiguous tc name span)
   ; A QUALIFIED reference names one module, so it cannot be
@@ -10722,7 +10718,7 @@
   ; name list and two `fmtInt`/`die` pairs are still duplicated by
   ; hand.
   (let ((mods (definingModules tc (bareOf name))))
-    (if (!= (modOf name) 0)
+    (if (|| (!= (modOf name) 0) (!= (ownCtor tc name) 0))
       0
       (if (< (vecLen mods) 2)
         0
@@ -11043,7 +11039,10 @@
                   0)))
                 (if (== refused 1)
                   (mkNode TAG_T_ERR 0 0 0)
-                  (let ((ent (findFnEnt tc name)))
+                  (let ((ent
+                    (if (!= (ownCtor tc name) 0)
+                      0
+                      (findFnEnt tc name))))
                     (if (!= ent 0)
                       {
                         (warnDeprecated tc name (nodeSpan e))
@@ -11061,7 +11060,10 @@
                       }
                       (let ((ctor (findCtor tc name)))
                         (if (!= ctor 0)
-                          (tyInstStamped tc (memGetWord ctor 3) e)
+                          {
+                            (memSetWord e 1 (ctorResolvedName ctor))
+                            (tyInstStamped tc (memGetWord ctor 3) e)
+                          }
                           ; `format#` AS A CALL HEAD is the
                           ; builtin's (`showBuiltin`), which has
                           ; already rewritten it or reported on it
@@ -15201,7 +15203,10 @@
       (mkNode TAG_T_ERR 0 0 0)
     }
     (let ((args (spineArgVec e vecNew)))
-      (wordLowerIfWord tc ent e args (checkStructConAt tc args (spanOf e) ent)))))
+      {
+        (memSetWord (spineHead e) 1 (nominalName (memGetWordStr ent 0) (memGetWord ent 2)))
+        (wordLowerIfWord tc ent e args (checkStructConAt tc args (spanOf e) ent))
+      })))
 
 ; A word struct's construction, once it checks, is recorded for the
 ; lowering (`wordLowerRecord`): the site becomes its one argument.
@@ -15257,7 +15262,7 @@
           (if (|| (== (as tvs Int) 0) (== (vecLen tvs) 0))
             {
               (checkStructFields tc args fields 0)
-              (mkTCon (bareOf (memGetWordStr ent 0)) vecNew)
+              (mkTCon (nominalName (memGetWordStr ent 0) (memGetWord ent 2)) vecNew)
             }
             ; PARAMETERISED. The declared field types mention the
             ; struct's variables, which are SOURCE variables and
@@ -15281,7 +15286,7 @@
                 {
                   (checkStructFieldsInst tc args insts 0)
                   (mkTCon
-                    (bareOf (memGetWordStr ent 0))
+                    (nominalName (memGetWordStr ent 0) (memGetWord ent 2))
                     (structPinArgs tc args insts (structTvNodes env tvs vecNew 0) vecNew 0))
                 }))))))))
 
@@ -15345,7 +15350,11 @@
 ; `pairCtorNamed`'s four spellings.
 (pub :: tcPairCtorNamed (-> String Int))
 (pub fn (tcPairCtorNamed n)
-  (if (|| (strEq n "None") (|| (strEq n "Some") (|| (strEq n "Ok") (strEq n "Err"))))
+  (if (||
+        (strEq n "None")
+        (||
+          (strEq n "Some")
+          (|| (strEq n "Ok") (|| (strEq n "Err") (|| (strEq n "Err$Ok") (strEq n "Err$Err"))))))
     1
     0))
 
@@ -15384,12 +15393,12 @@
                       (strEq n "String")
                       (|| (strEq n "Option") (|| (strEq n "Handle") (strEq n "Vec"))))
                   2
-                  (if (!= (findData tc n) 0)
+                  (if (!= (findDataAnyVis tc n) 0)
                     2
                     ; A word struct is codegen's scalar too (`fldClass`).
                     (if (== (tcWordTyName tc n) 1)
                       0
-                      (if (!= (findStruct tc n) 0)
+                      (if (!= (findStructAnyVis tc n) 0)
                         2
                         1))))))
             1))))))
@@ -15421,7 +15430,7 @@
             (if (== (vecLen args) 1)
               (tcPairArgClassOK tc (vecGet args 0))
               0)
-            (if (strEq tn "Result")
+            (if (|| (strEq tn "Result") (strEq tn "Err$Result"))
               (if (== (vecLen args) 2)
                 (if (== (tcPairArgClassOK tc (vecGet args 0)) 1)
                   (tcPairArgClassOK tc (vecGet args 1))
@@ -20042,8 +20051,10 @@
                               ; reads the data field it resolved here
                               ; (`resolveStructField`).
                               {
-                                (setNodeTy e (as "" Int))
-                                agreed
+                                (stampFieldData e dent)
+                                (tyEnvSubst
+                                  agreed
+                                  (ctorPatEnv (memGetWord (vecGet ctors 0) 2) baseTy vecNew))
                               })))))
                     (let ((dty (dataFieldTy tc (nodeBName e))))
                       (if (!= dty 0)
@@ -20095,6 +20106,16 @@
       (as (if (== m 0)
         name
         (concat (concat (memGetWordStr ent 2) "$") name)) Int))))
+
+; Every constructor agrees on the field's slot and type here. Keeping
+; one resolved constructor key lets the emitter use that declaration
+; even when another module defines the same field or constructor name.
+(:: stampFieldData (-> Int Int Int))
+(fn (stampFieldData e dent)
+  {
+    (setNodeTy e (as "" Int))
+    (setNodeBinderTy e (as (ctorResolvedName (vecGet (memGetWordVec dent 1) 0)) Int))
+  })
 
 ; The type of a named constructor field, searching every data type in
 ; declaration order, or 0. Mirrors stage0's `find_data_field_by_name`.
@@ -20197,7 +20218,9 @@
           "unsafe-field-access"
           span
           (concat
-            (concat (concat (concat "field access `." fname) "` is unsafe on `") tyname)
+            (concat
+              (concat (concat "field access `." fname) "` is unsafe on `")
+              (srcSpelling tyname))
             "`: the type has a nullary constructor, so a value may be an immediate tag with no fields to read")
           0
           0
@@ -20224,7 +20247,9 @@
           "unsafe-field-access"
           span
           (concat
-            (concat (concat (concat "field access `." fname) "` is unsafe on `") tyname)
+            (concat
+              (concat (concat "field access `." fname) "` is unsafe on `")
+              (srcSpelling tyname))
             "`: not every constructor declares that field, so a value built by another constructor has no such word to read")
           0
           0
@@ -20280,11 +20305,17 @@
             "AX3007"
             "field-not-found"
             span
-            (concat (concat (concat (concat "field `" fname) "` not found on type `") tyName) "`")
+            (concat
+              (concat
+                (concat (concat "field `" fname) "` not found on type `")
+                (srcSpelling tyName))
+              "`")
             0
             0
-            (concat (concat "check the field name and the definition of `" tyName) "`"))
-          (concat (concat (concat (concat "no field `" fname) "` on `") tyName) "`")))
+            (concat
+              (concat "check the field name and the definition of `" (srcSpelling tyName))
+              "`"))
+          (concat (concat (concat (concat "no field `" fname) "` on `") (srcSpelling tyName)) "`")))
       0
     }))
 
@@ -22163,18 +22194,24 @@
     (if (== tag TAG_E_STR)
       (checkLitPatternTy tc mkStringTy fitTy (nodeSpan pat))
       (if (== tag TAG_P_CON0)
-        (checkCtorPattern tc (nodeAName pat) vecNew (nodeSpan pat) fitTy scrutTy)
+        {
+          (stampCtorName tc pat)
+          (checkCtorPattern tc (nodeAName pat) vecNew (nodeSpan pat) fitTy scrutTy)
+        }
         (if (== tag TAG_E_APP)
           (let ((head (spineHead pat)))
             (if (!= (nodeTag head) TAG_E_VAR)
               0
-              (checkCtorPattern
-                tc
-                (nodeAName head)
-                (spineArgVec pat vecNew)
-                (nodeSpan head)
-                fitTy
-                scrutTy)))
+              {
+                (stampCtorName tc head)
+                (checkCtorPattern
+                  tc
+                  (nodeAName head)
+                  (spineArgVec pat vecNew)
+                  (nodeSpan head)
+                  fitTy
+                  scrutTy)
+              }))
           ; A NAMED constructor pattern. Every field it mentions must be one
           ; the constructor declares - a miss is AX3007, anchored at the
           ; FIELD NAME, which is why the parser keeps each name as a spanned
@@ -22185,7 +22222,10 @@
           ; There is deliberately no arity check: stage0 fills an omitted
           ; field with a wildcard, so a partial named pattern is legal.
           (if (== tag TAG_P_CONNAMED)
-            (let ((ctor (findCtor tc (nodeAName pat))))
+            (let (
+              (_resolved (stampCtorName tc pat))
+              (ctor (findCtor tc (nodeAName pat)))
+            )
               (if (== ctor 0)
                 (checkCtorPattern tc (nodeAName pat) vecNew (nodeSpan pat) fitTy scrutTy)
                 (let ((declared (memGetWordVec ctor 4)))
@@ -22270,9 +22310,8 @@
 ; does not: inside `(:: g (-> a Int))` the parameter stands for one
 ; unknown type, and `(match v ((Red) 1))` claims it is `Color`. A
 ; known constructor type with a different name does not either, and
-; nor does an arrow, a tuple or a pointer. An alias name left
-; unexpanded (a cyclic one stops at the depth cap) stays nominal and
-; is not refused.
+; nor does an arrow, a tuple or a pointer. Checked aliases have
+; already resolved to their target declaration.
 (pub :: ctorPatFits (-> Int Int Int Int))
 (pub fn (ctorPatFits tc resTy scrutTy)
   (if (|| (== scrutTy 0) (== resTy 0))
@@ -22287,16 +22326,7 @@
           (if (!= (nodeTag resTy) TAG_T_CON)
             1
             (if (== st TAG_T_CON)
-              (if (strEq (nodeAName scrutTy) (nodeAName resTy))
-                1
-                (if (!= (tcAliasFind tc (nodeAName scrutTy)) 0)
-                  1
-                  ; different spellings of one declaration: a qualified
-                  ; scrutinee against bare constructor patterns, or the
-                  ; reverse. Resolved, never spelled-around.
-                  (if (== (tySameDecl tc scrutTy resTy) 1)
-                    1
-                    0)))
+              (tySameDecl tc scrutTy resTy)
               0)))))))
 
 ; Each field the pattern names must be declared. AX3007's message and
@@ -22325,6 +22355,20 @@
 ; (the QA sweep's tyvar-shaped sibling of MM-VAL-9b). A clash is
 ; AX3004 at the constructor's name, expected the constructor's type;
 ; the arguments are still bound so the arm's body checks once.
+; Constructor references and patterns retain the same resolved declaration
+; the checker used. The emitter's qualified registry entries carry its
+; tag, field offsets, Float flags and ownership map.
+(:: ctorResolvedName (-> Int String))
+(fn (ctorResolvedName ctor)
+  (nominalName (memGetWordStr ctor 0) (modOf (nodeAName (memGetWord ctor 2)))))
+
+(:: stampCtorName (-> Int Int Int))
+(fn (stampCtorName tc node)
+  (let ((ctor (findCtor tc (nodeAName node))))
+    (if (== ctor 0)
+      0
+      (memSetWord node 1 (ctorResolvedName ctor)))))
+
 (pub :: checkCtorPattern (-> Int String (Vec Int) Int Int Int Int))
 (pub fn (checkCtorPattern tc cname args span scrutTy envTy)
   (let ((ctor (findCtor tc cname)))

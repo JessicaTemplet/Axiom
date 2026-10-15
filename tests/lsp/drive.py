@@ -174,6 +174,19 @@ def canonicalise(out, real_uri):
             break
         n = int(cl[0].split(":")[1])
         body = out[j + 4:j + 4 + n].replace(real_uri.encode(), DOC_URI.encode())
+        # Import help contains the actual search roots. Their content is
+        # checked against terminal diagnostics below; only the roots are
+        # normalised for a portable byte golden.
+        decoded = json.loads(body)
+        if decoded.get("method") == "textDocument/publishDiagnostics":
+            for diagnostic in decoded["params"]["diagnostics"]:
+                message = diagnostic.get("message", "")
+                if diagnostic.get("code") == "AX5001" and "help: looked for " in message:
+                    prefix, separator, search = message.partition("\n\nhelp: looked for ")
+                    assert separator and search, message
+                    portable = prefix + "\n\nhelp: <module search>"
+                    encoded = lambda value: json.dumps(value, ensure_ascii=False).encode()
+                    body = body.replace(encoded(message), encoded(portable))
         out_parts.append(b"Content-Length: " + str(len(body)).encode()
                          + b"\r\n\r\n" + body)
         i = j + 4 + n
@@ -6781,6 +6794,12 @@ for fx in fixtures:
                         f"{label!r} at the caret and the editor's message does "
                         f"not carry it: {e.get('message')!r}")
                 break
+        for help_text in t.get("help") or []:
+            if help_text not in (e.get("message") or ""):
+                dwhy = (f"{fx}: {t.get('code')} omitted terminal help {help_text!r}")
+                break
+        if dwhy:
+            break
         want = [{"location": {"uri": uri,
                               "range": {"start": char_pos(text, r["span"]["char_start"]),
                                         "end": char_pos(text, r["span"]["char_end"])}},

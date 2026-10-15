@@ -93,8 +93,8 @@ integrator would still need.
 | Fixed-width signed and unsigned integers through 64 bits, with explicit casts and width-correct operators | Done | `tests/stdlib/948-fixed-width-integers.ax`, `tests/stdlib/949-fixed-width-alias-callback.ax` |
 | Wider integer literals, widths beyond 64 bits and checked fixed-width FFI shims | Planned | |
 | Transparent type aliases support parameters, simultaneous substitution and finite expansion | Done | `tests/stdlib/946-generic-aliases.ax`, `tests/diagnostics/1420-generic-alias-arity.ax`, `tests/diagnostics/1421-generic-alias-parameters.axbad`, `tests/diagnostics/1422-recursive-alias.ax` |
-| Generic bodies are checked for their declared types; each call constrains repeated parameters independently | Done | `tests/diagnostics/1423-generic-rigidity.ax` |
-| Distinguish homonymous nominal types across module boundaries | Planned | |
+| Generic bodies are checked for their declared types; each call constrains repeated parameters independently | In progress | `tests/diagnostics/1423-generic-rigidity.ax`, `tests/diagnostics/1439-nominal-generic-results.ax` |
+| Distinguish homonymous nominal types across module boundaries | Done | `tests/stdlib/954-nominal-identity.ax`, `tests/diagnostics/1438-nominal-module-boundaries.ax` |
 | Numeric conversions are explicit; mixed numeric operands and incompatible ADT parameters are refused | Done | `tests/diagnostics/1117-mixed-numeric-operands.ax`, `tests/diagnostics/1410-explicit-numeric-boundaries.ax` |
 | Explicit numeric conversions document rounding and range; exact conversions refuse value loss | Done | `tests/stdlib/947-exact-numeric-conversions.ax` |
 | Legacy CLI and syntax removed: `axiom FILE`, expression `fn`, keyword struct construction, format aliases | Done | `compat/BREAKING` |
@@ -106,7 +106,6 @@ integrator would still need.
 | A unit type with a value, `()`, so an `if` without an else, a dropped branch and a procedure need no filler `0` | Done | `tests/stdlib/890-unit-and-if.ax`, `tests/stdlib/892-dropped-branches.ax` |
 | Explicit numeric conversion uses `(as value Type)`; bit reinterpretation has named Float operations | Done | `tests/stdlib/943-as-numeric.ax`, `tests/diagnostics/1411-as-boundaries.ax` |
 | Prefix pipelines evaluate each stage once, with explicit argument placement | Done | `tests/stdlib/945-pipelines.ax`, `tests/diagnostics/1430-pipeline-boundaries.ax` |
-| Functional piping as a structural form: a pipe the tree, the language server and agents see stage by stage, with an explicit `_` hole for where the value goes | Not started | |
 | One code-generation route: the MIR route is finished or removed | Not started | |
 
 Numeric values never widen or narrow implicitly. Expected types do not
@@ -164,12 +163,17 @@ ADT instantiation.
 | Debug information (DWARF), a message on SIGSEGV, and inlined frames in backtraces | Not started |
 | An assembler error inside an `asm` template is reported at the form | Done |
 | `asm` takes floating-point, vector and memory operands | Not started |
-| The restricted profile requires `nostack` of an allowed `asm` block, or counts what it pushes | Not started |
+| The restricted profile requires `nostack` on every selected arm of an allowed `asm` body | Done |
 | Selected steady and nonblocking entries are analysed transitively; stale or ambiguous assurance exceptions fail closed | Done |
+| Imported foreign items keep separate checker, source and linker identities when their source names match | Done |
+| Resource reports consume checked `Spawn` and `Block` effects, preserve handled effect subtraction and refuse unknown kernel calls in nonblocking entries | Done |
+| Stack reports cover every selected source entry and the assembled IRQ save and dispatch extent; additional machine roots cannot bypass main | Done |
+| Selective foreign-item imports and transitive foreign references preserve visibility and module resolution | Planned |
 | The test runner runs tests in parallel | Done |
 | UTF-16 ranged document edits apply in order and atomically, with monotonic versions and versioned diagnostics | Done |
 | The language server cancels obsolete work and serves requests from revisioned background analysis | Not started |
-| Unsaved imported documents feed a shared semantic cache, with dependency invalidation and workspace diagnostics | Not started |
+| Unsaved imported documents feed checks and navigation, with transitive dependency invalidation and diagnostics for open modules | Done |
+| Workspace semantic results are shared through a revision-keyed cache | Not started |
 | Completion uses expected types, offers auto-import edits and resolves expensive details on demand | Not started |
 | Safe assists organise top-level imports and preserve attached comments | Not started |
 | Semantic tokens support range and delta requests | Done |

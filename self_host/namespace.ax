@@ -305,23 +305,31 @@
         ; reached from the one direction the entry-file fixtures could
         ; not see, because `recordEntryFns` covers only the entry file.
         (if (== (nodeTag node) TAG_D_EXTERN)
-          (mangleExternItems (nodeCVec node) 0 idx bares fulls)
+          (mangleExternItems (nodeCVec node) 0 idx bares fulls modName)
           0)))))
 
 ; Record every item of an `extern` block: the Axiom name maps to the
 ; `(symbol "...")` clause the parser resolved. Visibility does not
 ; change the mapping - an unexported item is simply never referenced
 ; from outside, and recording it costs one entry.
-(pub :: mangleExternItems (-> (Vec Int) Int Int (Vec String) (Vec String) Int))
-(pub fn (mangleExternItems items i idx bares fulls)
+(pub :: mangleExternItems (-> (Vec Int) Int Int (Vec String) (Vec String) String Int))
+(pub fn (mangleExternItems items i idx bares fulls modName)
   (if (== (as items Int) 0)
     0
     (if (>= i (vecLen items))
       0
       {
         (let ((f (vecGet items i)))
-          (mangleRecord idx bares fulls (nodeAName f) (nodeCName f)))
-        (mangleExternItems items (+ i 1) idx bares fulls)
+          {
+            (mangleRecord idx bares fulls (nodeAName f) (nodeCName f))
+            ; Qualified Axiom identity and linker symbol are separate.
+            ; Module-local and explicitly qualified calls use this map
+            ; even when another declaration has won the bare spelling.
+            (vecPush bares (concat modName (concat "$" (nodeAName f))))
+            (vecPush fulls (nodeCName f))
+            0
+          })
+        (mangleExternItems items (+ i 1) idx bares fulls modName)
       })))
 
 ; The half of `mangleRecord` that a private declaration gets: the
