@@ -680,7 +680,6 @@ module.exports = grammar({
       $.type_variable,
       $.type_constructor,
       $.qualified_type,
-      $.region_type,
       $.function_type,
       $.list_type,
       $.tuple_type,
@@ -729,24 +728,8 @@ module.exports = grammar({
       // (`parseTypeParens` in self_host/parser.ax reads the head
       // through the same qualified tail as a bare atom).
       seq('(', field('name', choice($.constructor_identifier, $.qualified_type)), repeat(field('argument', $._type)),
-          optional(field('region', $.region_annotation)), ')'),
+          ')'),
     ),
-
-    // `(String @r)`, `(Vec Int @r)`, `(a @r)` - a REGION
-    // ANNOTATION is the last thing inside a type's parentheses
-    // (`parseTypeAtomsRgn` in self_host/parser.ax; stage S3 of
-    // docs/memory-model.md). On a constructor application it
-    // is the optional trailing field above; a keyword type or a type
-    // variable takes it through this rule, which is the one place the
-    // grammar admits a parenthesised variable - `(a @r)` is valid Axiom
-    // because the annotation is what the parentheses are for. `@` alone
-    // is still not a token: the compiler refuses it as AX1001.
-    region_type: $ => seq(
-      '(', field('type', choice($.builtin_type, $.type_variable, $.function_type, $.list_type)),
-      field('region', $.region_annotation), ')',
-    ),
-
-    region_annotation: _ => token(/@[a-z][A-Za-z0-9_']*/),
 
     // `(-> A B C)` - n-ary in the source, curried in the compiler.
     function_type: $ => seq('(', '->', repeat(field('operand', $._type)), ')'),

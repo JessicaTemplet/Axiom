@@ -97,7 +97,7 @@ handle.
 
 | Obligation | Enforcement | Evidence |
 |---|---|---|
-| A reference stays live across a reset or return | Region escape refusals `AX3059`–`AX3063`; traps 75 and 76 | `scripts/check-region-escape.sh` |
+| A reference stays live across a reset or return | Region escape refusals `AX3059`, `AX3060` and `AX3062`; traps 75 and 76 | `scripts/check-region-escape.sh` |
 | A cast preserves its type, ownership and lifetime | `MM-VAL-22` and `MM-VAL-23`; forging requires Unsafe | `scripts/check-cast-arg-root.sh` |
 | A container access stays within bounds | `vecGet` and `vecSet` trap 77 before access | `tests/stdlib/525-vec-set-bounds.ax` |
 | A handle is live and belongs to the right module | Sealed types and the runtime handle table; stale use traps 85 | `scripts/check-handles.sh` |
@@ -2693,38 +2693,34 @@ Evidence: [codegen.ax](../self_host/codegen.ax), `emitRegion` and
 with its unsafe-escape ablation and its no-region and two-region
 controls; [168-region.ax](../tests/stdlib/168-region.ax).
 
-**MM-RGN-2 (H). Region extents nest.** For lexical regions, an extent
-outlives itself and its descendants, and siblings are unordered. In a
-region-annotated signature, each distinct named region outlives the
-caller's current allocation region and its lexical descendants, but
-different named regions are unordered. This is the ordering the checker
-declares, not lifetime inference at run time. A signature can't promise
-a result region that no parameter supplies (`AX3063`). A `parallel`
-binding doesn't create a typed sibling region yet (`MM-RGN-7`).
+**MM-RGN-2 (H). Region extents nest.** An extent outlives itself and
+its lexical descendants; siblings are unordered. Reference origins
+are inferred from function bodies and resolved calls. The named
+signature-region clause is withdrawn: types carry no region names.
+A `parallel` binding does not create a typed sibling region yet
+(`MM-RGN-7`).
 
-Evidence: [typecheck.ax](../self_host/typecheck.ax), `rgnOutlives`,
-`rgnFormNestedIn`, and `rgnWalkFn` for the result region;
+Evidence: [typecheck.ax](../self_host/typecheck.ax), `rgnOutlives` and
+`rgnFormNestedIn`;
 [646-region-escape-return.ax](../tests/diagnostics/646-region-escape-return.ax)
-and [648-region-argument.ax](../tests/diagnostics/648-region-argument.ax),
-held by [check-region-escape.sh](../scripts/check-region-escape.sh).
+and [648-region-argument.ax](../tests/diagnostics/648-region-argument.ax).
 
 **MM-RGN-3 (H, within the tracked-origin domain). The escape rule.**
 A reference **MUST NOT** be stored into, returned into, or captured by
 an object whose region outlives any region that reference depends on.
-The checker enforces this with five refusals:
+The checker enforces this with three refusals:
 
 | Code | What it refuses |
 |---|---|
 | `AX3059` | a non-scalar value leaving a region as its result, or through a direct store to an outer binding |
 | `AX3060` | a store, including one made inside a callee |
-| `AX3061` | a return that doesn't match the declared result region |
 | `AX3062` | an escaping capture |
-| `AX3063` | region arguments that don't agree |
 
-`AX3059` is a scope check on the region form. The other four come
-from the region facts. The pass that reports them runs over function
-bodies when the program contains a region form or a region-annotated
-signature.
+`AX3059` is a scope check on the region form. `AX3060` and `AX3062`
+come from inferred region facts. Their reporting pass runs over function
+bodies when the program contains a region or recovery scope. The
+annotation-specific return and argument clauses are withdrawn; their
+diagnostic numbers, `AX3061` and `AX3063`, remain retired.
 
 Facts propagate through resolved calls to a fixpoint. An unresolved
 call may store arguments and fresh values into any argument or capture.
@@ -2739,7 +2735,7 @@ repeated-extent controls in `scripts/check-region-escape.sh`.
 
 The checker refuses unrepresentable origins and unconverged facts as
 `AX3060`. Each function can track 61 parameter and lexical-extent
-origins together. An annotation alone adds no extent origin. Split a
+origins together. Split a
 function that exceeds the capacity instead of relying on an incomplete
 lifetime proof.
 
@@ -2761,21 +2757,17 @@ The same gate covers callback captures and origin capacity, with
 the accepted [closure-local.ax](../tests/region/closure-local.ax).
 
 **MM-RGN-4 (H, amended from the design default). Origins are
-inferred, not invariant.** A function without region
-annotations allocates in its caller's current region. Its parameter and
-result origins come from the facts of its body, and they aren't forced
-to be identical. So reading an outer string inside a shorter region is
-legal, while a call that stores a fresh inner value into an outer
-container is refused. This replaces the design's proposal that every
-reference parameter and result be invariant. Region annotations add no
-runtime arguments and don't select another allocation arena.
+inferred, not invariant.** A function allocates in its caller's current
+region. Parameter and result origins come from its body facts, and
+need not be identical. Reading an outer string inside a shorter region
+is legal. A call storing a fresh inner value into an outer container
+is refused.
 
+The signature-region mechanism is withdrawn. Region names identify
+lexical scopes, and do not appear in types or add runtime arguments.
 A program with no region form emits no lexical-region mark cell.
-Annotations alone leave the emitted program unchanged, apart from
-source-location attribution. Evidence:
-[check-region-scope.sh](../scripts/check-region-scope.sh) and
-[check-region-escape.sh](../scripts/check-region-escape.sh), which
-compares its annotated fixture with a stripped twin.
+Evidence: [check-region-scope.sh](../scripts/check-region-scope.sh) and
+[check-region-escape.sh](../scripts/check-region-escape.sh).
 
 `restrict(no-escape)` reads the same facts. It claims that a function
 stores none of its fresh allocations into its parameters. It doesn't

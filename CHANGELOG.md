@@ -16,6 +16,14 @@ its changelog too.
 
 ## Unreleased
 
+- Removed `@r` signature region annotations and their parser, formatter
+  and editor support. Lexical `region` scopes and inferred escape checks
+  remain the memory-lifetime interface. `AX3061` and `AX3063` are retired;
+  lexical stores, return escapes, captures and conservative call checks
+  have regression coverage in `scripts/check-region-escape.sh`. Region
+  refusals carry concrete remedies and a related reclamation boundary
+  through both compiler diagnostics and the language server.
+
 - Numeric conversion policy follows explicit primitive conversions:
   expected types never insert conversions into calls, returns, assignments
   or ADT payloads. Regression cases cover both directions, generic ADTs

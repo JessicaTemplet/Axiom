@@ -15,6 +15,13 @@ answer is read off the compiler's own parse tree.
 Tested by `scripts/check-lsp-selfhost.sh`, which builds a server from
 `self_host/` and drives it with `tests/lsp/drive.py`.
 
+For a reference forged with `as`, `AX3073` points to the source value
+and explains its representation and lifetime obligations. The editor
+receives the terminal's help and related location. Hover over `as` for
+guidance on ownership shares, identity comparisons and region scope;
+the same text is available through `axiom explain as`. See
+[RECAP](reference.md#what-recap-guarantees) for the memory boundaries.
+
 <a id="running-it"></a>
 ## Run the server
 
@@ -1287,7 +1294,7 @@ keeps answering from what still parses around the error, so hover,
 definition, completion, references, the outline and the semantic
 tokens don't go blank while you type.
 
-```scheme fragment
+```text
 (:: bump (-> Int Int))
 (fn (bump x) (+ x 1)
 
@@ -1335,7 +1342,7 @@ and AXTAGs apart from variables, in every editor the same way.
 Every identifier is coloured by what it resolves to, through the same
 walk that answers `references`: a parameter, a `let`, a function or
 macro this document declares, a constructor, an effect. Keywords,
-literals, comments, AXTAG lines, region annotations and operators come
+literals, comments, AXTAG lines and operators come
 from the bytes, so a document that doesn't parse is still coloured.
 The whole request expands no macros, which is the
 [cost rule](#the-cost-rule) below.
@@ -1355,7 +1362,7 @@ maps to scopes. The token types, in the order the integers index them:
 | `parameter` | a `fn` or `lambda` parameter, `declaration` at its binder |
 | `variable` | a `let` binder (`readonly` unless `mut`), a `set` target (`modification`), every other local |
 | `effect` | an `effect` name and the effects a `handle` lists; a built-in one with `defaultLibrary` |
-| `region` | `@r` in a type, and the name of a `region` or `parallel` form |
+| `region` | the name of a `region` or `parallel` form |
 | `namespace` | an `import` path and the module of a qualified `Mod::name` |
 | `operator` | `+`, `==`, `&&` and the other builtin operators with `defaultLibrary`; `->`, `::` and `=` without |
 | `string` | a string or char literal |

@@ -79,20 +79,23 @@ have() { # have <got> <want> <what>
 # Generic alias expansion adds scoped substitution, cycle, parameter and
 # constructor-arity helpers. Existing function effect sets remain unchanged
 # when compared with the same compiler; the additions are pure or Alloc,Mut.
+# Removing explicit region annotations removes annotation-only helpers,
+# including two Unsafe leaves. rgnOriginSpan adds scope locations to memory
+# diagnostics; existing IO rows keep their effect sets.
 echo "== compiler view: symbols --calls self_host/main.ax =="
 "$axc" --diagnostic-format=ai symbols --calls self_host/main.ax > "$work/main.axsym" 2>"$work/main.err" \
   || { fail "could not read symbols over self_host/main.ax"; echo "check-effect-distribution: $failed failed"; exit 1; }
 rows="$(grep -c '^F ' "$work/main.axsym" || true)"
 (( rows >= 4000 )) && ok "$rows functions listed (floor 4000)" \
   || fail "only $rows functions listed; the floor is 4000 (the corpus moved or the read broke)"
-have "$(bucket "$work/main.axsym" 'Alloc,Mut')" 2786 "exactly Alloc,Mut"
+have "$(bucket "$work/main.axsym" 'Alloc,Mut')" 2784 "exactly Alloc,Mut"
 have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut')" 401 "Alloc,IO,Mut"
-have "$(bucket "$work/main.axsym" 'Mut')" 159 "exactly Mut"
-have "$(bucket "$work/main.axsym" 'Alloc')" 150 "exactly Alloc"
+have "$(bucket "$work/main.axsym" 'Mut')" 157 "exactly Mut"
+have "$(bucket "$work/main.axsym" 'Alloc')" 149 "exactly Alloc"
 have "$(bucket "$work/main.axsym" 'Alloc,IO')" 15 "Alloc,IO"
 have "$(bucket "$work/main.axsym" 'IO')" 12 "exactly IO"
 have "$(bucket "$work/main.axsym" 'IO,Mut')" 1 "IO,Mut"
-have "$(bucket "$work/main.axsym" 'Alloc,Mut,Unsafe')" 260 "Alloc,Mut,Unsafe"
+have "$(bucket "$work/main.axsym" 'Alloc,Mut,Unsafe')" 258 "Alloc,Mut,Unsafe"
 have "$(bucket "$work/main.axsym" 'Unsafe')" 115 "exactly Unsafe"
 have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut,Unsafe')" 64 "Alloc,IO,Mut,Unsafe"
 have "$(bucket "$work/main.axsym" 'Mut,Unsafe')" 23 "Mut,Unsafe"
@@ -116,7 +119,7 @@ have "$(bucket "$work/main.axsym" 'IO,Spawn,Unsafe')" 1 "IO,Spawn,Unsafe"
 have "$(bucket "$work/main.axsym" 'Spawn')" 2 "Spawn"
 have "$(bucket "$work/main.axsym" 'Alloc,Block,IO,Mut')" 5 "Alloc,Block,IO,Mut"
 have "$(bucket "$work/main.axsym" 'Block,IO')" 1 "Block,IO"
-have "$(grep '^F ' "$work/main.axsym" | grep -vc '#effects=\|#effects-incomplete' || true)" 2096 "pure (neither row nor mark)"
+have "$(grep '^F ' "$work/main.axsym" | grep -vc '#effects=\|#effects-incomplete' || true)" 2085 "pure (neither row nor mark)"
 have "$(grep '^F ' "$work/main.axsym" | grep -o '#effects=[^ #]*' | LC_ALL=C sort -u | wc -l | tr -d ' ')" 29 "distinct compiler effect rows"
 have "$(grep -c '#effects-incomplete' "$work/main.axsym" || true)" 35 "incomplete rows"
 have "$(grep -c '#effect-params' "$work/main.axsym" || true)" 11 "effect-params rows"

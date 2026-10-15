@@ -70,7 +70,7 @@
 #   5. THE ADJACENT HOLE, CLOSED AND PINNED. A callee-mediated
 #      store of a fresh construction into an outer cell from inside
 #      a region used to check OK and read back wrong with every gate
-#      green (`rgnCheckAll` reported only under `@r` signatures).
+#      green before lexical region bodies ran the reporting walk.
 #      S3's reporting walk now runs for region-form programs too -
 #      with S2's refused store spans suppressing the same-store
 #      double - and refuses the probe, which is what this check pins:

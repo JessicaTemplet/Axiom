@@ -752,22 +752,23 @@ Tested by `tests/diagnostics/330-axtag-mismatch.ax`.
 
 ### Region checks
 
-A signature can name the region a reference lives in, such as
-`(String @r)` (see [Region annotations](reference.md#region-annotations)).
-After every body is typed, the escape rule checks those names:
+A lexical `(region r body)` scope reclaims allocations when its body
+ends. The compiler infers reference origins and checks their stores,
+including stores made through calls.
 
-- `AX3060`: a store whose place outlives the value.
-- `AX3061`: a result that doesn't live in its declared region.
-- `AX3062`: either of those with a closure as the value, reported
-  against the capture.
-- `AX3063`: a call whose arguments disagree on a region the callee
-  names, or a signature whose result names a region no parameter
-  supplies.
+- `AX3059`: a reference leaving a region or stored into an outer binding.
+- `AX3060`: a reference stored into an older object, or a lifetime proof
+  that exceeds its origin capacity or fails to converge.
+- `AX3062`: a closure escaping a captured value's region.
 
-All four are errors. A program whose signatures name no region never
-sees them, because the pass doesn't run.
+All three are errors. Their help names a safe boundary change, and a
+related location points to the reclaiming scope in the terminal and
+language server. Unresolved calls are checked conservatively.
+`AX3061` and `AX3063` are retired with signature region annotations.
+See [Regions](reference.md#regions).
 
-Tested by `tests/diagnostics/645-region-escape-store.ax`.
+Tested by `tests/diagnostics/645-region-escape-store.ax` and
+`tests/diagnostics/647-region-capture.ax`.
 
 ## Adding a new diagnostic
 

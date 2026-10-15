@@ -163,7 +163,7 @@ export const STATUS_LIMITS: StatusRow[] = [
   { feature: 'Effects', status: 'Enforced; two limits stated', note: 'Two inference gaps, both stated: unresolvable calls are marked incomplete, and constructor allocation is not counted.' },
   { feature: 'Macros', status: 'Partial', note: 'A template cannot generate `import` or a nested `macro`, or test two binders for sameness.' },
   { feature: 'Concurrency', status: 'Language form, two lowerings', note: '`parallel`, channels, a mutex and task pools; `taskFold` reclaims each delivered answer under an explicit scalar-only callback contract.' },
-  { feature: 'Region syntax', status: 'Checked scope, and annotated signatures with the escape rule', note: 'Scalars leave a region; typed promotion is planned.' },
+  { feature: 'Region syntax', status: 'Checked lexical scopes and inferred escape checks', note: 'Scalars leave a region; typed promotion is planned.' },
   { feature: 'Resource ownership', status: 'Functional', note: 'Files, sockets, terminal modes, channels and mutexes close or free themselves when their last owner lets go.' },
   { feature: 'FFI', status: 'Functional', note: 'Rust through `extern` blocks, sealed owners and callbacks borrowed for the call.' },
   { feature: 'Standard library', status: 'Functional', note: 'Collections, cryptography, optional binary obfuscation, dates, JSON, networking and an embedded database.' },

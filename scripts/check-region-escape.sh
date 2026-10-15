@@ -1,54 +1,7 @@
 #!/usr/bin/env bash
-# THE ESCAPE RULE, MM-RGN-3, and the compatibility half of MM-RGN-4
-# (docs/memory-model.md §2, stage S3 of §4).
-#
-# Stage S3 lets a signature name the region a reference lives in,
-# `(:: keep (-> (Vec String @r) (String @s) Int))`, and refuses a store,
-# a return or a capture that would let a value be read after its
-# region is reclaimed. Two claims rest on it, and this gate holds both
-# from the outside:
-#
-#   1. AN ANNOTATION CHANGES NOTHING THE EMITTER SEES. The annotation
-#      lives in a spare word of the type node that no reader of a
-#      type consults (`tyRegion`, parser.ax), so a program and the
-#      same program with every `@r` deleted emit BYTE-IDENTICAL LLVM.
-#      `tests/stdlib/468-region-signatures.ax` against its stripped
-#      twin. This is MM-RGN-4's "backward compatible by construction",
-#      measured rather than argued; and it is what `check-self-host`'s
-#      fixpoint cannot say, because nothing in self_host/ is annotated
-#      (the seed's parser cannot read `@r` - land, reseed, then use).
-#
-#   2. THE RULE IS LOAD-BEARING. The five fixtures 645-649 are refused
-#      for the codes they name (check-diagnostics holds the bytes; this
-#      holds the codes so the gate reads alone), and an ABLATED
-#      compiler - the tree with `rgnCheckAll` answering 0 - ACCEPTS
-#      645-648. Then the program that compiler lets through is RUN:
-#      `tests/region/escape-store.ax` stores a string from a region
-#      into a cell that outlives it, resets the arena past the string,
-#      reuses the bytes, and reads the cell back. It must not print
-#      `hello` at exit 0. That is §1.4's measured behaviour today
-#      turned into the thing this stage makes unspellable. 649's
-#      `restrict(no-escape)` refusal must SURVIVE the ablation, because
-#      it reads the facts and not the pass - one computation, two
-#      readers, and the gate says which reader each claim rests on.
-#
-#   3. THE TWO-REGION SWEEP of §5 probe 1 is a program now
-#      (`scripts/lib/region-sweep.py`): the count of `fn` declarations
-#      whose body stores a value derived from one parameter into a
-#      place derived from another. The note quotes 349 of 5,841
-#      (5.98%) by a hand-run proxy and 3.5-5.2% by audit; the proxy
-#      here reads 241 of 6,206 (3.88%) over the tree on 2026-09-03.
-#      Held as a BAND rather than a point: a floor on how many
-#      functions were swept (a proxy that stops parsing reads zero),
-#      and a ceiling on the fraction, which is the claim MM-RGN-4's
-#      ergonomics rest on. The ceiling is generous - 8% - because the
-#      number is allowed to move with the corpus; what it may not do
-#      is become most of the tree.
-#
-# Every refusal is anchored on a code and a NAME in the message, never
-# on "the gate failed": a probe that broke the build would satisfy a
-# red-expecting test, and section 4 of check-compat.sh records that
-# happening once.
+# Lexical region safety: origins through callees, closures and loops;
+# complete proofs; and a reporting-pass ablation that exposes reclaimed
+# memory. Ordinary signatures carry no region syntax.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/gate.sh"
 gate_init
@@ -61,64 +14,30 @@ bad() { echo "FAIL $*"; failed=$((failed + 1)); }
 fix="$repo_root/tests/diagnostics"
 mkdir -p "$work/run"
 
-filter_line_attr() {
-  # The line-attribution pass (`emitLineTable` in codegen.ax) writes
-  # one `; @@line` marker at every call site, plus the filename
-  # globals, the `__axiom_linetab` constant table, the
-  # `__axiom_lineaddrs` zero-initialised array, and the
-  # `__axiom_lineinit` function that fills it. Their byte offsets and
-  # counts depend on the source bytes they were carved out of -
-  # stripping a `@r` from the source shifts every byte offset after it
-  # and can move a call marker past a musttail site the resolver
-  # reaches, so the two IRs agree on every other byte but diverge on
-  # the markers' spanstart, line-table size, and backtrace-init's
-  # references to it. None of that is the property this section
-  # asserts; they are stripped from the comparison.
-  grep -v -E -e '^; @@line' \
-              -e '^@__axiom_filen_[0-9]+ = ' \
-              -e '^@__axiom_linetab(_n)? = ' \
-              -e '^@__axiom_lineaddrs = ' \
-              -e '^@__axiom_lineinit = ' \
-              -e 'ptr @__axiom_filen_' \
-              -e 'getelementptr \[[0-9]+ x i64\], ptr @__axiom_(lineaddrs|linetab)' \
-              -e '^define internal i64 @__axiom_lineinit' \
-              -e '^  store i64 ptrtoint \(ptr blockaddress.*lineaddrs' \
-              -e 'icmp (u|s)ge i64 %li, [0-9]+'
-}
-
-# ---------------------------------------------------------------
-# 1. byte-identity: the annotated program against its stripped twin
-# ---------------------------------------------------------------
-echo "== 1. an annotation changes nothing the emitter sees =="
-cp "$repo_root/tests/stdlib/468-region-signatures.ax" "$work/run/ann.ax"
-sed -E 's/ @[a-z][A-Za-z0-9_]*//g' "$work/run/ann.ax" > "$work/run/bare.ax"
-# `;@axiom:` tags are not annotations; only ` @name` inside a type is.
-if grep -qE ' @[a-z]' "$work/run/bare.ax"; then
-  bad "the stripped twin still carries an annotation - the sed no longer matches the spelling"
-fi
+# Accepted function results, field stores and containers use ordinary types.
+echo "== 1. inferred origins preserve valid calls =="
 checks=$((checks + 1))
-if ! "$axc" emit-llvm "$work/run/ann.ax" > "$work/run/ann.ll" 2> "$work/run/ann.err"; then
-  bad "the annotated fixture did not emit"; sed 's/^/     /' "$work/run/ann.err" | head -10
-elif ! "$axc" emit-llvm "$work/run/bare.ax" > "$work/run/bare.ll" 2> "$work/run/bare.err"; then
-  bad "the stripped twin did not emit"; sed 's/^/     /' "$work/run/bare.err" | head -10
-elif ! filter_line_attr < "$work/run/ann.ll" | cmp -s - <(filter_line_attr < "$work/run/bare.ll"); then
-  bad "the annotated program and its stripped twin emit different IR"
-  diff <(filter_line_attr < "$work/run/ann.ll") <(filter_line_attr < "$work/run/bare.ll") | head -10 | sed 's/^/     /'
+if "$axc" --diagnostic-format=ai run "$repo_root/tests/stdlib/468-region-signatures.ax" \
+    > "$work/run/inferred.out" 2> "$work/run/inferred.err" \
+    && cmp -s "$work/run/inferred.out" "$repo_root/tests/stdlib/468-region-signatures.out"; then
+  ok "468: inferred calls run to their golden"
 else
-  lines="$(wc -l < "$work/run/ann.ll" | tr -d ' ')"
-  if [[ "$lines" -lt 500 ]]; then
-    bad "the fixture emitted only $lines lines - it no longer reaches the library, so identity says nothing"
-  else
-    ok "468 with and without its annotations: byte-identical IR up to the line markers ($lines lines)"
-  fi
+  bad "468: a valid inferred call failed"
+  head -10 "$work/run/inferred.err"
 fi
-# and it RUNS to its golden, which is what makes the identity worth having
-checks=$((checks + 1))
-if "$axc" run "$work/run/ann.ax" > "$work/run/ann.out" 2>&1 \
-   && diff -q "$work/run/ann.out" "$repo_root/tests/stdlib/468-region-signatures.out" > /dev/null; then
-  ok "468 runs to its golden under the annotations"
+# Removing annotation syntax must cover formatter and checker surfaces.
+cp "$repo_root/tests/diagnostics/1413-retired-region-annotation.axbad" "$work/run/retired.ax"
+"$axc" --diagnostic-format=ai check "$work/run/retired.ax" > /dev/null 2> "$work/run/retired.err"
+if grep -q '^E AX1001 .*unexpected character.*@' "$work/run/retired.err"; then
+  ok "signature region annotations are refused"
 else
-  bad "468 did not run to its golden"; sed 's/^/     /' "$work/run/ann.out" | head -10
+  bad "signature region annotations remain accepted"
+  head -8 "$work/run/retired.err"
+fi
+if "$axc" --diagnostic-format=ai fmt --check "$work/run/retired.ax" > /dev/null 2>&1; then
+  bad "formatter accepted a retired region annotation"
+else
+  ok "formatter refuses retired region annotations"
 fi
 
 # ---------------------------------------------------------------
@@ -136,15 +55,21 @@ refused() {  # <case> <code> <name-in-message>
     bad "$case: no $code naming \`$name\`"; sed 's/^/     /' "$work/run/$case.err" | cut -c1-160 | head -6
   fi
 }
-refused 645-region-escape-store   AX3060 'field `s`'
-refused 645-region-escape-store   AX3060 'parameter `v` of `vecPush`'
-refused 646-region-escape-return  AX3061 'pick'
-refused 646-region-escape-return  AX3063 'orphan'
+refused 645-region-escape-store   AX3060 'parameter `c` of `putField`'
+refused 645-region-escape-store   AX3060 'parameter `v` of `putVec`'
+refused 646-region-escape-return  AX3059 'picked'
+refused 646-region-escape-return  AX3059 'allocated'
 refused 647-region-capture        AX3062 'captures `s`'
-refused 648-region-argument       AX3063 'pair'
+refused 648-region-argument       AX3060 'pair'
 refused 649-restrict-no-escape    AX3049 'through `vecPush`'
 refused 649-restrict-no-escape    AX3051 'dispatch'
 refused 649-restrict-no-escape    AX3057 'dispatchStrict'
+
+if python3 "$repo_root/tests/lsp/region-boundary-hints.py" "$axc"; then
+  ok "the LSP preserves memory-boundary remedies and related spans"
+else
+  bad "the LSP lost a memory-boundary remedy or span"
+fi
 
 # A callback's captures are destinations too. The three stores were
 # accepted when the origin walk considered only its explicit arguments.
@@ -198,11 +123,11 @@ for count in (61, 62):
         f"(:: main Int)\n(fn (main) {{\n{body}\n    0 }})\n")
 for count in (61, 62):
     params = " ".join(f"p{i}" for i in range(count))
-    types = " ".join("(String @r)" for _ in range(count))
+    types = " ".join("String" for _ in range(count))
     (root / f"parameters-{count}.ax").write_text(
-        f"(:: wide (-> {types} (String @r)))\n"
+        f"(:: wide (-> {types} String))\n"
         f"(fn (wide {params}) p{count - 1})\n"
-        "(:: main Int)\n(fn (main) 0)\n")
+        "(:: main Int)\n(fn (main) (region trigger 0))\n")
 PY
 for shape in capacity parameters; do
   if "$axc" --diagnostic-format=ai check "$work/run/$shape-61.ax" \
@@ -247,7 +172,7 @@ fi
 checks=$((checks + 1))
 cp "$repo_root/tests/region/escape-store.ax" "$work/run/escape-store.ax"
 ( cd "$work/run" && "$axc" --diagnostic-format=ai check escape-store.ax ) > /dev/null 2> "$work/run/escape-store.err"
-if grep -q '^E AX3060 .*field `s`' "$work/run/escape-store.err"; then
+if grep -q '^E AX3060 .*parameter `c` of `put`' "$work/run/escape-store.err"; then
   ok "tests/region/escape-store.ax: AX3060 at the store"
 else
   bad "tests/region/escape-store.ax is not refused with AX3060"; sed 's/^/     /' "$work/run/escape-store.err" | cut -c1-160 | head -4
@@ -267,23 +192,13 @@ python3 - "$abl/self_host/typecheck.ax" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p, encoding="utf-8").read()
-old = """(pub fn (rgnCheckAll tc)
-  (if (== (rgnProgramUsesRegions tc) 1)
-    {"""
-new = """(pub fn (rgnCheckAll tc)
-  (if (== 0 1)
-    {"""
-if s.count(old) != 1:
-    sys.exit("the ablation matched %d times, wanted 1" % s.count(old))
-s = s.replace(old, new)
-# Disable the reporting walk for unannotated region forms as well.
 start = s.index("(pub fn (rgnCheckAll tc)")
 end = s.index("(pub :: rgnEnsureFacts", start)
 part = s[start:end]
-old_forms = "(if (== (memGetWord tc 39) 1)"
-if part.count(old_forms) != 1:
-    sys.exit("the region-form ablation no longer matches")
-s = s[:start] + part.replace(old_forms, "(if (== 0 1)") + s[end:]
+old = "(if (== (memGetWord tc 39) 1)"
+if part.count(old) != 1:
+    sys.exit("the lexical reporting ablation no longer matches")
+s = s[:start] + part.replace(old, "(if (== 0 1)") + s[end:]
 open(p, "w", encoding="utf-8").write(s)
 PY
 if [[ $? -ne 0 ]]; then
@@ -303,7 +218,6 @@ else
     fi
   }
   accepted 645-region-escape-store
-  accepted 646-region-escape-return
   accepted 647-region-capture
   accepted 648-region-argument
   accepted escape-store
@@ -349,12 +263,12 @@ s = p.read_text()
 start = s.index("(pub fn (rgnWhile rc e)")
 end = s.index("\n(pub :: rgnMatch ", start)
 s = s[:start] + """(pub fn (rgnWhile rc e)
-  (let ((rep (memGetWord rc 12)))
+  (let ((rep (memGetWord rc 11)))
     {
-      (memSetWord rc 12 0)
+      (memSetWord rc 11 0)
       (rgnExpr rc (nodeA e))
       (rgnSeq rc (nodeBVec e) 0 0)
-      (memSetWord rc 12 rep)
+      (memSetWord rc 11 rep)
       (rgnExpr rc (nodeA e))
       (rgnSeq rc (nodeBVec e) 0 0)
       0
@@ -402,27 +316,6 @@ else
   fi
 fi
 
-# ---------------------------------------------------------------
-# 4. the two-region sweep, as a band
-# ---------------------------------------------------------------
-echo "== 4. the two-region sweep (§5 probe 1) =="
-checks=$((checks + 1))
-sweep="$(cd "$repo_root" && python3 scripts/lib/region-sweep.py self_host stdlib tests examples web/bench 2>&1 | tail -1)"
-echo "     $sweep"
-fns="$(printf '%s' "$sweep" | sed -n 's/.*fns=\([0-9]*\).*/\1/p')"
-rel="$(printf '%s' "$sweep" | sed -n 's/.*relating=\([0-9]*\).*/\1/p')"
-pct="$(printf '%s' "$sweep" | sed -n 's/.*pct=\([0-9.]*\).*/\1/p')"
-if [[ -z "$fns" || -z "$rel" || -z "$pct" ]]; then
-  bad "the sweep printed nothing this gate can read"
-elif [[ "$fns" -lt 5000 ]]; then
-  bad "the sweep saw only $fns functions; the tree holds thousands, so the proxy has stopped parsing"
-elif [[ "$rel" -lt 100 ]]; then
-  bad "the sweep found only $rel functions relating two regions; the hand audit found hundreds, so the store heads it recognises have moved"
-elif python3 -c "import sys; sys.exit(0 if float('$pct') <= 8.0 else 1)"; then
-  ok "$rel of $fns functions relate two regions ($pct%) - within the band MM-RGN-4's ergonomics claim rests on"
-else
-  bad "$rel of $fns functions relate two regions ($pct%) - above the 8% ceiling; MM-RGN-4's 'common case carries no annotation' needs re-measuring"
-fi
 
 echo
 if [[ "$failed" -eq 0 ]]; then

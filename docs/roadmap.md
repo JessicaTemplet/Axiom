@@ -74,6 +74,7 @@ integrator would still need.
 | A misspelt checked AXTAG key is an error | Done | `AX3039` |
 | Handler values propagate effects through local bindings and handler parameters | Done | `tests/diagnostics/1390-handler-effects.ax`, `tests/stdlib/940-handler-values.ax` |
 | Unsafe declarations retain type, effect and restriction checks | Done | `tests/diagnostics/1395-unsafe-checks-retained.ax` |
+| Checked memory boundaries explain source representation and lifetime obligations consistently in the compiler and editor | Done | `tests/lsp/memory-boundaries.py` |
 | An `effect(unsafe)` claim is judged by what the body itself performs | Done | `AX3010`, `tests/diagnostics/1200-unsafe-claim-open-row.ax` |
 | A statically certain defect or a refuted claim is an error, not a warning | Done | `tests/diagnostics/severity.policy` |
 | Retired and never-assigned codes are recorded and never reused | Done | `ERR-DIAG-2` |

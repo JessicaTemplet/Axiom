@@ -1,45 +1,29 @@
-; MM-RGN-3 for a CLOSURE (docs/memory-model.md §2.3, "captured
-; by anything in a region that outlives s"). A lambda's record holds a
-; reference to every capture, so its region is where it was made AND
-; the region of each capture.
-;
-;   1  `hook` stores a closure capturing its `@s` string into a `@r`
-;      field: AX3062, named against `s`, the capture that makes the
-;      closure short-lived. The capture is blamed BEFORE the record -
-;      `rgnCaptureBad` runs first - because "the closure captures `s`"
-;      is where the fix is.
-;   2  `keep` captures from `@r` itself and stores into `@r`: the
-;      captures pass, and the closure's RECORD does not - it was
-;      allocated in this function's own region, which does not
-;      outlive `@r`. AX3060, the same refusal 640's growth row is:
-;      nothing allocated here can live in a named region until stage
-;      S4 allocates into one.
-;   3  `mk` answers a closure capturing `@s` as an UN-annotated result
-;      - the caller's current region, which every named region
-;      outlives - and is SILENT.
+; A closure cannot store an inner capture into an older object.
 (import Str)
 
 (struct Hook
   (mut f : (-> Int Int)))
 
-(:: hook (-> (Hook @r) (String @s) Int))
-(fn (hook h s)
+(:: initial (-> Int Int))
+(fn (initial n)
+  n)
+
+(:: keepFn (-> Hook (-> Int Int) Int))
+(fn (keepFn h f)
   {
-    (set h.f (lambda (n) (+ n (strLen s))))
+    (set h.f f)
     0
   })
 
-(:: keep (-> (Hook @r) (String @r) Int))
-(fn (keep h s)
-  {
-    (set h.f (lambda (n) (+ n (strLen s))))
-    0
-  })
-
-(:: mk (-> (String @s) Int Int))
-(fn (mk s)
-  (lambda (n) (+ n (strLen s))))
-
-(:: main ())
+(:: main Int)
 (fn (main)
-  ())
+  (let ((h (Hook initial)))
+    {
+      (region captured
+        (let ((s (strDup "inner")))
+          {
+            (keepFn h (lambda (n) (+ n (strLen s))))
+            0
+          }))
+      0
+    }))

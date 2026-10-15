@@ -273,7 +273,7 @@
                             (if (strEq w "handle")
                               "Runs a body with a handler installed for an effect's operations. The list names every effect the body performs: a declared effect is intercepted and a built-in one is acknowledged and still reaches the caller. The handler's return value is the operation's result."
                               (if (strEq w "region")
-                                "Opens a named arena scope. Values allocated inside it are released together when the body ends, and a value that would leave it is refused (`AX3059`). A type can name the region it lives in, `(Vec Int @r)`."
+                                "Opens a named arena scope. Values allocated inside it are released together when the body ends, and a value that would leave it is refused (`AX3059`). The compiler infers reference origins through calls and refuses stores into older objects."
                                 (if (strEq w "parallel")
                                   "Evaluates its bindings at the same time, each on its own task, and runs the body once all of them have answered. A binding may capture a parent value only by borrowing it for the extent of the form (`AX3064`)."
                                   (if (strEq w "macro")
@@ -333,7 +333,7 @@
                     (if (strEq w "_")
                       "The wildcard. In a pattern it matches anything and binds nothing. In a call, `(f _ 2)` builds a lambda over the missing arguments from left to right."
                       (if (strEq w "as")
-                        "Converts a value to the written type. Int and Float conversions operate on numeric values; floatToBits and floatFromBits reinterpret bits. It does not make an address valid or extend a lifetime, and casting a reference to `Int` drops its share. Raw-memory uses belong behind `;@axiom:effect(unsafe)`."
+                        "Converts a value to the written type. Int and Float conversions operate on numeric values; floatToBits and floatFromBits reinterpret bits. A reference converted to a word, such as `Int` or `Foreign`, keeps no ownership share: keep the owner alive while using the word. For identity comparisons and hashing, use `addrOf`. Converting a word to a reference requires `effect(unsafe)`, a valid representation and a live backing owner. A conversion never extends a region's scope."
                         (if (strEq w "sizeof")
                           "The size in bytes of a type's representation. Takes exactly one type (`AX3069`)."
                           (if (strEq w "alignof")
@@ -387,11 +387,11 @@
   (if (strEq w "IO")
     "Reaches the outside world: a syscall, an `extern` call or the command line. It propagates through calls, so a function that performs IO without declaring `;@axiom:effect(io)` is `AX3042`."
     (if (strEq w "Alloc")
-      "Allocates, resets the arena or installs a handler. It is ambient: inferred and reported, never declared."
+      "Allocates, resets the arena or installs a handler. Inferred through calls; `effect(alloc)` checks a claim and `restrict(no-alloc)` forbids it. Ordinary functions need not declare it. Generated retains and releases carry no separate reclamation effect."
       (if (strEq w "Mut")
-        "Changes heap state that something else can see. Ambient, like `Alloc`: inferred and reported, never declared."
+        "Changes heap state that something else can see. Inferred through calls; `effect(mut)` checks a claim. Ordinary functions need not declare it. Reference-count bookkeeping does not add `Mut`."
         (if (strEq w "Unsafe")
-          "Uses a raw-memory primitive, calls an `extern` or forges a reference. A function that does so must declare `;@axiom:effect(unsafe)` (`AX3073`), which makes it a trusted wrapper; the effect does not propagate to callers."
+          "Uses a raw-memory primitive, calls an `extern` or forges a reference. A function that does so must declare `;@axiom:effect(unsafe)` (`AX3073`), which makes it a trusted wrapper; the effect does not propagate to callers. Its author must uphold address, layout and lifetime obligations for every well-typed call. Type, effect and restriction checks still apply."
           (if (strEq w "Spawn")
             "Creates a task, thread or process."
             (if (strEq w "Block")

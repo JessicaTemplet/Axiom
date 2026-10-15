@@ -107,7 +107,6 @@
 ((effect (identifier) @type)
   (#not-match? @type "^(IO|Alloc|Mut|Unsafe|Spawn|Block|Entropy|Div|Pure|[-+*/%<>=!&|^~]+|[.][.][.]|_|syntax/.*)$"))
 
-(region_annotation) @label
 
 ; ---------------------------------------------------------------
 ; Declarations

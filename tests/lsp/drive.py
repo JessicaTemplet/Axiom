@@ -5424,7 +5424,7 @@ shutil.rmtree(CADIR2, ignore_errors=True)
 # hover document, NavMain, NavUser, their helpers and NavBroken - and
 # one document written HERE carrying the roles those lack: an
 # `effect` and a `handle`, a rule-form expression `macro`, a `subtype`, a
-# `type` alias, a `region`, `@r` annotations, a `for`, a `cast`, a
+# `type` alias, a `region`, a `for`, a `cast`, a
 # qualified call, `true`, a string with an escape, a char, a float and
 # a negative literal. Every obligation is DERIVED from the documents'
 # bytes by a second reading of them - a string-and-comment mask and
@@ -5448,7 +5448,7 @@ shutil.rmtree(CADIR2, ignore_errors=True)
 #     every `(import` path `namespace`;
 #   - a `handle`'s effects are `effect` (`defaultLibrary` for a
 #     built-in one), an `effect`'s name `effect` + `declaration`,
-#     `(region r` and `@r` are `region`, a macro's name and its rule
+#     `(region r` is `region`, a macro's name and its rule
 #     heads `macro` + `declaration`, a `(set x` target `variable` +
 #     `modification`, a `(mut x` binder `variable` + `declaration`
 #     without `readonly`, an operator head `operator` +
@@ -5498,7 +5498,7 @@ HL = r"""(import RefHelper)
         ((Circle r) (twice (+ r acc))))
     }))
 
-(:: left (-> (Pair @r) (String @r)))
+(:: left (-> Pair String))
 (fn (left p)
   (match p
     ((Pair a b) a)))
@@ -5799,13 +5799,10 @@ def hl_obligations(src):
                 w = em.group(0)
                 hl_want(obs, f"handled effect `{w}`", src, kids[1] + em.start(), w, "effect",
                         LIB if w in HL_BUILTIN_EFFECTS else 0, DECL | (0 if w in HL_BUILTIN_EFFECTS else LIB))
-    # regions: `(region r`, `(parallel r` and `@r`
+    # lexical region names: `(region r` and `(parallel r`
     for m in re.finditer(r"\((?:region|parallel)\s+([a-z]" + HL_IDENT + ")", src):
         if code(m.start(1)):
             hl_want(obs, f"region `{m.group(1)}`", src, m.start(1), m.group(1), "region", 0, 0)
-    for m in re.finditer(r"@[a-z][A-Za-z0-9_]*", src):
-        if code(m.start()):
-            hl_want(obs, f"annotation `{m.group(0)}`", src, m.start(), m.group(0), "region", 0, 0)
     # macros: the name, and the head of every rule
     for m in re.finditer(r"\((?:pub\s+)?e?macro\s+(" + HL_IDENT + ")", src):
         if not code(m.start(1)):
@@ -6923,6 +6920,15 @@ if contract_why:
     failed += 1
 else:
     print("ok   contract-tools (clauses on both declaration halves appear once in local and imported hover, signature help and axiom doc; completion offers the parameter and result)")
+    passed += 1
+
+memory_check = subprocess.run([sys.executable, os.path.join(fixdir, "memory-boundaries.py"), stage1],
+                              capture_output=True, text=True)
+if memory_check.returncode:
+    print(memory_check.stdout + memory_check.stderr)
+    failed += 1
+else:
+    print(memory_check.stdout.strip())
     passed += 1
 
 print(f"\nlsp: {passed} passed, {failed} failed, "

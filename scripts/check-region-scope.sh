@@ -306,8 +306,7 @@ open(p, "w", encoding="utf-8").write(s[:i] + new + s[k:].lstrip("\n"))
 # refuse the probe through the facts (AX3060) with S2's scalar test
 # blinded, so the ablation silences that branch's report flag too -
 # the walk still runs, still stamps, and diagnoses nothing. Anchored
-# on the tc39 branch, and only it: the `@r` branch above keeps its
-# reporting. Read fresh: the first splice moved every index after
+# on the tc39 branch. Read fresh: the first splice moved every index after
 # it, so offsets computed before the re-read would land mid-line.
 s = open(p, encoding="utf-8").read()
 branch = "(if (== (memGetWord tc 39) 1)"

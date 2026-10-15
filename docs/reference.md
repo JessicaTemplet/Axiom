@@ -545,12 +545,15 @@ turns a reference into a word that holds no share. To compare values
 by identity, use `addrOf` (see
 [Compare values by identity](#compare-values-by-identity)).
 
-### Region annotations
+<a id="region-annotations"></a>
 
-Signature region annotations describe lifetime relationships. They do
-not name a `region` expression's arena or implement general promotion.
-The current enforcement and remaining gaps are in the
-[memory model](memory-model.md) and [region design](memory-model.md).
+### Inferred region origins
+
+The compiler infers reference origins from parameters, allocations and
+calls. Use `(region r body)` to choose a reclamation scope; signatures
+carry ordinary types. `@r` annotations are removed: delete the
+annotation and keep the type, such as `(Vec String)`.
+See [Regions](#regions) and the [memory model](memory-model.md).
 
 ## Type aliases
 
@@ -1155,6 +1158,26 @@ not introduce a separate drop effect. An `effect(unsafe)` declaration
 records a trusted boundary whose author must uphold its obligations.
 It does not prove that a raw address is valid.
 
+At a memory boundary, the compiler explains the obligation it can check.
+A conversion that forges a reference reports its source type and points
+to the value being trusted. The terminal and editor share the same
+guidance: prefer typed construction, or establish the target's layout,
+validity and backing lifetime. An unsafe tag keeps ordinary type,
+effect and restriction checks in place.
+
+Hover over `as`, or run `axiom explain as`, for ownership guidance.
+A word obtained from a reference holds no share; keep its owner alive
+while using the word. Use `addrOf` for identity comparisons and hashing.
+`axiom symbols FILE --diagnostic-format=ai` reports `#erasures=n` on
+functions that turn references into words. These conversions do not
+promote a value out of a region.
+
+`Alloc` covers allocation and arena reset; `Mut` covers visible heap
+updates. Both are inferred through calls, and their claims are optional
+and checked. Generated retains and releases have no separate `Reclaim`
+effect. Region escape checks concern value origins and scope, rather
+than an `Escape` effect.
+
 Axiom uses region and escape analysis rather than Rust's borrow checker.
 It also has a MIR representation and compiler-generated runtime helpers.
 Use `axiom symbols FILE --mir --diagnostic-format=ai` to inspect region
@@ -1169,6 +1192,8 @@ The name does not claim a unique reclamation algorithm.
 
 Tested by `tests/stdlib/479-region-reclaim.ax` and
 `tests/stdlib/557-cycle-backlog.ax`.
+
+Memory-boundary guidance is tested by `tests/lsp/memory-boundaries.py`.
 
 ### Regions
 ```scheme
@@ -1201,8 +1226,11 @@ escape. Raw addresses and remaining low-level escape gaps are explicit
 Unsafe obligations; a region is not a general lifetime proof.
 
 Nested regions reset innermost first and cannot reuse an open name.
-A region performs `Alloc`. Signature region annotations and expression
-arena names are separate mechanisms.
+A region performs `Alloc`. Its name identifies the lexical scope in
+diagnostics and macro expansion; it is not a type parameter. Escape
+diagnostics point to the reclaiming scope and suggest moving the
+allocation or call outside it, or computing a scalar inside it. The
+language server shows the same remedies and related locations.
 
 A `Vec` or `Map` owns what you put in it. When its last reference goes,
 it releases every string, vector, record or `File` it holds, so a
