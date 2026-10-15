@@ -552,6 +552,13 @@ if [[ "$c3" != 0 ]]; then
   failed=$((failed + 1))
 fi
 
+if python3 "$repo_root/tests/fmt/route-b.py" "$axc"; then
+  echo "ok   block locals and named fields preserve layout and behaviour"
+else
+  echo "FAIL block locals or named fields changed layout or behaviour"
+  failed=$((failed + 1))
+fi
+
 echo
 if [[ $failed -eq 0 ]]; then
   echo "fmt-selfhost: all checks passed"

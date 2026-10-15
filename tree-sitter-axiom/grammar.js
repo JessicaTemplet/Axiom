@@ -880,6 +880,7 @@ module.exports = grammar({
       $.removed_form,
       $.field_expression,
       $.propagate_expression,
+      $.struct_construction,
       // Application is last so that every special form gets first refusal
       // on the token after `(`. A head that is not a keyword falls through
       // to here, which is what makes `(+ 1 2)` and `(f x)` the same shape.
@@ -1117,8 +1118,27 @@ module.exports = grammar({
       '(', 'as', field('operand', $._expression), field('type', $._type), ')',
     ),
 
+    // A local belongs to the surrounding block and becomes visible after
+    // its initializer. It is a block entry, not a general expression.
+    local_binding: $ => seq(
+      '(', 'let', optional(field('mutable', 'mut')),
+      field('name', $.identifier), field('value', $._expression), ')',
+    ),
+
     // `{ e1 e2 ... }` - sequencing, value of the last expression.
-    block: $ => seq('{', repeat(field('body', $._expression)), '}'),
+    block: $ => seq('{', repeat(field('body', choice($.local_binding, $._expression))), '}'),
+
+    // The compiler resolves the head to a struct and checks every field.
+    // An editor recognises the colon labels without resolving the type.
+    struct_construction: $ => seq(
+      '(', field('constructor', choice($.identifier, $.qualified_identifier)),
+      repeat1(field('field', $.constructor_field)), ')',
+    ),
+
+    constructor_field: $ => seq(
+      ':', field('name', alias($.identifier, $.field_identifier)),
+      field('value', $._expression),
+    ),
 
     list_literal: $ => seq('[', repeat(field('element', $._expression)), ']'),
 
@@ -1139,7 +1159,7 @@ module.exports = grammar({
     // touches. The `.` and the name both touch, as the compiler's lexer
     // requires, which is what keeps `lo..hi` a range.
     field_expression: $ => prec.left(seq(
-      field('object', choice($.identifier, $.field_expression, $.application)),
+      field('object', choice($.identifier, $.field_expression, $.application, $.struct_construction)),
       token.immediate('.'),
       field('field', alias(token.immediate(/[A-Za-z_][A-Za-z0-9_']*/), $.field_identifier)),
     )),

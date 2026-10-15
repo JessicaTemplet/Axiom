@@ -5889,10 +5889,58 @@
       (pOk (mkEBegin acc) (advance pos)))
     (if (peekIs tokens pos TK_EOF)
       (pErr pos)
-      (let ((r (parseExpr tokens pos)))
-        (if (== (memGetWord r 0) 0)
-          r
-          (parseBlockBody tokens (memGetWord r 2) (vecPush acc (memGetWord r 1))))))))
+      (if (isBlockLocalLet tokens pos)
+        (parseBlockLocalLet tokens (advance (advance pos)) acc)
+        (let ((r (parseExpr tokens pos)))
+          (if (== (memGetWord r 0) 0)
+            r
+            (parseBlockBody tokens (memGetWord r 2) (vecPush acc (memGetWord r 1)))))))))
+
+; A local declaration belongs to the block that contains it. Lower
+; its remainder to an ordinary lexical let, preserving scope ends and
+; evaluation order for every existing consumer of the expression tree.
+(pub :: isBlockLocalLet (-> (Vec Int) Int Bool))
+(pub fn (isBlockLocalLet tokens pos)
+  (&& (peekIs tokens pos TK_LPAREN)
+    (&& (peekIs tokens (advance pos) TK_IDENT)
+      (&& (strEq (tokenLexeme (vecGet tokens (advance pos))) kwLet)
+        (! (peekIs tokens (advance (advance pos)) TK_LPAREN))))))
+
+(pub :: parseBlockLocalLet (-> (Vec Int) Int (Vec Int) Int))
+(pub fn (parseBlockLocalLet tokens pos acc)
+  (let ((nr (parseIdentName tokens pos)))
+    (if (== (memGetWord nr 0) 0)
+      nr
+      (let (
+        (mutable (strEq (memGetWordStr nr 1) "mut"))
+        (nameR (if mutable
+          (parseIdentName tokens (memGetWord nr 2))
+          nr))
+      )
+        (if (== (memGetWord nameR 0) 0)
+          nameR
+          (let ((valueR (parseExpr tokens (memGetWord nameR 2))))
+            (if (== (memGetWord valueR 0) 0)
+              valueR
+              (let ((afterValue (memGetWord valueR 2)))
+                (if (! (peekIs tokens afterValue TK_RPAREN))
+                  (pErrExp afterValue "`)` after the local binding's value")
+                  (let (
+                    (after (advance afterValue))
+                    (bodyR (if (peekIs tokens after TK_RBRACE)
+                      (pOk (mkEUnitAt (tokenSpan (vecGet tokens after))) (advance after))
+                      (parseBlockBody tokens after vecNew)))
+                  )
+                    (if (== (memGetWord bodyR 0) 0)
+                      bodyR
+                      (let (
+                        (name (memGetWordStr nameR 1))
+                        (sp (tokenSpan (vecGet tokens (- (memGetWord nameR 2) 1))))
+                        (local (if mutable
+                          (mkNodeAt TAG_E_LETM name (memGetWord valueR 1) (memGetWord bodyR 1) sp)
+                          (mkELetAt name (memGetWord valueR 1) (memGetWord bodyR 1) sp)))
+                      )
+                        (pOk (mkEBegin (vecPush acc local)) (memGetWord bodyR 2))))))))))))))
 
 ; ------------------------------------------------------------------
 ; Function application: (f args...)
@@ -5942,14 +5990,47 @@
     (pOk fnExpr (advance pos))
     (if (peekIs tokens pos TK_EOF)
       (pErr pos)
-      (let ((r (parseExpr tokens pos)))
-        (if (== (memGetWord r 0) 0)
-          r
-          (let (
-            (arg (memGetWord r 1))
-            (nextPos (memGetWord r 2))
-          )
-            (parseArgs tokens nextPos (mkEApp fnExpr arg))))))))
+      (if (peekIs tokens pos TK_COLON)
+        (if (== (nodeTag fnExpr) TAG_E_VAR)
+          (parseNamedArgs tokens pos fnExpr vecNew vecNew)
+          (pErrExp pos "a positional argument; labelled fields cannot follow positional arguments"))
+        (let ((r (parseExpr tokens pos)))
+          (if (== (memGetWord r 0) 0)
+            r
+            (let (
+              (arg (memGetWord r 1))
+              (nextPos (memGetWord r 2))
+            )
+              (parseArgs tokens nextPos (mkEApp fnExpr arg)))))))))
+
+; Labels belong to the complete application, in source order. Values
+; remain ordinary arguments, so expression visitors see every value.
+; Expansion resolves the struct and lowers its checked field order.
+(pub :: parseNamedArgs (-> (Vec Int) Int Int (Vec String) (Vec Int) Int))
+(pub fn (parseNamedArgs tokens pos call labels spans)
+  (if (peekIs tokens pos TK_RPAREN)
+    (pOk (setNamedCall call labels spans) (advance pos))
+    (if (! (peekIs tokens pos TK_COLON))
+      (pErrExp pos "a `:field` label or `)`")
+      (let ((nameR (parseIdentName tokens (advance pos))))
+        (if (== (memGetWord nameR 0) 0)
+          nameR
+          (let ((valueR (parseExpr tokens (memGetWord nameR 2))))
+            (if (== (memGetWord valueR 0) 0)
+              valueR
+              (parseNamedArgs tokens (memGetWord valueR 2) (mkEApp call (memGetWord valueR 1))
+                (vecPush labels (memGetWordStr nameR 1))
+                (vecPush spans (tokenSpan (vecGet tokens (advance pos))))))))))))
+
+; Application word c is otherwise unused. Keep label spans there until
+; expansion so field diagnostics point at the label the reader wrote.
+(pub :: setNamedCall (-> Int (Vec String) (Vec Int) Int))
+(pub fn (setNamedCall call labels spans)
+  {
+    (setCtorFieldNames call labels)
+    (memSetWord call 3 spans)
+    call
+  })
 
 ; ------------------------------------------------------------------
 ; Parse declarations until EOF.

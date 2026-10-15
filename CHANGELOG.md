@@ -34,6 +34,13 @@ and selected entry roots; they do not establish aviation or space certification.
 
 <!-- release-notes: end of highlights -->
 
+- Block-local declarations use `(let name value)` and `(let mut name value)`.
+  Named struct construction checks every field and preserves written
+  evaluation order. Formatter, editor grammar, highlighting and language-server
+  refactorings support the new forms. Tested by
+  `tests/stdlib/963-block-local-bindings.ax` and
+  `tests/stdlib/964-named-struct-construction.ax`.
+
 - Region diagnostic checks wait for background analysis before shutting
   down the language server. Tested by `tests/lsp/region-boundary-hints.py`.
 

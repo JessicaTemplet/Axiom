@@ -89,6 +89,7 @@ integrator would still need.
 | Item | State | Where it's specified or tested |
 |---|---|---|
 | Imports form the module header and cannot appear later or inside expressions | Done | `tests/diagnostics/1400-late-import.axbad`, `tests/diagnostics/1401-nested-import.axbad`, `tests/diagnostics/1402-lambda-import.axbad` |
+| Block-local declarations and named struct construction across compiler, library, documentation and editor tools; retire grouped bindings and positional struct construction | In progress | `tests/stdlib/963-block-local-bindings.ax`, `tests/stdlib/964-named-struct-construction.ax` |
 | REPL uses the brand palette and shares diagnostic and language help with the CLI | Done | `scripts/check-repl-tui.sh`, `tests/repl/170-explain-shape.txt` |
 | Editor and REPL completion exclude retired syntax | Done | `tests/lsp/drive.py`, `scripts/check-replcomp.sh` |
 | Fixed-width signed and unsigned integers through 64 bits, with explicit casts and width-correct operators | Done | `tests/stdlib/948-fixed-width-integers.ax`, `tests/stdlib/949-fixed-width-alias-callback.ax` |

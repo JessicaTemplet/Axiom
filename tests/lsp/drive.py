@@ -5018,8 +5018,8 @@ def ca_fresh(src):
 
 
 EX_NAME = ca_fresh(CA_EXTRACT)
-EX_NEW = "(let ((" + EX_NAME + " (tick 3))) " + EX_STMT.replace("(tick 3)", EX_NAME) + ")"
-IF_NEW = "(let ((" + EX_NAME + " (> n 0))) " + IF_STMT.replace("(> n 0)", EX_NAME) + ")"
+EX_NEW = "{ (let " + EX_NAME + " (tick 3)) " + EX_STMT.replace("(tick 3)", EX_NAME) + " }"
+IF_NEW = "{ (let " + EX_NAME + " (> n 0)) " + IF_STMT.replace("(> n 0)", EX_NAME) + " }"
 EX_LINES = CA_EXTRACT.split("\n")
 PUB_LINES = CA_PUBLIC.split("\n")
 PUB_WHOLE = {"start": {"line": 0, "character": 0},

@@ -1,0 +1,55 @@
+; Local declarations preserve sequential scope, mutation and cleanup.
+(import IO)
+(import Vec)
+
+(struct LocalOwner sealed
+  (handle : Handle))
+
+(:: arithmetic Int)
+(fn (arithmetic)
+  {
+    (let first 20)
+    (let first (+ first 1))
+    (let mut total first)
+    (set total (+ total 1))
+    (let inside
+      {
+        (let first 19)
+        (+ first 1)
+      })
+    (+ total inside)
+  })
+
+(:: scopedOwner (-> (Vec Int) Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (scopedOwner hits)
+  {
+    (let value
+      {
+        (let owner
+          (LocalOwner
+            (__resource_new
+              (lambda (word)
+                {
+                  (vecPush hits word)
+                  0
+                }
+              )
+              42)))
+        (__resource_get owner.handle)
+      })
+    (+ value (vecLen hits))
+  })
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  {
+    (let hits vecNew)
+    (println arithmetic)
+    (println (scopedOwner hits))
+    (println (vecLen hits))
+    (println (vecGet hits 0))
+    ()
+  })

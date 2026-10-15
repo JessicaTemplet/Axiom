@@ -389,6 +389,26 @@ class Fixtures(object):
         return self.cache[named]
 
 
+def named_construction_anchor(message, source, line, start, end):
+    """AX3132 labels point at the label; other errors point at the head."""
+    text = source[line - 1]
+    claimed = text[start - 1:end - 1]
+    before = '\n'.join(source[:line - 1])
+    if line > 1:
+        before += '\n'
+    before += text[:start - 1]
+    label = re.fullmatch(r'unknown struct field `([^`]+)`|'
+                         r'struct field `([^`]+)` is supplied more than once', message)
+    if label:
+        wanted = next(name for name in label.groups() if name is not None)
+        prefix = before.rstrip()
+        if claimed != wanted or not prefix.endswith(':') or prefix.endswith('::'):
+            return 'named-field error must cover the name after its single-colon label'
+    elif not re.search(r"\(\s*(?:[A-Za-z_][A-Za-z0-9_'.]*::)*$", before):
+        return 'named-construction error must cover the constructor head'
+    return None
+
+
 def main(argv):
     if not argv:
         print(__doc__.strip().splitlines()[-3], file=sys.stderr)
@@ -522,6 +542,11 @@ def main(argv):
                         # file. Bounds are all there is to check.
                         continue
                     slice_ = line[c1 - 1:c2 - 1]
+                    if code == 'AX3132' and kind == 'primary':
+                        why = named_construction_anchor(message, src_here, l1, c1, c2)
+                        if why:
+                            failures.append('%s-%d - %s: it covers %r'
+                                            % (where, c2, why, slice_))
                     if slice_ == fname if fname is not None else slice_ in names:
                         anchored += 1
                     if slice_ and '\\' not in slice_:

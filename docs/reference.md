@@ -362,11 +362,11 @@ Tested by `tests/diagnostics/1410-explicit-numeric-boundaries.ax` and
 
 (:: compute (-> Int Int))
 (fn (compute n)
-  (let (
-    (x (+ n 1))
-    (y (* x 2))
-  )
-    (+ x y)))
+  {
+    (let x (+ n 1))
+    (let y (* x 2))
+    (+ x y)
+  })
 
 (:: main ())
 ;@axiom:effect(io)
@@ -374,8 +374,10 @@ Tested by `tests/diagnostics/1410-explicit-numeric-boundaries.ax` and
   (println (compute 4)))
 ```
 
-Bindings are sequential: `y` can read `x` above. A later binding can
-shadow an earlier name. The body answers its last expression.
+Declare local values directly inside a `{ ... }` block. Bindings are
+sequential: `y` can read `x` above. A later binding can shadow an earlier
+name. Each name stays in scope through the rest of its block, and the
+block answers its last expression.
 
 ### Mutable bindings
 
@@ -387,13 +389,13 @@ Declare a mutable binding with `mut`, then change it with `set`:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut count 0))
-    {
-      (set count (+ count 1))
-      (set count (+ count 1))
-      (println count)
-      ()
-    }))
+  {
+    (let mut count 0)
+    (set count (+ count 1))
+    (set count (+ count 1))
+    (println count)
+    ()
+  })
 ```
 
 This prints `2`. Assignment returns the assigned value. A closure may
@@ -803,9 +805,9 @@ number of fields, and arm results must agree in type.
 
 ## Structs
 
-Declare typed fields; construct in declaration order and read through
-a bound name. Field access attaches to a name, so bind a call's result
-before using `.field`.
+Declare typed fields, name them when constructing a value, and read
+through a bound name. Field access attaches to a name, so bind a call's
+result before using `.field`.
 
 ```scheme
 (import IO)
@@ -816,21 +818,25 @@ before using `.field`.
 
 (:: shift (-> Point Int Point))
 (fn (shift p n)
-  (Point (+ p.x n) p.y))
+  (Point :x (+ p.x n) :y p.y))
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((p (shift (Point 1 2) 10)))
-    (let ((total (+ p.x p.y)))
-      {
-        (println "{p}")
-        (println "x + y = {total}")
-      })))
+  {
+    (let p (shift (Point :x 1 :y 2) 10))
+    (let total (+ p.x p.y))
+    (println "{p}")
+    (println "x + y = {total}")
+  })
 ```
 
-A struct is built by calling its name, `(Point 1 2)`; `struct` only
-declares, and `(struct Point 1 2)` in an expression is refused with
+A struct is built by calling its name with labelled fields,
+`(Point :x 1 :y 2)`. Supply every field exactly once. Unknown, repeated
+and missing fields are refused with `AX3132`. Values evaluate in written
+order; storage follows declaration order.
+
+`struct` declares a type. Using it in an expression is refused with
 `AX2004`. A mutable field is declared `(mut x : Int)` and assigned with
 `(set p.x 9)`. Structs may have type parameters and function fields.
 Each function field must carry its complete arrow type.

@@ -203,41 +203,49 @@
 (pub fn (HL_TAG)
   14)
 
+; A named constructor label has the same structural colour as keywords.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: HL_MEMBER Int)
+(pub fn (HL_MEMBER)
+  15)
+
 ; One ASCII letter per class, for `replHlClass`. Pure ASCII and no
 ; escapes, so the whole classification is a string a fixture can pin
 ; by hand beside the source it describes.
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: hlLetter (-> Int Int))
 (pub fn (hlLetter cls)
-  (if (== cls HL_KEYWORD)
-    75
-    (if (== cls HL_IDENT)
-      105
-      (if (== cls HL_NUM)
-        110
-        (if (== cls HL_LIT)
-          115
-          (if (== cls HL_COMMENT)
-            99
-            (if (== cls HL_PUNCT)
-              112
-              (if (== cls HL_ERROR)
-                69
-                (if (== cls HL_PEND)
-                  63
-                  (if (== cls HL_MATCH)
-                    77
-                    (if (== cls HL_MISMATCH)
-                      88
-                      (if (== cls HL_CALL)
-                        102
-                        (if (== cls HL_CTOR)
-                          67
-                          (if (== cls HL_DOC)
-                            100
-                            (if (== cls HL_TAG)
-                              116
-                              46)))))))))))))))
+  (if (== cls HL_MEMBER)
+    109
+    (if (== cls HL_KEYWORD)
+      75
+      (if (== cls HL_IDENT)
+        105
+        (if (== cls HL_NUM)
+          110
+          (if (== cls HL_LIT)
+            115
+            (if (== cls HL_COMMENT)
+              99
+              (if (== cls HL_PUNCT)
+                112
+                (if (== cls HL_ERROR)
+                  69
+                  (if (== cls HL_PEND)
+                    63
+                    (if (== cls HL_MATCH)
+                      77
+                      (if (== cls HL_MISMATCH)
+                        88
+                        (if (== cls HL_CALL)
+                          102
+                          (if (== cls HL_CTOR)
+                            67
+                            (if (== cls HL_DOC)
+                              100
+                              (if (== cls HL_TAG)
+                                116
+                                46))))))))))))))))
 
 ; The SGR parameter string a class is painted with, or "" for a class
 ; that is left unpainted. Built ONLY from style.ax's nine exported
@@ -246,7 +254,7 @@
 ;@axiom:restrict(no-io,no-alloc,no-foreign)
 (pub :: hlSgr (-> Int String))
 (pub fn (hlSgr cls)
-  (if (== cls HL_KEYWORD)
+  (if (|| (== cls HL_KEYWORD) (== cls HL_MEMBER))
     REPL_ACCENT
     (if (== cls HL_NUM)
       REPL_AMBER
@@ -739,6 +747,28 @@
                 8
                 0))))))))
 
+; Contextual roles for the flat local spelling and colon labels.
+; `ordinal` counts operands after the head, including this token.
+;@axiom:restrict(no-io,no-foreign)
+(:: hlContextClass (-> Int Int String String Int Int))
+(fn (hlContextClass t previous head parent ordinal)
+  (if (!= (kindInt (tokenKind t)) (kindInt TK_IDENT))
+    (- 0 1)
+    (if (&& (! (|| (strEq parent "struct") (strEq head "{")))
+          (&& (!= previous 0)
+            (&& (== (kindInt (tokenKind previous)) (kindInt TK_COLON))
+              (== (spanEnd (tokenSpan previous)) (spanStart (tokenSpan t))))))
+      HL_MEMBER
+      (if (strEq head "let")
+        (if (== ordinal 1)
+          (if (strEq (tokenLexeme t) "mut")
+            HL_KEYWORD
+            HL_IDENT)
+          (if (&& (== ordinal 2) (&& (!= previous 0) (strEq (tokenLexeme previous) "mut")))
+            HL_IDENT
+            (- 0 1)))
+        (- 0 1)))))
+
 ; ------------------------------------------------------------------
 ; The classifier. ONE `lex`, then every byte of the buffer covered
 ; exactly once and in order by an HlSpan, and every bracket token
@@ -877,20 +907,36 @@
                                     false
                                     true)))
                             (hlStackSet seen (- depth 1) (+ (vecGet seen (- depth 1)) 1))))
-                        (hlPush spans
-                          (if (|| (hlIsForIn forSt k (tokenLexeme t))
-                                (hlIsForBy forSt k (tokenLexeme t) depth forD))
-                            HL_KEYWORD
-                            (hlClassOf t prevLP
-                              (if (&& prevLP (>= depth 2))
-                                (hlBinderContext (vecGetStr heads (- depth 2))
-                                  (if (>= depth 3)
-                                    (vecGetStr heads (- depth 3))
-                                    "")
-                                  (vecGet ords (- depth 1)) (== (vecGet firsts (- depth 1)) 1))
-                                false)
-                              n))
-                          s e)
+                        (let ((contextClass
+                          (hlContextClass t
+                            (if (> i 0)
+                              (vecGet toks (- i 1))
+                              0)
+                            (if (> depth 0)
+                              (vecGetStr heads (- depth 1))
+                              "")
+                            (if (> depth 1)
+                              (vecGetStr heads (- depth 2))
+                              "")
+                            (if (> depth 0)
+                              (vecGet seen (- depth 1))
+                              0))))
+                          (hlPush spans
+                            (if (>= contextClass 0)
+                              contextClass
+                              (if (|| (hlIsForIn forSt k (tokenLexeme t))
+                                    (hlIsForBy forSt k (tokenLexeme t) depth forD))
+                                HL_KEYWORD
+                                (hlClassOf t prevLP
+                                  (if (&& prevLP (>= depth 2))
+                                    (hlBinderContext (vecGetStr heads (- depth 2))
+                                      (if (>= depth 3)
+                                        (vecGetStr heads (- depth 3))
+                                        "")
+                                      (vecGet ords (- depth 1)) (== (vecGet firsts (- depth 1)) 1))
+                                    false)
+                                  n)))
+                            s e))
                         (let ((next (hlForStep forSt k prevLP (tokenLexeme t) depth forD)))
                           {
                             (if (&& (== next 6) (!= forSt 6))

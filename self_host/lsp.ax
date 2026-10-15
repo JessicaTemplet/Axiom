@@ -12509,15 +12509,15 @@
 (pub fn (lspExtractJson src uri ix ws we fs fe name)
   (let ((parts vecNew))
     {
-      (vecPush parts "(let ((")
+      (vecPush parts "{ (let ")
       (vecPush parts name)
       (vecPush parts " ")
       (vecPush parts (strSlice src ws (- we ws)))
-      (vecPush parts ")) ")
+      (vecPush parts ") ")
       (vecPush parts (strSlice src fs (- ws fs)))
       (vecPush parts name)
       (vecPush parts (strSlice src we (- fe we)))
-      (vecPush parts ")")
+      (vecPush parts " }")
       (jsonObjPut
         (jsonObjPut (jsonObjPut jsonObj "title" (jsonStr "Extract to `let`")) "kind"
           (jsonStr "refactor.extract"))
@@ -14078,6 +14078,9 @@
 (pub fn (lspRenderApp e ind)
   (let (
     (rev vecNew)
+    (labels (if (!= (nodeFieldNames e) 0)
+      (nodeFieldNamesVec e)
+      vecNew))
     (mut h e)
   )
     {
@@ -14094,6 +14097,9 @@
           (vecPush parts (lspRenderExpr h (+ ind 2)))
           (while (>= i 0)
             {
+              (let ((labelIndex (- (- (vecLen rev) 1) i)))
+                (if (< labelIndex (vecLen labels))
+                  (vecPush parts (concat ":" (vecGetStr labels labelIndex)))))
               (vecPush parts (lspRenderExpr (vecGet rev i) (+ ind 2)))
               (set i (- i 1))
             })
@@ -14132,34 +14138,35 @@
         " ")
       (concat (lspRenderName (vecGetStr names i)) (lspJoinNames names (+ i 1))))))
 
-; `(let ((x 1) (mut y 2))` and the body on its own line: the nested
-; single-binding lets re-merged while the body is directly another.
+; Lowered lets render as locals in one enclosing brace block.
 (pub :: lspRenderLet (-> Int Int String))
 (pub fn (lspRenderLet e ind)
-  (let (
-    (binds vecNew)
-    (mut body e)
-  )
-    {
-      (while (|| (== (nodeTag body) TAG_E_LET) (== (nodeTag body) TAG_E_LETM))
-        {
-          (vecPush binds
-            (concat
-              (concat
-                (concat
-                  (concat "("
-                    (if (== (nodeTag body) TAG_E_LETM)
-                      "mut "
-                      ""))
-                  (lspRenderName (nodeAName body)))
-                " ")
-              (concat (lspRenderExpr (nodeB body) (+ ind 6)) ")")))
-          (set body (nodeC body))
-        })
-      (concat
-        (concat (concat (concat "(let (" (lspJoinStrs binds 0 " ")) ")\n") (lspPad (+ ind 2)))
-        (concat (lspRenderExpr body (+ ind 2)) ")"))
-    }))
+  {
+    (let parts vecNew)
+    (let mut body e)
+    (vecPush parts "{")
+    (while (|| (== (nodeTag body) TAG_E_LET) (== (nodeTag body) TAG_E_LETM))
+      {
+        (vecPush parts "\n")
+        (vecPush parts (lspPad (+ ind 2)))
+        (vecPush parts
+          (if (== (nodeTag body) TAG_E_LETM)
+            "(let mut "
+            "(let "))
+        (vecPush parts (lspRenderName (nodeAName body)))
+        (vecPush parts " ")
+        (vecPush parts (lspRenderExpr (nodeB body) (+ ind 2)))
+        (vecPush parts ")")
+        (set body (nodeC body))
+      })
+    (vecPush parts "\n")
+    (vecPush parts (lspPad (+ ind 2)))
+    (vecPush parts (lspRenderExpr body (+ ind 2)))
+    (vecPush parts "\n")
+    (vecPush parts (lspPad ind))
+    (vecPush parts "}")
+    (catStrs parts)
+  })
 
 (pub :: lspJoinStrs (-> (Vec a) Int String String))
 (pub fn (lspJoinStrs xs i sep)
@@ -16146,34 +16153,49 @@
 ;   4. an identifier the walk recorded is what its key says;
 ;   5. everything else is read from the form around it.
 ; ------------------------------------------------------------------
+; A single colon before a name labels a constructor field. Type positions
+; keep their own colon syntax, and `Mod::name` remains a qualified name.
+(pub :: lspHlLabelBefore (-> String Int Bool))
+(pub fn (lspHlLabelBefore src start)
+  {
+    (let mut i (- start 1))
+    (while (&& (>= i 0) (lspIsBlank (strByte src i)))
+      (set i (- i 1)))
+    (&& (>= i 0) (&& (== (strByte src i) 58) (|| (== i 0) (!= (strByte src (- i 1)) 58))))
+  })
+
 (pub :: lspHlClassify (-> Int Int Int String Bool Int Int Int Int))
 (pub fn (lspHlClassify st s e word head hc state ctx)
-  (if (strEq word "_")
-    0
-    (if (|| (strEq word "true") (strEq word "false"))
-      (lspHlEmit st s e SEM_KEYWORD SEM_M_LIB)
-      (if (&& head (&& (lspHlFormHead ctx word) (== (strVecHas (memGetWordVec st 8) word) 1)))
-        (lspHlEmit st s e SEM_KEYWORD SEM_M_DEPRECATED)
-        (if (|| (&& head (&& (lspHlFormHead ctx word) (lspHlIsKeyword st word ctx)))
-              (|| (&& (== hc SEM_H_FOR) (lspHlIn word "in by"))
-                (&& (== hc SEM_H_SUBTYPE) (lspHlIn word "is range"))))
-          (lspHlEmit st s e SEM_KEYWORD 0)
-          (if (lspHlIsOpWord (memGetWordStr st 0) s e)
-            (lspHlEmit st s e SEM_OPERATOR
-              (if (!= (lspShapeBuiltinRes word) 0)
-                SEM_M_LIB
-                0))
-            (if (|| (&& (== state 1) (== hc SEM_H_CAST)) (&& (== state 2) (== hc SEM_H_AS)))
-              (lspHlEmitPacked st s e (lspHlTypeClass word))
-              ; A `parallel`'s region name is a region, as a
-              ; `region`'s is, though the walk records it as a binding.
-              (if (&& (== state 1) (== hc SEM_H_PARALLEL))
-                (lspHlEmit st s e SEM_REGION 0)
-                (let ((o (lspHlOccAt st s)))
-                  (lspHlEmitPacked st s e
-                    (if (!= o 0)
-                      (lspHlOccClass st o word head ctx)
-                      (lspHlFormClass st s e word head hc state ctx))))))))))))
+  (if (&& (! (lspHlIsTypeCtx ctx)) (lspHlLabelBefore (memGetWordStr st 0) s))
+    (lspHlEmit st s e SEM_PROPERTY 0)
+    (if (&& (== hc SEM_H_LET) (&& (== state 1) (strEq word "mut")))
+      (lspHlEmit st s e SEM_KEYWORD 0)
+      (if (strEq word "_")
+        0
+        (if (|| (strEq word "true") (strEq word "false"))
+          (lspHlEmit st s e SEM_KEYWORD SEM_M_LIB)
+          (if (&& head (&& (lspHlFormHead ctx word) (== (strVecHas (memGetWordVec st 8) word) 1)))
+            (lspHlEmit st s e SEM_KEYWORD SEM_M_DEPRECATED)
+            (if (|| (&& head (&& (lspHlFormHead ctx word) (lspHlIsKeyword st word ctx)))
+                  (|| (&& (== hc SEM_H_FOR) (lspHlIn word "in by"))
+                    (&& (== hc SEM_H_SUBTYPE) (lspHlIn word "is range"))))
+              (lspHlEmit st s e SEM_KEYWORD 0)
+              (if (lspHlIsOpWord (memGetWordStr st 0) s e)
+                (lspHlEmit st s e SEM_OPERATOR
+                  (if (!= (lspShapeBuiltinRes word) 0)
+                    SEM_M_LIB
+                    0))
+                (if (|| (&& (== state 1) (== hc SEM_H_CAST)) (&& (== state 2) (== hc SEM_H_AS)))
+                  (lspHlEmitPacked st s e (lspHlTypeClass word))
+                  ; A `parallel`'s region name is a region, as a
+                  ; `region`'s is, though the walk records it as a binding.
+                  (if (&& (== state 1) (== hc SEM_H_PARALLEL))
+                    (lspHlEmit st s e SEM_REGION 0)
+                    (let ((o (lspHlOccAt st s)))
+                      (lspHlEmitPacked st s e
+                        (if (!= o 0)
+                          (lspHlOccClass st o word head ctx)
+                          (lspHlFormClass st s e word head hc state ctx))))))))))))))
 
 ; Can a keyword stand at the head of a bracket in context `ctx`? Not
 ; where the head is a binder or a field: `(let ((for 5)) ...)` binds a
@@ -16353,7 +16375,7 @@
           0)
         (if (== ctx SEM_C_EFFECTS)
           (lspHlEffectClass word 0)
-          (if (lspNavColonAfter src (mkSpan s e))
+          (if (&& (lspHlIsTypeCtx ctx) (lspNavColonAfter src (mkSpan s e)))
             (lspHlPack SEM_PROPERTY
               (if (lspHlIsTypeCtx ctx)
                 SEM_M_DECL
@@ -16380,15 +16402,22 @@
 
 (pub :: lspHlFormClassMore (-> String Int String Bool Int Int Int Int))
 (pub fn (lspHlFormClassMore src e word head hc state ctx)
-  (if (&& (== ctx SEM_C_LETPAIR) head)
-    (lspHlPack SEM_VARIABLE (+ SEM_M_DECL SEM_M_READONLY))
-    (if (&& (== state 1) (|| (== hc SEM_H_MUT) (== hc SEM_H_FOR)))
-      (lspHlPack SEM_VARIABLE SEM_M_DECL)
-      (if (&& (== state 1) (== hc SEM_H_SET))
-        (lspHlPack SEM_VARIABLE SEM_M_MOD)
-        (if (&& (== state 1) (|| (== hc SEM_H_REGION) (== hc SEM_H_PARALLEL)))
-          (lspHlPack SEM_REGION 0)
-          (lspHlFormClassDecl src e word head hc state ctx))))))
+  (if (&& (== hc SEM_H_LET)
+        (|| (== state 1) (&& (== state 2) (lspHlMutBefore src (- e (strLen word))))))
+    (lspHlPack SEM_VARIABLE
+      (+ SEM_M_DECL
+        (if (== state 1)
+          SEM_M_READONLY
+          0)))
+    (if (&& (== ctx SEM_C_LETPAIR) head)
+      (lspHlPack SEM_VARIABLE (+ SEM_M_DECL SEM_M_READONLY))
+      (if (&& (== state 1) (|| (== hc SEM_H_MUT) (== hc SEM_H_FOR)))
+        (lspHlPack SEM_VARIABLE SEM_M_DECL)
+        (if (&& (== state 1) (== hc SEM_H_SET))
+          (lspHlPack SEM_VARIABLE SEM_M_MOD)
+          (if (&& (== state 1) (|| (== hc SEM_H_REGION) (== hc SEM_H_PARALLEL)))
+            (lspHlPack SEM_REGION 0)
+            (lspHlFormClassDecl src e word head hc state ctx)))))))
 
 (pub :: lspHlFormClassDecl (-> String Int String Bool Int Int Int Int))
 (pub fn (lspHlFormClassDecl src e word head hc state ctx)

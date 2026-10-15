@@ -172,6 +172,8 @@
 
 ; `p.x`: the field is a field, and `p` is coloured as any expression.
 (field_expression field: (field_identifier) @variable.member)
+(constructor_field name: (field_identifier) @variable.member)
+(struct_construction constructor: (identifier) @constructor)
 
 ; ---------------------------------------------------------------
 ; Bindings and patterns
@@ -182,6 +184,7 @@
 
 ([
   (let_binding pattern: (identifier) @variable)
+  (local_binding name: (identifier) @variable)
   (parallel_binding name: (identifier) @variable)
   (for_expression binder: (identifier) @variable)
   (match_arm pattern: (identifier) @variable)
@@ -226,6 +229,8 @@
   (lambda body: (identifier) @constructor)
   (let_expression body: (identifier) @constructor)
   (let_binding value: (identifier) @constructor)
+  (local_binding value: (identifier) @constructor)
+  (constructor_field value: (identifier) @constructor)
   (list_literal element: (identifier) @constructor)
   (macro_declaration body: (identifier) @constructor)
   (macro_rule template: (identifier) @constructor)
@@ -266,6 +271,8 @@
   (lambda body: (identifier) @variable)
   (let_expression body: (identifier) @variable)
   (let_binding value: (identifier) @variable)
+  (local_binding value: (identifier) @variable)
+  (constructor_field value: (identifier) @variable)
   (list_literal element: (identifier) @variable)
   (macro_declaration body: (identifier) @variable)
   (macro_rule template: (identifier) @variable)

@@ -236,6 +236,26 @@ holds those), and the files `tests/fmt/unformatted.list` names, each
 with its reason. Leave `tests/fmt/parity/*.axp` and the `*.axbad`
 refusal cases alone: they are inputs the formatter must refuse.
 
+### Migrate local bindings and struct construction
+
+Review a source migration before applying it:
+
+```bash
+python3 scripts/migrate-route-b.py --review path/to/Main.ax
+python3 scripts/migrate-route-b.py --write path/to/Main.ax
+axiom fmt path/to/Main.ax
+```
+
+The tool converts grouped bindings to block-local declarations and
+positional struct construction to labelled fields. It preserves lexical
+scope, comments and evaluation order. Add `-I path/to/modules` when imports
+need another search directory.
+
+An uncertain constructor or malformed source stops the file's migration.
+Review those sites by hand. Explicit Markdown, Python, shell, Rust and
+JavaScript files can supply embedded source; interpolated generators and
+expected output need separate review.
+
 ### Where to make changes
 
 The compiler lives in `self_host/` and is written in Axiom.

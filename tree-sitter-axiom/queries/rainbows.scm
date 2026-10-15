@@ -51,6 +51,8 @@
   (lambda)
   (let_expression)
   (let_binding)
+  (local_binding)
+  (struct_construction)
   (if_expression)
   (while_expression)
   (set_expression)

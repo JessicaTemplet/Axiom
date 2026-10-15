@@ -3158,7 +3158,8 @@
                         (vecPush out (substTpl a params args env isp))))))
                 (set i (+ i 1))
               }))
-          (expRebuildSpine (substTpl head params args env isp) out isp 0)
+          (setCtorFieldNames (expRebuildSpine (substTpl head params args env isp) out isp 0)
+            (nodeFieldNamesVec tpl))
         }))))
 
 ; Does the TEMPLATE bind this name around the substitution in flight?
@@ -4346,6 +4347,12 @@
 ; ------------------------------------------------------------------
 (pub :: expandApp (-> Int Int (Vec Int) Int))
 (pub fn (expandApp e env bs)
+  (if (!= (nodeFieldNames e) 0)
+    (expandNamedStruct e env bs)
+    (expandAppUnlabelled e env bs)))
+
+(pub :: expandAppUnlabelled (-> Int Int (Vec Int) Int))
+(pub fn (expandAppUnlabelled e env bs)
   (if (&& (== (nodeTag (spineHead e)) TAG_E_VAR) (strEq (nodeAName (spineHead e)) "|>"))
     (expandPipe e env bs)
     (let ((head (spineHead e)))
@@ -10016,12 +10023,20 @@
         (if (> holes 1)
           (expPipeBad env (nodeSpan stage)
             "a pipeline stage accepts at most one direct `_` argument")
-          {
-            (if (== holes 0)
-              (vecPush out value))
-            (expPipeArgs args out value 0)
-            (expBuildSpine (spineHead stage) out 0)
-          })))))
+          (if (&& (!= (nodeFieldNames stage) 0) (== holes 0))
+            (expPipeBad env (nodeSpan stage)
+              "a labelled pipeline stage needs one direct `_` field value")
+            {
+              (if (== holes 0)
+                (vecPush out value))
+              (expPipeArgs args out value 0)
+              (let ((rebuilt (expBuildSpine (spineHead stage) out 0)))
+                {
+                  (setCtorFieldNames rebuilt (nodeFieldNamesVec stage))
+                  (memSetWord rebuilt 3 (nodeC stage))
+                  rebuilt
+                })
+            }))))))
 
 (pub :: expPipeArgs (-> (Vec Int) (Vec Int) Int Int Int))
 (pub fn (expPipeArgs args out value i)
@@ -10042,6 +10057,193 @@
       (expMarkUnit env
         (mkDiag SEV_ERROR "AX3127" "pipeline-stage" sp message 0 0
           "write `(|> value (f args...) (g args...))`; each stage receives the preceding value first, or at its single direct `_` argument")
+        (memGetWord env 11)))
+    (mkEInt 0)
+  })
+
+; Named struct construction lowers to the same checked application as
+; positional construction. Reordered fields first bind their values in
+; written order; the final call follows declaration order.
+(pub :: expandNamedStruct (-> Int Int (Vec Int) Int))
+(pub fn (expandNamedStruct e env bs)
+  (let (
+    (head (spineHead e))
+    (name (nodeAName head))
+    (decl (expNamedStructDecl env name))
+  )
+    (if (&& (== (expBound bs name) 1) (== (nodeDefScope head) 0))
+      (expNamedBad env (nodeSpan e)
+        (concat "labelled construction requires a struct name; `"
+          (concat name "` is a local binding")))
+      (if (== decl (- 0 1))
+        (expNamedBad env (nodeSpan e)
+          (concat "struct name `" (concat name "` is ambiguous; qualify it with its module")))
+        (if (== decl 0)
+          (expNamedBad env (nodeSpan e)
+            (concat "labelled construction requires a visible struct; `"
+              (concat name "` does not name one")))
+          (let (
+            (labels (nodeFieldNamesVec e))
+            (fields (nodeBVec decl))
+            (names (expNamedFieldNames fields vecNew 0))
+          )
+            (if (== (expCheckNamedLabels env e labels names) 0)
+              (mkEInt 0)
+              (let (
+                (params vecNew)
+                (values vecNew)
+                (callee (expandExpr head env bs))
+              )
+                {
+                  (expHoleArgs (spineArgVec e vecNew) 0 env bs params values)
+                  (let ((body (expLowerNamedStruct callee values labels names env)))
+                    (if (== (vecLen params) 0)
+                      body
+                      (mkLamCurried params body (nodeSpan e))))
+                }))))))))
+
+; Values are already expanded, including fresh parameters for direct
+; holes. Reordering occurs inside the lambda when construction has holes.
+(pub :: expLowerNamedStruct (-> Int (Vec Int) (Vec String) (Vec String) Int Int))
+(pub fn (expLowerNamedStruct callee values labels names env)
+  (if (expNamedSameOrder labels names 0)
+    (setCtorFieldNames (expBuildSpine callee values 0) names)
+    (let (
+      (binds vecNew)
+      (refs vecNew)
+      (ordered vecNew)
+      (mut i 0)
+    )
+      {
+        (while (< i (vecLen values))
+          (let (
+            (fresh (expFresh env "_field"))
+            (value (vecGet values i))
+          )
+            {
+              (vecPush binds (mkNodeAt TAG_NIL fresh value 0 (nodeSpan value)))
+              (vecPush refs (mkEVarAt fresh (nodeSpan value)))
+              (set i (+ i 1))
+            }))
+        (set i 0)
+        (while (< i (vecLen names))
+          {
+            (vecPush ordered (vecGet refs (strVecIdx labels (vecGetStr names i))))
+            (set i (+ i 1))
+          })
+        (foldLets binds (setCtorFieldNames (expBuildSpine callee ordered 0) names)
+          (- (vecLen binds) 1))
+      })))
+
+(pub :: expNamedFieldNames (-> (Vec Int) (Vec String) Int (Vec String)))
+(pub fn (expNamedFieldNames fields names i)
+  (if (>= i (vecLen fields))
+    names
+    (expNamedFieldNames fields (vecPush names (nodeAName (vecGet fields i))) (+ i 1))))
+
+(pub :: expNamedSameOrder (-> (Vec String) (Vec String) Int Bool))
+(pub fn (expNamedSameOrder labels names i)
+  (if (>= i (vecLen labels))
+    true
+    (&& (strEq (vecGetStr labels i) (vecGetStr names i)) (expNamedSameOrder labels names (+ i 1)))))
+
+(pub :: expCheckNamedLabels (-> Int Int (Vec String) (Vec String) Int))
+(pub fn (expCheckNamedLabels env e labels names)
+  (let (
+    (seen vecNew)
+    (mut good 1)
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen labels))
+        (let ((label (vecGetStr labels i)))
+          {
+            (if (== (strVecHas names label) 0)
+              {
+                (expNamedBad env (expNamedLabelSpan e i)
+                  (concat "unknown struct field `" (concat label "`")))
+                (set good 0)
+              }
+              (if (== (strVecHas seen label) 1)
+                {
+                  (expNamedBad env (expNamedLabelSpan e i)
+                    (concat "struct field `" (concat label "` is supplied more than once")))
+                  (set good 0)
+                }))
+            (vecPush seen label)
+            (set i (+ i 1))
+          }))
+      (set i 0)
+      (while (< i (vecLen names))
+        (let ((name (vecGetStr names i)))
+          {
+            (if (== (strVecHas labels name) 0)
+              {
+                (expNamedBad env (nodeSpan e) (concat "missing struct field `" (concat name "`")))
+                (set good 0)
+              })
+            (set i (+ i 1))
+          }))
+      good
+    }))
+
+(pub :: expNamedLabelSpan (-> Int Int Int))
+(pub fn (expNamedLabelSpan e i)
+  (if (== (nodeC e) 0)
+    (nodeSpan e)
+    (if (>= i (vecLen (nodeCVec e)))
+      (nodeSpan e)
+      (vecGet (nodeCVec e) i))))
+
+; Prefer the defining module, then one exported imported type. A
+; qualified name selects exactly that module and preserves privacy.
+(pub :: expNamedStructDecl (-> Int String Int))
+(pub fn (expNamedStructDecl env name)
+  (let (
+    (decls (expDeclsVec env))
+    (bare (bareOf name))
+    (site (memGetWord env 9))
+    (mut chosen 0)
+    (mut priority 0)
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen decls))
+        (let ((d (vecGet decls i)))
+          {
+            (if (&& (== (nodeTag d) TAG_D_STRUCT) (strEq (nodeAName d) bare))
+              (let (
+                (own (== (expModEq (nodeModule d) site) 1))
+                (qualified (! (strEq name bare)))
+                (full (if (== (nodeModule d) 0)
+                  bare
+                  (concat (nodeModuleName d) (concat "$" bare))))
+              )
+                (if (&& (|| own (&& (== (nodeVis d) 1) (!= (nodeModule d) 0)))
+                      (|| (! qualified) (strEq name full)))
+                  (let ((rank
+                    (if own
+                      2
+                      1)))
+                    (if (> rank priority)
+                      {
+                        (set priority rank)
+                        (set chosen d)
+                      }
+                      (if (== rank priority)
+                        (set chosen (- 0 1))))))))
+            (set i (+ i 1))
+          }))
+      chosen
+    }))
+
+(pub :: expNamedBad (-> Int Int String Int))
+(pub fn (expNamedBad env sp message)
+  {
+    (expEmit env
+      (expMarkUnit env
+        (mkDiag SEV_ERROR "AX3132" "named-construction" sp message 0 0
+          "construct a visible struct with each declared field exactly once: `(Point :x 10 :y 20)`")
         (memGetWord env 11)))
     (mkEInt 0)
   })

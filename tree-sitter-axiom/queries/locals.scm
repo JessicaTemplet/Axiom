@@ -20,6 +20,7 @@
 (source_file) @local.scope
 (function_definition) @local.scope
 (lambda) @local.scope
+(block) @local.scope
 (let_expression) @local.scope
 (match_arm) @local.scope
 (for_expression) @local.scope
@@ -37,6 +38,9 @@
 
 ; A binding's own value does not see it: in `(let ((ps ps)) ...)` the
 ; second `ps` is the one from outside.
+(local_binding
+  name: (identifier) @local.definition
+  value: (_) @local.definition-value)
 (let_binding
   pattern: (identifier) @local.definition
   value: (_) @local.definition-value)

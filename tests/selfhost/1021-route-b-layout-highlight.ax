@@ -1,0 +1,40 @@
+; expect 42
+; Flat locals keep their surrounding block and constructor labels keep
+; their source order. The REPL recognises mutable locals and field labels.
+(import Str)
+(import format)
+(import replhl)
+(import style)
+
+(:: containsText (-> String String Bool))
+(fn (containsText text needle)
+  (match (strFind text needle 0)
+    ((None) false)
+    ((Some _) true)))
+
+(:: main Int)
+(fn (main)
+  {
+    (let source
+      "(fn (f input) {(let point (Point :y 20 ; second\n :x input)) (let mut total point.x) total})")
+    (let formatted (fmtFormat source))
+    (let text (fzText formatted))
+    (let again (fmtFormat text))
+    (let highlight "{(let mut total 0) (Point :y 20 :x total)}")
+    (let classes (replHlClass highlight (- 0 1)))
+    (let fieldType "(struct Point (x:Int))")
+    (let fieldClasses (replHlClass fieldType (- 0 1)))
+    (if (&& (== (fzOk formatted) 1)
+          (&& (== (fzOk again) 1)
+            (&& (strEq text (fzText again))
+              (&& (containsText text "(let point\n")
+                (&& (containsText text ":y 20  ; second")
+                  (&& (containsText text ":x input")
+                    (&& (containsText text "(let mut total point.x)")
+                      (&& (strEq classes "ppKKK.KKK.iiiii.np.pCCCCC.pm.nn.pm.iiiiipp")
+                        (&& (! (containsText fieldClasses "m"))
+                          (== (visLen (replHlPaint highlight (- 0 1) 0))
+                            (visLen highlight)))))))))))
+      42
+      1)
+  })
