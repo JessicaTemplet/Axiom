@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- A cast into a struct or `data` type another module keeps private is
+  judged like any other cast into a reference: `(cast Map 4096)` in a
+  user file forged a map header in safe code, and is AX3073 now. Tested
+  by `tests/diagnostics/1381-private-struct-forge.ax`.
+
 - A program's `main` is declared `(:: main ())`: it runs for what it
   does and the program exits 0. The tests, examples, docs, website
   samples, `explain` pages, the VS Code snippet, the REPL and

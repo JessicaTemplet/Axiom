@@ -6649,13 +6649,14 @@
 ; standard library's `Chan`, `Mutex` and `CancelToken` are not words but
 ; `sealed shared` owners (MM-PAR-16).
 ; ------------------------------------------------------------------
-; The struct declaration a bare or qualified NAME denotes, IGNORING
-; visibility: whether a type is a word is a fact about its declaration,
-; not about who asks. Tiered exactly as `tyFind` is - the referencing
-; module's own, then a module-less one, then any - with no privacy set.
-(pub :: findStructAnyVis (-> Int String Int))
+; The declaration of `kind` a bare or qualified NAME denotes, IGNORING
+; visibility: whether a type is a word, or a reference a cast can forge,
+; is a fact about its declaration, not about who asks. Tiered exactly as
+; `tyFind` is - the referencing module's own, then a module-less one,
+; then any - with no privacy set.
+(pub :: tyFindAnyVis (-> Int Int String Int))
 ;@axiom:effect(unsafe)
-(pub fn (findStructAnyVis tc name)
+(pub fn (tyFindAnyVis tc kind name)
   (let ((v (tyIdxBucket tc name)))
     (if (==
       (cast Int v)
@@ -6669,7 +6670,7 @@
           (if (!= (modOf name) 0)
             (tyPick
               v
-              TY_STRUCT
+              kind
               name
               none
               curMod
@@ -6677,7 +6678,7 @@
               0)
             (let ((own (tyPick
               v
-              TY_STRUCT
+              kind
               name
               none
               curMod
@@ -6687,7 +6688,7 @@
                 own
                 (let ((glob (tyPick
                   v
-                  TY_STRUCT
+                  kind
                   name
                   none
                   curMod
@@ -6697,7 +6698,7 @@
                     glob
                     (tyPick
                       v
-                      TY_STRUCT
+                      kind
                       name
                       none
                       curMod
@@ -6706,6 +6707,15 @@
           (if (== te 0)
             0
             (memGetWord te 3)))))))
+
+(pub :: findStructAnyVis (-> Int String Int))
+(pub fn (findStructAnyVis tc name)
+  (tyFindAnyVis tc TY_STRUCT name))
+
+; The `data` declaration a name denotes, ignoring visibility, as above.
+(pub :: findDataAnyVis (-> Int String Int))
+(pub fn (findDataAnyVis tc name)
+  (tyFindAnyVis tc TY_DATA name))
 
 ; The word struct a type NAME denotes, or 0 - at once when the program
 ; declares none (word 43).
@@ -13972,9 +13982,13 @@
           0
           (if (!= (tySubtypeBase tc t) 0)
             0
-            (if (!= (findStruct tc n) 0)
+            ; Ignoring visibility: a module's private struct is still a
+            ; reference in the module that names it - `Map` is private to
+            ; `Map.ax`, and `(cast Map 4096)` in a user file forged one
+            ; while this asked `findStruct` and answered 3, "unknown".
+            (if (!= (findStructAnyVis tc n) 0)
               1
-              (let ((de (findData tc n)))
+              (let ((de (findDataAnyVis tc n)))
                 (if (== de 0)
                   3
                   (if (== (castDataAllNullary (memGetWordVec de 1) 0) 1)
