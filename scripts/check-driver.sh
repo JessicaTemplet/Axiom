@@ -470,7 +470,7 @@ fi
 
 # The help has to be actionable, since this is the commonest thing a
 # newcomer gets wrong.
-grep -q 'add `(:: main Int)`' nm.err \
+grep -Fq 'add `(:: main ())` and `(fn (main) ...)`' nm.err \
   && ok "AX4001 says how to fix it" || bad "AX4001 help text"
 
 # ...and it must NOT over-fire. These three surfaces analyse a module
