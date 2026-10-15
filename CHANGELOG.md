@@ -49,6 +49,11 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- The restricted-declaration census includes fixed-width arithmetic,
+  exact conversion helpers, REPL colours and ownership regressions.
+  Deleted helper functions leave the census; all other recorded verdicts
+  remain unchanged. Tested by `scripts/check-restrictions.sh`.
+
 - Effect inference walks its frontier iteratively, preserving processing
   order while avoiding one stack frame per declaration. Language-server
   disconnects answer active and queued requests before reaping their worker.
