@@ -227,13 +227,21 @@ in `self_host/parser.ax`) accepts exactly this shape:
   raw extern answers a `Foreign` word, and only `ffiHandleNew` turns
   one into a `Handle`.
 - `pub` makes the items importable like any other declaration. A block
-  without `pub` binds within its own file.
+  without `pub` binds within its own file. Selective imports name the
+  items: `(import MyCrate (add))`. Repeated imports combine their lists
+  without exposing private items. Qualified references obey the same
+  visibility rules.
+- Calls inside an imported module resolve its own bindings before other
+  imports. An entry-file function or extern cannot capture those calls.
+  Foreign call evidence retains the defining module and its linker symbol.
 - An item defines a value name. A `fn` with the same spelling in the
   same file is `AX3006 duplicate definition`, but two blocks naming one
   library are not duplicates of each other (`tests/diagnostics/702`).
 - Calling an item contributes the `IO` effect (C6). `tcAddExtern` seeds
   the item's `FnEnt` with `IO`, and the ordinary fixpoint propagates it
   (`tests/ffi/demo/070-extern-effect-transitive.ax`).
+
+Tested by `tests/profile/verify-foreign-resolution.py`.
 
 The emitter (`emitExternItems` in `codegen.ax`) writes
 `declare i64 @sym(i64, ...) #0` only for a symbol the module calls. A

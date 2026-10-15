@@ -176,4 +176,6 @@ tests/lsp/100-lint-dead-branch.golden|1|lspg_version|lspg_replace
 tests/lsp/101-lint-bool-if.golden|1|lspg_version|lspg_replace
 tests/lsp/102-lint-unused-let.golden|1|lspg_version|lspg_replace
 tests/lsp/103-lint-nolint.golden|1|lspg_version|lspg_replace
+tests/lsp/104-lint-file-nolint.golden|1|lspg_version|lspg_replace
+tests/lsp/105-lint-nolint-names.golden|1|lspg_version|lspg_replace
 "

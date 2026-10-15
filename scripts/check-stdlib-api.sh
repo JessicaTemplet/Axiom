@@ -336,6 +336,64 @@ if ! AXIOM_STDLIB="$repo_root/stdlib" "$axc" build \
   exit 1
 fi
 
+# A complete declaration may span several lines. Check exact type
+# cells independently of the generated page and its bless operation.
+echo "== balanced source signatures =="
+cat > "$work/ApiLayout.ax" <<'SIGNATURES'
+;; Calls a numeric callback.
+(pub :: layoutCallback
+  (-> (-> Int Int) ; a comment containing )) must not end the signature
+    #| A nested comment: #| ) ( |#
+(pub :: phantom Int)
+    |#
+    Int
+    Int))
+;@axiom:pre((>= value 0))
+(pub fn (layoutCallback worker value) (worker value))
+
+;; Keeps the vector's element type.
+(pub :: layoutVector
+  (-> (Vec
+         Int)
+      (Vec Int)))
+(pub fn (layoutVector values) values)
+
+;; A following signature stays separate.
+(pub :: layoutInt Int)
+(pub fn (layoutInt) 42)
+SIGNATURES
+: > "$work/signature.axsym"
+if ! "$axc" --diagnostic-format=ai check "$work/ApiLayout.ax" >"$work/signature.log" 2>&1; then
+  bad "the source-signature probe does not typecheck"
+  head -20 "$work/signature.log"
+fi
+"$gen_bin" "$work/signature.axsym" "$work/ApiLayout.ax" > "$work/signature.md"
+if python3 - "$work/signature.md" <<'VERIFY_SIGNATURES'
+from pathlib import Path
+import sys
+rows = {}
+for line in Path(sys.argv[1]).read_text().splitlines():
+    if line.startswith('| `'):
+        cells = [cell.strip() for cell in line.split('|')]
+        rows[cells[1].strip('`')] = cells
+expected = {
+    'layoutCallback': '(-> (-> Int Int) Int Int)',
+    'layoutVector': '(-> (Vec Int) (Vec Int))',
+    'layoutInt': 'Int',
+}
+assert set(rows) == set(expected), rows
+for name, signature in expected.items():
+    assert rows[name][2] == 'value', rows[name]
+    assert rows[name][3] == f'`{signature}`', rows[name]
+assert rows['layoutCallback'][6] == 'Calls a numeric callback.', rows
+assert ';@axiom:pre((>= value 0))' in rows['layoutCallback'][5], rows
+VERIFY_SIGNATURES
+then
+  ok "multiline signatures retain nested types, comments, contracts and declaration boundaries"
+else
+  bad "the generator truncated or merged a source signature"
+fi
+
 generate() {  # <src-root> <out-file>
   local root="$1" out="$2" axsym="$work/axsym.$$"
   ( cd "$root" && build_axsym "$axsym" )

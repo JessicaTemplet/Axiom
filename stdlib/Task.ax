@@ -1430,3 +1430,36 @@
 ;@axiom:effect(block)
 (pub fn (taskRunCommands cmds width)
   (taskMapWords (lambda (i) (taskRunCommandWord (vecGet cmds i))) (vecLen cmds) width))
+
+;; Map an Int-to-Int numeric computation with the ordinary Task budgets.
+;; Results are submit-ordered. Each word crosses as exactly eight bytes;
+;; the byte limit and keep budget apply to those bytes. Numeric conversion
+;; is explicit. `compute(worker)` checks primitive captures and the entire
+;; reachable numeric program, including local accumulators and helpers.
+;@axiom:compute(worker)
+(pub :: taskMapCompute (-> (-> Int Int) Int TaskOpts (Vec (Result Int Error))))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (taskMapCompute worker count opts)
+  (taskMapDecodedWith (lambda (index) (taskComputeEncode (worker index))) taskComputeDecode count
+    opts))
+
+; Private fixed-width transport. The allocated String owns eight writable
+; bytes. Decoding checks the size before its one word load. No reference
+; or hidden ownership promotion crosses the process boundary.
+(:: taskComputeEncode (-> Int String))
+;@axiom:effect(unsafe)
+(fn (taskComputeEncode word)
+  (let ((bytes (strAlloc 8)))
+    {
+      (__store64 (strData bytes) 0 word)
+      bytes
+    }))
+
+(:: taskComputeDecode (-> String (Result Int Error)))
+;@axiom:effect(unsafe)
+(fn (taskComputeDecode bytes)
+  (if (== (strLen bytes) 8)
+    (Ok (__load64 (strData bytes) 0))
+    (Err (mkError 22 "task compute answer must contain exactly eight bytes"))))

@@ -1,0 +1,109 @@
+(import IO)
+(import Task)
+(import Vec)
+(import Err)
+
+(type Word = Int)
+
+(type Kernel = (-> Word Word))
+
+(:: applyKernel (-> Kernel Int Int))
+;@axiom:compute(worker)
+(fn (applyKernel worker value)
+  (worker value))
+
+(:: forward (-> Kernel Int Int))
+;@axiom:compute(worker)
+(fn (forward worker value)
+  (applyKernel worker value))
+
+(:: show (-> (Vec (Result Int Error)) Int))
+;@axiom:effect(io)
+(fn (show results)
+  {
+    (for i in 0..(vecLen results)
+      (match (vecGet results i)
+        ((Ok word) (println "ok {word}"))
+        ((Err error)
+          (let ((code error.code))
+            (println "err {code}"))
+        )))
+    0
+  })
+
+(:: append (-> (Vec Int) Int Int))
+(fn (append values index)
+  {
+    (vecPush values index)
+    (vecLen values)
+  })
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  {
+    (let (
+      (offset (:: 7 Word))
+      (scale 2.0)
+      (small (as 3 UInt8))
+    )
+      {
+        (println (forward (lambda (i) (+ offset (triangular i))) 5))
+        (println
+          (applyKernel
+            (lambda (i)
+              (as (* (as i Float) scale) Int)
+            )
+            6))
+        (println
+          (applyKernel
+            (lambda (i)
+              (+ i (as small Int))
+            )
+            8))
+      })
+    (show (taskMapCompute (lambda (i) (triangular (+ i 1))) 4 (taskOpts 2 8)))
+    (show
+      (taskMapCompute
+        (lambda (i)
+          (if (== i 0)
+            (- (- 0 9223372036854775807) 1)
+            (== i 1)
+            9223372036854775807
+            (== i 2)
+            (- 0 17)
+            0)
+        )
+        4 (taskOpts 3 8)))
+    (show (taskMapCompute (lambda (i) i) 2 (taskOpts 1 7)))
+    (show (taskMapCompute (lambda (i) i) 3 (taskWithKeep (taskOpts 1 8) 8)))
+    (match taskTokenNew
+      ((Err error) 1)
+      ((Ok token)
+        {
+          (taskCancel token)
+          (show (taskMapCompute (lambda (i) i) 2 (taskWithToken (taskOpts 2 8) token)))
+        }
+      ))
+    (let ((values (vecWithCapacity 4)))
+      {
+        (show (taskMapWordsChecked (lambda (i) (append values i)) 3 2))
+        (println (vecLen values))
+        (println (append values 0))
+        (println (append values 1))
+        (println (append values 2))
+      })
+    0
+  })
+
+; Defined below the use: validation needs the checked body, not order.
+(:: triangular (-> Int Int))
+(fn (triangular count)
+  (let ((mut sum 0))
+    {
+      (for i in 0..count
+        (set sum (+ sum i)))
+      sum
+    }))

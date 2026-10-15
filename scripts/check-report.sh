@@ -481,6 +481,15 @@ else
   bad "cannot build the foreign-call evidence archive"
 fi
 
+# Imported foreign items share the module visibility rules of functions.
+# The probe includes native linker controls and refused source programs.
+if python3 "$fxdir/verify-foreign-resolution.py" --axiom "$axc" --work "$work" > "$work/foreign-resolution.out" 2>&1; then
+  ok "$(tail -1 "$work/foreign-resolution.out"): selective, repeated and transitive imports"
+else
+  bad "foreign import visibility or provenance differs"
+  tail -15 "$work/foreign-resolution.out" | sed 's/^/     /'
+fi
+
 # Built-in IO refinements are not unhandled user effects. Handler
 # subtraction must also survive the report's own call-graph closure.
 for fx in effect-entropy effect-handled rp4-syscall-spawn rp8-tagged-block; do

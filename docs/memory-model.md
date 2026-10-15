@@ -6193,6 +6193,22 @@ answers one error. Range counts and ends **MUST NOT** overflow `Int`.
 Evidence: `tests/stdlib/951-task-ranges.ax` and
 `tests/stdlib/952-task-ranges-lifecycle.ax`.
 
+`taskMapCompute worker count opts` carries successful `Int` results as
+exactly eight bytes. Its `compute(worker)` contract **MUST** be checked
+at every direct call and every forwarding boundary. The callback and
+its transitive helpers use a closed numeric operation basis, with only
+canonical primitive captures and local scalar mutation. References,
+allocation, captured or heap stores, raw/runtime observers, foreign
+calls, assembly and opaque calls are refused with `AX3131`. An empty
+effect row does not establish this boundary. Ordinary type and effect
+checks still apply, including `Mut` for local accumulators.
+
+Each invocation runs in a fresh child. The contract transfers no
+ownership and extends no region lifetime. `limit` and `keep` count eight
+bytes per successful result. Evidence:
+`tests/stdlib/961-task-compute-contract.ax` and
+`tests/diagnostics/1445-compute-callback.ax`.
+
 `taskMapDecoded` and `taskMapDecodedWith` call a
 `(-> String (Result a Error))` decoder in the parent, in submit order.
 Transport errors pass through unchanged and skip the decoder.
@@ -6392,7 +6408,7 @@ answered, combined in index order, whatever finished first.** This
 rule says which parts of a parallel computation's answer are
 reproducible and which are not. It covers `parallel` bindings and `Task`'s
 word pools (`taskMapWords`, `taskMapWordsChecked`) and byte-result pools
-(`taskMap`, `taskMapWith`, `taskMapRanges`, `taskFold`), at any width and in both
+(`taskMap`, `taskMapWith`, `taskMapRanges`, `taskMapCompute`, `taskFold`), at any width and in both
 lowerings.
 
 A workload is *pure* here when every binding and task computes from
@@ -6669,7 +6685,7 @@ pool keeps (`MM-PAR-13`), and each has a stated outcome:
 | Workers | `width` | children alive at once, and the handles they hold | a spawn the kernel or the handle table refuses answers `Err` 78 (or 70) in its slot, and the pool is cancelled |
 | Queue | none | a task not yet started is its index, so waiting costs nothing; submission blocks while `width` are out | nothing to run out of |
 | Answers in flight | `width` and `limit` | the slab: `width` slots of `limit` bytes | an answer over `limit` answers `Err` 1003 |
-| Kept answers | `keep` (`taskWithKeep`) | the answer bytes one `taskMap`, `taskMapWith`, `taskMapRanges` or `taskMapDecoded*` call holds | the answer that would pass it, and every non-empty `Ok` after it, answers `Err` `taskOverBudgetCode` (1012), and the pool is cancelled |
+| Kept answers | `keep` (`taskWithKeep`) | the answer bytes one `taskMap`, `taskMapWith`, `taskMapRanges`, `taskMapCompute` or `taskMapDecoded*` call holds | the answer that would pass it, and every non-empty `Ok` after it, answers `Err` `taskOverBudgetCode` (1012), and the pool is cancelled |
 | Task memory | `memory` (`taskWithMemory`) | bytes one task's arena may map beyond what its process began with | the task traps 70 in its own process and answers `Err` 70, "task out of memory"; its siblings and the caller go on |
 | Stack | `stack` (`taskWithStack`), `taskStackDefault` (8 MiB) when 0 | the stack one task runs on: that many bytes, rounded up to 64 KiB, mapped in the task's process with a 64 KiB guard below, whichever thread started the pool | the task touches the guard, traps 86 in its own process and answers `Err` 86, "task out of stack"; its siblings and the caller go on |
 

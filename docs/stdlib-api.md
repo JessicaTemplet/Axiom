@@ -2206,7 +2206,7 @@ target being compiled for (this one is `darwin`).
 
 ## `Task`
 
-`stdlib/Task.ax` — 29 public names
+`stdlib/Task.ax` — 30 public names
 
 Structured tasks with typed results across the process boundary
 (R-C2, docs/memory-model.md MM-PAR-13).
@@ -2242,6 +2242,7 @@ Structured tasks with typed results across the process boundary
 | `taskArgvVector` | value | `(-> (Vec String) Int)` | `Alloc,Mut` |  | A null-terminated argv for `execve` or `posix_spawn`. Every string passes through `strCStr`, which copies a slice when it needs a terminator. The array lives in the caller's arena. |
 | `taskRunCommand` | value | `(-> (Vec String) (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn` |  | Run one argument vector. Element 0 is the program, looked up on `PATH`. An empty vector answers `Err` 2 without starting a process. |
 | `taskRunCommands` | value | `(-> (Vec (Vec String)) Int (Vec Int))` | `Alloc,Block,IO,Mut,Spawn` |  | Run argument vectors at up to `width` at once, in submit order. Each slot contains its exit code, 128 plus its terminating signal, or a negative errno when the program could not start. |
+| `taskMapCompute` | value | `(-> (-> Int Int) Int TaskOpts (Vec (Result Int Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | Map an Int-to-Int numeric computation with the ordinary Task budgets. Results are submit-ordered. Each word crosses as exactly eight bytes; the byte limit and keep budget apply to those bytes. Numeric conversion is explicit. `compute(worker)` checks primitive captures and the entire reachable numeric program, including local accumulators and helpers. |
 
 ## `Test`
 

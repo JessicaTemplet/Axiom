@@ -656,6 +656,21 @@ Decoder errors stay in their result slots; `failFast` applies to worker
 failures. A slow decoder can delay submission and deadline handling.
 Tested by `tests/stdlib/704-task-decoded.ax`.
 
+`taskMapCompute worker count opts` runs checked `(-> Int Int)` workers
+and returns `(Vec (Result Int Error))` in submit order. The
+`compute(worker)` contract permits primitive captures, numeric helper
+calls, explicit conversions and local scalar accumulators. It refuses
+references, allocation, captured or heap stores, raw/runtime observers,
+foreign calls, assembly and opaque calls, transitively. Local mutation
+retains its `Mut` effect; normal type and effect checks still apply.
+
+Each invocation runs in a fresh child. Successful `Int` answers cross as
+exactly eight bytes; both `limit` and `keep` count those bytes. Existing
+`TaskOpts` cancellation, deadline, fail-fast, memory and stack limits
+apply. Convert other numeric results to `Int` explicitly. Tested by
+`tests/stdlib/961-task-compute-contract.ax` and
+`tests/diagnostics/1445-compute-callback.ax`.
+
 Group small jobs into explicit ranges to reduce process starts:
 
 ```scheme

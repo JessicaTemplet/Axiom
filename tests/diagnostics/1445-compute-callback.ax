@@ -1,0 +1,114 @@
+(import Mem)
+(import Vec)
+(import IO)
+
+(extern "demo"
+  (foreignObserve :: (-> Int Int)))
+
+(struct Key word shared
+  (value : Int))
+
+(:: applyKernel (-> (-> Int Int) Int Int))
+;@axiom:compute(worker)
+(fn (applyKernel worker value)
+  (worker value))
+
+(:: unary (-> (-> Int Int) Int))
+;@axiom:compute(worker)
+(fn (unary worker)
+  (applyKernel worker 0))
+
+(:: observer Int)
+(fn (observer)
+  (__axiom_mem_stat 2))
+
+(:: hiddenRead (-> Int Int))
+;@axiom:effect(pure)
+(fn (hiddenRead address)
+  (memGetWord address 0))
+
+(:: throughObserver (-> Int Int))
+(fn (throughObserver value)
+  (+ value observer))
+
+(:: factory (-> Int Int))
+(fn (factory)
+  (lambda (i) i))
+
+(:: hiddenIO (-> Int Int))
+;@axiom:effect(io)
+(fn (hiddenIO value)
+  {
+    (println value)
+    value
+  })
+
+(:: hiddenAssembly (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (hiddenAssembly value)
+  (asm
+    (aarch64 "mov {r}, {a}" (out r) (in a value))
+    (x86_64 "movq {a}, {r}" (out r) (in a value))))
+
+(:: opaque (-> (-> Int Int) Int))
+(fn (opaque worker)
+  (applyKernel worker 0))
+
+(:: shadowed (-> (-> Int Int) Int))
+;@axiom:compute(worker)
+(fn (shadowed worker)
+  (let ((worker
+    (lambda (i) i)))
+    (applyKernel worker 0)))
+
+(:: invalid (-> Int Int))
+;@axiom:compute(value)
+(fn (invalid value)
+  value)
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (main)
+  (let (
+    (buffer (vecWithCapacity 4))
+    (key (Key 7))
+    (saved (lambda (i) (+ i 1)))
+  )
+    {
+      (applyKernel
+        (lambda (i)
+          {
+            (vecPush buffer i)
+            i
+          }
+        )
+        0)
+      (applyKernel (lambda (i) key.value) 0)
+      (let ((mut counter 0))
+        (applyKernel
+          (lambda (i)
+            {
+              (set counter (+ counter i))
+              counter
+            }
+          )
+          0))
+      (applyKernel (lambda (i) (__axiom_mem_stat i)) 0)
+      (applyKernel (lambda (i) (hiddenRead i)) 0)
+      (applyKernel throughObserver 0)
+      (applyKernel factory 0)
+      (applyKernel foreignObserve 0)
+      (applyKernel hiddenIO 0)
+      (applyKernel hiddenAssembly 0)
+      (applyKernel saved 0)
+      (let ((erased unary))
+        (erased saved))
+      (applyKernel
+        (lambda (i)
+          (let ((temporary (vecWithCapacity 4)))
+            i)
+        )
+        0)
+      0
+    }))

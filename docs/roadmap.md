@@ -145,10 +145,18 @@ ADT instantiation.
 | Explicit task grain with bounded range jobs, ordered answers and per-range budgets | Done | `tests/stdlib/951-task-ranges.ax`, `tests/stdlib/952-task-ranges-lifecycle.ax` |
 | Checked streaming callbacks reject retained answers and temporary allocations, with explicit forwarding contracts | Done | `tests/stdlib/953-scoped-task-fold.ax`, `tests/diagnostics/1440-scoped-callback-escape.ax` |
 | Cancellation is checked between spawn attempts, and grace starts at the observed shutdown boundary | Done | `tests/stdlib/960-task-launch-cancellation.ax`, `tests/litmus/check-task-launch.py` |
+| Checked numeric callbacks with primitive captures, local accumulators and fixed-width task answers | Done | `tests/stdlib/961-task-compute-contract.ax`, `tests/diagnostics/1445-compute-callback.ax` |
 | Scale multicore work with bounded worker reuse and scheduling, preserving isolation, submit order and cancellation | Planned | `MM-PAR-3`, `MM-PAR-5`, `MM-PAR-17` |
 | A `parallel` form keeps no arena storage once it returns, in both lowerings | Done | `tests/litmus/par-forms.ax`, `scripts/check-parallel.sh` |
 | Fixed worker, queue, memory and stack budgets, with exhaustion and shutdown tests | Done | `MM-PAR-17`, `tests/stdlib/920-task-stack.ax` |
 | Shared mutable heap graphs across tasks | Not started | |
+
+Worker reuse requires the checked `compute(worker)` boundary: general
+callbacks can mutate a captured vector independently in each fresh
+process, while serial reuse would accumulate those mutations. The
+compute entry still forks each invocation. Persistent scheduling,
+measured startup amortisation and a broader checked numeric syntax,
+including pattern matching, remain work to do.
 
 ## Tools
 
@@ -175,7 +183,8 @@ ADT instantiation.
 | Imported foreign items keep separate checker, source and linker identities when their source names match | Done |
 | Resource reports consume checked `Spawn` and `Block` effects, preserve handled effect subtraction and refuse unknown kernel calls in nonblocking entries | Done |
 | Stack reports cover every selected source entry and the assembled IRQ save and dispatch extent; additional machine roots cannot bypass main | Done |
-| Selective foreign-item imports and transitive foreign references preserve visibility and module resolution | Planned |
+| Selective foreign-item imports and transitive foreign references preserve visibility and module resolution | Done | `tests/profile/verify-foreign-resolution.py` |
+| Selective import lists are validated inside every imported module, including unused names | Not started |
 | The test runner runs tests in parallel | Done |
 | UTF-16 ranged document edits apply in order and atomically, with monotonic versions and versioned diagnostics | Done |
 | The language server cancels obsolete work and serves requests from revisioned background analysis on hosts with process and poller support | Done |

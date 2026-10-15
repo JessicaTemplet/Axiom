@@ -16,6 +16,26 @@ its changelog too.
 
 ## Unreleased
 
+- API generation reads complete multiline signatures and skips nested
+  comments within them. Existing type cells stay complete after formatting.
+  The source-signature probe in `scripts/check-stdlib-api.sh` checks exact
+  types, declaration boundaries and attached documentation.
+- Internal compiler fixtures now use explicit generic parameters and the
+  resolved, expanded, checked emission pipeline. Tested by
+  `tests/stdlib/352-arc-shape.ax` and `tests/selfhost/300-pipeline.ax`.
+
+- Selective extern imports filter item names and preserve private bindings.
+  Calls in transitive modules retain their defining binding when an entry
+  file declares an extern with the same name. Tested by
+  `tests/profile/verify-foreign-resolution.py`.
+- Added checked `compute(worker)` callback contracts and
+  `Task.taskMapCompute`. Numeric callbacks can capture primitive values,
+  call checked helpers and use local scalar accumulators. Transitive raw
+  observers, references, heap stores, allocation and opaque calls are
+  refused with `AX3131`. Successful `Int` answers use an eight-byte
+  transport under existing task budgets; each invocation keeps its fresh
+  process isolation.
+
 - Fixed leaked reference results when surplus arguments invoke a closure
   returned by a generic function. The final checked result type controls
   cleanup for arguments, bound values, return tails and generic field

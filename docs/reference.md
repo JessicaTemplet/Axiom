@@ -1967,6 +1967,12 @@ from sharing a process start. `worker` receives the start and exclusive
 end of a contiguous range, at most `grain` items. Each range runs in a
 fresh child and returns one result. Options and budgets apply per range.
 
+`taskMapCompute worker count opts` returns `(Result Int Error)` slots.
+Its checked `compute(worker)` contract accepts numeric computations with
+primitive captures and local accumulators. Each invocation still runs in
+a fresh child; successful words cross as eight bytes, counted by `limit`
+and `keep`. See [AXTAG metadata](#axtag-metadata) for the checked boundary.
+
 `taskMapWords` returns word results, while `taskMapWordsChecked`
 returns a `Result` for each word. `taskRunCommand` runs one argument
 vector; `taskRunCommands` runs a bounded command pool. The
@@ -2204,6 +2210,44 @@ only after it returns. Normal type, effect and region checks still apply.
 Raw addresses retain their unsafe validity and lifetime obligations.
 Tested by `tests/stdlib/953-scoped-task-fold.ax` and
 `tests/diagnostics/1440-scoped-callback-escape.ax`.
+
+A compute callback accepts an `Int` and returns an `Int`:
+
+```scheme
+(:: applyKernel (-> (-> Int Int) Int Int))
+;@axiom:compute(worker)
+(fn (applyKernel worker value)
+  (worker value))
+
+(:: main Int)
+(fn (main)
+  (let ((offset 7))
+    (applyKernel (lambda (i) (+ i offset)) 5)))
+```
+
+`compute(worker)` requires that exact callback type, after expanding
+aliases. Pass a lambda directly, a non-nullary function declaration with
+a visible body, or the exact parameter carrying the same contract.
+Call the tagged function directly with all its declared arguments.
+An invalid declaration, opaque callback or erased precondition is
+`AX3131`.
+
+The compiler checks the callback and every helper it calls against a
+closed numeric operation basis: primitive numeric, Boolean and character
+values, arithmetic, comparisons, Boolean operations, explicit numeric
+conversions, local bindings, `if`, loops and sequences. Captures must be
+canonical primitive values. Local scalar accumulators are allowed and
+keep their `Mut` effects. References, handles, allocation, heap or
+captured stores, raw loads, runtime observers, foreign calls, assembly
+and opaque calls are refused, including through helpers. An empty effect
+row alone does not establish this contract.
+
+Normal type and effect checks still apply. Convert fixed-width and
+floating-point results to `Int` explicitly. The contract restricts what
+the callback can observe and mutate; it does not transfer ownership or
+extend a region's lifetime. Tested by
+`tests/stdlib/961-task-compute-contract.ax` and
+`tests/diagnostics/1445-compute-callback.ax`.
 
 Use `axiom --diagnostic-format=ai symbols file.ax` to inspect accepted
 tags and inferred facts. [Symbol tags](diagnostics.md#read-symbol-tags) describes reading

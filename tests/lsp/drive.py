@@ -6980,6 +6980,15 @@ else:
     print(scoped_check.stdout.strip())
     passed += 1
 
+compute_check = subprocess.run([sys.executable, os.path.join(fixdir, "compute-callback.py"), stage1],
+                              capture_output=True, text=True)
+if compute_check.returncode:
+    print(compute_check.stdout + compute_check.stderr)
+    failed += 1
+else:
+    print(compute_check.stdout.strip())
+    passed += 1
+
 print(f"\nlsp: {passed} passed, {failed} failed, "
       f"{len(fixtures)} fixtures + 2 generated")
 

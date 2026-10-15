@@ -1023,7 +1023,10 @@
       (let ((full (vecGetStr (memGetWordVec cg 13) (vecGet (vecGet (memGetWordVec cg 40) 0) id))))
         (if (== (as m Int) 0)
           full
-          (if (strEq full name)
+          (if (|| (strEq full name)
+                (match (internFind bi (concat "$entry$" name))
+                  ((Some _) true)
+                  ((None) false)))
             (match (internFind bi (concat "$" name))
               ((Some v)
                 (vecGetStr (memGetWordVec cg 13) (vecGet (vecGet (memGetWordVec cg 40) 0) v))
@@ -7575,7 +7578,7 @@
 (pub :: mangledForModIn (-> (Vec String) (Vec String) String String))
 (pub fn (mangledForModIn bares fulls name)
   (let ((full (mangledForIn bares fulls name 0)))
-    (if (strEq full name)
+    (if (|| (strEq full name) (mangleHasIn bares (concat "$entry$" name) 0))
       (if (mangleHasIn bares name 0)
         (let ((key (concat "$" name)))
           (if (mangleHasIn bares key 0)
@@ -7622,7 +7625,11 @@
       ; parser resolved (defaulting to the Axiom name).
       {
         (let ((f (vecGet items i)))
-          (mangleRecord idx bares fulls (nodeAName f) (nodeCName f)))
+          {
+            (mangleRecord idx bares fulls (nodeAName f) (nodeCName f))
+            (vecPush bares (concat "$entry$" (nodeAName f)))
+            (vecPush fulls (nodeCName f))
+          })
         (recordExternSyms idx bares fulls items (+ i 1))
       })))
 
@@ -7762,23 +7769,11 @@
           ; Provenance, recorded before mangling rewrites the
           ; name: this is the only point in the pipeline that
           ; knows which module a declaration came from.
-          (let ((exported
-            (if (&& (filterKeeps filter (nodeAName first))
-                  (|| (== (as modName Int) 0) (== (nodeVis first) 1)))
-              1
-              0)))
+          (let ((exported (moduleDeclExport first modName mods filter)))
             {
               (memSetWord first 8 modName)
-              ; The written `pub`, recorded BEFORE the verdict below
-              ; destroys it. Word 5 is `nodeVis` ("written `pub`")
-              ; only until the next line runs; a repeat import's
-              ; union and the checker's `exportedFromModule` both
-              ; need the original answer afterwards, and this is
-              ; the only point in the pipeline that still has it.
-              ; The name is still bare here - `mangleDecl` renames
-              ; below - which is the spelling `modPubsFor` is asked.
-              (if (&& (!= (as modName Int) 0) (== (nodeVis first) 1))
-                (modPubsAdd mods modName (nodeAName first)))
+              ; moduleDeclExport preserves the original public names,
+              ; including individual items of foreign blocks.
               ; From here on word 5 answers "may a reference from
               ; outside this module name it", not "was it written
               ; `pub`". The entry file's own declarations are all
@@ -7879,8 +7874,8 @@
 ; (`mangleDecl`'s exported arm). First-writer-wins still holds -
 ; `mangleRecord` no-ops on a claimed bare slot, so the entry file
 ; keeps a name it defined itself. Every other declaration kind needs
-; only the flip: signatures rename without recording, `extern` items
-; record regardless of visibility, and the rest record nothing.
+; only the flip. Foreign items widen individually and acquire a bare
+; mapping only when the module exports that item.
 (pub :: repeatExportNew
   (-> (Vec Int) String (Vec String) Int (Vec String) (Vec String) Int (Vec Int)))
 (pub fn (repeatExportNew acc mod delta idx bares fulls i)
@@ -7889,14 +7884,21 @@
     {
       (let ((d (vecGet acc i)))
         (if (&& (!= (nodeModule d) 0) (strEq (nodeModuleName d) mod))
-          (let ((bare (bareOf (nodeAName d))))
-            (if (seenHasIn delta bare 0)
-              (if (== (nodeVis d) 0)
-                {
-                  (memSetWord d 5 1)
-                  (if (== (nodeTag d) TAG_D_FN)
-                    (mangleRecord idx bares fulls bare (nodeAName d)))
-                })))))
+          (if (== (nodeTag d) TAG_D_EXTERN)
+            {
+              (repeatExportExtern (nodeCVec d) delta 0)
+              (if (== (externAnyVisible (nodeCVec d) 0) 1)
+                (memSetWord d 5 1))
+              (mangleExternItems (nodeCVec d) 0 idx bares fulls mod)
+            }
+            (let ((bare (bareOf (nodeAName d))))
+              (if (seenHasIn delta bare 0)
+                (if (== (nodeVis d) 0)
+                  {
+                    (memSetWord d 5 1)
+                    (if (== (nodeTag d) TAG_D_FN)
+                      (mangleRecord idx bares fulls bare (nodeAName d)))
+                  }))))))
       (repeatExportNew acc mod delta idx bares fulls (+ i 1))
     }))
 

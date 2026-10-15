@@ -172,33 +172,27 @@
 ; `strLen`, and an entry file declaring its own `strLen` used to
 ; capture that call, at check time and at run time.
 ;
-; The module view is recorded under `$bare`, a key no reference can
-; spell, because a name never contains `$` until mangling puts it
-; there. It is written only when the slot's holder maps the name to
-; itself, which is the entry file's shape (`recordEntryFns` records
-; `name -> name`); a slot another module won keeps first-writer-wins,
-; and two modules exporting one name are AX3014 wherever it's used.
-; The first module to record wins the view as well, in the same
-; resolution order. `mangledForCg` asks for `$bare` only inside a
-; module, and only when the bare slot answers the name unchanged.
+; The unspellable `$bare` key holds the first imported definition when
+; the entry file owns the bare slot. Ordinary entry functions map their
+; name to itself; foreign entries carry a separate `$entry$bare` marker,
+; because their linker symbols can differ from their Axiom names.
+; Two public imported definitions still require qualification (AX3014).
 (pub :: mangleRecordModuleView (-> Int (Vec String) (Vec String) String String Int))
 (pub fn (mangleRecordModuleView idx bares fulls bare full)
-  (if (strEq bare full)
-    0
-    (match (mangleIdxIndexOf idx bares bare)
-      ((Some i)
-        (if (strEq (vecGet fulls i) bare)
-          (let ((key (concat "$" bare)))
-            (if (mangleIdxHas idx bares key)
+  (match (mangleIdxIndexOf idx bares bare)
+    ((Some i)
+      (if (|| (strEq (vecGet fulls i) bare) (mangleIdxHas idx bares (concat "$entry$" bare)))
+        (let ((key (concat "$" bare)))
+          (if (mangleIdxHas idx bares key)
+            0
+            {
+              (vecPush bares key)
+              (vecPush fulls full)
               0
-              {
-                (vecPush bares key)
-                (vecPush fulls full)
-                0
-              }))
-          0)
-      )
-      ((None) 0))))
+            }))
+        0)
+    )
+    ((None) 0)))
 
 ; The entry file's claim on a bare name, which OVERRIDES whatever an
 ; import recorded. `mangleRecord` gives the entry file the bare slot by
@@ -306,10 +300,8 @@
           (mangleExternItems (nodeCVec node) 0 idx bares fulls modName)
           0)))))
 
-; Record every item of an `extern` block: the Axiom name maps to the
-; `(symbol "...")` clause the parser resolved. Visibility does not
-; change the mapping - an unexported item is simply never referenced
-; from outside, and recording it costs one entry.
+; Record qualified identities for every item and bare names for the
+; exported items. A private binding remains callable within its module.
 (pub :: mangleExternItems (-> (Vec Int) Int Int (Vec String) (Vec String) String Int))
 (pub fn (mangleExternItems items i idx bares fulls modName)
   (if (== (as items Int) 0)
@@ -319,16 +311,55 @@
       {
         (let ((f (vecGet items i)))
           {
-            (mangleRecord idx bares fulls (nodeAName f) (nodeCName f))
-            ; Qualified Axiom identity and linker symbol are separate.
-            ; Module-local and explicitly qualified calls use this map
-            ; even when another declaration has won the bare spelling.
-            (vecPush bares (concat modName (concat "$" (nodeAName f))))
-            (vecPush fulls (nodeCName f))
+            (if (== (nodeVis f) 1)
+              (mangleRecord idx bares fulls (nodeAName f) (nodeCName f)))
+            (let ((q (concat modName (concat "$" (nodeAName f)))))
+              (if (! (mangleIdxHas idx bares q))
+                {
+                  (vecPush bares q)
+                  (vecPush fulls (nodeCName f))
+                }))
             0
           })
         (mangleExternItems items (+ i 1) idx bares fulls modName)
       })))
+
+; Apply the import filter to declaration names, or to individual extern
+; items. Preserve the written public surface for repeat-import unions.
+(pub :: moduleDeclExport (-> Int String (Vec Int) (Vec String) Int))
+(pub fn (moduleDeclExport d mod mods filter)
+  (if (== (nodeTag d) TAG_D_EXTERN)
+    (moduleExternExport (nodeCVec d) mod mods filter
+      (if (== (as mod Int) 0)
+        1
+        (nodeVis d))
+      0 0)
+    {
+      (if (&& (!= (as mod Int) 0) (== (nodeVis d) 1))
+        (modPubsAdd mods mod (nodeAName d)))
+      (if (&& (filterKeeps filter (nodeAName d)) (|| (== (as mod Int) 0) (== (nodeVis d) 1)))
+        1
+        0)
+    }))
+
+(pub :: moduleExternExport (-> (Vec Int) String (Vec Int) (Vec String) Int Int Int Int))
+(pub fn (moduleExternExport items mod mods filter writtenPub i visible)
+  (if (>= i (vecLen items))
+    visible
+    (let ((f (vecGet items i)))
+      (let ((exported
+        (if (&& (== writtenPub 1) (filterKeeps filter (nodeAName f)))
+          1
+          0)))
+        {
+          (if (&& (!= (as mod Int) 0) (== writtenPub 1))
+            (modPubsAdd mods mod (nodeAName f)))
+          (memSetWord f 5 exported)
+          (moduleExternExport items mod mods filter writtenPub (+ i 1)
+            (if (== exported 1)
+              1
+              visible))
+        }))))
 
 ; The half of `mangleRecord` that a private declaration gets: the
 ; mangled name maps to itself, and the bare slot is left for whoever
@@ -484,3 +515,21 @@
           0
         }
         (modFilterWidenIn mods name widened (+ i 1))))))
+
+(pub :: repeatExportExtern (-> (Vec Int) (Vec String) Int Int))
+(pub fn (repeatExportExtern items delta i)
+  (if (>= i (vecLen items))
+    0
+    {
+      (if (seenHasIn delta (nodeAName (vecGet items i)) 0)
+        (memSetWord (vecGet items i) 5 1))
+      (repeatExportExtern items delta (+ i 1))
+    }))
+
+(pub :: externAnyVisible (-> (Vec Int) Int Int))
+(pub fn (externAnyVisible items i)
+  (if (>= i (vecLen items))
+    0
+    (if (== (nodeVis (vecGet items i)) 1)
+      1
+      (externAnyVisible items (+ i 1)))))

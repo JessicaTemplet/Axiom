@@ -2639,7 +2639,7 @@
               ; and every signature over a binding is "a signature with
               ; no definition behind it".
               (if (&& (== (nodeTag d) TAG_D_EXTERN) (== (nodeVis d) 1))
-                (defIdxAddExternKeys bs (nodeBVec d) 0))))
+                (defIdxAddExternKeys bs (nodeCVec d) 0))))
           (set i (+ i 1))
         })
       bs
@@ -2652,7 +2652,8 @@
     (if (>= i (vecLen names))
       0
       {
-        (defIdxAddKeys bs (vecGetStr names i))
+        (if (== (nodeVis (vecGet names i)) 1)
+          (defIdxAddKeys bs (nodeAName (vecGet names i))))
         (defIdxAddExternKeys bs names (+ i 1))
       })))
 
@@ -2748,8 +2749,7 @@
   (if (>= i (vecLen allDecls))
     0
     (let ((d (vecGet allDecls i)))
-      (if (&& (!= (nodeModule d) 0)
-            (&& (strEq (nodeModuleName d) modName) (strEq (bareOf (nodeAName d)) n)))
+      (if (&& (!= (nodeModule d) 0) (&& (strEq (nodeModuleName d) modName) (moduleDeclNames d n)))
         1
         (declaredInModule allDecls modName n (+ i 1))))))
 
@@ -2760,9 +2760,24 @@
     (let ((d (vecGet allDecls i)))
       (if (&& (== (nodeVis d) 1)
             (&& (!= (nodeModule d) 0)
-              (&& (strEq (nodeModuleName d) modName) (strEq (bareOf (nodeAName d)) n))))
+              (&& (strEq (nodeModuleName d) modName) (moduleDeclExports d n))))
         1
         (exportedFromModule allDecls modName n (+ i 1))))))
+
+(pub :: moduleDeclNames (-> Int String Bool))
+(pub fn (moduleDeclNames d name)
+  (if (== (nodeTag d) TAG_D_EXTERN)
+    (!= (findFieldNamed (nodeCVec d) name 0) 0)
+    (strEq (bareOf (nodeAName d)) name)))
+
+(pub :: moduleDeclExports (-> Int String Bool))
+(pub fn (moduleDeclExports d name)
+  (if (== (nodeTag d) TAG_D_EXTERN)
+    (let ((f (findFieldNamed (nodeCVec d) name 0)))
+      (if (== f 0)
+        false
+        (== (nodeVis f) 1)))
+    (strEq (bareOf (nodeAName d)) name)))
 
 (pub :: checkMissingDefs (-> (Vec (Vec String)) (Vec Int) (Vec Int) Int (Vec Int) (Vec Int)))
 (pub fn (checkMissingDefs bs entryDecls out i missing)
@@ -2847,7 +2862,8 @@
   (uses : (Vec EpUse))
   (mayCalls : (Vec Int))
   (mut pending : Int)
-  (scoped : (Vec Int)))
+  (scoped : (Vec Int))
+  (compute : (Vec Int)))
 
 ; The region FACTS of this function (`rgnFactsNew`, stage S3 of
 ; docs/memory-model.md): which parameters its body stores
@@ -2935,6 +2951,11 @@
 ; struct written before 2026-08-30 and for every one written without
 ; parameters since, which is what keeps `(mkTCon name vecNew)` the
 ; right answer in the unparameterised case.
+(struct ExprChecks
+  (formatChecked : (Vec Int))
+  (computeRequests : (Vec Int))
+  (mut computeEnabled : Int))
+
 (pub struct TC
   (fns : (Vec Int))
   (datas : (Vec Int))
@@ -2982,9 +3003,10 @@
   (wordStructs : Int)
   (unsafe : UState)
   (parLends : (Vec Int))
-  (formatChecked : (Vec Int)))
+  (exprChecks : ExprChecks))
 
-; Word 46, `formatChecked`: a stack of (expression, checked type)
+; Word 46, `exprChecks`: formatting-cache pairs, compute requests and
+; the compute activation flag. The formatting cache is a stack of (expression, checked type)
 ; pairs, scoped to a formatting rewrite. The argument is checked once
 ; to select its renderer; the rewritten call reuses that result while
 ; checking the generated head and arguments. Nested formatting pushes
@@ -3454,7 +3476,7 @@
 (pub fn (regFn fns name ty)
   (vecPush fns
     (as (FnEnt name ty (- 0 1) 1 0 vecNew vecNew vecNew 0 0 (vecWithCapacity 1) (vecWithCapacity 1)
-          0 vecNew) Int)))
+          0 vecNew vecNew) Int)))
 
 ; A primitive that PERFORMS something, registered with the effect it
 ; performs rather than with the empty set every other one gets.
@@ -3532,7 +3554,7 @@
       (vecPush effs (as eff Int))
       (vecPush fns
         (as (FnEnt name ty (- 0 1) 1 0 effs vecNew vecNew 0 0 (vecWithCapacity 1)
-              (vecWithCapacity 1) 0 vecNew) Int))
+              (vecWithCapacity 1) 0 vecNew vecNew) Int))
     }))
 
 ; ------------------------------------------------------------------
@@ -3584,10 +3606,15 @@
 (pub fn (countPrivates decls i acc)
   (if (>= i (vecLen decls))
     acc
-    (countPrivates decls (+ i 1)
-      (if (&& (== (nodeVis (vecGet decls i)) 0) (!= (nodeModule (vecGet decls i)) 0))
-        (+ acc 1)
-        acc))))
+    (let ((d (vecGet decls i)))
+      (countPrivates decls (+ i 1)
+        (if (== (nodeModule d) 0)
+          acc
+          (if (== (nodeTag d) TAG_D_EXTERN)
+            (countPrivateExtern (nodeCVec d) 0 acc)
+            (if (== (nodeVis d) 0)
+              (+ acc 1)
+              acc)))))))
 
 (pub :: collectPrivatesSeen (-> (Vec Int) (Vec String) (Vec (Vec String)) Int Int))
 (pub fn (collectPrivatesSeen decls out seen i)
@@ -3597,20 +3624,48 @@
       (as out Int))
     (let ((d (vecGet decls i)))
       {
-        (if (&& (== (nodeVis d) 0) (!= (nodeModule d) 0))
-          (let ((k
-            (if (|| (== (nodeTag d) TAG_D_FN) (== (nodeTag d) TAG_D_SIG))
-              (nodeAName d)
-              (privKey (nodeModule d) (nodeAName d)))))
-            (if (! (== (privIdxHas seen k) 1))
-              {
-                (defIdxPut seen k)
-                (vecPush out k)
-              })))
+        (if (!= (nodeModule d) 0)
+          (if (== (nodeTag d) TAG_D_EXTERN)
+            (collectPrivateExtern (nodeCVec d) (nodeModule d) out seen 0)
+            (if (== (nodeVis d) 0)
+              (let ((k
+                (if (|| (== (nodeTag d) TAG_D_FN) (== (nodeTag d) TAG_D_SIG))
+                  (nodeAName d)
+                  (privKey (nodeModule d) (nodeAName d)))))
+                (if (! (== (privIdxHas seen k) 1))
+                  {
+                    (defIdxPut seen k)
+                    (vecPush out k)
+                  })))))
         (collectPrivatesSeen decls out seen (+ i 1))
       })))
 
 ; ------------------------------------------------------------------
+(pub :: countPrivateExtern (-> (Vec Int) Int Int Int))
+(pub fn (countPrivateExtern items i acc)
+  (if (>= i (vecLen items))
+    acc
+    (countPrivateExtern items (+ i 1)
+      (if (== (nodeVis (vecGet items i)) 0)
+        (+ acc 1)
+        acc))))
+
+(pub :: collectPrivateExtern (-> (Vec Int) Int (Vec String) (Vec (Vec String)) Int Int))
+(pub fn (collectPrivateExtern items mod out seen i)
+  (if (>= i (vecLen items))
+    0
+    {
+      (let ((f (vecGet items i)))
+        (if (== (nodeVis f) 0)
+          (let ((k (privKey mod (nodeAName f))))
+            (if (== (privIdxHas seen k) 0)
+              {
+                (defIdxPut seen k)
+                (vecPush out k)
+              }))))
+      (collectPrivateExtern items mod out seen (+ i 1))
+    }))
+
 ; THE DEVICE PRIMITIVES (R-D2, 2026-09-27): memory-mapped I/O at the
 ; widths a device register has, and the AArch64 system operations a
 ; bare-metal program needs around it. Registered in one block, called
@@ -4039,7 +4094,7 @@
               0 0 0 0 0 0 vecNew 0 vecNew vecNew 0 0 vecNew vecNew (countWordStructs allDecls 0 0)
               (UState 0 0 vecNew vecNew 0 0 vecNew 0 vecNew vecNew 0
                 (bsCtxOf vecNew vecNew 0 vecNew) 0 vecNew)
-              vecNew vecNew) Int)))
+              vecNew (ExprChecks vecNew vecNew 0)) Int)))
         {
           (memSetWord tc 30 (tyIdxNew (vecLen allDecls)))
           ; The builtin `Option` went into `datas` before this record
@@ -4509,7 +4564,7 @@
               (vecPushStr v (customEff effName))
               v
             })
-          vecNew vecNew 0 0 (vecWithCapacity 1) (vecWithCapacity 1) 0 vecNew) Int)))
+          vecNew vecNew 0 0 (vecWithCapacity 1) (vecWithCapacity 1) 0 vecNew vecNew) Int)))
 
 ; An `extern` item. Modelled on `tcAddEffectOp` above, and for the
 ; same reason: an operation's FnEnt arrives with its effects already
@@ -4562,6 +4617,7 @@
           (vecWithCapacity 1)
           (vecWithCapacity 1)
           0
+          vecNew
           vecNew) Int)))
 
 ; An imported item has one checker identity, `Mod$name`, like an
@@ -4701,7 +4757,7 @@
       (if (== ent 0)
         (tcPushFn tc
           (as (FnEnt (nodeAName d) ty (- 0 1) 0 0 vecNew vecNew vecNew 0 0 (vecWithCapacity 1)
-                (vecWithCapacity 1) 0 vecNew) Int))
+                (vecWithCapacity 1) 0 vecNew vecNew) Int))
         (memSetWord ent 1 ty)))))
 
 ; Whether declaration `i` is a second signature for its name in its
@@ -4753,7 +4809,7 @@
             (tcBumpCounter tc)
             (tcPushFn tc
               (as (FnEnt (nodeAName d) ph (- 0 1) 0 0 vecNew vecNew vecNew 0 0 (vecWithCapacity 1)
-                    (vecWithCapacity 1) 0 vecNew) Int))
+                    (vecWithCapacity 1) 0 vecNew vecNew) Int))
           }))))
       (memSetWord ent 2 (vecLen (nodeBVec d))))))
 
@@ -4957,27 +5013,22 @@
             (if (!= e 0)
               (if (== (fnEntOutOfModuleScope tc m name e) 0)
                 e
-                (let ((s (fnEntSuffix tc name)))
-                  (if (!= s 0)
-                    s
-                    e)))
+                (fnEntModuleSuffix tc name))
               (fnEntSuffix tc name)))
           (let ((e (fnEntVisibleExact tc (memGetWordVec tc 27) name (memGetWordStr tc 16))))
             (if (!= e 0)
               (if (== (fnEntOutOfModuleScope tc m name e) 0)
                 e
-                (let ((s (fnEntVisibleSuffix tc (memGetWordVec tc 27) name (memGetWordStr tc 16))))
-                  (if (!= s 0)
-                    s
-                    e)))
+                (fnEntModuleSuffix tc name))
               (fnEntVisibleSuffix tc (memGetWordVec tc 27) name (memGetWordStr tc 16)))))))))
 
 ; 1 when `e`, the exact match for a BARE reference made inside module
 ; `m`, may be the entry file's declaration, which no module can see
 ; (AN-52). A module can't import the entry file, so an entry-file
 ; `strLen` must not answer `IO`'s call to `Str`'s: the lookup then
-; asks the suffix pass for a module's `Mod$name` and keeps `e` only
-; when there is none. A builtin and an effect operation are never the
+; asks the suffix pass for a visible module's `Mod$name`. A missing
+; imported definition stays unresolved. Builtins and effect operations
+; remain globally visible. Neither can be the
 ; entry file's, and a module's `extern` item or effect operation is
 ; also registered as `Mod$name`, so the suffix pass answers the same
 ; declaration for them. `mangledForCg` makes the same choice, through
@@ -4988,11 +5039,34 @@
     0
     (if (!= (memGetWord e 3) 0)
       0
-      (if (!= (memGetWord e 4) 0)
+      (if (== (memGetWord e 4) 1)
         0
         (if (== (nameHasDollar name 0) 1)
           0
           1)))))
+
+; Search only legitimate module candidates after excluding an exact
+; entry-file match. The ordinary suffix index also contains exact keys.
+(pub :: fnEntModuleSuffix (-> Int String Int))
+(pub fn (fnEntModuleSuffix tc name)
+  (if (== (memGetWord tc 26) 0)
+    (fnEntModuleSuffixIn tc (tcFnsVec tc) name 0)
+    (let ((bs (memGetWordVec tc 26)))
+      (let ((v (vecGetVec bs (% (fnIdxHash name) (vecLen bs)))))
+        (if (== (as v Int) 0)
+          0
+          (fnEntModuleSuffixIn tc v name 0))))))
+
+(pub :: fnEntModuleSuffixIn (-> Int (Vec Int) String Int Int))
+(pub fn (fnEntModuleSuffixIn tc fns name i)
+  (if (>= i (vecLen fns))
+    0
+    (let ((e (vecGet fns i)))
+      (if (&& (== (nameMatches (memGetWordStr e 0) name) 1)
+            (&& (== (fnEntOutOfModuleScope tc (memGetWord tc 16) (memGetWordStr e 0) e) 0)
+              (== (privBlocks (memGetWordVec tc 27) (memGetWordStr e 0) (memGetWordStr tc 16)) 0)))
+        e
+        (fnEntModuleSuffixIn tc fns name (+ i 1))))))
 
 ; Does `s` contain `$` (36) at or after `i`? Asked without building a
 ; string.
@@ -10056,11 +10130,9 @@
 ; BOTH namespaces: a function in one module and a constructor of the
 ; same name in another are exactly as unresolvable as two functions.
 ;
-; A module-less definition wins outright, and that covers builtins as
-; well as the entry file: `Option`'s `None`/`Some` and the operators
-; are registered directly into the tables and never pass through a
-; declaration list, so without the check two imports defining a
-; `None` constructor would make the BUILTIN spelling ambiguous.
+; Builtins remain globally visible. Entry-file definitions win only
+; in the entry file; imported modules choose their own declaration or
+; a unique visible imported definition.
 (:: ownCtor (-> Int String Int))
 (fn (ownCtor tc name)
   (let ((ctor (findCtor tc name)))
@@ -10082,7 +10154,11 @@
   ; name list and two `fmtInt`/`die` pairs are still duplicated by
   ; hand.
   (let ((mods (definingModules tc (bareOf name))))
-    (if (|| (!= (modOf name) 0) (!= (ownCtor tc name) 0))
+    (if (|| (!= (modOf name) 0)
+          (|| (!= (ownCtor tc name) 0)
+            (if (== (memGetWord tc 16) 0)
+              false
+              (!= (fnEntQual tc (memGetWordStr tc 16) name) 0))))
       0
       (if (< (vecLen mods) 2)
         0
@@ -10113,9 +10189,18 @@
   (let ((e (ambFind tc n)))
     (if (== e 0)
       vecNew
-      (if (== (memGetWord e 2) 1)
+      (if (&& (== (memGetWord e 2) 1) (rootNameVisibleHere tc n))
         vecNew
         (memGetWordVec e 1)))))
+
+(pub :: rootNameVisibleHere (-> Int String Bool))
+(pub fn (rootNameVisibleHere tc name)
+  (if (== (memGetWord tc 16) 0)
+    true
+    (let ((e (fnEntExact tc name)))
+      (if (== e 0)
+        true
+        (== (fnEntOutOfModuleScope tc (memGetWord tc 16) name e) 0)))))
 
 (pub struct AmbEnt
   (name : String)
@@ -10242,8 +10327,19 @@
             ; Slot b, the bare NAMES - `ambRecordAll` wants names, and this is
             ; the one reader for which the parallel name vector exists.
             (if (== tag TAG_D_EXTERN)
-              (ambRecordAll tc (nodeBVec d) 0 m)
+              (ambRecordExtern tc (nodeCVec d) 0 m)
               0)))))))
+
+(pub :: ambRecordExtern (-> Int (Vec Int) Int String Int))
+(pub fn (ambRecordExtern tc items i mod)
+  (if (>= i (vecLen items))
+    0
+    {
+      (let ((f (vecGet items i)))
+        (if (== (nodeVis f) 1)
+          (ambRecord tc (nodeAName f) mod)))
+      (ambRecordExtern tc items (+ i 1) mod)
+    }))
 
 (pub :: ambRecordAll (-> Int (Vec Int) Int String Int))
 (pub fn (ambRecordAll tc v i m)
@@ -12329,7 +12425,7 @@
                 false))
             false)
             (mkNode TAG_T_ERR 0 0 0)
-            (let ((cache (memGetWordVec tc 46)))
+            (let ((cache (memGetWordVec (memGetWord tc 46) 0)))
               {
                 ; A String splice copied the argument over `e`.
                 (vecPush cache
@@ -24777,6 +24873,8 @@
           (checkResultTag tc d val lex)
           (if (strEq key "scoped")
             (checkScopedTag tc d val)
+            (strEq key "compute")
+            (checkComputeTag tc d val)
             (axtagKeyTypo tc d key)))))))
 
 ; Does either half of the declaration say `effect(unsafe)`? `checkAxtags`
@@ -25538,6 +25636,8 @@
     1
     (strEq key "scoped")
     1
+    (strEq key "compute")
+    1
     (if (strEq key "raw")
       1
       (if (strEq key "pre")
@@ -25575,6 +25675,8 @@
     ""
     (== (axtagSlip key "scoped") 1)
     "scoped"
+    (== (axtagSlip key "compute") 1)
+    "compute"
     (== (axtagSlip key "deprecated") 1)
     "deprecated"
     (if (== (axtagSlip key "effect") 1)
@@ -26489,13 +26591,19 @@
     0
     {
       (let ((tag (vecGet tags i)))
-        (if (strEq (axtagKeyOf tag) "scoped")
+        (if (sizedTyIn (axtagKeyOf tag) "scoped compute")
           (let ((pos (strVecIdx (nodeBVec d) (axtagTextValue tag))))
             (if (>= pos 0)
               {
-                (if (== (intInVec (memGetWordVec ent 13) pos 0) 0)
-                  (vecPush (memGetWordVec ent 13) pos))
-                (memSetWord tc 39 1)
+                (let ((field
+                  (if (strEq (axtagKeyOf tag) "compute")
+                    14
+                    13)))
+                  (if (== (intInVec (memGetWordVec ent field) pos 0) 0)
+                    (vecPush (memGetWordVec ent field) pos)))
+                (if (strEq (axtagKeyOf tag) "scoped")
+                  (memSetWord tc 39 1)
+                  (memSetWord (memGetWord tc 46) 2 1))
               }))))
       (scopedCollectTags tc d ent tags (+ i 1))
     }))
@@ -28064,6 +28172,7 @@
         ; first (R-B6): a forging callee under `restrict(no-unsafe)`,
         ; and the forging bodies' rows.
         (unsafeLatePass tc)
+        (computeCheckRequests tc 0)
         ; Stage S3's escape rule, after every body has been checked:
         ; it reads the call graph the effect fixpoint built and the
         ; signatures as declared, and it is ABSENT - not silent - for a
@@ -28844,7 +28953,7 @@
 
 (pub :: checkExprH (-> Int Int Int Int))
 (pub fn (checkExprH tc e inHead)
-  (let ((cache (memGetWordVec tc 46)))
+  (let ((cache (memGetWordVec (memGetWord tc 46) 0)))
     (let ((ty
       (if (if (>= (vecLen cache) 2)
         (== (vecGet cache (- (vecLen cache) 2)) e)
@@ -28860,6 +28969,7 @@
               (mkNode TAG_EVSTAMP (tyResolve ty) (evClassOf tc (tyResolve ty)) (memGetWord tc 24))
               (tyResolve ty)))
           e)
+        (computePostExpr tc e inHead)
         ty
       })))
 
@@ -28886,3 +28996,354 @@
         e)
       ty
     }))
+
+; A compute callback is a closed numeric program. Local scalar mutation
+; remains Mut; no reference, runtime observer or opaque callee is admitted.
+(struct ComputeRequest
+  (body : Int)
+  (bound : (Vec Int))
+  (module : Int)
+  (unit : Int)
+  (site : Int)
+  (siteUnit : Int))
+
+(struct ComputeWalk
+  (tc : Int)
+  (site : Int)
+  (unit : Int)
+  (seen : (Vec Int))
+  (mut failed : Int))
+
+(:: emitCompute (-> Int Int String Int))
+(fn (emitCompute tc span message)
+  (emitDiag tc
+    (mkDiag SEV_ERROR "AX3131" "compute-callback" span message 0 0
+      "pass a numeric lambda, a checked named function, or the exact parameter carrying compute; use canonical primitive captures, numeric operations and local accumulators; raw/runtime observers, references, heap stores, allocation and opaque calls are refused")))
+
+(:: computePrimitive (-> Int Int Bool))
+(fn (computePrimitive tc ty0)
+  (if (== ty0 0)
+    false
+    (let ((ty (tyExpandAliases tc (tyResolve ty0) 0)))
+      (if (|| (!= (nodeTag ty) TAG_T_CON) (!= (vecLen (nodeBVec ty)) 0))
+        false
+        (let ((name (nodeAName ty)))
+          (&& (== (evClassOf tc ty) 0)
+            (|| (> (integerTypeCode name) 0) (sizedTyIn name "Float Bool Char"))))))))
+
+(:: computeWordArrow (-> Int Int Bool))
+(fn (computeWordArrow tc ty0)
+  (if (== ty0 0)
+    false
+    (let ((ty (tyExpandAliases tc (tyResolve ty0) 0)))
+      (if (!= (nodeTag ty) TAG_T_ARR)
+        false
+        (&& (tyIsBareInt (tyExpandAliases tc (nodeA ty) 0))
+          (tyIsBareInt (tyExpandAliases tc (nodeB ty) 0)))))))
+
+(:: checkComputeTag (-> Int Int String Int))
+(fn (checkComputeTag tc d name)
+  (let (
+    (pos (strVecIdx (nodeBVec d) name))
+    (ent (findFnEntAnywhere tc (nodeAName d)))
+  )
+    (if (< pos 0)
+      (emitCompute tc (nodeSpan d)
+        (concat "compute contract names no parameter: `" (concat name "`")))
+      (if (== ent 0)
+        0
+        (if (computeWordArrow tc (nthParamTy (memGetWord ent 1) pos 0))
+          0
+          (emitCompute tc (nodeSpan d)
+            "a compute parameter requires the declared callback type (-> Int Int)"))))))
+
+; A spelling is not a proof: compare the actual frame entry with the
+; declaration's parameter entry, so a shadowing let/lambda cannot inherit it.
+(:: computeForwarded (-> Int Int Bool))
+(fn (computeForwarded tc e)
+  (let ((d (memGetWord tc 24)))
+    (if (|| (== d 0) (!= (nodeTag e) TAG_E_VAR))
+      false
+      (let (
+        (pos (strVecIdx (nodeBVec d) (nodeAName e)))
+        (ent (findFnEntAnywhere tc (nodeAName d)))
+        (frame (scopeFindFrame tc (nodeAName e)))
+      )
+        (if (|| (< pos 0) (|| (== ent 0) (== frame 0)))
+          false
+          (let ((index (+ (tcFrameBase tc) pos)))
+            (&& (< index (vecLen (tcScopeVec tc)))
+              (&& (== frame (vecGet (tcScopeVec tc) index))
+                (== (intInVec (memGetWordVec ent 14) pos 0) 1)))))))))
+
+(:: computeCaptureNames (-> Int Int (Vec Int) Bool))
+(fn (computeCaptureNames tc lam names)
+  (let (
+    (occ (capScanInto lam vecNew vecNew))
+    (mut valid true)
+  )
+    {
+      (for i in 0..(vecLen occ)
+        (let (
+          (v (vecGet occ i))
+          (name (nodeAName (vecGet occ i)))
+        )
+          (let ((entry (scopeFindFrame tc name)))
+            (if (&& (!= entry 0) (< (strVecIdx names name) 0))
+              (if (computePrimitive tc (sEntTy entry))
+                (vecPushStr names name)
+                {
+                  (emitCompute tc (nodeSpan v)
+                    (concat "compute callback captures non-primitive `"
+                      (concat name (concat "` of type " (tyRender (tyResolve (sEntTy entry)))))))
+                  (set valid false)
+                })))))
+      valid
+    }))
+
+(:: computeRequest (-> Int Int (Vec Int) Int Int Int Int))
+(fn (computeRequest tc body bound module unit site)
+  {
+    (vecPush (memGetWordVec (memGetWord tc 46) 1)
+      (as (ComputeRequest body bound module unit site (memGetWord tc 14)) Int))
+    0
+  })
+
+(:: computeValue (-> Int Int Int))
+(fn (computeValue tc e)
+  (if (== (nodeTag e) TAG_E_IF)
+    {
+      (computeValue tc (nodeB e))
+      (computeValue tc (nodeC e))
+      0
+    }
+    (if (computeForwarded tc e)
+      0
+      (if (== (nodeTag e) TAG_E_LAM)
+        (let ((names vecNew))
+          (if (computeCaptureNames tc e names)
+            {
+              (capPushAll (nodeAVec e) 0 names)
+              (computeRequest tc (nodeB e) names (memGetWord tc 16) (memGetWord tc 14) (nodeSpan e))
+            }
+            0))
+        (if (&& (== (nodeTag e) TAG_E_VAR) (== (scopeFindFrame tc (nodeAName e)) 0))
+          (let ((ent (findFnEnt tc (nodeAName e))))
+            (if (if (== ent 0)
+              false
+              (&& (== (memGetWord ent 2) 1)
+                (&& (== (memGetWord ent 3) 0) (== (memGetWord ent 4) 0))))
+              (let ((d (rgnDeclOf tc (memGetWordStr ent 0))))
+                (if (== d 0)
+                  (emitCompute tc (nodeSpan e) "compute callback has no visible function body")
+                  (computeRequest tc (nodeC d) (capBoundOf (nodeBVec d)) (nodeModule d)
+                    (unitIndexFor (memGetWordVec tc 13) (nodeModule d)) (nodeSpan e))))
+              (emitCompute tc (nodeSpan e)
+                "compute callback must be a non-nullary numeric function with a visible body")))
+          (emitCompute tc (nodeSpan e)
+            "compute callback is opaque here or its parameter has no matching compute contract"))))))
+
+(:: computePostExpr (-> Int Int Int Int))
+(fn (computePostExpr tc e inHead)
+  (if (|| (== e 0) (|| (!= inHead 0) (== (memGetWord (memGetWord tc 46) 2) 0)))
+    0
+    (let ((head
+      (if (== (nodeTag e) TAG_E_APP)
+        (spineHead e)
+        e)))
+      (if (|| (!= (nodeTag head) TAG_E_VAR) (!= (scopeFindFrame tc (nodeAName head)) 0))
+        0
+        (let ((ent (findFnEnt tc (nodeAName head))))
+          (if (== ent 0)
+            0
+            (let ((indices (memGetWordVec ent 14)))
+              (if (== (vecLen indices) 0)
+                0
+                (if (!= (nodeTag e) TAG_E_APP)
+                  (emitCompute tc (nodeSpan e)
+                    "a function with a compute contract must be called directly; a function value erases the precondition")
+                  (let ((args (spineArgVec e vecNew)))
+                    {
+                      (if (< (vecLen args) (memGetWord ent 2))
+                        (emitCompute tc (nodeSpan e)
+                          "a function with a compute contract requires all declared arguments in one call"))
+                      (for i in 0..(vecLen indices)
+                        (let ((pos (vecGet indices i)))
+                          (if (< pos (vecLen args))
+                            (computeValue tc (vecGet args pos)))))
+                      0
+                    }))))))))))
+
+(:: computeFail (-> Int String Int))
+(fn (computeFail walk message)
+  (if (!= (memGetWord walk 4) 0)
+    0
+    (let (
+      (tc (memGetWord walk 0))
+      (saved (memGetWord (memGetWord walk 0) 14))
+    )
+      {
+        (memSetWord walk 4 1)
+        (memSetWord tc 14 (memGetWord walk 2))
+        (emitCompute tc (memGetWord walk 1) message)
+        (memSetWord tc 14 saved)
+        0
+      })))
+
+; This is a closed operation basis, not inference from an empty effect
+; row: trusted loads and runtime observers can have empty caller rows.
+(:: computeBuiltin (-> String Bool))
+(fn (computeBuiltin name)
+  (|| (== (isNumOp name) 1)
+    (sizedTyIn name "&& || ! __intToFloat __floatToInt __floatToBits __floatFromBits")))
+
+(:: computeWalkHelper (-> Int Int Int))
+(fn (computeWalkHelper walk ent)
+  (if (== (intInVec (memGetWordVec walk 3) ent 0) 1)
+    0
+    (let (
+      (tc (memGetWord walk 0))
+      (d (rgnDeclOf (memGetWord walk 0) (memGetWordStr ent 0)))
+    )
+      (if (|| (== d 0) (!= (memGetWord ent 4) 0))
+        (computeFail walk
+          (concat "compute callback reaches an opaque or foreign function `"
+            (concat (memGetWordStr ent 0) "`")))
+        (let ((savedModule (memGetWord tc 16)))
+          {
+            (vecPush (memGetWordVec walk 3) ent)
+            (memSetWord tc 16 (nodeModule d))
+            (computeWalkExpr walk (nodeC d) (capBoundOf (nodeBVec d)) vecNew)
+            (memSetWord tc 16 savedModule)
+            0
+          })))))
+
+(:: computeWalkVar (-> Int Int (Vec Int) Int))
+(fn (computeWalkVar walk e bound)
+  (let ((name (nodeAName e)))
+    (if (|| (>= (strVecIdx bound name) 0) (sizedTyIn name "true false"))
+      0
+      (let ((ent (findFnEnt (memGetWord walk 0) name)))
+        (if (if (== ent 0)
+          true
+          (!= (memGetWord ent 2) 0))
+          (computeFail walk
+            (concat "compute callback uses an opaque or function value `" (concat name "`")))
+          (if (!= (memGetWord ent 3) 0)
+            (computeFail walk
+              (concat "compute callback observes runtime state through `" (concat name "`")))
+            (computeWalkHelper walk ent)))))))
+
+(:: computeWalkVec (-> Int (Vec Int) (Vec Int) (Vec Int) Int))
+(fn (computeWalkVec walk expressions bound mutable)
+  {
+    (for i in 0..(vecLen expressions)
+      (computeWalkExpr walk (vecGet expressions i) bound mutable))
+    0
+  })
+
+(:: computeWalkApp (-> Int Int (Vec Int) (Vec Int) Int))
+(fn (computeWalkApp walk e bound mutable)
+  (let (
+    (tc (memGetWord walk 0))
+    (head (spineHead e))
+    (args (spineArgVec e vecNew))
+  )
+    (if (!= (nodeTag head) TAG_E_VAR)
+      (computeFail walk "compute callback calls an opaque expression")
+      (let (
+        (name (nodeAName head))
+        (ent (findFnEnt tc (nodeAName head)))
+      )
+        (if (>= (strVecIdx bound name) 0)
+          (computeFail walk (concat "compute callback calls opaque local `" (concat name "`")))
+          (if (&& (isValueCastForm name)
+                (if (== ent 0)
+                  true
+                  (!= (memGetWord ent 3) 0)))
+            (if (&& (> (vecLen args) 0) (computePrimitive tc (rgnCheckedTy e)))
+              (computeWalkExpr walk (vecGet args (- (vecLen args) 1)) bound mutable)
+              (computeFail walk "compute callback converts to a non-primitive type"))
+            {
+              (computeWalkVec walk args bound mutable)
+              (if (== ent 0)
+                (computeFail walk
+                  (concat "compute callback reaches unknown operation `" (concat name "`")))
+                (if (!= (memGetWord ent 3) 0)
+                  (if (computeBuiltin name)
+                    0
+                    (computeFail walk
+                      (concat "compute callback reaches non-numeric primitive `"
+                        (concat name "`"))))
+                  (computeWalkHelper walk ent)))
+              0
+            }))))))
+
+(:: computeWalkExpr (-> Int Int (Vec Int) (Vec Int) Int))
+(fn (computeWalkExpr walk e bound mutable)
+  (if (|| (== e 0) (!= (memGetWord walk 4) 0))
+    0
+    (let ((tag (nodeTag e)))
+      (if (|| (== tag TAG_E_INT) (|| (== tag TAG_E_FLT) (== tag TAG_E_CHAR)))
+        0
+        (== tag TAG_E_VAR)
+        (computeWalkVar walk e bound)
+        (== tag TAG_E_APP)
+        (computeWalkApp walk e bound mutable)
+        (|| (== tag TAG_E_LET) (== tag TAG_E_LETM))
+        (let (
+          (mark (vecLen bound))
+          (mutMark (vecLen mutable))
+        )
+          {
+            (computeWalkExpr walk (nodeB e) bound mutable)
+            (vecPush bound (nodeA e))
+            (if (== tag TAG_E_LETM)
+              (vecPush mutable (nodeA e)))
+            (computeWalkExpr walk (nodeC e) bound mutable)
+            (scopeTrunc bound mark)
+            (scopeTrunc mutable mutMark)
+            0
+          })
+        (== tag TAG_E_SET)
+        (if (< (strVecIdx mutable (nodeAName e)) 0)
+          (computeFail walk "compute callback assigns to captured or non-local state")
+          (computeWalkExpr walk (nodeB e) bound mutable))
+        (== tag TAG_E_IF)
+        {
+          (computeWalkExpr walk (nodeA e) bound mutable)
+          (computeWalkExpr walk (nodeB e) bound mutable)
+          (computeWalkExpr walk (nodeC e) bound mutable)
+          0
+        }
+        (== tag TAG_E_BEGIN)
+        (computeWalkVec walk (nodeAVec e) bound mutable)
+        (== tag TAG_E_WHILE)
+        {
+          (computeWalkExpr walk (nodeA e) bound mutable)
+          (computeWalkVec walk (nodeBVec e) bound mutable)
+          0
+        }
+        (computeFail walk
+          "compute callback contains a reference, allocation, heap store or non-numeric form")))))
+
+(:: computeCheckRequests (-> Int Int Int))
+(fn (computeCheckRequests tc i)
+  (let ((requests (memGetWordVec (memGetWord tc 46) 1)))
+    (if (>= i (vecLen requests))
+      0
+      (let (
+        (request (vecGet requests i))
+        (savedModule (memGetWord tc 16))
+        (savedUnit (memGetWord tc 14))
+      )
+        {
+          (memSetWord tc 16 (memGetWord request 2))
+          (memSetWord tc 14 (memGetWord request 3))
+          (computeWalkExpr
+            (as (ComputeWalk tc (memGetWord request 4) (memGetWord request 5) vecNew 0) Int)
+            (memGetWord request 0) (memGetWordVec request 1) vecNew)
+          (memSetWord tc 16 savedModule)
+          (memSetWord tc 14 savedUnit)
+          (computeCheckRequests tc (+ i 1))
+        }))))

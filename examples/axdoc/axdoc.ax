@@ -116,8 +116,89 @@
       (identAt line (+ at 1))
       (identAt line at))))
 
-; A `(pub :: NAME TYPE)` line's TYPE: everything after the name, with
-; the closing paren of the declaration dropped.
+; Read the complete signature, ignoring comments and joining layout
+; whitespace. A comment's parentheses never close the declaration.
+(struct Signature
+  (text : String)
+  (next : Int))
+
+(:: signatureAt (-> (Vec String) Int Signature))
+(fn (signatureAt lines start)
+  (let (
+    (mut i start)
+    (mut depth 0)
+    (mut block 0)
+    (mut done 0)
+    (mut space 0)
+  )
+    (let ((mut out ""))
+      {
+        (while (&& (< i (vecLen lines)) (== done 0))
+          (let (
+            (line (vecGet lines i))
+            (mut j 0)
+          )
+            {
+              (while (&& (< j (strLen line)) (== done 0))
+                (let (
+                  (c (strByte line j))
+                  (next (if (< (+ j 1) (strLen line))
+                    (strByte line (+ j 1))
+                    0))
+                )
+                  (if (> block 0)
+                    (if (&& (== c 35) (== next 124))
+                      {
+                        (set block (+ block 1))
+                        (set j (+ j 2))
+                      }
+                      (if (&& (== c 124) (== next 35))
+                        {
+                          (set block (- block 1))
+                          (set j (+ j 2))
+                        }
+                        (set j (+ j 1))))
+                    (if (== c 59)
+                      (set j (strLen line))
+                      (if (&& (== c 35) (== next 124))
+                        {
+                          (set block 1)
+                          (set space 1)
+                          (set j (+ j 2))
+                        }
+                        (if (<= c 32)
+                          {
+                            (set space 1)
+                            (set j (+ j 1))
+                          }
+                          {
+                            (if (&& (== space 1) (> (strLen out) 0))
+                              (if (&& (!= c 41) (!= (strByte out (- (strLen out) 1)) 40))
+                                (set out (concat out " "))))
+                            (set space 0)
+                            (set out (concat out (strSlice line j 1)))
+                            (if (== c 40)
+                              (set depth (+ depth 1))
+                              (if (== c 41)
+                                {
+                                  (set depth (- depth 1))
+                                  (if (== depth 0)
+                                    (set done 1))
+                                }))
+                            (set j (+ j 1))
+                          }))))))
+              (set space 1)
+              (set i (+ i 1))
+            }))
+        (Signature
+          (if (== done 1)
+            out
+            "")
+          i)
+      })))
+
+; A `(pub :: NAME TYPE)` declaration's TYPE: everything after the name,
+; with the closing paren of the declaration dropped.
 ;
 ; The type is taken from the SOURCE rather than from AXSYM even though
 ; AXSYM carries a checked one, because the two are written differently
@@ -496,16 +577,22 @@
                 {
                   (let ((kind (kindOf line)))
                     (if (! (== (strLen kind) 0))
-                      (let ((dn (declName line kind)))
+                      (let (
+                        (dn (declName line kind))
+                        (signature (if (strEq kind "value")
+                          (signatureAt lines i)
+                          (Signature "" (+ i 1))))
+                      )
                         {
                           (set count (+ count 1))
                           (set rows (concat rows
                                       (renderRow kind dn
                                         (if (strEq kind "value")
-                                          (declType line dn)
+                                          (declType signature.text dn)
                                           "")
                                         (effectsOf axsym dn) (contractsFor lines dn)
                                         (docAbove lines i))))
+                          (set i (- signature.next 1))
                           ()
                         })))
                   ; The block answers `0` so it agrees with the
