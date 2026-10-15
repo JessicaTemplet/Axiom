@@ -30,6 +30,9 @@ its changelog too.
   to the parser, beside `spineHead`. The checker calls `spineArgAt`, so
   checking a file that imports the checker without the emitter, such as
   `self_host/axir.ax`, was `AX3001`.
+- `axiom-bindgen` no longer writes a space before a `let` binding's
+  broken value, so `rust/examples/demo/axiom/Demo.ax` is in `axiom fmt`'s
+  normal form again. Tested by `rust/axiom-bindgen/tests/snapshot.rs`.
 
 - Numeric conversion policy follows explicit primitive conversions:
   expected types never insert conversions into calls, returns, assignments

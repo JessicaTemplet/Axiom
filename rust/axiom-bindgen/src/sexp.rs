@@ -230,10 +230,13 @@ pub fn print(e: &Ex, level: usize, out: &mut String) {
                 let (name, init) = &binds[0];
                 out.push('(');
                 out.push_str(name);
-                out.push(' ');
                 if init.is_simple() {
+                    out.push(' ');
                     print(init, level, out);
                 } else {
+                    // No space before the break: `fpLetBinding` ends the
+                    // line at the name, and a trailing space is a byte
+                    // `axiom fmt` would remove.
                     out.push('\n');
                     out.push_str(&ind(level + 2));
                     print(init, level + 2, out);

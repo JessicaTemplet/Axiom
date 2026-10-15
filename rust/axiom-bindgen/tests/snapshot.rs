@@ -145,7 +145,7 @@ fn nested_fixture_shape() {
     assert!(fresh.contains("(ffiFreeStrList __p __n)"));
     assert!(fresh.contains("(totalRaw :: (-> Int Int) (symbol \"axffi_total\"))"));
     assert!(fresh.contains("(pub :: total (-> (Vec Int) Int))"));
-    assert!(fresh.contains("(__r \n    (totalRaw (cast Int xs))))\n    __r))"));
+    assert!(fresh.contains("(__r\n    (totalRaw (cast Int xs))))\n    __r))"));
     assert!(fresh.contains("(pub :: tryEvens (-> Int (Result (Vec Int) String)))"));
     assert!(fresh.contains("(pub :: maybePieces (-> String (Option (Vec String))))"));
     // A record is a `data` with one positional field per Rust field,
