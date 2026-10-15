@@ -221,39 +221,20 @@ only what it declares.
    first: they tell the story of the change, and carry the measurement
    that justified it.
 
-Run `axiom fmt` over every file you touch. Don't assume the tree is
-already in the formatter's normal form. It checks one file at a time,
-so this lists the ones that need formatting:
+Every `.ax` file in the tree is in `axiom fmt`'s normal form, and
+`scripts/check-fmt.sh` keeps it that way. Run `axiom fmt` on each file
+you change before you commit; `axiom fmt --check FILE` reports without
+rewriting. The formatter keeps a form on one line when it fits in 100
+columns, and breaks it when it doesn't, with each argument on its own
+line two columns past the call's opening paren.
 
-```bash
-git ls-files '*.ax' | while read -r f; do
-  .axiom-bin/axiom fmt --check "$f" >/dev/null 2>&1 || echo "$f"
-done
-```
-
-Four of those files stay as they are:
-
-- `tests/fmt/syntax-zoo.ax` is the formatter's input fixture. Its
-  transformation into `tests/fmt/syntax-zoo.expected.ax` is the golden
-  that pins what the normal form looks like.
-- `tests/diagnostics/940-long-line.ax` puts a diagnostic at column 217
-  of a very long line, which is the renderer behaviour it pins.
-- `tests/diagnostics/654-macro-hygiene-suggestion.ax` has pinned spans,
-  which formatting would move.
-- `examples/batch-fallible/batch-fallible.ax` waits until someone next
-  edits it.
-
-The other 49 arrived or changed without a formatting pass. Format one
-when you're editing it anyway, rather than in a bulk whitespace change
-nobody can review. Leave `tests/fmt/parity/*.axp` and the `*.axbad`
+A few files are exempt because their layout is what they test: the
+formatter's own inputs under `tests/fmt/`, the fuzz reproducers under
+`tests/fuzz/`, the grammar's fixtures under `tree-sitter-axiom/`, the
+generated bindings under `rust/examples/` (section 1b of the same gate
+holds those), and the files `tests/fmt/unformatted.list` names, each
+with its reason. Leave `tests/fmt/parity/*.axp` and the `*.axbad`
 refusal cases alone: they are inputs the formatter must refuse.
-
-No gate holds committed files to the normal form.
-`scripts/check-fmt.sh` formats a copy of the tree, and fails when
-formatting changes what a program means. `scripts/check-fmt-selfhost.sh`
-fails when more than 60 files in the tree have no entry in
-`tests/fmt/corpus-fmt.golden`. So before you commit a new file, run
-`axiom fmt --check` on it. It reports without rewriting.
 
 ### Where to make changes
 
@@ -390,7 +371,7 @@ shows the check can fail at all.
 | `check-stack-depth.sh` | How much stack the compiler needs for the largest Axiom program there is, found by bisection and reported |
 | `check-tail-calls.sh` | A tail call runs in constant stack at `--opt 0`: a self call in every tail position, and a mutual call whose prototypes match, which the emitter marks `musttail`. Ten million alternating calls run under a 512 KiB stack, and the same IR with the marker deleted must die by signal. The two refusals, a mismatched prototype and an owned temporary, must stay plain calls, and the compiler's own IR must carry at least 300 marked sites |
 | `check-concurrent-run.sh` | Two `axiom run`s in one directory don't corrupt each other |
-| `check-fmt.sh` | Formatting a file doesn't change what it means: the tree is formatted on a copy, and the suites are re-run against it. The bindings in `rust/examples/*/axiom/*.ax` must also be fixed points of `axiom fmt`, because `rust/axiom-bindgen/src/sexp.rs` restates the formatter's layout in Rust and `check-ffi.sh` only compares bindgen with itself. One ablation per binding adds two spaces to one indented line and must turn that check red |
+| `check-fmt.sh` | Every `.ax` file outside the fixtures is already in `axiom fmt`'s normal form, and formatting doesn't change what a file means: the tree is formatted on a copy, and the suites are re-run against it. The bindings in `rust/examples/*/axiom/*.ax` must also be fixed points of `axiom fmt`, because `rust/axiom-bindgen/src/sexp.rs` restates the formatter's layout in Rust and `check-ffi.sh` only compares bindgen with itself. One ablation per binding adds two spaces to one indented line and must turn that check red |
 | `check-fmt-selfhost.sh` | The self-hosted formatter's bytes, exit statuses and refusals, over the corpus and a bank of refusal cases |
 | `check-tools-selfhost.sh` | `explain` and `symbols`, including that every code the corpus emits has an `explain` entry. It also compiles the Axiom programs in the documentation |
 | `check-render-selfhost.sh` | The human and JSON renderers, cross-checked against the AXDL goldens and against the palette `self_host/style.ax` declares |
@@ -599,11 +580,9 @@ refuses a Windows host first.
 
 ### Formatting
 
-- The repository isn't fully in `axiom fmt`'s normal form.
-  [The development workflow](#the-development-workflow) gives the
-  current count and a loop that lists the files that aren't. `check-fmt.sh` checks the property that
-  matters more: formatting a copy of the tree and re-running the suites
-  against it must not change behaviour.
+- Every `.ax` file is in `axiom fmt`'s normal form, and `check-fmt.sh`
+  fails on one that isn't. It also formats a copy of the tree and
+  re-runs the suites against it, so formatting can't change behaviour.
 - Format a new file before you commit it. The gates need it to
   round-trip either way, but an unformatted file shows up as churn in
   whichever commit next touches it.

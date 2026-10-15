@@ -19,10 +19,13 @@
 //! - an atom is simple; an application is simple iff every element is
 //!   simple; `cast`, `let`, `if`, `match` and a multi-statement `{}`
 //!   block are never simple (`isSimpleForm`);
-//! - an application prints on one line iff its head is simple, it has
-//!   at most four arguments and every argument is simple; otherwise
-//!   the head ends the line and the arguments follow ONE PER LINE at
-//!   one deeper indent, then `)` stacked onto the last one (`fpApp`).
+//! - an application prints on one line when its one-line form fits
+//!   within `WIDTH` columns from where it starts, or when its head is
+//!   simple and it has at most four arguments, every one an atom;
+//!   otherwise
+//!   the head ends the line and the arguments follow ONE PER LINE two
+//!   columns past the call's paren, then `)` stacked onto the last one
+//!   (`fpApp`).
 //!   Until 2026-09-04 there was no newline between the arguments at
 //!   all - stage0's quirk, kept for byte-identity until stage0 was
 //!   deleted;
@@ -42,8 +45,10 @@
 //! - a `fn` head stands alone and the body sits below it, `)` stacked
 //!   (`fpDeclFn`).
 //!
-//! Indent is two spaces per level. A closing paren never stands on its
-//! own line: it stacks onto whatever precedes it.
+//! The indent is a column: a nested construct indents two columns past
+//! the one it sits in, and a broken call hangs its arguments two columns
+//! past its own paren. A closing paren never stands on its own line: it
+//! stacks onto whatever precedes it.
 
 /// An Axiom expression.
 #[derive(Clone, Debug)]
@@ -98,8 +103,40 @@ impl Ex {
     }
 }
 
-fn ind(level: usize) -> String {
-    "  ".repeat(level)
+/// `col` spaces: the indent is a column, as `foIndent` is.
+fn ind(col: usize) -> String {
+    " ".repeat(col)
+}
+
+/// The widest line a form is laid out on: `fmtWidth` in
+/// `self_host/format.ax`.
+const WIDTH: usize = 100;
+
+/// The column the next byte of `out` lands at.
+fn column(out: &str) -> usize {
+    match out.rfind('\n') {
+        Some(i) => out.len() - i - 1,
+        None => out.len(),
+    }
+}
+
+/// `elems` as one application on one line, printed into a fresh buffer
+/// the way `fpAppFlat` prints its trial, or `None` when an element
+/// breaks across lines.
+fn app_flat(elems: &[Ex]) -> Option<String> {
+    let mut s = String::from("(");
+    for (i, e) in elems.iter().enumerate() {
+        if i > 0 {
+            s.push(' ');
+        }
+        print(e, 0, &mut s);
+    }
+    s.push(')');
+    if s.contains('\n') {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 /// Print `e` at `level`, assuming the cursor already sits at the
@@ -118,25 +155,31 @@ pub fn print(e: &Ex, level: usize, out: &mut String) {
             let head = &elems[0];
             let args = &elems[1..];
             let inline = head.is_simple() && args.len() <= 4 && args.iter().all(Ex::is_simple);
+            let flat = app_flat(elems);
+            if let Some(f) = &flat {
+                let atoms = args.iter().all(|a| matches!(a, Ex::Atom(_)));
+                if (inline && atoms) || column(out) + f.len() <= WIDTH {
+                    out.push_str(f);
+                    return;
+                }
+            }
+            // A broken call hangs its arguments two columns past its own
+            // paren (`foSetIndent` in `fpApp`).
+            let col = column(out);
+            // The formatter keeps the older one-line rule only for a call
+            // with a comment inside; generated code has none, so a call
+            // that is not laid out on one line above always breaks.
             out.push('(');
             print(head, level, out);
-            if inline {
-                for a in args {
-                    out.push(' ');
-                    print(a, level, out);
+            out.push('\n');
+            for (i, a) in args.iter().enumerate() {
+                if i > 0 {
+                    out.push('\n');
                 }
-                out.push(')');
-            } else {
-                out.push('\n');
-                for (i, a) in args.iter().enumerate() {
-                    if i > 0 {
-                        out.push('\n');
-                    }
-                    out.push_str(&ind(level + 1));
-                    print(a, level + 1, out);
-                }
-                out.push(')');
+                out.push_str(&ind(col + 2));
+                print(a, col + 2, out);
             }
+            out.push(')');
         }
         Ex::Let(binds, body) => {
             out.push_str("(let (");
@@ -149,36 +192,36 @@ pub fn print(e: &Ex, level: usize, out: &mut String) {
                     print(init, level, out);
                 } else {
                     out.push('\n');
-                    out.push_str(&ind(level + 1));
-                    print(init, level + 1, out);
+                    out.push_str(&ind(level + 2));
+                    print(init, level + 2, out);
                 }
                 out.push(')');
             } else {
                 out.push('\n');
                 for (name, init) in binds {
-                    out.push_str(&ind(level + 1));
+                    out.push_str(&ind(level + 2));
                     out.push('(');
                     out.push_str(name);
                     out.push(' ');
-                    print(init, level + 1, out);
+                    print(init, level + 2, out);
                     out.push_str(")\n");
                 }
                 out.push_str(&ind(level));
             }
             out.push_str(")\n");
-            out.push_str(&ind(level + 1));
-            print(body, level + 1, out);
+            out.push_str(&ind(level + 2));
+            print(body, level + 2, out);
             out.push(')');
         }
         Ex::If(c, t, f) => {
             out.push_str("(if ");
             print(c, level, out);
             out.push('\n');
-            out.push_str(&ind(level + 1));
-            print(t, level + 1, out);
+            out.push_str(&ind(level + 2));
+            print(t, level + 2, out);
             out.push('\n');
-            out.push_str(&ind(level + 1));
-            print(f, level + 1, out);
+            out.push_str(&ind(level + 2));
+            print(f, level + 2, out);
             out.push(')');
         }
         Ex::Match(scrut, arms) => {
@@ -189,10 +232,10 @@ pub fn print(e: &Ex, level: usize, out: &mut String) {
                 if i > 0 {
                     out.push('\n');
                 }
-                out.push_str(&ind(level + 1));
+                out.push_str(&ind(level + 2));
                 out.push('(');
-                print(pat, level + 1, out);
-                tail_body(body, level + 1, out);
+                print(pat, level + 2, out);
+                tail_body(body, level + 2, out);
                 out.push(')');
             }
             out.push(')');
@@ -203,8 +246,8 @@ pub fn print(e: &Ex, level: usize, out: &mut String) {
                 if i > 0 {
                     out.push('\n');
                 }
-                out.push_str(&ind(level + 1));
-                print(s, level + 1, out);
+                out.push_str(&ind(level + 2));
+                print(s, level + 2, out);
             }
             out.push('\n');
             out.push_str(&ind(level));
@@ -221,8 +264,8 @@ fn tail_body(body: &Ex, level: usize, out: &mut String) {
         print(body, level, out);
     } else {
         out.push('\n');
-        out.push_str(&ind(level + 1));
-        print(body, level + 1, out);
+        out.push_str(&ind(level + 2));
+        print(body, level + 2, out);
         out.push('\n');
         out.push_str(&ind(level));
     }
@@ -250,7 +293,7 @@ fn decl_fn_vis(public: bool, name: &str, params: &[String], body: &Ex) -> String
     // The head stands alone; the body goes on the next line, as
     // `fpDeclFn` lays it out.
     out.push_str(")\n  ");
-    print(body, 1, &mut out);
+    print(body, 2, &mut out);
     out.push(')');
     out
 }
@@ -274,10 +317,17 @@ mod tests {
                 atom("d"),
                 atom("e"),
             ]),
-            1,
+            2,
             &mut s,
         );
-        assert_eq!(s, "(f\n    a\n    b\n    c\n    d\n    e)");
+        assert_eq!(s, "(f a b c d e)");
+        // One that does not fit breaks, one argument per line.
+        let long: Vec<Ex> = std::iter::once(atom("f"))
+            .chain((0..12).map(|i| atom(&format!("argument{i}"))))
+            .collect();
+        let mut s = String::new();
+        print(&app(long), 2, &mut s);
+        assert!(s.starts_with("(f\n  argument0\n  argument1\n"));
     }
 
     #[test]
@@ -295,7 +345,7 @@ mod tests {
                 vec![("x".into(), atom("1")), ("y".into(), atom("2"))],
                 Box::new(atom("x")),
             ),
-            1,
+            2,
             &mut s,
         );
         assert_eq!(s, "(let (\n    (x 1)\n    (y 2)\n  )\n    x)");

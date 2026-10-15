@@ -1536,10 +1536,13 @@
 (pub fn (foNewline o)
   (foPush o "\n"))
 
+; The indent is a column. A nested construct indents two columns past
+; the one it sits in; a broken call hangs its arguments two columns past
+; its own opening paren (`foSetIndent`).
 (pub :: foPushIndent (-> Int Int))
 (pub fn (foPushIndent o)
   {
-    (memSetWord o 2 (+ (foIndent o) 1))
+    (memSetWord o 2 (+ (foIndent o) 2))
     o
   })
 
@@ -1549,23 +1552,34 @@
     (memSetWord
       o
       2
-      (if (> (foIndent o) 0)
-        (- (foIndent o) 1)
+      (if (> (foIndent o) 1)
+        (- (foIndent o) 2)
         0))
     o
   })
 
-; Two spaces per level, stage0's `INDENT.repeat(level)`.
+(pub :: foSetIndent (-> Int Int Int))
+(pub fn (foSetIndent o col)
+  {
+    (memSetWord o 2 col)
+    o
+  })
+
 (pub :: foIndentStr (-> Int String))
 (pub fn (foIndentStr o)
+  (strRepeatSpace (foIndent o)))
+
+; `n` spaces.
+(pub :: strRepeatSpace (-> Int String))
+(pub fn (strRepeatSpace n)
   (let (
     (mut i 0)
     (mut s "")
   )
     {
-      (while (< i (foIndent o))
+      (while (< i n)
         {
-          (set s (concat s "  "))
+          (set s (concat s " "))
           (set i (+ i 1))
         })
       s
@@ -1574,6 +1588,49 @@
 (pub :: foEmitIndent (-> Int Int))
 (pub fn (foEmitIndent o)
   (foPush o (foIndentStr o)))
+
+; The widest line the printer lays a form out on: a form that fits stays
+; on one line, and one that doesn't breaks. rustfmt's default, for the
+; same reason - wide enough that a call with a handful of arguments
+; stays whole, narrow enough to read beside a second file.
+(pub :: fmtWidth Int)
+(pub fn (fmtWidth)
+  100)
+
+; The column the next fragment lands at: the bytes written since the
+; last newline.
+(pub :: foColumn (-> Int Int))
+(pub fn (foColumn o)
+  (let (
+    (v (foFragsVec o))
+    (mut i (- (vecLen v) 1))
+    (mut col 0)
+    (mut go true)
+  )
+    {
+      (while (&& go (>= i 0))
+        (let ((s (vecGetStr v i)))
+          (let ((nl (strLastNewline s (- (strLen s) 1))))
+            (if (>= nl 0)
+              {
+                (set col (+ col (- (strLen s) (+ nl 1))))
+                (set go false)
+              }
+              {
+                (set col (+ col (strLen s)))
+                (set i (- i 1))
+              }))))
+      col
+    }))
+
+; The offset of the last newline in `s` at or before `i`, or -1.
+(pub :: strLastNewline (-> String Int Int))
+(pub fn (strLastNewline s i)
+  (if (< i 0)
+    (- 0 1)
+    (if (== (strByte s i) 10)
+      i
+      (strLastNewline s (- i 1)))))
 
 ; Join the fragments: measure, allocate once, copy - the same shape
 ; `renderCG` uses, and for the same reason.
@@ -3103,6 +3160,71 @@
                   true)
                 true))))))))
 
+; The application `elems` printed on one line, or "" when it can't be:
+; an element breaks across lines, or the printer refused a shape. A
+; comment inside the form keeps it broken, so the comment keeps its
+; line. The trial prints into its own buffer with an empty comment
+; queue, so it takes nothing from the real one.
+; Whether a pending comment starts inside `[from, to)`. The queue is in
+; source order, so the walk stops at the first comment past `to`; one
+; pending BEFORE `from` belongs to an enclosing construct and says
+; nothing about this one.
+(pub :: fqAnyWithin (-> Int Int Int Bool))
+(pub fn (fqAnyWithin q from to)
+  (let (
+    (coms (fqComsVec q))
+    (mut i (fqNext q))
+    (mut found false)
+    (mut go true)
+  )
+    {
+      (while (&& go (< i (vecLen coms)))
+        (let ((c (fcStart (vecGet coms i))))
+          (if (>= c to)
+            (set go false)
+            {
+              (if (>= c from)
+                {
+                  (set found true)
+                  (set go false)
+                })
+              (set i (+ i 1))
+            })))
+      found
+    }))
+
+; Whether every element of `elems` from `i` on is an atom.
+(pub :: fpArgsAtoms (-> (Vec Int) Int Bool))
+(pub fn (fpArgsAtoms elems i)
+  (if (>= i (vecLen elems))
+    true
+    (if (== (fnKind (vecGet elems i)) FN_ATOM)
+      (fpArgsAtoms elems (+ i 1))
+      false)))
+
+(pub :: fpAppFlat (-> Int Int (Vec Int) String))
+(pub fn (fpAppFlat p n elems)
+  (let ((q (fpQ p)))
+    (if (fqAnyWithin q (fnStart n) (fnEnd n))
+      ""
+      (let ((o2 (mkFOut 0)))
+        (let ((p2 (mkFPr (fpSrc p) (fpStarts p) (mkFCq (cast Int vecNew)) o2)))
+          {
+            (fpP p2 "(")
+            (fpExpr p2 (vecGet elems 0))
+            (let ((mut j 1))
+              (while (< j (vecLen elems))
+                {
+                  (fpP p2 " ")
+                  (fpExpr p2 (vecGet elems j))
+                  (set j (+ j 1))
+                }))
+            (fpP p2 ")")
+            (if (|| (!= (foBad o2) 0) (> (foNl o2) 0))
+              ""
+              (foFinish o2))
+          })))))
+
 (pub :: fpApp (-> Int Int Int))
 (pub fn (fpApp p n)
   (let (
@@ -3201,25 +3323,44 @@
                     })
                   false)
                 false)))
-              (if inline
-                (let ((mut j 1))
-                  {
-                    (fpP p "(")
-                    (fpExpr p func)
-                    (while (< j (vecLen elems))
-                      {
-                        (fpP p " ")
-                        (fpExpr p (vecGet elems j))
-                        (set j (+ j 1))
-                      })
-                    (fpP p ")")
-                  })
-                (let ((mut j 1))
+              ; ONE LINE WHEN IT FITS. A call whose one-line form fits the
+              ; width stays on one line, however many arguments it has;
+              ; one that doesn't breaks, one argument per line. A short
+              ; call over atoms alone - a long string literal, say - stays
+              ; on one line however wide, since breaking it would not
+              ; shorten anything.
+              (let ((flat (fpAppFlat p n elems)))
+                (if (&& (> (strLen flat) 0) (|| (&& inline (fpArgsAtoms elems 1)) (<= (+ (foColumn o) (strLen flat)) fmtWidth)))
+                  (fpP p flat)
+                ; No one-line form could be built - a comment sits inside
+                ; the call - so the call keeps the layout it always had.
+                (if (&& inline (fqAnyWithin (fpQ p) (fnStart n) (fnEnd n)))
+                  (let ((mut j 1))
+                    {
+                      (fpP p "(")
+                      (fpExpr p func)
+                      (while (< j (vecLen elems))
+                        {
+                          (fpP p " ")
+                          (fpExpr p (vecGet elems j))
+                          (set j (+ j 1))
+                        })
+                      (fpP p ")")
+                    })
+                (let (
+                  (mut j 1)
+                  (col (foColumn o))
+                  (saved (foIndent o))
+                )
                   {
                     (fpP p "(")
                     (fpExpr p func)
                     (fpP p "\n")
-                    (foPushIndent o)
+                    ; The arguments hang two columns past this call's own
+                    ; paren, so a call broken in the middle of a line is
+                    ; still visibly one form, and never lines up with the
+                    ; statement after it.
+                    (foSetIndent o (+ col 2))
                     ; One argument per line. Until 2026-09-04 there was
                     ; no newline between them, so a broken application
                     ; printed its indent width as an INTER-ARGUMENT
@@ -3252,9 +3393,9 @@
                         (fpExpr p (vecGet elems j))
                         (set j (+ j 1))
                       })
-                    (foPopIndent o)
+                    (foSetIndent o saved)
                     (fpP p ")")
-                  })))))
+                  })))))))
       })))
 
 (pub :: fpExpr (-> Int Int Int))

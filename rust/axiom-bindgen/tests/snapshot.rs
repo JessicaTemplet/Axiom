@@ -145,7 +145,7 @@ fn nested_fixture_shape() {
     assert!(fresh.contains("(ffiFreeStrList __p __n)"));
     assert!(fresh.contains("(totalRaw :: (-> Int Int) (symbol \"axffi_total\"))"));
     assert!(fresh.contains("(pub :: total (-> (Vec Int) Int))"));
-    assert!(fresh.contains("(__r \n    (totalRaw\n      (cast Int xs))))\n    __r))"));
+    assert!(fresh.contains("(__r \n    (totalRaw (cast Int xs))))\n    __r))"));
     assert!(fresh.contains("(pub :: tryEvens (-> Int (Result (Vec Int) String)))"));
     assert!(fresh.contains("(pub :: maybePieces (-> String (Option (Vec String))))"));
     // A record is a `data` with one positional field per Rust field,
@@ -219,14 +219,14 @@ fn nested_fixture_shape() {
     assert!(fresh.contains(
         "(fn (__pixelToWords __ps __w __i)\n  (if (>= __i (vecLen __ps))\n    __w\n    \
          (match (vecGet __ps __i)\n      ((Pixel __f0 __f1 __f2)\n        {\n          \
-          (vecPush __w __f0)\n          (vecPush\n            __w\n            (cast Int __f1))\n          \
-          (vecPush\n            __w\n            (cast Int __f2))\n          \
+          (vecPush __w __f0)\n          (vecPush __w (cast Int __f1))\n          \
+          (vecPush __w (cast Int __f2))\n          \
          (__pixelToWords __ps __w (+ __i 1))"
     ));
     assert!(fresh.contains("(pixelsDimRaw :: (-> Int Int Int Int) (symbol \"axffi_pixels_dim\"))"));
     assert!(fresh.contains("(pub :: pixelsDim (-> (Vec Pixel) Int (Vec Pixel)))"));
     assert!(fresh.contains("(__a0 (__pixelToWords ps (vecWithCapacity (* (vecLen ps) 3)) 0))"));
-    assert!(fresh.contains("(__st (pixelsDimRaw\n      (cast Int __a0)\n      by\n      __c))"));
+    assert!(fresh.contains("(__st (pixelsDimRaw (cast Int __a0) by __c))"));
     assert!(fresh.contains("(__v (__pixelFromWords (vecWithCapacity __n) __p __n 0))"));
     assert!(fresh.contains("(ffiFreeWords __p (* __n 3))"));
     assert!(fresh.contains("(pub :: pixelsTry (-> (Vec Pixel) (Result (Vec Pixel) String)))"));

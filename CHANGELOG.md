@@ -34,6 +34,15 @@ its changelog too.
   `Tui` modules' doc comments now say what each name does.
   **BREAKING**: `compat/BREAKING` names it.
 
+- `axiom fmt` lays code out by width. A call stays on one line when it
+  fits in 100 columns, however many arguments it has, and breaks only
+  when it doesn't, with each argument on its own line two columns past
+  the call's own paren. A call over atoms alone, such as one long string,
+  stays whole. A call that once printed six short arguments one per
+  line now prints as one line, and a long test broken mid-line no longer
+  lines up with the statement after it. The whole tree is in this
+  normal form, and `scripts/check-fmt.sh` keeps it there.
+
 - A cast into a struct or `data` type another module keeps private is
   judged like any other cast into a reference: `(cast Map 4096)` in a
   user file forged a map header in safe code, and is AX3073 now. Tested

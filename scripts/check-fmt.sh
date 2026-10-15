@@ -20,19 +20,12 @@
 # fixed point), so a failure here is either that verification firing or a
 # genuine behavioural difference.
 #
-# There is no `--check` mode. This script had one - "assert every file
-# in the working tree is already formatted" - and it was a mode that
-# could never pass and that nothing ran: CONTRIBUTING.md says plainly
-# that the repository is deliberately NOT kept in `axiom fmt`'s normal
-# form, because a formatted tree would bury the narrative comments this
-# codebase is written in. A gate that cannot go green is not a gate.
-#
-# There are exactly two files where normal form IS the claim, and
-# section 1b holds them: the `axiom-bindgen` output under
-# `rust/examples/*/axiom/`. Their generator carries a second copy of
-# this formatter's layout rules, written in Rust, and says its output
-# is byte-for-byte what `axiom fmt` produces. Nothing checked that
-# until 2026-09-03.
+# The tree is kept in `axiom fmt`'s normal form, so section 1 also
+# asserts that formatting changes no committed file. The formatter lays
+# a form out on one line when it fits 100 columns and breaks it when it
+# doesn't, so the whole tree reads one way. The generated bindings under
+# `rust/examples/*/axiom/` are held separately by section 1b, because
+# their generator restates the formatter's layout rules in Rust.
 #
 # Usage:
 #   scripts/check-fmt.sh          # format a copy, then re-run the suites
@@ -83,7 +76,14 @@ tar --exclude=./.git --exclude=./rust/target --exclude=./.axiom-bin \
     --exclude=./.claude/worktrees --exclude=./.muse/worktrees \
     --exclude=./tree-sitter-axiom/node_modules -cf - . | (cd "$copy" && tar -xf -)
 
+# And every file is ALREADY in that form: formatting the copy must leave
+# it byte for byte as committed. The exceptions are the formatter's and
+# the grammar's own fixtures, fuzz reproducers, the generated bindings
+# (section 1b holds those), and the files `tests/fmt/unformatted.list`
+# names, each with its reason.
+exempt="$(grep -v '^#' "$repo_root/tests/fmt/unformatted.list" | sed 's/[[:space:]].*//')"
 total=0
+drifted=0
 for file in $(find "$copy" -name '*.ax' | sort); do
   total=$((total + 1))
   rel="${file#"$copy"/}"
@@ -91,9 +91,26 @@ for file in $(find "$copy" -name '*.ax' | sort); do
     echo "FAIL $rel"
     echo "$output" | sed 's/^/     /'
     failed=$((failed + 1))
+    continue
+  fi
+  case "$rel" in
+    tests/fmt/*|tests/fuzz/*|tree-sitter-axiom/*|rust/examples/*) continue ;;
+  esac
+  grep -qxF "$rel" <<< "$exempt" && continue
+  if ! cmp -s "$repo_root/$rel" "$file"; then
+    drifted=$((drifted + 1))
+    if (( drifted <= 20 )); then
+      echo "FAIL $rel is not in axiom fmt's normal form"
+    fi
   fi
 done
 echo "     $total files"
+if (( drifted > 0 )); then
+  echo "FAIL $drifted file(s) are not in axiom fmt's normal form; run axiom fmt on them"
+  failed=$((failed + 1))
+else
+  echo "ok   every .ax file outside the fixtures is in axiom fmt's normal form"
+fi
 
 # ---------------------------------------------------------------
 # 1b. The GENERATED bindings are already in the formatter's normal
