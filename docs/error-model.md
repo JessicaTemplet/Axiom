@@ -124,7 +124,7 @@ refer to:
 | `stdlib/Map.ax` | 6 | `-1` / absent-key |
 | `stdlib/Cereal.ax`, `stdlib/Path.ax`, `stdlib/Rpc.ax` | 3 each | `-1` |
 | `stdlib/Str.ax`, `stdlib/Intern.ax`, `stdlib/Sys/Platform.darwin.ax` | 2 each | `-1` / `-errno` |
-| `stdlib/Par.ax` | 1 | `-errno`, in the private `parRunWord` only: the one word a join can carry |
+| `stdlib/Task.ax` | 1 | `-errno`, in the private `taskRunCommandWord` only: the one word a join can carry |
 | `stdlib/Vec.ax` | 1 | `-1` |
 
 The platform shim is counted because `Platform.darwin.ax` is where the
@@ -1799,7 +1799,7 @@ The slices, in order, each green before the next starts:
    - A job pool turned a failed spawn into pid `0`. That is not `< 0`,
      so the pool counted it live, and `sysWaitPid 0` waited for any
      child in the group. The test hung rather than failed.
-     `stdlib/Par.ax` matches on `parRunOne`'s `Result` instead of
+     `stdlib/Task.ax` matches on `taskRunCommand`'s `Result` instead of
      unwrapping it, and its comment says why.
      `tests/stdlib/476-par-pool.ax` checks that a missing program
      answers a negative errno in its own slot.

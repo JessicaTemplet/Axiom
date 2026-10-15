@@ -1805,9 +1805,10 @@ Width is clamped to the input count, with a minimum of one for non-empty
 inputs. A slab size that exceeds the `Int` range returns `Err` 22 before
 mapping the answer slab or starting tasks.
 
-`Par` offers word and external-command pools. The
-[library reference](stdlib.md#task-par-chan-and-sync) gives the entry
-points, and the [memory model](memory-model.md) defines publication,
+`taskMapWords` returns word results, while `taskMapWordsChecked`
+returns a `Result` for each word. `taskRunCommand` runs one argument
+vector; `taskRunCommands` runs a bounded command pool. The
+[library reference](stdlib.md#task-chan-and-sync) gives the entry points, and the [memory model](memory-model.md) defines publication,
 atomic ordering and lifecycle rules.
 
 ## Calling Rust
@@ -1925,7 +1926,7 @@ Tested by `tests/stdlib/841-net-ip.ax` and `tests/stdlib/843-net-stream.ax`.
 
 ### Modules at a Glance
 
-Sixty-two modules, all of them Axiom source under `stdlib/`, plus the six
+Sixty-one modules, all of them Axiom source under `stdlib/`, plus the six
 `Sys.Platform.*` target files covered by `Sys`. Only names marked `pub`
 are exported.
 
@@ -1948,7 +1949,6 @@ are exported.
 | `Ffi` | [API](stdlib-api.md#ffi) |
 | `Cereal` | [API](stdlib-api.md#cereal) |
 | `Rpc` | [API](stdlib-api.md#rpc) |
-| `Par` | [API](stdlib-api.md#par) |
 | `Chan` | [API](stdlib-api.md#chan) |
 | `Sync` | [API](stdlib-api.md#sync) |
 | `Task` | [API](stdlib-api.md#task) |

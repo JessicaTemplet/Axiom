@@ -53,7 +53,7 @@
 #      fixture's `.exit` is what the process lowering produces AND what
 #      the thread lowering produces, against a control that exits 0.
 #
-#   6. AND THE POOL BUILT ON THOSE PRIMITIVES. `stdlib/Par.ax` replaced
+#   6. AND THE POOL BUILT ON THOSE PRIMITIVES. `stdlib/Task.ax` replaced
 #      `stdlib/Job.ax` at 0.7.4: a bounded pool over `__proc_spawn` /
 #      `__proc_join` that runs an Axiom CLOSURE, which is the limit
 #      `docs/memory-model.md` MM-PAR-2 named as Job's. Four arms, and
@@ -63,9 +63,9 @@
 #            byte for byte;
 #        (b) the pool is FLAG-INDEPENDENT: its module is BYTE-IDENTICAL
 #            with and without `--threads`. That is not a nicety. AX3064
-#            cannot see a capture through `parMapWords`, because
+#            cannot see a capture through `taskMapWords`, because
 #            `checkSpawnCaptures` inspects argument 0 only when it is
-#            literally a lambda and `parMapWords` spawns a PARAMETER -
+#            literally a lambda and `taskMapWords` spawns a PARAMETER -
 #            so the safety of every caller's capture rests on this file
 #            naming `__proc_spawn`, and nothing in the type system would
 #            notice if that word changed. This arm is the check the rule
@@ -130,7 +130,7 @@
 # `__par_spawn` or `__thread_spawn`, and none is in the corpus.
 # Section 11 holds the four refusals and the three controls.
 #
-# Section 6b is what keeps `Par.ax`'s primitive choice honest: that
+# Section 6b is what keeps `Task.ax`'s primitive choice honest: that
 # module spawns a parameter through `__proc_spawn`, whose forked
 # lowering isolates by construction, and the arm requires its module
 # byte-identical with and without `--threads`.
@@ -418,7 +418,7 @@ fi
 
 # --------------------------------------------------------------------
 echo
-echo "== 6. the pool built on those primitives: stdlib/Par.ax =="
+echo "== 6. the pool built on those primitives: stdlib/Task.ax =="
 # --------------------------------------------------------------------
 fx476="$repo_root/tests/stdlib/476-par-pool.ax"
 gold476="$repo_root/tests/stdlib/476-par-pool.out"
@@ -428,7 +428,7 @@ else
 
 # --- 6a. the fixture answers its golden ---
 #
-# 476 is the deleted `302-job` fixture with `Job` swapped for `Par`,
+# 476 is the deleted `302-job` fixture with `Job` swapped for `Task`,
 # plus one term Job could never run. Its first sixteen output lines ARE
 # that fixture's golden, measured byte for byte before it was deleted,
 # so this arm is
@@ -449,7 +449,7 @@ fi
 
 # --- 6b. the pool is FLAG-INDEPENDENT, byte for byte ---
 #
-# THE ARM THAT MATTERS. `Par.ax` names `__proc_spawn`, the primitive
+# THE ARM THAT MATTERS. `Task.ax` names `__proc_spawn`, the primitive
 # `capSpawnHead` exempts from AX3064 because it NAMES the forked
 # lowering - MM-PAR-3's isolation by construction. A pool that lowered
 # to threads under a flag would be a pool whose safety depended on how
@@ -490,7 +490,7 @@ cat > "$work/width.ax" <<'WIDTH'
 
 (import Vec)
 
-(import Par)
+(import Task)
 
 (pub :: main Int)
 
@@ -515,7 +515,7 @@ cat > "$work/width.ax" <<'WIDTH'
             })
           (set i (+ i 1))
         })
-      (println (vecLen (parRunAll cmds w)))
+      (println (vecLen (taskRunCommands cmds w)))
       0
     }
   )
@@ -585,8 +585,8 @@ echo "== 6e. the ablations: each of section 6's claims, deliberately broken =="
 # it was retired (2026-09-04) and `check-compat.sh`'s `probe` still
 # does, and the reason is that a `sed` that matched nothing produces a
 # green "ablation failed to fail" that reads exactly like a passing gate.
-abl_run() {  # <tag> <sed-program> <what-must-change> [module, default Par.ax] -> 0 when the edit landed
-  local tag="$1" prog="$2" what="$3" module="${4:-Par.ax}"
+abl_run() {  # <tag> <sed-program> <what-must-change> [module, default Task.ax] -> 0 when the edit landed
+  local tag="$1" prog="$2" what="$3" module="${4:-Task.ax}"
   local copy="$work/abl-$tag"
   rm -rf "$copy"; mkdir -p "$copy"
   cp -r "$repo_root/stdlib" "$copy/stdlib"
@@ -598,7 +598,7 @@ abl_run() {  # <tag> <sed-program> <what-must-change> [module, default Par.ax] -
   return 0
 }
 
-# ABLATION 1 (arm 6a, term 1): the submit order is reversed. `parRunAll`
+# ABLATION 1 (arm 6a, term 1): the submit order is reversed. `taskRunCommands`
 # maps slot `i` to `cmds[n-1-i]`, so the same eight children run and the
 # same eight codes come back - in the other order. That is precisely the
 # pool `Job.ax`'s header refused to be, and it is what a golden
@@ -606,7 +606,7 @@ abl_run() {  # <tag> <sed-program> <what-must-change> [module, default Par.ax] -
 # once, so the ablation is a WRONG ANSWER rather than a crash - which is
 # what an ablation should be, or it is proving that the program died
 # rather than that the arm can see.
-if abl_run order 's|(lambda (i) (parRunWord (vecGet cmds i)))|(lambda (i) (parRunWord (vecGet cmds (- (- (vecLen cmds) 1) i))))|' "submit order"; then
+if abl_run order 's|(lambda (i) (taskRunCommandWord (vecGet cmds i)))|(lambda (i) (taskRunCommandWord (vecGet cmds (- (- (vecLen cmds) 1) i))))|' "submit order"; then
   if AXIOM_STDLIB="$work/abl-order/stdlib" "$axc" build --input "$fx476" --output "$work/abl-order.bin" > "$work/abl-order.build" 2>&1 \
      && ( cd "$work" && ./abl-order.bin > "$work/abl-order.out" 2>/dev/null ) \
      && cmp -s "$work/abl-order.out" "$gold476"; then
@@ -617,7 +617,7 @@ if abl_run order 's|(lambda (i) (parRunWord (vecGet cmds i)))|(lambda (i) (parRu
 fi
 
 # ABLATION 1b (arm 6a, term 2): `strCStr`'s copy of a slice dropped.
-# `parArgvVector` hands every argument to `strCStr`, and a `String` with
+# `taskArgvVector` hands every argument to `strCStr`, and a `String` with
 # no NUL after it is copied there and nowhere else (Str.ax). Without the
 # copy `strCStr` is `strData` and nothing more, so a `strSlice` handed to
 # the kernel runs on into whatever follows it in memory. 476's term 2
@@ -652,10 +652,10 @@ if abl_run flag 's/__proc_spawn/__par_spawn/g; s/__proc_join/__par_join/g' "the 
       ok "ablation flag: __par_spawn makes the module follow --threads ($(grep -c '^declare i32 @pthread_' "$work/abl-flag-t.ll" || true) pthread declare(s), $(grep -c 'thread_local' "$work/abl-flag-t.ll" || true) thread_local), so arm 6b is measuring the primitive"
     fi
   else
-    n_cap="$(grep -c '^E AX3064 .*/Par\.ax:' "$work/abl-flag.build" || true)"
+    n_cap="$(grep -c '^E AX3064 .*/Task\.ax:' "$work/abl-flag.build" || true)"
     n_err="$(grep -c '^E ' "$work/abl-flag.build" || true)"
     if (( n_cap > 0 && n_cap == n_err )); then
-      ok "ablation flag: __par_spawn in the pool is refused before it can follow --threads ($n_cap AX3064 site(s) in Par.ax, nothing else)"
+      ok "ablation flag: __par_spawn in the pool is refused before it can follow --threads ($n_cap AX3064 site(s) in Task.ax, nothing else)"
     else
       bad "ablation flag: the ablated pool failed to build for a reason other than AX3064, so the arm proved nothing"
       sed 's/^/     /' "$work/abl-flag.build" | head -5
@@ -702,7 +702,7 @@ fi
 echo
 echo "== 6f. the checked pool: per-slot failure, flag-independent =="
 # --------------------------------------------------------------------
-# `parMapWordsChecked` is `parMapWords` joined through `__proc_join_nr`:
+# `taskMapWordsChecked` is `taskMapWords` joined through `__proc_join_nr`:
 # a thunk that traps is an `Err` carrying its wait status, the parent
 # survives, the slots after it still join, and the answer stays in
 # submit order. Two arms and an ablation, mirroring 6a/6b/6e for the
@@ -740,7 +740,7 @@ else
   bad "492: expected 1 join_nr_proc definition, >=1 call, 0 pthread declares, 0 thread_local; got $n_nrdef, $n_nrcall, $n_pth, $n_tl"
 fi
 # --- ABLATION (arm 6f): the non-raising join swapped for the raising one ---
-# `parJoinChecked` over `__proc_join` is the pool this section refuses
+# `taskWordsJoinChecked` over `__proc_join` is the pool this section refuses
 # to be: the mixed term's first trap ends the program with 77 instead
 # of an `Err` in the answer. A golden this edit could still satisfy
 # would not be measuring the join.

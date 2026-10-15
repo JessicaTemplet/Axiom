@@ -641,6 +641,13 @@ calling a converted function checks its remaining arguments. Tested by
   `tests/stdlib/945-pipelines.ax` and
   `tests/diagnostics/1430-pipeline-boundaries.ax`.
 
+- Consolidated `Par` into `Task`. Word maps and command runners now use
+  `taskMapWords`, `taskMapWordsChecked`, `taskArgvVector`, `taskRunCommand`
+  and `taskRunCommands`. The migration removes the `Par` module and shares
+  the trusted spawn boundary. Task isolation, ordered answers, cancellation
+  and resource budgets retain regression coverage in
+  `tests/stdlib/950-task-unified.ax`.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

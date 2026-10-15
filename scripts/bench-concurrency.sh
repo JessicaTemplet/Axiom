@@ -123,7 +123,7 @@ echo "== load when the second half started: $(uptime | sed 's/.*load averages*: 
 
 # ---- scaling ----------------------------------------------------------
 # A pure hash of every i in 0 .. W, summed, split into K contiguous
-# ranges: by `parallel` bindings in each lowering, and by `parMapWords`
+# ranges: by `parallel` bindings in each lowering, and by `taskMapWords`
 # (which forks under both builds). Every run must print the sequential
 # program's sum.
 want="$("$work/cb-processes" work "$W_SCALE" | awk '{print $2}')"
@@ -152,7 +152,7 @@ for low in ("processes", "threads"):
     sb, sm, srss = rows["seq-" + low]
     sb, sm = sb - nb, sm - nm
     print("%s build: sequential %.3f s (%.3f), peak RSS %s KiB; start-up %.1f ms subtracted" % (low, sb, sm, srss, nb * 1000))
-    print("  %-10s %-26s %-26s" % ("width", "parallel bindings", "parMapWords (forks)"))
+    print("  %-10s %-26s %-26s" % ("width", "parallel bindings", "taskMapWords (forks)"))
     for k in (1, 2, 4, 8):
         cells = []
         for kind in ("bind", "pool"):

@@ -1,10 +1,10 @@
 ; A bounded pool of concurrent tasks, joined in submit order.
 ;
-; This is the deleted `302-job` fixture with `Job` replaced by `Par`,
+; This is the deleted `302-job` fixture with `Job` replaced by `Task`,
 ; plus one term `Job` could never have run. The first three terms and
 ; their golden are inherited BYTE FOR BYTE from that fixture -
 ; measured, `diff` of the two outputs was empty - which is the evidence
-; that `parRunAll` is a drop-in for `jobRunAll` rather than merely a
+; that `taskRunCommands` is a drop-in for `jobRunAll` rather than merely a
 ; similar function.
 ;
 ; THE DISCRIMINATING TERMS, and what each one alone would catch:
@@ -21,7 +21,7 @@
 ;
 ;   2. THE SLICE. One argument is a `strSlice` of a longer string
 ;      rather than a literal, so no NUL follows its bytes.
-;      `parArgvVector` hands every element to `strCStr`, which copies
+;      `taskArgvVector` hands every element to `strCStr`, which copies
 ;      such a slice into a terminated buffer. Ablated (`strCStr` without
 ;      the copy), this term makes `sh` receive an argument with trailing
 ;      garbage and exit non-zero, so it shows up as a wrong code rather
@@ -38,7 +38,7 @@
 ;   4. AN AXIOM CLOSURE, which is the whole reason this module replaced
 ;      `Job`. `docs/memory-model.md` MM-PAR-2 named "`Job` cannot run
 ;      an Axiom closure - it execs an external program" as Job's hard
-;      limit. `parMapWords` runs a lambda that CAPTURES a `Vec` the
+;      limit. `taskMapWords` runs a lambda that CAPTURES a `Vec` the
 ;      parent built, at width 3 over six tasks, and answers in submit
 ;      order. Nothing here execs anything. The capture is safe because
 ;      `__proc_spawn` names the FORKED lowering, so the child reads its
@@ -52,7 +52,7 @@
 (import Str)
 (import Fmt)
 (import Vec)
-(import Par)
+(import Task)
 
 (pub :: sh3 (-> String (Vec String)))
 (pub fn (sh3 script)
@@ -87,7 +87,7 @@
         })
       ; Term 1: order under a deliberately reversed completion order.
       (let (
-        (res (parRunAll cmds 3))
+        (res (taskRunCommands cmds 3))
         (mut k 0)
       )
         {
@@ -108,7 +108,7 @@
         {
           (vecPush c2 (sh3 (strSlice long 2 7)))
           (println "slice argument")
-          (println (as (vecGet (parRunAll c2 2) 0) Int))
+          (println (as (vecGet (taskRunCommands c2 2) 0) Int))
         })
       ; Term 3: a program that does not exist keeps its own slot, and
       ; answers negative rather than 127.
@@ -121,7 +121,7 @@
           (vecPush c3 (sh3 "exit 5"))
           (vecPush c3 miss)
           (vecPush c3 (sh3 "exit 6"))
-          (let ((r3 (parRunAll c3 3)))
+          (let ((r3 (taskRunCommands c3 3)))
             {
               (println "missing program")
               (println (vecLen r3))
@@ -147,7 +147,7 @@
               (set m (+ m 1))
             })
           (let (
-            (r4 (parMapWords (lambda (t) (vecGet muls t)) 6 3))
+            (r4 (taskMapWords (lambda (t) (vecGet muls t)) 6 3))
             (mut q 0)
           )
             {

@@ -15,7 +15,7 @@ Import `Err` when working with `Result`, and use `?` to propagate errors.
 | dates, durations, a monotonic clock and sleep | [Chrono](#chrono) |
 | databases | [Axqlite](#axqlite) |
 | cryptography and embedded assets | [Crypto](#crypto) |
-| concurrency | [Task, Par, Chan, Sync](#task-par-chan-and-sync) |
+| concurrency | [Task, Chan, Sync](#task-chan-and-sync) |
 | terminals, testing and tooling | [Tui, Test, Agent.Tags](#terminals-tests-and-tools) |
 | low-level interfaces | [Mem, Ffi](#mem-and-ffi) |
 
@@ -612,7 +612,9 @@ bytes remain recoverable during runtime inspection.
 
 API: [Crypto modules](stdlib-api.md#cryptosecret).
 
-## Task, Par, Chan and Sync
+<a id="task-par-chan-and-sync"></a>
+
+## Task, Chan and Sync
 
 `Task.taskMap` runs bounded `(-> Int String)` workers and returns ordered
 `Result` values. `taskMapWith` adds deadlines, cancellation and fail-fast
@@ -634,7 +636,15 @@ Decoder errors stay in their result slots; `failFast` applies to worker
 failures. A slow decoder can delay submission and deadline handling.
 Tested by `tests/stdlib/704-task-decoded.ax`.
 
-`Par` runs word workers or external commands. `Chan` passes words
+`taskMapWords` runs word workers and raises the lowest failing index's
+status. `taskMapWordsChecked` returns every failure in its own `Result`
+slot. Both accept a count and a width, and fork each invocation with its
+own copy of captured state. `taskRunCommand` returns one command's
+`Result`; `taskRunCommands` runs argument vectors at a bounded width.
+Its slots contain exit codes, 128 plus a terminating signal, or a
+negative errno when the program could not start.
+
+`Chan` passes words
 through a bounded channel; `Sync` provides mutexes with timeout and
 owner-death reporting. A lock call answers a guard, and the lock is
 released when the guard's scope ends. A channel, mutex or token is
@@ -643,8 +653,7 @@ shared handles through their module's public operations. These APIs do not trans
 processes or make unsynchronised payload mutation safe.
 
 Read [concurrency](reference.md#concurrency) for capture and result rules.
-API: [Task](stdlib-api.md#task), [Par](stdlib-api.md#par),
-[Chan](stdlib-api.md#chan), [Sync](stdlib-api.md#sync).
+API: [Task](stdlib-api.md#task), [Chan](stdlib-api.md#chan), [Sync](stdlib-api.md#sync).
 
 ## Terminals, tests and tools
 

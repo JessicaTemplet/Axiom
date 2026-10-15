@@ -119,7 +119,7 @@ ADT instantiation.
 | Shorter, consistent names, with duplicates removed and internals private | In progress | `compat/BREAKING` |
 | Failure answers a `Result` or `Option`, never a sentinel | In progress | `ERR-ADOPT-1`, `compat/SENTINELS` |
 | `Map` is generic, and `vecSortBy` takes a typed comparator | Done | `tests/stdlib/081-map-value-type.ax`, `tests/stdlib/405-vec-sort.ax` |
-| `Par` folds into `Task` | Not started | |
+| `Par` folds into `Task` | Done | `tests/stdlib/476-par-pool.ax`, `tests/stdlib/492-par-pool-checked.ax` |
 | Sleep and a monotonic clock | Done | `MM-PAR-12`, `tests/stdlib/851-instant-sleep.ax` |
 | A would-block test for sockets: `errorKind` answers `WouldBlock` | Done | `tests/stdlib/840-error-kind.ax` |
 | AXQLite: links between tables, a dump that loads back, and messages that name the statement and say what to do | Done | `tests/axqlite/513-axql-links.ax`, `tests/axqlite/618-api-errors.ax` |

@@ -79,7 +79,7 @@
 #      cast.ax with one AX3073 at each untagged cast whose source is not
 #      already a `Spawn`, which the gate finds in the fixture's own
 #      bytes, and none at the controls. The standard library's two such
-#      casts, `taskHandleOf` and `parHandleOf`, are trusted
+#      casts, `taskHandleOf` and `taskHandleOf`, are trusted
 #      encapsulations (`#unsafe=trusted`). Ablation `forge`: a compiler
 #      whose forging rule no longer names `Spawn` draws no AX3073 on the
 #      fixture, only `trusted`'s AX3010 for a claim it no longer needs.
@@ -421,14 +421,14 @@ else
   bad "1260: check exit $rc, AX3073 at lines [$got_forge], wanted [$want_forge], $others diagnostic line(s)"
   head -4 "$work/forge.log" | sed 's/^/    /'
 fi
-printf '(import Task)\n(import Par)\n\n(fn (main)\n  0)\n' > "$work/libforge.ax"
+printf '(import Task)\n\n(fn (main)\n  0)\n' > "$work/libforge.ax"
 (cd "$work" && AXIOM_STDLIB="$repo_root/stdlib" "$axc" --diagnostic-format=ai symbols libforge.ax) > "$work/libforge.axsym" 2>&1 || true
-lib_rows="$(grep -cE '^F [A-Za-z:]*(taskHandleOf|parHandleOf) .*#unsafe=trusted' "$work/libforge.axsym" || true)"
-lib_casts="$(grep -cE '\(as .* Spawn\)' "$repo_root/stdlib/Task.ax" "$repo_root/stdlib/Par.ax" | awk -F: '{t += $2} END {print t}')"
-if [[ "$lib_rows" == 2 && "$lib_casts" == 2 ]]; then
-  ok "the library's two casts to Spawn are in taskHandleOf and parHandleOf, each #unsafe=trusted"
+lib_rows="$(grep -cE '^F [A-Za-z:]*taskHandleOf .*#unsafe=trusted' "$work/libforge.axsym" || true)"
+lib_casts="$(grep -cE '\(as .* Spawn\)' "$repo_root/stdlib/Task.ax")"
+if [[ "$lib_rows" == 1 && "$lib_casts" == 1 ]]; then
+  ok "the library's cast to Spawn is in taskHandleOf, marked #unsafe=trusted"
 else
-  bad "the library holds $lib_casts cast(s) to Spawn and $lib_rows trusted row(s) for taskHandleOf/parHandleOf"
+  bad "the library holds $lib_casts cast(s) to Spawn and $lib_rows trusted row(s) for taskHandleOf"
   grep -E 'HandleOf' "$work/libforge.axsym" | head -4 | sed 's/^/    /'
 fi
 # The scan: no guessed word names the live child, and its owner still

@@ -18,7 +18,7 @@
 ; (MM-RGN-7 is planned), so serialization is not a workaround here, it
 ; is the transfer - explicit, bounded, and checked on arrival.
 ;
-; WHY `__proc_spawn`, Par.ax's reason, unchanged: a task is a caller's
+; A task is a caller's
 ; closure, and its captures are only isolated by the forked lowering
 ; (MM-PAR-3), which this primitive names whatever `--threads` says. So
 ; a `--threads` program's tasks are processes too, and a task's
@@ -30,7 +30,7 @@
 ;                        slab is mapped and no task is started
 ;   Ok s                 the task answered `s`, at most `limit` bytes
 ;   Err 1..255           the task trapped or died: its wait status, an
-;                        exit code or 128 plus the signal (Par.ax's
+;                        exit code or 128 plus the signal (the word-pool
 ;                        convention); the runtime's message is on fd 2
 ;   Err taskTooLargeCode its answer was over `limit` bytes; nothing of
 ;                        it crossed, and the parent is unharmed
@@ -59,8 +59,7 @@
 ; `limit` bytes, REUSED - O(width x limit), never O(n). Submission
 ; blocks while `width` tasks are outstanding: there is no queue. A
 ; task's slot is freed when its result is DELIVERED, in submit order,
-; so a slow task holds back the tasks `width` places behind it (Par.ax's
-; rule, for the same reason: the answer order is the submit order, and
+; so a slow task holds back the tasks `width` places behind it (for the same reason: the answer order is the submit order, and
 ; a bounded buffer cannot hold results out of order for ever). The
 ; answer of `taskMap` is O(n) because it is n results; `keep` bounds
 ; the answer bytes it holds, and `taskFold` streams them instead, each
@@ -1191,3 +1190,238 @@
         (memSetWord acc 1 (+ i 1))
         (memSetWord acc 0 (g r))
       })))
+
+; ---- word results and external commands ------------------------------------
+;; Run `f i` for every `i` in `0 .. n`, at most `width` at once,
+;; answering the results in SUBMIT order.
+;
+; `hs` is a ring with at most min(n, w) slots, each a `Spawn`: the
+; handle a spawn answers and its join takes (docs/memory-model.md
+; MM-PAR-8), so a slot joined twice would trap with status 85 rather
+; than read an unmapped page. Slot i % w is reused only after the old
+; child in it has joined; `joined` counts submitted results, not
+; positions in the ring. `out` still holds n results, so
+; total result storage is O(n), while handle storage is O(min(n, w)).
+; Capacity is capped by n before allocation: a huge width over a short
+; or empty input does not ask for a huge ring. Vec clamps an empty or
+; negative capacity to one word.
+(pub :: taskMapWords (-> (-> Int Int) Int Int (Vec Int)))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (taskMapWords f n width)
+  (let (
+    (w (if (< width 1)
+      1
+      width))
+    (hs (vecWithCapacity
+          (if (< n w)
+            n
+            w)))
+    (out vecNew)
+    (mut joined 0)
+  )
+    {
+      (for i in 0..n
+        {
+          ; Block before spawning, not after, so at most `w` children
+          ; are ever outstanding. `(- i joined)` is the count of
+          ; handles spawned but not yet joined.
+          (while (>= (- i joined) w)
+            {
+              (vecPush out (__proc_join (vecGet hs (% joined w))))
+              (set joined (+ joined 1))
+            })
+          (let ((h (__proc_spawn f i)))
+            (if (< i w)
+              (vecPush hs h)
+              (vecSet hs (% i w) h)))
+        })
+      ; The drain continues the submission count left by the fill loop.
+      ; Ring length is only its capacity, not the number submitted.
+      (while (< joined n)
+        {
+          (vecPush out (__proc_join (vecGet hs (% joined w))))
+          (set joined (+ joined 1))
+        })
+      out
+    }))
+
+; Join one `__proc_spawn` handle WITHOUT re-raising: `Ok` the thunk's
+; word when the child exits 0, `Err` the child's wait status otherwise.
+; `cell` is a live writable word owned by the calling pool. Every join
+; overwrites it before returning, so one cell serves all sequential joins
+; in that pool. It is never shared between concurrent pool invocations.
+;
+; PRIVATE, for `taskRunCommandWord`'s reason: the lossy-per-slot form is needed
+; in one place, so it lives there, and a caller who wants the pool
+; calls `taskMapWordsChecked`.
+(:: taskWordsJoinChecked (-> Spawn Int (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (taskWordsJoinChecked h cell)
+  (let ((w (__proc_join_nr h cell)))
+    (let ((st (memGetWord cell 0)))
+      (if (== st 0)
+        (Ok w)
+        (Err (mkError st "parallel slot trapped"))))))
+
+; Spawn `f` on `i` inside a recovery point of its own, so a refused
+; spawn comes back here as a status rather than raising past the pool
+; (MM-PAR-7's 78). Answers the handle's word, or the status: 78 when the
+; kernel refused the fork or the handle table was full, 70 when the
+; handle's page could not be mapped. The spawn is all the extent does,
+; and the `region` around it takes back its one allocation, the mark.
+(:: taskWordsSpawn (-> (-> Int Int) Int Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+(fn (taskWordsSpawn f i)
+  (region r
+    (__axiom_recover __axiom_arena_mark (lambda (x) (taskWordOf (__proc_spawn f i))))))
+
+; SIGKILL a running slot's child, through the pid its handle names. A
+; child that has already exited is a zombie, and the signal changes
+; nothing about it.
+(:: taskWordsKill (-> Spawn Int))
+;@axiom:effect(io)
+(fn (taskWordsKill h)
+  (match (sysKill (__spawn_pid h) 9)
+    ((Ok z) 0)
+    ((Err e) 0)))
+
+; Join a slot `taskWordsKill` just signalled: `Ok` its word when it had
+; finished first, and otherwise `Err` its wait status, which is 137.
+(:: taskWordsJoinKilled (-> Spawn Int (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (taskWordsJoinKilled h cell)
+  (let ((w (__proc_join_nr h cell)))
+    (let ((st (memGetWord cell 0)))
+      (if (== st 0)
+        (Ok w)
+        (Err (mkError st "parallel slot killed: a later spawn was refused"))))))
+
+;; Run `f i` for every `i` in `0 .. n`, at most `width` at once,
+;; answering one `Result` per slot in SUBMIT order: `Ok` the thunk's
+;; word, `Err` the wait status of a slot whose thunk trapped.
+;
+; A SPAWN THAT IS REFUSED stops the pool. Its slot and every slot after
+; it answer `Err` with the refusal's status - 78 when the kernel refused
+; the fork or the handle table was full, 70 when no page could be mapped
+; for the handle - and never run. Every slot still running is SIGKILLed
+; and joined, in submit order, and answers what its join saw: `Ok` its
+; word if it finished first, otherwise `Err` 137. So no child outlives
+; the call, and the scratch cell and ring are released on this path
+; too.
+;
+; The loop is `taskMapWords`'s, join for join - the width clamp, the
+; block-before-spawning, the drain that continues `joined` - and the
+; comments there are not repeated here. What differs is the join, the
+; non-raising one, so a trapped slot is an `Err` in the answer and not
+; the end of the program, and the spawn, which answers its refusal.
+(pub :: taskMapWordsChecked (-> (-> Int Int) Int Int (Vec (Result Int Error))))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (taskMapWordsChecked f n width)
+  (let (
+    (w (if (< width 1)
+      1
+      width))
+    (hs (vecWithCapacity
+          (if (< n w)
+            n
+            w)))
+    (out vecNew)
+    (cell (memAlloc 8))
+    (mut joined 0)
+    (mut next 0)
+    (mut refused 0)
+  )
+    {
+      (__retain cell)
+      (while (&& (< next n) (== refused 0))
+        {
+          (while (>= (- next joined) w)
+            {
+              (vecPush out (taskWordsJoinChecked (vecGet hs (% joined w)) cell))
+              (set joined (+ joined 1))
+            })
+          (let ((hw (taskWordsSpawn f next)))
+            (if (taskSpawned hw)
+              {
+                (let ((h (taskHandleOf hw)))
+                  (if (< next w)
+                    (vecPush hs h)
+                    (vecSet hs (% next w) h)))
+                (set next (+ next 1))
+              }
+              (set refused hw)))
+        })
+      (if (== refused 0)
+        (while (< joined n)
+          {
+            (vecPush out (taskWordsJoinChecked (vecGet hs (% joined w)) cell))
+            (set joined (+ joined 1))
+          })
+        {
+          (for k in joined..next
+            (taskWordsKill (vecGet hs (% k w))))
+          (while (< joined next)
+            {
+              (vecPush out (taskWordsJoinKilled (vecGet hs (% joined w)) cell))
+              (set joined (+ joined 1))
+            })
+          (for k in next..n
+            (vecPush out (Err (mkError refused "parallel slot not started: its spawn was refused"))))
+        })
+      (__release cell)
+      out
+    }))
+
+;; A null-terminated argv for `execve` or `posix_spawn`. Every string
+;; passes through `strCStr`, which copies a slice when it needs a
+;; terminator. The array lives in the caller's arena.
+(pub :: taskArgvVector (-> (Vec String) Int))
+(pub fn (taskArgvVector argv)
+  (let ((n (vecLen argv)))
+    (let ((v (memAlloc (* 8 (+ n 1)))))
+      {
+        (for i in 0..n
+          (memSetWord v i (strCStr (vecGetStr argv i))))
+        (memSetWord v n 0)
+        v
+      })))
+
+;; Run one argument vector. Element 0 is the program, looked up on
+;; `PATH`. An empty vector answers `Err` 2 without starting a process.
+(pub :: taskRunCommand (-> (Vec String) (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (taskRunCommand argv)
+  (if (== (vecLen argv) 0)
+    (Err (mkError 2 "taskRunCommand: an empty argv names no program"))
+    (sysRunPath (strDup (vecGetStr argv 0)) (taskArgvVector argv) sysEnvp)))
+
+; Encode a command result as the word carried by a join: an exit code
+; or 128 plus its signal, or a negative errno if it could not start.
+(:: taskRunCommandWord (-> (Vec String) Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (taskRunCommandWord argv)
+  (match (taskRunCommand argv)
+    ((Ok c) c)
+    ((Err e) (- 0 (errCode e)))))
+
+;; Run argument vectors at up to `width` at once, in submit order.
+;; Each slot contains its exit code, 128 plus its terminating signal,
+;; or a negative errno when the program could not start.
+(pub :: taskRunCommands (-> (Vec (Vec String)) Int (Vec Int)))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (taskRunCommands cmds width)
+  (taskMapWords (lambda (i) (taskRunCommandWord (vecGet cmds i))) (vecLen cmds) width))

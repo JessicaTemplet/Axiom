@@ -90,8 +90,8 @@
 #      fills the runtime's handle table but for a few slots, so a pool's
 #      third spawn is refused - the path a fork the kernel refuses takes
 #      too - with two tasks running. `taskMap` must answer 78 in the
-#      refused slot and cancel, `parMapWordsChecked` answer 78 there and
-#      137 for the two it killed, and `parMapWords` raise 78 to the
+#      refused slot and cancel, `taskMapWordsChecked` answer 78 there and
+#      137 for the two it killed, and `taskMapWords` raise 78 to the
 #      recovery point. While the program still lives, every pid a task
 #      printed must be gone, it must have no child at all, and every
 #      handle slot must be back; eight refused `taskMap` rounds with a
@@ -105,8 +105,8 @@
 #      end).
 #  10. Determinism (MM-PAR-14). tests/litmus/par-determinism.ax adds
 #      2,000 Float terms whose sum rounds differently in any other
-#      order, through `taskFold`, `taskMap`, `parMapWords` and
-#      `parMapWordsChecked` at widths 1, 2, 3, 4 and 8, in both
+#      order, through `taskFold`, `taskMap`, `taskMapWords` and
+#      `taskMapWordsChecked` at widths 1, 2, 3, 4 and 8, in both
 #      lowerings, with tasks made to finish out of submit order: every
 #      answer must be the sequential sum's bits, which a Python
 #      recomputation in IEEE doubles must agree with. `parallel`
@@ -563,7 +563,7 @@ cuts = {
   # A refused spawn no longer cancels the pool.
   "refusecancel": [("Task.ax", "                  {\n                    (set cancelling 1)\n                    (set graceEnd (+ now graceUs))\n                  })", "                  ())")],
   # The checked pool no longer kills its running slots on a refusal.
-  "parkill": [("Par.ax", "(parKill (vecGet hs (% k w)))", "0")],
+  "parkill": [("Task.ax", "(taskWordsKill (vecGet hs (% k w)))", "0")],
   # The microseconds conversion rounds without saturating.
   "micros": [("Task.ax", "    (if (> nanos 9223372036854774808)\n      9223372036854776\n      (/ (+ nanos 999) 1000))", "    (/ (+ nanos 999) 1000)")],
   # Section 10. The pool delivers each answer when it joins the task,
@@ -584,7 +584,7 @@ cuts = {
   # for a tenth of the time: a sleep that ends short.
   "shortsleep": [("Sys.ax", "            (if (>= now deadline)\n              (set state 1)\n              (sysWaitWordTimeout (+ buf 16) 0 (- deadline now)))", "            {\n              (sysWaitWordTimeout (+ buf 16) 0 (/ (- deadline now) 10))\n              (set state 1)\n            }")],
   # Section 10. The raising pool's drain joins newest first.
-  "drain": [("Par.ax", "      (while (< joined n)\n        {\n          (vecPush out (__proc_join (vecGet hs (% joined w))))", "      (while (< joined n)\n        {\n          (vecPush out (__proc_join (vecGet hs (% (- n (+ joined 1)) w))))")],
+  "drain": [("Task.ax", "      (while (< joined n)\n        {\n          (vecPush out (__proc_join (vecGet hs (% joined w))))", "      (while (< joined n)\n        {\n          (vecPush out (__proc_join (vecGet hs (% (- n (+ joined 1)) w))))")],
 }[kind]
 for f, old, new in cuts:
     p = os.path.join(root, f)
@@ -848,18 +848,18 @@ for lowering in processes threads; do
   live "$work/refuse-$lowering-c.out" "$bin" checked 2 4 4 1
   out="$(answers "$work/refuse-$lowering-c.out")"
   if [[ "$live_rc" == 0 && "$out" == "$want_checked"$'\n'"round 0 status 1004 free 2" && "$live_alive" == 0 && -z "$live_kids" ]]; then
-    ok "$lowering parMapWordsChecked: the third spawn refused; two running slots killed and joined (137), two never started (78), both handles back"
+    ok "$lowering taskMapWordsChecked: the third spawn refused; two running slots killed and joined (137), two never started (78), both handles back"
   else
-    bad "$lowering parMapWordsChecked refusal: exit $live_rc, pids [$live_pids ] $live_alive alive, children [$live_kids], '$(tr '\n' ';' <<< "$out")'"
+    bad "$lowering taskMapWordsChecked refusal: exit $live_rc, pids [$live_pids ] $live_alive alive, children [$live_kids], '$(tr '\n' ';' <<< "$out")'"
   fi
   # The raising pool: the refusal raises 78 to the caller's recovery
   # point, and the runtime's sweep is its cleanup.
   live "$work/refuse-$lowering-r.out" "$bin" raising 2 4 4 1
   out="$(answers "$work/refuse-$lowering-r.out")"
   if [[ "$live_rc" == 0 && "$out" == "round 0 status 78 free 2" && "$live_alive" == 0 && -z "$live_kids" ]]; then
-    ok "$lowering parMapWords: the refusal raised 78 to the recovery point, the sweep killed and reaped its children, both handles back"
+    ok "$lowering taskMapWords: the refusal raised 78 to the recovery point, the sweep killed and reaped its children, both handles back"
   else
-    bad "$lowering parMapWords refusal: exit $live_rc, pids [$live_pids ] $live_alive alive, children [$live_kids], '$(tr '\n' ';' <<< "$out")'"
+    bad "$lowering taskMapWords refusal: exit $live_rc, pids [$live_pids ] $live_alive alive, children [$live_kids], '$(tr '\n' ';' <<< "$out")'"
   fi
 done
 # The KERNEL refusing: the fold's first step lowers RLIMIT_NPROC to 1,
@@ -1084,9 +1084,9 @@ for lowering in processes threads; do
     done
   done
   if [[ "$(printf '%s\n' $got | LC_ALL=C sort -u | tr -d '\n')" == 77 ]]; then
-    ok "$lowering parMapWords: tasks 10 (77, last), 12 (72) and 14 (82) fail; the pool raised 77, the lowest index's, in all 15 runs at widths 1 to 8"
+    ok "$lowering taskMapWords: tasks 10 (77, last), 12 (72) and 14 (82) fail; the pool raised 77, the lowest index's, in all 15 runs at widths 1 to 8"
   else
-    bad "$lowering parMapWords: exit statuses [${got# }], wanted 77 every time"
+    bad "$lowering taskMapWords: exit statuses [${got# }], wanted 77 every time"
   fi
   for mode in fail-checked fail-tasks; do
     wrong=""

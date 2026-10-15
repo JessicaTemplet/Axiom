@@ -65,10 +65,10 @@ echo "--- 1. user-level cast count does not grow ---"
 # casts the removal deleted; the fixture is refused AX2004, so its
 # cast never compiles.
 # Baseline 433 measured 2026-09-29 at the Track C merge: seven arrived.
-# Four are `stdlib/Task.ax`'s and `stdlib/Par.ax`'s spawn handle carried
+# Three are `stdlib/Task.ax`'s spawn handle carried
 # through the recovery point around a spawn, which answers a word, so
 # each pool turns the handle into its word and back (`taskWordOf`,
-# `parHandleOf`); each module states that as its one such cast. Three
+# `taskHandleOf`); each module states that as its one such cast. Three
 # were forged guards in `tests/litmus/sync-load.ax`,
 # `tests/stdlib/541-sync-mutex.ax` and a deleted handle fixture, whose
 # subject was a guard nothing earned being refused: the MM-VAL-23 reason.

@@ -1852,21 +1852,6 @@ Net - TCP connections and IP addresses.
 | `tcpTakeError` | value | `(-> TcpStream (Result (Option Error) Error))` | `Alloc,IO,Mut` |  | The stream's pending socket error, cleared by reading it: `(Ok None)` when there is none. |
 | `tcpSetNonBlocking` | value | `(-> TcpStream Bool (Result Int Error))` | `Alloc,IO,Mut` |  | Switch the stream between blocking (`false`) and non-blocking (`true`). A non-blocking read or write that cannot proceed answers `WouldBlock`. |
 
-## `Par`
-
-`stdlib/Par.ax` — 5 public names
-
-A bounded pool of concurrent tasks, joined in SUBMIT order, built on
-the primitives `(parallel ...)` desugars to.
-
-| Name | Kind | Type | Effects | Contracts | Summary |
-|---|---|---|---|---|---|
-| `parMapWords` | value | `(-> (-> Int Int) Int Int (Vec Int))` | `Alloc,Block,IO,Mut,Spawn` |  | Run `f i` for every `i` in `0 .. n`, at most `width` at once, answering the results in SUBMIT order. |
-| `parMapWordsChecked` | value | `(-> (-> Int Int) Int Int (Vec (Result Int Error)))` | `Alloc,Block,IO,Mut,Spawn,Unsafe` |  | Run `f i` for every `i` in `0 .. n`, at most `width` at once, answering one `Result` per slot in SUBMIT order: `Ok` the thunk's word, `Err` the wait status of a slot whose thunk trapped. |
-| `parArgvVector` | value | `(-> (Vec String) Int)` | `Alloc,Mut` |  | A NULL-terminated array of char* from a Vec of `String`, which is the shape `execve` and `posix_spawn` both take. |
-| `parRunOne` | value | `(-> (Vec String) (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn` |  | Run one argv - element 0 is the program, looked up on `PATH` the way `sysRunPath` does it. |
-| `parRunAll` | value | `(-> (Vec (Vec String)) Int (Vec Int))` | `Alloc,Block,IO,Mut,Spawn` |  | Run every command in `cmds` at up to `width` at once, answering their exit codes in the order they appear in `cmds`. |
-
 ## `Path`
 
 `stdlib/Path.ax` — 11 public names
@@ -2215,7 +2200,7 @@ target being compiled for (this one is `darwin`).
 
 ## `Task`
 
-`stdlib/Task.ax` — 23 public names
+`stdlib/Task.ax` — 28 public names
 
 Structured tasks with typed results across the process boundary
 (R-C2, docs/memory-model.md MM-PAR-13).
@@ -2245,6 +2230,11 @@ Structured tasks with typed results across the process boundary
 | `taskMapDecoded` | value | `(-> (-> Int String) (-> String (Result a Error)) Int Int Int (Vec (Result a Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | Decode each successful answer in the parent, in submit order. Task failures pass through unchanged and never call `decode`. The encoded answers keep `taskMap`'s byte limit; decoded storage is the decoder's responsibility and the result vector holds n values. |
 | `taskMapDecodedWith` | value | `(-> (-> Int String) (-> String (Result a Error)) Int TaskOpts (Vec (Result a Error)))` | `Alloc,Block,IO,Mut,Spawn` |  | All task options, with parent-side decoding. Decoder errors belong to their result slots; `failFast` concerns worker failures, not decoding. Delivery calls `decode` before starting more work, so a slow decoder can delay submission and deadline/cancellation handling. |
 | `taskFold` | value | `(-> (-> Int String) Int TaskOpts Int (-> Int Int (Result String Error) Int) Int)` | `Alloc,Block,IO,Mut,Spawn` |  | Fold the answers in submit order without keeping them: `step acc i r` for each task, starting from `init`, answering the last `acc`. Each answer and everything the step allocates are reclaimed on return. A retained mark cell is refreshed before delivery, then reset after it. The pool's state and the accumulator were allocated before that mark. |
+| `taskMapWords` | value | `(-> (-> Int Int) Int Int (Vec Int))` | `Alloc,Block,IO,Mut,Spawn` |  | Run `f i` for every `i` in `0 .. n`, at most `width` at once, answering the results in SUBMIT order. |
+| `taskMapWordsChecked` | value | `(-> (-> Int Int) Int Int (Vec (Result Int Error)))` | `Alloc,Block,IO,Mut,Spawn,Unsafe` |  | Run `f i` for every `i` in `0 .. n`, at most `width` at once, answering one `Result` per slot in SUBMIT order: `Ok` the thunk's word, `Err` the wait status of a slot whose thunk trapped. |
+| `taskArgvVector` | value | `(-> (Vec String) Int)` | `Alloc,Mut` |  | A null-terminated argv for `execve` or `posix_spawn`. Every string passes through `strCStr`, which copies a slice when it needs a terminator. The array lives in the caller's arena. |
+| `taskRunCommand` | value | `(-> (Vec String) (Result Int Error))` | `Alloc,Block,IO,Mut,Spawn` |  | Run one argument vector. Element 0 is the program, looked up on `PATH`. An empty vector answers `Err` 2 without starting a process. |
+| `taskRunCommands` | value | `(-> (Vec (Vec String)) Int (Vec Int))` | `Alloc,Block,IO,Mut,Spawn` |  | Run argument vectors at up to `width` at once, in submit order. Each slot contains its exit code, 128 plus its terminating signal, or a negative errno when the program could not start. |
 
 ## `Test`
 

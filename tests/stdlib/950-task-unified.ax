@@ -1,0 +1,70 @@
+; Word and byte-result tasks share one module and preserve per-invocation
+; isolation. Each worker mutates its captured Vec; later workers and the
+; parent must still see the original element.
+(import Task)
+(import Vec)
+(import Str)
+(import Fmt)
+(import Err)
+(import IO)
+
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  (let (
+    (state (vecNew))
+    (mut errors 0)
+  )
+    {
+      (vecPush state 7)
+      (let ((words
+        (taskMapWords
+          (lambda (i)
+            {
+              (vecSet state 0 (+ (vecGet state 0) i))
+              (vecGet state 0)
+            }
+          )
+          17
+          3)))
+        (for i in 0..17
+          (if (!= (vecGet words i) (+ 7 i))
+            (set errors (+ errors 1))
+            ())))
+      (let ((answers
+        (taskMap
+          (lambda (i)
+            {
+              (vecSet state 0 (+ (vecGet state 0) i))
+              (fmtInt (vecGet state 0))
+            }
+          )
+          17
+          3
+          32)))
+        (for i in 0..17
+          (match (vecGet answers i)
+            ((Ok s)
+              (if (!= s (fmtInt (+ 7 i)))
+                (set errors (+ errors 1))
+                ())
+            )
+            ((Err e)
+              (set errors (+ errors 1))
+            ))))
+      (if (!= (vecGet state 0) 7)
+        (set errors (+ errors 1))
+        ())
+      (match (taskRunCommand (vecNew))
+        ((Ok code)
+          (set errors (+ errors 1))
+        )
+        ((Err e)
+          (if (!= (errCode e) 2)
+            (set errors (+ errors 1))
+            ())
+        ))
+      (println errors)
+      0
+    }))

@@ -107,7 +107,6 @@ stdlib/Cereal.ax
 stdlib/Map.ax
 stdlib/Mem.ax
 stdlib/Net.ax
-stdlib/Par.ax
 stdlib/Path.ax
 stdlib/Pre.ax
 stdlib/Rpc.ax

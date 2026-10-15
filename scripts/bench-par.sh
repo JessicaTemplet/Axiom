@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# What the parallel pool's `parMapWords` and `parRunAll` cost on this
+# What the parallel pool's `taskMapWords` and `taskRunCommands` cost on this
 # machine, as a baseline for changes to the pool's accounting.
 #
 #   scripts/bench-par.sh                # best of 20 runs at --opt 2
@@ -12,7 +12,7 @@
 #   spawn   4000 trivial thunks at width 8 (fork/join round trips)
 #   alloc   2000 thunks each summing a fresh 2000-word Vec (join
 #           under allocation)
-#   runall  800 true(1) at width 8, end to end through parRunAll
+#   runall  800 true(1) at width 8, end to end through taskRunCommands
 #
 # The method is `bench-datastructures.sh`'s (see `web/bench/README.md`).
 # Hyperfine times whole processes, the figure is the best of REPS runs
@@ -48,7 +48,7 @@ AX
 
 cat > "$work/b_spawn.ax" <<'AX'
 (import IO)
-(import Par)
+(import Task)
 (import Vec)
 
 (:: main ())
@@ -56,7 +56,7 @@ cat > "$work/b_spawn.ax" <<'AX'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((out (parMapWords (lambda (i) i) 4000 8)))
+  (let ((out (taskMapWords (lambda (i) i) 4000 8)))
     (let ((s (vecSum out)))
       {
         (println "{s}")
@@ -65,7 +65,7 @@ AX
 
 cat > "$work/b_alloc.ax" <<'AX'
 (import IO)
-(import Par)
+(import Task)
 (import Vec)
 
 (:: childSum (-> Int Int))
@@ -82,7 +82,7 @@ cat > "$work/b_alloc.ax" <<'AX'
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((out (parMapWords (lambda (i) (childSum 2000)) 2000 8)))
+  (let ((out (taskMapWords (lambda (i) (childSum 2000)) 2000 8)))
     (let ((s (vecSum out)))
       {
         (println "{s}")
@@ -91,7 +91,7 @@ AX
 
 cat > "$work/b_runall.ax" <<'AX'
 (import IO)
-(import Par)
+(import Task)
 (import Str)
 (import Vec)
 
@@ -108,7 +108,7 @@ cat > "$work/b_runall.ax" <<'AX'
             (vecPushStr one "true")
             (vecPushVec cmds one)
           }))
-      (let ((codes (parRunAll cmds 8)))
+      (let ((codes (taskRunCommands cmds 8)))
         (let ((n (vecLen codes)))
           (let ((s (vecSum codes)))
             {

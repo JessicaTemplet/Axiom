@@ -4,7 +4,7 @@
 #
 # docs/embedded-guide.md says `Pre`, `Mem`, `Str`, `Vec`, `Map`, `Fmt`,
 # `Utf8` and `Err` assume no filesystem, process model or sockets, while
-# `Sys`, `IO`, `Path`, `Net`, `Rpc` and `Par` do. This gate holds that
+# `Sys`, `IO`, `Path`, `Net`, `Rpc` and `Task` do. This gate holds that
 # split in three arms, each catching a different breakage:
 #
 #   1. Closure. The transitive imports of every subset module stay inside

@@ -5176,17 +5176,15 @@ program that asks for threads pays it:
   obligation, which also records that a shared bump pointer is the one
   thing this allocator's design can't absorb.
 
-**MM-PAR-2 (H, amended).** The unit of parallelism is the
-**process**. `stdlib/Par.ax` provides a bounded pool with a
-submit-order guarantee and the `sysRun` error contract. It is built on
-`__proc_spawn` and `__proc_join`, the forked lowering of `parallel`.
-`parMapWords` runs an Axiom closure, and `parRunAll` is that function
-over a closure which runs one argv, so running external programs is a
-special case of the general pool. `Par` replaces the old `Job` module,
-which could only exec an external program. Evidence:
-`tests/stdlib/476-par-pool.ax`, which reproduces the old `Job`
-fixture's output byte for byte and adds a fourth term `Job` could not
-run.
+**MM-PAR-2 (H, amended).** The unit of task parallelism is the
+**process**. `stdlib/Task.ax` provides bounded pools with a submit-order
+guarantee. `taskMapWords` runs an Axiom closure;
+`taskMapWordsChecked` answers a `Result` for each slot.
+`taskRunCommands` runs argument vectors and preserves the `sysRun`
+exit-code and negative-errno contract. The pools use `__proc_spawn`
+and `__proc_join`, the forked lowering of `parallel`.
+Evidence: `tests/stdlib/476-par-pool.ax` and
+`tests/stdlib/492-par-pool-checked.ax`.
 
 The pool uses `__proc_spawn` rather than `__par_spawn` for a reason.
 `__par_spawn` follows `--threads`, so `AX3064` refuses a captured
@@ -5194,7 +5192,7 @@ reference at it. `__proc_spawn` names the forked lowering, whose
 isolation is `MM-PAR-3` by construction, and `capSpawnHead` exempts it
 for that reason. The pool therefore takes a caller's capture safely
 without weakening the rule. `AX3064` can't see a capture through
-`parMapWords`'s parameter, so `scripts/check-parallel.sh` section 6b
+`taskMapWords`'s parameter, so `scripts/check-parallel.sh` section 6b
 checks the substitute directly: the module emitted for the pool is
 byte-identical with `--threads` and without.
 
@@ -5279,7 +5277,7 @@ for `__tls_get_addr` alone would pass an AArch64 build that imports
 **MM-PAR-4 (H, with a stated escape).** Nothing the language or the
 standard library provides shares mutable memory between processes.
 Values cross a process boundary as bytes, through a file descriptor or
-the filesystem. `Par`'s determinism (`MM-PAR-5`) rests on this.
+the filesystem. `Task`'s determinism (`MM-PAR-5`) rests on this.
 
 The rule covers what is *provided*, not what is *reachable*. A program
 holds raw `mmap` through `__syscallN`, so it can map a `MAP_SHARED`
@@ -5643,7 +5641,7 @@ visible to another binding's read.
    its answer to the `MAP_SHARED` page and exits, and the parent reads
    it after `wait4` returns. `wait4` is the BSD and Linux form of
    `waitpid`, which POSIX lists. This edge relies on the kernel's exit
-   and wait path. `stdlib/Par.ax` is the process lowering
+   and wait path. `stdlib/Task.ax` is the process lowering
    (`__proc_spawn`/`__proc_join`) and inherits both edges.
 4. **Atomics.** The five primitives are sequentially consistent. There
    is one total order over every atomic operation in the program,
@@ -6175,7 +6173,7 @@ deadline/cancellation handling. Tested by
   it crosses, and the parent is unharmed.
 - **Failure is a value in its slot.** A task that traps or dies answers
   `Err` with its wait status: 1 to 255, an exit code or 128 plus the
-  signal, as in `Par.ax`. Its siblings still run and answer. The
+  signal, as in `Task.ax`. Its siblings still run and answer. The
   library's own codes are above 255, so none can be mistaken for a
   status.
 - **A deadline** runs per task from the clock read after its spawn,
@@ -6220,9 +6218,9 @@ deadline/cancellation handling. Tested by
   unmaps the slab and lets a private token go. The spawn runs inside a
   recovery point of its own (`taskSpawn`), so the runtime's 78 comes
   back to the pool instead of unwinding past its cleanup.
-- **`Par`'s pools answer a refusal too.** `stdlib/Par.ax`'s
-  `parMapWordsChecked` answers it in its slots the same way, and kills
-  and joins its running children at once. `parMapWords` raises 78 to
+- **`Task`'s pools answer a refusal too.** `stdlib/Task.ax`'s
+  `taskMapWordsChecked` answers it in its slots the same way, and kills
+  and joins its running children at once. `taskMapWords` raises 78 to
   its caller as it raises a child's trap, and the runtime's sweep
   (`MM-PAR-7`) kills and reaps its children.
 - **No child outlives the call** on any path the program has. A normal
@@ -6340,8 +6338,8 @@ deadline/cancellation handling. Tested by
 **MM-PAR-14 (H). A pure parallel computation answers what its parts
 answered, combined in index order, whatever finished first.** This
 rule says which parts of a parallel computation's answer are
-reproducible and which are not. It covers `parallel` bindings, `Par`'s
-pools (`parMapWords`, `parMapWordsChecked`) and `Task`'s
+reproducible and which are not. It covers `parallel` bindings and `Task`'s
+word pools (`taskMapWords`, `taskMapWordsChecked`) and byte-result pools
 (`taskMap`, `taskMapWith`, `taskFold`), at any width and in both
 lowerings.
 
@@ -6392,8 +6390,8 @@ Three limits:
 |---|---|---|
 | `parallel`, processes | the first binding in written order whose child failed | yes |
 | `parallel`, threads | whichever binding trapped first | no |
-| `parMapWords` | the status of the lowest failing index: the joins run in submit order and the first failed join raises | yes |
-| `parMapWordsChecked`, `taskMap`, `taskMapWith`, `taskFold` | every failure, each in its own slot with its own status | yes |
+| `taskMapWords` | the status of the lowest failing index: the joins run in submit order and the first failed join raises | yes |
+| `taskMapWordsChecked`, `taskMap`, `taskMapWith`, `taskFold` | every failure, each in its own slot with its own status | yes |
 | any pool with `failFast` | the first failure the pool *observes* cancels the rest; which slots answer 1002 is the clock's | no |
 
 A refused spawn (78, or 70) is the environment's answer, not the
@@ -6415,14 +6413,14 @@ interleave as the scheduler ran them.
 *Evidence.*
 
 - `scripts/check-task.sh` §10 adds 2,000 terms through `taskFold`,
-  `taskMap`, `parMapWords` and `parMapWordsChecked` at widths 1, 2, 3,
+  `taskMap`, `taskMapWords` and `taskMapWordsChecked` at widths 1, 2, 3,
   4 and 8 in both lowerings, with the tasks made to finish out of
   order. Each answer is the sequential sum's bits, and Python's IEEE
   doubles compute the same bits.
 - The same section runs `parallel` with 1 to 8 bindings, each equal to
   the chunked association. The reverse, pairwise and chunked sums each
   differ from index order, which shows the data can see an order.
-- `parMapWords` raises the lowest failing index's 77 in fifteen runs
+- `taskMapWords` raises the lowest failing index's 77 in fifteen runs
   per lowering, while 72 and 82 arrive first.
 - The IR, and `opt` and `llc -O3` output, hold no contraction or
   reassociation, beside controls whose IR asks for each and shows it.
