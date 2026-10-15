@@ -97,6 +97,7 @@
 (import Str)
 (import Fmt)
 (import Vec)
+(import Intern)
 (import core)
 (import lexer)
 (import parser)
@@ -157,6 +158,8 @@
 ;            against a second, renaming-only track; M4 deleted that
 ;            track and the check with it (MAC-HYG-9). Kept for the
 ;            same additive-numbering reason as word 19.
+;   words 31-32 — struct-name interner and typed declaration buckets,
+;            built after declaration macros finish, before bodies expand.
 ; ------------------------------------------------------------------
 (pub struct MEnv
   (macros : Int)
@@ -189,7 +192,9 @@
   (scSeq : Int)
   (retired28 : Int)
   (defer : Int)
-  (deferHits : Int))
+  (deferHits : Int)
+  (structNames : Int)
+  (structBuckets : (Vec (Vec Int))))
 
 ; The two budgets on the OUTPUT, which the parser's
 ; own AX2005 guard cannot see: it measures the source,
@@ -8511,7 +8516,9 @@
             :scSeq 0
             :retired28 0
             :defer 0
-            :deferHits 0) Int))
+            :deferHits 0
+            :structNames internNew
+            :structBuckets vecNew) Int))
     {
       (expCheckMacros env 0)
       (expCheckDeclNames decls env 0)
@@ -8522,6 +8529,7 @@
       ; declaration can call a generated function, order-independently
       ; like everything else at top level.
       (expandDeclPhase entryDecls decls env)
+      (expIndexStructDecls env)
       (expandDeclsIn decls env 0)
       ; Contracts last, over the list expansion finished with: a
       ; macro-generated `fn` carries its own AXTAGs and gets its
@@ -11079,19 +11087,55 @@
       (nodeSpan e)
       (vecGet (nodeCVec e) i))))
 
+; The raw environment word contains the typed field declared by MEnv.
+(pub :: expStructBuckets (-> Int (Vec (Vec Int))))
+;@axiom:effect(unsafe)
+(pub fn (expStructBuckets env)
+  (as (memGetWord env 32) (Vec (Vec Int))))
+
+; Declaration macros have finished before this index is built. Each
+; name keeps its candidates in declaration order, including duplicates.
+(pub :: expIndexStructDecls (-> Int ()))
+(pub fn (expIndexStructDecls env)
+  {
+    (let names (memGetWord env 31))
+    (let buckets (expStructBuckets env))
+    (for d in (expDeclsVec env)
+      (if (== (nodeTag d) TAG_D_STRUCT)
+        {
+          (let index (internIntern names (nodeAName d)))
+          (if (== index (vecLen buckets))
+            {
+              (let bucket (:: vecNew (Vec Int)))
+              (vecPush buckets bucket)
+              ()
+            })
+          (vecPush (vecGet buckets index) d)
+          ()
+        }))
+  })
+
 ; A supplied argument keeps its enclosing declaration’s module when a
 ; macro expands it again. A free template head resolves at its macro’s
 ; definition. Qualified names select a module and preserve privacy.
 (pub :: expNamedStructDecl (-> Int Int Int))
 (pub fn (expNamedStructDecl env head)
   {
-    (let decls (expDeclsVec env))
     (let name (nodeAName head))
     (let bare (bareOf name))
-    (let site
-      (if (== (nodeDefScope head) 1)
-        (nodeModule head)
-        (memGetWord env 11)))
+    (match (internFind (memGetWord env 31) bare)
+      ((None) 0)
+      ((Some index)
+        (expChooseStructDecl (vecGet (expStructBuckets env) index) name bare
+          (if (== (nodeDefScope head) 1)
+            (nodeModule head)
+            (memGetWord env 11)))
+      ))
+  })
+
+(pub :: expChooseStructDecl (-> (Vec Int) String String Int Int))
+(pub fn (expChooseStructDecl decls name bare site)
+  {
     (let mut chosen 0)
     (let mut priority 0)
     (let mut i 0)

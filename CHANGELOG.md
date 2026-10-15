@@ -16,6 +16,12 @@ its changelog too.
 
 ## Unreleased
 
+- Index named-struct declarations after declaration macros finish, so
+  ordinary variable and function lookups avoid scanning the whole module.
+  Generated structs retain their visibility and written evaluation order.
+  Tested by `tests/stdlib/969-generated-named-struct.ax` and
+  `scripts/check-name-scale.sh`.
+
 ## 0.7.9 — 2026-10-15
 
 This release adds explicit numeric conversions and fixed-width integers,
