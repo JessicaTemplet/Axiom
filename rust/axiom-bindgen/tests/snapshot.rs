@@ -423,3 +423,24 @@ fn cli_help_check_and_module() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(written, std::fs::read_to_string(&expected).unwrap());
 }
+
+#[test]
+fn long_generated_declarations_are_formatter_fixed_points() {
+    let fresh = axiom_bindgen::generate(&fixture("layout/src"), "axiom_layout").unwrap();
+    for line in fresh
+        .lines()
+        .filter(|line| !line.trim_start().starts_with(';'))
+    {
+        assert!(
+            line.len() <= 100,
+            "generated code exceeds 100 columns: {line}"
+        );
+    }
+    assert!(fresh.contains("(requestSatelliteTelemetryRaw ::\n"));
+    assert!(fresh.contains("(pub :: requestSatelliteTelemetry\n"));
+    assert!(fresh.contains("(symbol \"axffi_request_satellite_telemetry\")"));
+    assert!(fresh.contains("(Result (Option (Vec SatelliteTelemetryPacket)) String)"));
+    assert!(fresh.contains("__floatFromBits"));
+    assert!(fresh.contains("__floatToBits"));
+    assert_fmt_clean(&fresh, "Layout");
+}

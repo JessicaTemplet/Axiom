@@ -1251,7 +1251,7 @@
 (pub :: tailOwnedApp (-> Int Int (Vec Int) (Vec Int) Int))
 (pub fn (tailOwnedApp cg e params env)
   (let ((hd (spineHead e)))
-    (if (!= (nodeTag hd) TAG_E_VAR)
+    (if (|| (!= (nodeTag hd) TAG_E_VAR) (closureOwnedCall cg e))
       (if (!= (fldClass cg (checkedValueTy e)) 0)
         1
         0)
@@ -3027,8 +3027,9 @@
 ; frame holding it may hand back - and is it a reference, so that
 ; handing it back means something? A direct construction; a call to a
 ; signed global whose result is a reference, applied to exactly its
-; arity (a surplus argument applies the closure it answers, whose
-; result nothing signed) - spelled with arguments OR bare: `(f)` with
+; arity, or a closure application whose checked result is a reference.
+; Surplus arguments invoke the returned closure. A call is spelled with
+; arguments OR bare: `(f)` with
 ; no arguments parses as the head alone, so a nullary call is a `VAR`
 ; node and is owned on the same terms; and the joins over `if`,
 ; `match`, `let` and a block. A match here is only as owned as its
@@ -3081,7 +3082,7 @@
                     ; not calls to reference-returning globals, and the
                     ; constructor-table scan is the expensive one
                     (let ((n (nodeAName hd)))
-                      (if (isLocalValue cg n)
+                      (if (closureOwnedCall cg e)
                         (if (== (fldClass cg (checkedValueTy e)) 2)
                           1
                           0)
@@ -18292,6 +18293,14 @@
 ;
 ; A directly-built value MOVES, exactly as it does at construction: a
 ; retain would double-count its birth.
+(pub :: emitStructFieldRc (-> Int Int String Int String Int Int))
+(pub fn (emitStructFieldRc cg cls shape bit value op)
+  (if (== cls 2)
+    (if (== op 1)
+      (emitRetainOf cg value)
+      (emitReleaseOf cg value))
+    (emitRcIfBitOf cg value bit shape op)))
+
 (pub :: emitSetF (-> Int Int Int))
 ;@axiom:effect(io)
 (pub fn (emitSetF node cg)
@@ -18302,44 +18311,48 @@
     )
       (if (== fi 0)
         (dieCodegenDiag "unknown struct field: " (nodeBName node))
-        ; and the temporary's own share, if the value
-        ; was an owned temporary that the retain above
-        ; (not a MOVE) has just copied into the field
-        (let ((owns (== (fldClass cgB (nodeC fi)) 2)))
-          (let ((cgL
-            (if owns
-              (loadWordAt cgB base (nodeA fi))
-              cgB)))
-            (let ((old
-              (if owns
-                (strDup (memGetWordStr cgL 2))
-                "")))
-              (let ((cgV (emitExpr (nodeC node) cgL)))
-                (let ((v (strDup (memGetWordStr cgV 2))))
-                  (let ((cgR
-                    (if (&& owns (!= (argIsDirectCon cgV (nodeC node)) 1))
-                      (emitRetainOf cgV v)
-                      cgV)))
-                    (let ((cgS (storeWordAt cgR base (nodeA fi) v)))
-                      (let ((cgD
-                        (if owns
-                          (emitReleaseOf cgS old)
-                          cgS)))
-                        (let ((cgT
-                          (if (&& owns
-                                (&& (!= (argIsDirectCon cgD (nodeC node)) 1)
-                                  (== (valueOwnedRef cgD (nodeC node)) 1)))
-                            (emitReleaseOf cgD v)
-                            cgD)))
-                          {
-                            (memSetWord cgT 2 (constStr 0))
-                            (memSetWord cgT 14 0)
-                            cgT
-                          })))))))))))))
+        ; A generic field's reference bit was fixed at construction.
+        ; Invariant type arguments preserve it across every write.
+        (let (
+          (cls (fldClass cgB (nodeC fi)))
+          (owns (!= cls 0))
+          (cgH (if (== cls 1)
+            (loadWordAt cgB base -1)
+            cgB))
+          (shape (if (== cls 1)
+            (strDup (memGetWordStr cgH 2))
+            ""))
+          (bit (+ 16 (/ (nodeA fi) 8)))
+          (cgL (if owns
+            (loadStructFieldAt cgH base (nodeA fi) (nodeTy fi))
+            cgH))
+          (old (if owns
+            (strDup (memGetWordStr cgL 2))
+            ""))
+          (cgV (emitExpr (nodeC node) cgL))
+          (v (strDup (memGetWordStr cgV 2)))
+          (cgR (if (&& owns (!= (argIsDirectCon cgV (nodeC node)) 1))
+            (emitStructFieldRc cgV cls shape bit v 1)
+            cgV))
+          (cgS (storeStructFieldAt cgR base (nodeA fi) (nodeTy fi) v))
+          (cgD (if owns
+            (emitStructFieldRc cgS cls shape bit old 0)
+            cgS))
+          (cgT (if (&& owns
+                     (&& (!= (argIsDirectCon cgD (nodeC node)) 1)
+                       (== (valueOwnedRef cgD (nodeC node)) 1)))
+            (emitStructFieldRc cgD cls shape bit v 0)
+            cgD))
+        )
+          {
+            (memSetWord cgT 2 (constStr 0))
+            (memSetWord cgT 14 0)
+            cgT
+          })))))
 
 ; `base.field`: the field resolves through the struct the CHECKER
-; stamped on the node (`resolveStructField`), and a struct carries no
-; tag word, so field i is word i.
+; stamped on the node (`resolveStructField`). Its byte offset follows
+; the declaration's naturally aligned field layout; structs carry no tag.
 ;
 ; It resolved by name across the whole struct registry until
 ; 2026-08-21 - first declaring struct wins, "the same simplification
@@ -18371,7 +18384,7 @@
                 (memSetWord cgL 14 (nodeB di))
                 cgL
               })))
-        (let ((cgL (loadWordAt cgB base (nodeA fi))))
+        (let ((cgL (loadStructFieldAt cgB base (nodeA fi) (nodeTy fi))))
           {
             (memSetWord cgL 14 (nodeB fi))
             cgL
@@ -18468,17 +18481,120 @@
               0
               (structFieldOf e (nodeBName node)))))))))
 
-; The named field of ONE struct entry, as `findStructFieldIn` shapes
-; it, or 0 when the struct does not declare the name.
+; The named field of one struct entry, or 0 when absent. The inert
+; node holds byte offset in A, Float flag in B and ownership type in C.
+; Its nodeTy preserves the declared storage type. Generic fields remain
+; words even when their instantiated value type is a narrow integer.
+; Ordinary structs store explicit integer widths at natural alignment.
+; Every other field occupies an aligned machine word, including references.
+; These are payload offsets, independent of the one-word value/call ABI.
+(pub :: fieldIntegerCode (-> Int Int))
+(pub fn (fieldIntegerCode ty)
+  (if (== ty 0)
+    0
+    (if (== (nodeTag ty) TAG_T_CON)
+      (integerTypeCode (nodeAName ty))
+      0)))
+
+(pub :: fieldStorageBytes (-> Int Int))
+(pub fn (fieldStorageBytes ty)
+  (let ((code (fieldIntegerCode ty)))
+    (if (> code 0)
+      (/ (integerBits code) 8)
+      8)))
+
+(pub :: fieldAligned (-> Int Int Int))
+(pub fn (fieldAligned offset bytes)
+  (* (/ (+ offset (- bytes 1)) bytes) bytes))
+
+(pub :: structFieldOffsetFrom (-> (Vec Int) Int Int Int Int))
+(pub fn (structFieldOffsetFrom fields wanted i offset)
+  (if (>= i (vecLen fields))
+    offset
+    (let (
+      (bytes (fieldStorageBytes (nodeTy (vecGet fields i))))
+      (at (fieldAligned offset bytes))
+    )
+      (if (== i wanted)
+        at
+        (structFieldOffsetFrom fields wanted (+ i 1) (+ at bytes))))))
+
+(pub :: structFieldOffset (-> (Vec Int) Int Int))
+(pub fn (structFieldOffset fields i)
+  (structFieldOffsetFrom fields i 0 0))
+
+(pub :: structPayloadBytes (-> (Vec Int) Int))
+(pub fn (structPayloadBytes fields)
+  (structFieldOffset fields (vecLen fields)))
+
+; A narrow field load restores the canonical signed/unsigned word.
+(pub :: loadStructFieldAt (-> Int String Int Int Int))
+(pub fn (loadStructFieldAt cg base offset ty)
+  (let ((bytes (fieldStorageBytes ty)))
+    (if (== bytes 8)
+      (loadWordAt cg base (/ offset 8))
+      (let (
+        (ptr (regStr (allocReg cg)))
+        (at (regStr (allocReg cg)))
+        (value (regStr (allocReg cg)))
+        (llvmTy (concat "i" (fmtInt (* bytes 8))))
+      )
+        {
+          (emitLine cg
+            (concat "  " (concat ptr (concat " = inttoptr i64 " (concat base " to ptr")))))
+          (emitLine cg
+            (concat "  "
+              (concat at
+                (concat " = getelementptr i8, ptr "
+                  (concat ptr (concat ", i64 " (fmtInt offset)))))))
+          (emitLine cg
+            (concat "  "
+              (concat value
+                (concat " = load "
+                  (concat llvmTy
+                    (concat ", ptr " (concat at (concat ", align " (fmtInt bytes)))))))))
+          (emitIntegerExtend cg value (fieldIntegerCode ty))
+        }))))
+
+(pub :: storeStructFieldAt (-> Int String Int Int String Int))
+(pub fn (storeStructFieldAt cg base offset ty value)
+  (let ((bytes (fieldStorageBytes ty)))
+    (if (== bytes 8)
+      (storeWordAt cg base (/ offset 8) value)
+      (let (
+        (narrow (emitIntegerNarrow cg value (* bytes 8)))
+        (ptr (regStr (allocReg cg)))
+        (at (regStr (allocReg cg)))
+        (llvmTy (concat "i" (fmtInt (* bytes 8))))
+      )
+        {
+          (emitLine cg
+            (concat "  " (concat ptr (concat " = inttoptr i64 " (concat base " to ptr")))))
+          (emitLine cg
+            (concat "  "
+              (concat at
+                (concat " = getelementptr i8, ptr "
+                  (concat ptr (concat ", i64 " (fmtInt offset)))))))
+          (emitLine cg
+            (concat "  store "
+              (concat llvmTy
+                (concat " "
+                  (concat narrow
+                    (concat ", ptr " (concat at (concat ", align " (fmtInt bytes)))))))))
+          cg
+        }))))
+
 (pub :: structFieldOf (-> Int String Int))
 (pub fn (structFieldOf e name)
   (let ((idx (fieldIndexIn (eFieldFlagsVec e) name 0)))
     (if (< idx 0)
       0
-      (mkNode TAG_NIL idx (nodeB (vecGet (eFieldFlagsVec e) idx))
-        (nodeTy (vecGet (eFieldFlagsVec e) idx))))))
+      (let ((field (vecGet (eFieldFlagsVec e) idx)))
+        (setNodeTy
+          (mkNode TAG_NIL (structFieldOffset (eFieldFlagsVec e) idx) (nodeB field) (nodeTy field))
+          (nodeTy field))))))
 
-; The field's (index, floatFlag) as an inert node, 0 when no struct
+; The field's (byte offset, Float flag, type), or 0 when no struct
 ; declares the name.
 (pub :: findStructField (-> (Vec Int) String Int))
 (pub fn (findStructField types name)
@@ -18490,10 +18606,9 @@
     0
     (let ((e (vecGet types i)))
       (if (== (eKind e) TF_STRUCT)
-        ; Word 3 of the answer is the field's declared TYPE node,
-        ; which `emitSetF` classifies to decide whether the store
-        ; is an ownership transfer (MM-LIFE-2c event 5). The read
-        ; side ignores it, as it always has.
+        ; C classifies ownership transfers (MM-LIFE-2c event 5).
+        ; Physical reads and writes use the separate declared type
+        ; in nodeTy, so instantiation cannot shrink a generic slot.
         (let ((fi (structFieldOf e name)))
           (if (== fi 0)
             (findStructFieldIn types name (+ i 1))
@@ -23003,7 +23118,11 @@
           (- 0 1)
           (+ rest
             (if (== c 2)
-              (pow2 (+ 16 (+ base i)))
+              (pow2
+                (+ 16
+                  (if (== isStruct 1)
+                    (/ (structFieldOffset ftys i) 8)
+                    (+ base i))))
               0)))))))
 
 (pub :: ctorShapeConst (-> Int Int Int))
@@ -23015,7 +23134,7 @@
     (let ((words
       (if (== kind TF_DATA)
         (+ arity 1)
-        arity)))
+        (/ (+ (structPayloadBytes (eFieldFlagsVec entry)) 7) 8))))
       (let (
         (cnt (paddedWords words))
         (ftys (if (== kind TF_DATA)
@@ -23165,6 +23284,24 @@
 ; forces the whole block to the leaf; a variable with no stamp, or
 ; a witness of 0, contributes no bit - which IS the leaf answer for
 ; that field, with every classifiable neighbour's bit kept.
+(:: ctorFieldTypes (-> Int (Vec Int)))
+(fn (ctorFieldTypes entry)
+  (if (== (eKind entry) TF_DATA)
+    (eFieldTysVec entry)
+    (let ((types vecNew))
+      {
+        (for field in (eFieldFlagsVec entry)
+          (vecPush types (nodeTy field)))
+        types
+      })))
+
+(:: ctorFieldBit (-> Int Int Int))
+(fn (ctorFieldBit entry i)
+  (+ 16
+    (if (== (eKind entry) TF_DATA)
+      (+ 1 i)
+      (/ (structFieldOffset (eFieldFlagsVec entry) i) 8))))
+
 (pub :: ctorShapeEmit (-> Int String Int Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (ctorShapeEmit cg ptr entry stamp)
@@ -23175,11 +23312,12 @@
     (let ((words
       (if (== kind TF_DATA)
         (+ arity 1)
-        arity)))
-      (if (|| (!= kind TF_DATA) (|| (> words 47) (== (eFieldTys entry) 0)))
+        (/ (+ (structPayloadBytes (eFieldFlagsVec entry)) 7) 8))))
+      (if (|| (&& (!= kind TF_DATA) (!= kind TF_STRUCT))
+            (|| (> words 47) (== (as (ctorFieldTypes entry) Int) 0)))
         (storeShapeAt cg ptr (ctorShapeConst cg entry))
         (let (
-          (ftys0 (eFieldTysVec entry))
+          (ftys0 (ctorFieldTypes entry))
           (mut anyVar 0)
         )
           {
@@ -23199,7 +23337,7 @@
               ; field index, so the prefix agrees by construction
               (let (
                 (cnt (paddedWords words))
-                (ftys (eFieldTysVec entry))
+                (ftys (ctorFieldTypes entry))
                 (vars vecNew)
                 (symPos vecNew)
                 (symK vecNew)
@@ -23224,10 +23362,10 @@
                                   (let ((wv
                                     (as (vecGet (nodeBVec stamp) vi) Int)))
                                     (if (== wv 1)
-                                      (set stat (+ stat (pow2 (+ 17 j))))
+                                      (set stat (+ stat (pow2 (ctorFieldBit entry j))))
                                       (if (>= wv 2)
                                         {
-                                          (vecPush symPos (+ 17 j))
+                                          (vecPush symPos (ctorFieldBit entry j))
                                           (vecPush symK (- wv 2))
                                         }
                                         ; a lam-arg witness is dynamic
@@ -23240,14 +23378,14 @@
                                         ; and gets its own loop below.
                                         (if (<= wv (- 0 2))
                                           {
-                                            (vecPush lamPos (+ 17 j))
+                                            (vecPush lamPos (ctorFieldBit entry j))
                                             (vecPush lamD (- (- 0 2) wv))
                                           })))))))
                             (let ((c (fldClass cg tn)))
                               (if (== c 1)
                                 (set leaf 1)
                                 (if (== c 2)
-                                  (set stat (+ stat (pow2 (+ 17 j)))))))))
+                                  (set stat (+ stat (pow2 (ctorFieldBit entry j)))))))))
                         (set j (+ j 1))
                       }))
                   (if (== leaf 1)
@@ -24051,7 +24189,7 @@
         (let ((size
           (if (== kind TF_DATA)
             (* (+ arity 1) 8)
-            (* arity 8))))
+            (structPayloadBytes (eFieldFlagsVec entry)))))
           (let ((ptrN (allocReg cg)))
             (let ((ptr (regStr ptrN)))
               (let ((allocInst (concat (concat "  " ptr)
@@ -24143,8 +24281,7 @@
             (- 0 1)
             (let ((vars vecNew))
               {
-                (if (== kind TF_DATA)
-                  (cgSigVarsVec (eFieldTysVec entry) vars))
+                (cgSigVarsVec (ctorFieldTypes entry) vars)
                 (let ((vi (strVecIdx vars (nodeAName tn))))
                   (if (if (< vi 0)
                     true
@@ -24204,7 +24341,12 @@
                   (if (<= rc (- 0 2))
                     (emitRetainIfLamArg cg1 reg (- (- 0 2) rc))
                     cg1)))))
-              (let ((cgS (storeWordAt cgR ptr (+ base i) reg)))
+              (let ((cgS
+                (if (== (eKind entry) TF_STRUCT)
+                  (let ((fields (eFieldFlagsVec entry)))
+                    (storeStructFieldAt cgR ptr (structFieldOffset fields i)
+                      (nodeTy (vecGet fields i)) reg))
+                  (storeWordAt cgR ptr (+ base i) reg))))
                 (let ((cgT
                   (if (&& (== rc 1)
                         (&& (== (isStaticSentinelNode cgS argNode) 0)
@@ -27397,12 +27539,24 @@
       (nodeA t)
       t)))
 
+; A call's final step may be through a closure even when its head is
+; global: surplus arguments invoke the returned value. Match the same
+; defined-function and arity gates that emitOverApplied uses. Its final
+; result follows the closure return contract, independently of the
+; named function's declared or inferred result ownership.
 (pub :: closureOwnedCall (-> Int Int Bool))
 (pub fn (closureOwnedCall cg e)
   (if (== (nodeTag e) TAG_E_APP)
     (let ((h (spineHead e)))
       (if (== (nodeTag h) TAG_E_VAR)
-        (isLocalValue cg (nodeAName h))
+        (let ((name (nodeAName h)))
+          (if (isLocalValue cg name)
+            true
+            (let ((full (mangledForCg cg name)))
+              (if (isDefinedFnCg cg full)
+                (let ((arity (fnArityOfCg cg full)))
+                  (&& (> arity 0) (> (spineArity e) arity)))
+                false))))
         true))
     false))
 

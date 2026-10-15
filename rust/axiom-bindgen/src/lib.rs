@@ -509,25 +509,19 @@ impl Surface {
 
         // The extern block: one item per raw shim, plus the drop-function
         // probe of every opaque type.
-        let mut items: Vec<(String, String)> = Vec::new();
+        let mut items: Vec<(String, Ex, String)> = Vec::new();
         for d in &decls {
-            items.push((
-                d.raw_name(),
-                format!("{} (symbol \"{}\")", d.raw_type(), d.symbol),
-            ));
+            items.push((d.raw_name(), d.raw_type(), d.symbol.clone()));
         }
         for o in &opaques {
             items.push((
                 format!("{}DropFn", lower_first(&o.name)),
-                format!("Int (symbol \"{}\")", cls::drop_fn_symbol(&o.stem)),
+                atom("Int"),
+                cls::drop_fn_symbol(&o.stem),
             ));
         }
-        items.sort();
-        let mut block = format!("(pub extern \"{lib}\"");
-        for (name, rest) in &items {
-            block.push_str(&format!("\n  ({name} :: {rest})"));
-        }
-        block.push(')');
+        items.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut block = sexp::decl_extern(lib, &items);
         // A `Vec` of words is `(Vec Int)` whatever scalar Rust widened
         // into those words; which scalar that was is only known here, so
         // say it where the items are declared (the formatter moves a
@@ -562,12 +556,16 @@ impl Surface {
                 .iter()
                 .map(|f| format!("{} {}", f.name, f.scalar.axiom_type()))
                 .collect();
-            let types: Vec<&str> = r.fields.iter().map(|f| f.scalar.axiom_type()).collect();
+            let types: Vec<Ex> = r
+                .fields
+                .iter()
+                .map(|f| atom(f.scalar.axiom_type()))
+                .collect();
             tops.push(format!(
                 "; `{t}` crosses the boundary as its fields, one word each: {}.\n\
-                 (pub data {t}\n  ({t} {}))",
+                 {}",
                 fields.join(", "),
-                types.join(" ")
+                sexp::decl_data(t, types)
             ));
         }
 
@@ -583,7 +581,7 @@ impl Surface {
         //
         // Every extern is outside Axiom's safety checker. Generated
         // wrappers vouch for the typed shim interface they construct.
-        let unsafe_calls: Vec<String> = items.iter().map(|(name, _)| name.clone()).collect();
+        let unsafe_calls: Vec<String> = items.iter().map(|(name, _, _)| name.clone()).collect();
         for r in &from_words {
             let (sig, body) = record_from_words_loop(r);
             tops.push(format!(
@@ -614,7 +612,11 @@ impl Surface {
                 cls::drop_symbol(&o.stem)
             ));
             let close = format!("{}Close", lower_first(t));
-            tops.push(format!("(pub :: {close} (-> {t} Int))"));
+            tops.push(sexp::decl_sig(
+                true,
+                &close,
+                &arrow(vec![atom(t)], atom("Int")),
+            ));
             let body = app(vec![atom("ffiHandleClose"), atom("c.handle")]);
             tops.push(sexp::decl_fn(&close, &["c".to_string()], &body));
         }
@@ -625,10 +627,9 @@ impl Surface {
                 continue;
             }
             tops.push(format!(
-                "{}(pub :: {} {})",
+                "{}{}",
                 d.callback_note(),
-                d.axiom_name,
-                d.wrapper_type()
+                sexp::decl_sig(true, &d.axiom_name, &d.wrapper_type())
             ));
             let params: Vec<String> = d.params.iter().map(|(n, _)| n.clone()).collect();
             // Every wrapper here CALLS the extern symbol, and a call across
@@ -688,12 +689,12 @@ fn sep_for(prev: &str, cur: &str) -> &'static str {
     // generator emits.
     let prev_import = !prev.contains('\n') && prev.starts_with("(import ");
     let cur_import = !cur.contains('\n') && cur.starts_with("(import ");
-    // A signature block ends with its `::` line (a leading comment
-    // rides above it); a body block opens its `fn` (or the effect
-    // tag above it).
+    // A signature starts at its first source line after any leading
+    // comment, and may span several lines. Its body opens with `fn`
+    // or an effect tag.
     let prev_sig = prev
         .lines()
-        .last()
+        .find(|line| !line.is_empty() && !line.starts_with(';'))
         .is_some_and(|l| l.starts_with("(:: ") || l.starts_with("(pub :: "));
     let cur_fn =
         cur.starts_with("(fn (") || cur.starts_with("(pub fn (") || cur.starts_with(";@axiom");
@@ -769,32 +770,27 @@ fn raw_shim(f: &syn::ItemFn, at: &str) -> Option<Decl> {
     })
 }
 
-fn payload_axiom_type(p: &Payload) -> String {
+fn payload_axiom_type(p: &Payload) -> Ex {
     match p {
-        Payload::Scalar(s) => s.axiom_type().to_string(),
-        Payload::Bytes => "String".into(),
-        // A `Vec` carries its element type since 2026-09-01, so the
-        // wrapper's signature says what the words are: `ffiWordsToVec`
-        // answers `(Vec Int)` whatever scalar Rust widened into those
-        // words, `ffiStrsToVec` a `(Vec String)`, `ffiWordListsToVec` a
-        // `(Vec (Vec Int))`, and the record loop below a `(Vec Point)`.
-        Payload::Words(_) => "(Vec Int)".into(),
-        Payload::WordLists(_) => "(Vec (Vec Int))".into(),
-        Payload::Strs => "(Vec String)".into(),
-        Payload::Records(r) => format!("(Vec {})", r.name),
-        Payload::Opaque(o) => o.name.clone(),
-        Payload::Record(r) => r.name.clone(),
+        Payload::Scalar(s) => atom(s.axiom_type()),
+        Payload::Bytes => atom("String"),
+        Payload::Words(_) => app(vec![atom("Vec"), atom("Int")]),
+        Payload::WordLists(_) => app(vec![atom("Vec"), app(vec![atom("Vec"), atom("Int")])]),
+        Payload::Strs => app(vec![atom("Vec"), atom("String")]),
+        Payload::Records(r) => app(vec![atom("Vec"), atom(&r.name)]),
+        Payload::Opaque(o) => atom(&o.name),
+        Payload::Record(r) => atom(&r.name),
     }
 }
 
 /// The Axiom types of a parameter as the RAW extern item declares
 /// them: one for every shape but a record, which is one per field.
-fn param_raw_types(p: &Param) -> Vec<String> {
+fn param_raw_types(p: &Param) -> Vec<Ex> {
     match p {
         Param::Record(r) => r
             .fields
             .iter()
-            .map(|f| f.scalar.axiom_type().to_string())
+            .map(|f| atom(f.scalar.axiom_type()))
             .collect(),
         other => vec![param_raw_type(other)],
     }
@@ -810,18 +806,18 @@ fn param_raw_types(p: &Param) -> Vec<String> {
 /// the way `tests/ffi/demo/400-arc-retain.ax` casts a `String` to
 /// `Foreign`. The wrapper's own signature says the real type; that is
 /// [`param_wrapper_type`].
-fn param_raw_type(p: &Param) -> String {
+fn param_raw_type(p: &Param) -> Ex {
     match p {
-        Param::Scalar(s) => s.axiom_type().to_string(),
-        Param::Str | Param::Bytes => "String".into(),
-        Param::Opaque { .. } => "Foreign".into(),
+        Param::Scalar(s) => atom(s.axiom_type()),
+        Param::Str | Param::Bytes => atom("String"),
+        Param::Opaque { .. } => atom("Foreign"),
         Param::Words(_)
         | Param::MutWords(_)
         | Param::WordLists(_)
         | Param::Strs
-        | Param::Records(_) => "Int".into(),
+        | Param::Records(_) => atom("Int"),
         Param::Callback(n) => callback_type(*n),
-        Param::Record(r) => r.name.clone(),
+        Param::Record(r) => atom(&r.name),
     }
 }
 
@@ -832,12 +828,12 @@ fn param_raw_type(p: &Param) -> String {
 /// A `&[Record]` is the one place the two differ in more than spelling:
 /// the wrapper takes `(Vec Point)` and the shim is handed the flattened
 /// `(Vec Int)` the `__pointToWords` loop builds.
-fn param_wrapper_type(p: &Param) -> String {
+fn param_wrapper_type(p: &Param) -> Ex {
     match p {
-        Param::Words(_) | Param::MutWords(_) => "(Vec Int)".into(),
-        Param::WordLists(_) => "(Vec (Vec Int))".into(),
-        Param::Strs => "(Vec String)".into(),
-        Param::Records(r) => format!("(Vec {})", r.name),
+        Param::Words(_) | Param::MutWords(_) => app(vec![atom("Vec"), atom("Int")]),
+        Param::WordLists(_) => app(vec![atom("Vec"), app(vec![atom("Vec"), atom("Int")])]),
+        Param::Strs => app(vec![atom("Vec"), atom("String")]),
+        Param::Records(r) => app(vec![atom("Vec"), atom(&r.name)]),
         other => param_raw_type(other),
     }
 }
@@ -971,7 +967,19 @@ fn record_from_words_loop(r: &RecordTy) -> (String, String) {
     let params = ["__v", "__p", "__n", "__i"].map(String::from);
     let t = &r.name;
     (
-        format!("(:: {name} (-> (Vec {t}) Int Int Int (Vec {t})))"),
+        sexp::decl_sig(
+            false,
+            &name,
+            &arrow(
+                vec![
+                    app(vec![atom("Vec"), atom(t)]),
+                    atom("Int"),
+                    atom("Int"),
+                    atom("Int"),
+                ],
+                app(vec![atom("Vec"), atom(t)]),
+            ),
+        ),
         sexp::decl_private_fn(&name, &params, &body),
     )
 }
@@ -1034,20 +1042,28 @@ fn record_to_words_loop(r: &RecordTy) -> (String, String) {
     let params = ["__ps", "__w", "__i"].map(String::from);
     let t = &r.name;
     (
-        format!("(:: {name} (-> (Vec {t}) (Vec Int) Int (Vec Int)))"),
+        sexp::decl_sig(
+            false,
+            &name,
+            &arrow(
+                vec![
+                    app(vec![atom("Vec"), atom(t)]),
+                    app(vec![atom("Vec"), atom("Int")]),
+                    atom("Int"),
+                ],
+                app(vec![atom("Vec"), atom("Int")]),
+            ),
+        ),
         sexp::decl_private_fn(&name, &params, &body),
     )
 }
 
 /// `(-> Int Int)` for one argument, and so on: the arrow type a
 /// callback parameter carries on both the raw item and the wrapper.
-fn callback_type(arity: u8) -> String {
-    let mut t = String::from("(->");
-    for _ in 0..=arity {
-        t.push_str(" Int");
-    }
-    t.push(')');
-    t
+fn callback_type(arity: u8) -> Ex {
+    let mut types = vec![atom("->")];
+    types.extend((0..=arity).map(|_| atom("Int")));
+    Ex::App(types)
 }
 
 /// Whether a payload rides the cell as a `(ptr, n)` pair the wrapper
@@ -1213,38 +1229,38 @@ impl Decl {
     }
 
     /// The raw extern's type: the shim's real arity over wire types.
-    fn raw_type(&self) -> String {
-        let mut ps: Vec<String> = self
+    fn raw_type(&self) -> Ex {
+        let mut ps: Vec<Ex> = self
             .params
             .iter()
             .flat_map(|(_, p)| param_raw_types(p))
             .collect();
         let ret = if self.ret.needs_cell() {
-            ps.push("Int".into());
-            "Int".to_string()
+            ps.push(atom("Int"));
+            atom("Int")
         } else {
             match &self.ret {
-                Ret::Scalar(s) => s.axiom_type().to_string(),
-                Ret::Opaque(_) => "Foreign".into(),
+                Ret::Scalar(s) => atom(s.axiom_type()),
+                Ret::Opaque(_) => atom("Foreign"),
                 _ => unreachable!(),
             }
         };
-        arrow(&ps, &ret)
+        arrow(ps, ret)
     }
 
     /// The wrapper's Axiom-facing type.
-    fn wrapper_type(&self) -> String {
-        let ps: Vec<String> = self
+    fn wrapper_type(&self) -> Ex {
+        let ps: Vec<Ex> = self
             .params
             .iter()
             .map(|(_, p)| match p {
-                Param::Opaque { ty, .. } => ty.name.clone(),
+                Param::Opaque { ty, .. } => atom(&ty.name),
                 other => param_wrapper_type(other),
             })
             .collect();
         let ret = match &self.ret {
-            Ret::Scalar(s) => s.axiom_type().to_string(),
-            Ret::Opaque(o) => o.name.clone(),
+            Ret::Scalar(s) => atom(s.axiom_type()),
+            Ret::Opaque(o) => atom(&o.name),
             Ret::Bytes
             | Ret::Words(_)
             | Ret::WordLists(_)
@@ -1256,12 +1272,19 @@ impl Decl {
                     .direct_payload()
                     .expect("a direct cell return matched this arm"),
             ),
-            Ret::Result(p) => format!("(Result {} String)", payload_axiom_type(p)),
-            Ret::Option(p) => format!("(Option {})", payload_axiom_type(p)),
-            Ret::ResultOption(p) => format!("(Result (Option {}) String)", payload_axiom_type(p)),
-            Ret::OptionResult(p) => format!("(Option (Result {} String))", payload_axiom_type(p)),
+            Ret::Result(p) => app(vec![atom("Result"), payload_axiom_type(p), atom("String")]),
+            Ret::Option(p) => app(vec![atom("Option"), payload_axiom_type(p)]),
+            Ret::ResultOption(p) => app(vec![
+                atom("Result"),
+                app(vec![atom("Option"), payload_axiom_type(p)]),
+                atom("String"),
+            ]),
+            Ret::OptionResult(p) => app(vec![
+                atom("Option"),
+                app(vec![atom("Result"), payload_axiom_type(p), atom("String")]),
+            ]),
         };
-        arrow(&ps, &ret)
+        arrow(ps, ret)
     }
 
     /// A callback may re-enter Axiom while Rust holds these references.
@@ -1588,10 +1611,12 @@ fn drop_fn_name(type_name: &str) -> String {
     format!("{}DropFn", lower_first(type_name))
 }
 
-fn arrow(ps: &[String], ret: &str) -> String {
+fn arrow(mut ps: Vec<Ex>, ret: Ex) -> Ex {
     if ps.is_empty() {
-        ret.to_string()
+        ret
     } else {
-        format!("(-> {} {})", ps.join(" "), ret)
+        ps.insert(0, atom("->"));
+        ps.push(ret);
+        Ex::App(ps)
     }
 }

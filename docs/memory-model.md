@@ -1350,7 +1350,8 @@ checked side.
 integers; `UInt8`, `UInt16`, `UInt32` and `UInt64` are unsigned. `Int`
 remains signed 64-bit. Each type is distinct, including inside ADTs and
 aliases. A signed value is sign-extended into its storage word; an unsigned
-value is zero-extended. Calls, closures and aggregate fields carry that word.
+value is zero-extended. Calls, closures, ADT fields and vectors carry that
+word. Ordinary struct fields use their declared width under `MM-VAL-10`.
 Arithmetic lowers to the declared LLVM integer width and restores this
 canonical representation afterwards. No implicit widening or narrowing occurs.
 
@@ -1586,10 +1587,24 @@ One all-literal shape stays accepted, because it can't fall through: a
 literal tests that add nothing to constructor coverage (`MAC-HYG-5`
 measured why), and having both is exhaustive.
 
-**MM-VAL-10 (H).** A `struct` is a heap block of `fields * 8` bytes,
-with field *i* at word *i* in declaration order, and **no tag**.
-`(P a b)` builds it; `(struct P a b)` in expression position is refused
-with `AX2004`.
+**MM-VAL-10 (H).** An ordinary `struct` is a heap block without a tag.
+Fields stay in declaration order. Explicit fixed-width integer fields occupy
+1, 2, 4 or 8 bytes and start at a multiple of their size. Every other
+field occupies an aligned 8-byte word, including a reference, a type variable
+and a nested struct handle. Padding fills each alignment gap. Loads restore
+a narrow integer's canonical signed or unsigned word; stores touch its declared
+bytes. A generic field stays a word across every instantiation. Its invariant
+type arguments fix its reference bit at construction; mutable stores use that
+bit for ownership transfers. The value and call ABI remain one word.
+
+The allocator rounds the payload up to 16 bytes and adds its ownership header.
+Its reference bitmap names the aligned payload words containing counted
+references; narrow integer bytes never set a reference bit. Construction, reads
+and mutable stores use the same offsets. `sizeof` and `alignof` describe the
+handle and remain 8. ADT and vector slots retain their word representation.
+
+`(P a b)` builds a struct; `(struct P a b)` in expression position is refused
+with `AX2004`. Tested by `tests/stdlib/959-compact-struct-fields.ax`.
 
 **MM-VAL-10a (H). A `word` struct is one machine word, sealed to its
 module.** A struct declared with the marker `word` isn't a heap block.
@@ -2040,7 +2055,7 @@ the same rounding must see memory grow.
 | Construct | Block |
 |---|---|
 | a constructor with fields | `(1 + arity) * 8` bytes under representation 0/2 |
-| `(P ...)` for a struct | `fields * 8` bytes, no tag |
+| `(P ...)` for a struct | naturally aligned fields under `MM-VAL-10`, no tag |
 | `Str` construction, `strDup`, `concat`, `strAlloc` | 2-word header, plus bytes where not shared |
 | a `lambda` that is evaluated | closure record, `(1 + captures) * 8` bytes |
 | `Vec`, `Map`, `Intern` operations | library-level, over `memAlloc` |
@@ -4058,6 +4073,15 @@ parked argument surviving its application, which now holds because the
 park is counted, not by accident. Term 128 is the struct-field factory,
 `z` without the fix and `a` with it. Reverting `checkLamAgainst`'s
 third caller strikes out term 128 and nothing else: 255 becomes 127.
+
+When a call supplies arguments beyond the named function's declared
+parameters, the remaining calls go through returned closures. Their final
+reference answer owns one share. The caller hands that share back after
+a borrowed argument use or a completed owning scope. Returning the
+answer transfers it without another retain. Generic field stores use
+the same reference witness, so scalar answers keep their word form.
+
+Tested by `tests/stdlib/962-overapplied-result-ownership.ax`.
 
 The share `MM-LIFE-2g` takes through `memSetWord` or `mkNode` is
 unbalanced, and has to be: nothing tells the unsafe layer when a word

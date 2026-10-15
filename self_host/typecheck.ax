@@ -14120,8 +14120,57 @@
     (let ((args (spineArgVec e vecNew)))
       {
         (memSetWord (spineHead e) 1 (nominalName (memGetWordStr ent 0) (memGetWord ent 2)))
-        (wordLowerIfWord tc ent e args (checkStructConAt tc args (spanOf e) ent))
+        (let ((result (checkStructConAt tc args (spanOf e) ent)))
+          {
+            (stampStructEvidence tc ent (spineHead e) result)
+            (wordLowerIfWord tc ent e args result)
+          })
       })))
+
+; Use the same first-occurrence ordering as constructor code generation.
+; The source type arguments remain invariant; evidence records only
+; whether each declared variable denotes a counted reference.
+(:: stampStructEvidence (-> Int Int Int Int Int))
+(fn (stampStructEvidence tc ent head result)
+  (if (== (nodeTag result) TAG_T_CON)
+    (let (
+      (vars vecNew)
+      (fields (memGetWordVec ent 1))
+    )
+      {
+        (for field in fields
+          (sigTyVarsInto (nodeTy field) vars))
+        (if (> (vecLen vars) 0)
+          (let (
+            (w vecNew)
+            (env vecNew)
+            (pts vecNew)
+            (actuals vecNew)
+          )
+            {
+              (for name in vars
+                (let (
+                  (pt (mkNode TAG_T_VAR name 0 0))
+                  (actual (structSubstField ent pt (nodeBVec result)))
+                )
+                  {
+                    (vecPush w -1)
+                    (vecPush env name)
+                    (vecPush env pt)
+                    (vecPush pts pt)
+                    (vecPush actuals actual)
+                  }))
+              (let ((stamp
+                (setNodeTy (mkNode TAG_EVSTAMP (memGetWord tc 24) w env) (as vars Int))))
+                {
+                  (setNodeTy head stamp)
+                  (for i in 0..(vecLen vars)
+                    (evWalk tc stamp (vecGet pts i) (vecGet actuals i) 0 0))
+                })
+            }))
+        0
+      })
+    0))
 
 ; A word struct's construction, once it checks, is recorded for the
 ; lowering (`wordLowerRecord`): the site becomes its one argument.
@@ -19083,7 +19132,7 @@
           (let ((fty
             (if (== ent 0)
               (- 0 1)
-              (structFieldTy ent (nodeBName e)))))
+              (structSubstField ent (structFieldTy ent (nodeBName e)) (nodeBVec baseTy)))))
             (if (!= fty (- 0 1))
               ; Field found: the VALUE is checked, against the
               ; field's type. On a miss the value is NEVER checked

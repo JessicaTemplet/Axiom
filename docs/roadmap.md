@@ -55,6 +55,7 @@ integrator would still need.
 | A `match` arm that computes a word from its binder, as `(Some (strLen a))` does, lets the scrutinee go | Done | `MM-LIFE-2c`, `tests/stdlib/902-match-arm-over-binder.ax` |
 | An element taken out with `vecPop` is released: a trusted function declares `result(owned)` and the caller hands the share back | Done | `MM-LIFE-2n`, `tests/stdlib/846-vec-pop-release.ax` |
 | A vector passed straight to `vecGet` is not leaked | Done | `MM-LIFE-2m`, `tests/stdlib/893-vecget-temporary.ax` |
+| Final reference results from calls with surplus arguments own one share through temporaries, returns and generic field stores | Done | `tests/stdlib/962-overapplied-result-ownership.ax` |
 | `vecFree` and `mapFree` leave safe code, so an early drop can't free a block still in use | Done | `tests/stdlib/406-array-form-large-block.ax`, `tests/stdlib/489-map-free.ax` |
 | CI builds the compiler with a poisoned allocator and checks it still reaches its fixpoint | Done | `scripts/check-poisoned-alloc.sh` |
 | No cast, `Int` container or raw store lets a heap value become an untracked word in safe code | Not started | `MM-VAL-24` |
@@ -91,6 +92,8 @@ integrator would still need.
 | REPL uses the brand palette and shares diagnostic and language help with the CLI | Done | `scripts/check-repl-tui.sh`, `tests/repl/170-explain-shape.txt` |
 | Editor and REPL completion exclude retired syntax | Done | `tests/lsp/drive.py`, `scripts/check-replcomp.sh` |
 | Fixed-width signed and unsigned integers through 64 bits, with explicit casts and width-correct operators | Done | `tests/stdlib/948-fixed-width-integers.ax`, `tests/stdlib/949-fixed-width-alias-callback.ax` |
+| Compact fixed-width integer struct fields, with aligned reference maps and native allocation measurements | Done | `tests/stdlib/959-compact-struct-fields.ax` |
+| Compact ADT and vector storage with complete generic storage evidence | Planned | |
 | Wider integer literals, widths beyond 64 bits and checked fixed-width FFI shims | Planned | |
 | Transparent type aliases support parameters, simultaneous substitution and finite expansion | Done | `tests/stdlib/946-generic-aliases.ax`, `tests/diagnostics/1420-generic-alias-arity.ax`, `tests/diagnostics/1421-generic-alias-parameters.axbad`, `tests/diagnostics/1422-recursive-alias.ax` |
 | Generic bodies preserve parameters through returned containers, ADTs and callbacks; each call constrains repeated parameters independently | Done | `tests/diagnostics/1443-generic-result-rigidity.ax`, `tests/stdlib/956-generic-result-rigidity.ax` |

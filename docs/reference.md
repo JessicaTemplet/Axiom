@@ -578,9 +578,10 @@ A same-width conversion preserves the bits. Integer-to-`Float` conversions
 round to nearest, with ties to even. `Float`-to-integer conversions truncate
 towards zero, saturate at the destination's bounds and map NaN to zero.
 
-Values use one machine word in calls and aggregate fields, including
-`Vec` elements. `sizeof` and `alignof` therefore remain 8; these types
-do not request packed storage. `UInt64` covers its full unsigned range;
+Values use one machine word in calls, closures, ADT fields and `Vec`
+elements. Ordinary [struct fields](#structs) use their declared integer
+width with natural alignment. `sizeof` and `alignof` describe the value,
+so both remain 8. `UInt64` covers its full unsigned range;
 construct values above the literal range through explicit casts and arithmetic.
 
 Not yet: integer widths beyond 64 bits, wider literal syntax and fixed-width
@@ -833,6 +834,20 @@ declares, and `(struct Point 1 2)` in an expression is refused with
 `AX2004`. A mutable field is declared `(mut x : Int)` and assigned with
 `(set p.x 9)`. Structs may have type parameters and function fields.
 Each function field must carry its complete arrow type.
+
+Fixed-width integer fields occupy 1, 2, 4 or 8 bytes, aligned to that
+size, in declaration order. Adjacent narrow fields can share a machine
+word. Other fields, including references and type variables, occupy an
+aligned 8-byte word. Reading a narrow field restores its signed or
+unsigned value; assignment changes just that field's bytes. A nested
+struct remains a counted handle. Generic fields keep their declared word
+storage even when instantiated with a narrow integer. Their type arguments
+remain invariant when you assign a new value.
+
+The allocator rounds payloads to 16 bytes and adds its ownership header.
+Packing can reduce allocation size; the result depends on the whole layout.
+Use `.field` access for this layout rather than raw word indices.
+Tested by `tests/stdlib/959-compact-struct-fields.ax`.
 
 ### Make a handle other modules can't forge
 

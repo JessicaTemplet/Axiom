@@ -2411,10 +2411,11 @@
 (pub :: fpTailBody (-> Int (Vec Int) Int Int))
 (pub fn (fpTailBody p elems from)
   (let ((o (fpOut p)))
-    (if (&& (fpBodyVecSimple (fpSrc p) elems from)
-          (let ((flat (fpExprFlat p (vecGet elems from))))
-            (&& (> (strLen flat) 0)
-              (<= (+ (+ (+ (foColumn o) 1) (strLen flat)) (+ 1 (fpSuffixWidth p))) fmtWidth))))
+    (if (&& (! (fqAnyWithin (fpQ p) 0 (fpBodyVecAnchor (fpSrc p) elems from)))
+          (&& (fpBodyVecSimple (fpSrc p) elems from)
+            (let ((flat (fpExprFlat p (vecGet elems from))))
+              (&& (> (strLen flat) 0)
+                (<= (+ (+ (+ (foColumn o) 1) (strLen flat)) (+ 1 (fpSuffixWidth p))) fmtWidth)))))
       {
         (fpP p " ")
         (fpBodyVec p elems from)
@@ -2422,6 +2423,7 @@
       {
         (fpP p "\n")
         (foPushIndent o)
+        (flushLeading (fpSrc p) (fpQ p) o (fpBodyVecAnchor (fpSrc p) elems from))
         (foEmitIndent o)
         (if (== (- (vecLen elems) from) 1)
           (fpExpr p (vecGet elems from))
@@ -2967,7 +2969,7 @@
                         (if (> i 1)
                           (fpP p "\n")
                           p)
-                        (flushLeading src (fpQ p) o (fpBodyVecAnchor src armBody 0))
+                        (flushLeading src (fpQ p) o (fnStart arm))
                         (foEmitIndent o)
                         (fpP p "(")
                         (fpPatVecAt p (fnKidsVec arm) 0)
@@ -3351,6 +3353,25 @@
     0
     (fpExprSuffix p n 0)))
 
+; Signed literals occupy two reader nodes and one expression. Both
+; conversions and ascriptions use the same canonical expression list.
+(pub :: fpTypedExpr (-> Int Int String Int))
+(pub fn (fpTypedExpr p n head)
+  (let ((elems (fpExprElems n 1)))
+    (if (!= (vecLen elems) 2)
+      (fpBad p)
+      {
+        (fpP p "(")
+        (fpP p head)
+        (fpP p " ")
+        (let ((width (fpTypeWidth p (vecGet elems 1))))
+          (if (> width 0)
+            (fpExprTail p (vecGet elems 0) (+ 2 width))
+            (fpExpr p (vecGet elems 0))))
+        (fpTypeAfter p (vecGet elems 1) (+ 1 (fpSuffixWidth p)))
+        (fpP p ")")
+      })))
+
 (pub :: fpExprLive (-> Int Int Int))
 (pub fn (fpExprLive p n)
   (let (
@@ -3529,34 +3550,9 @@
                                                 }
                                                 (fpBad p))
                                               (if (strEq h "as")
-                                                (if (== (fnLen n) 3)
-                                                  {
-                                                    (fpP p "(as ")
-                                                    (let ((width (fpTypeWidth p (fnKid n 2))))
-                                                      (if (> width 0)
-                                                        (fpExprTail p (fnKid n 1) (+ 2 width))
-                                                        (fpExpr p (fnKid n 1))))
-                                                    (fpTypeAfter p (fnKid n 2)
-                                                      (+ 1 (fpSuffixWidth p)))
-                                                    (fpP p ")")
-                                                  }
-                                                  (fpBad p))
+                                                (fpTypedExpr p n "as")
                                                 (if (strEq h "::")
-                                                  (let ((elems (fpExprElems n 1)))
-                                                    (if (!= (vecLen elems) 2)
-                                                      (fpBad p)
-                                                      {
-                                                        (fpP p "(:: ")
-                                                        (let ((width (fpTypeWidth p
-                                                                       (vecGet elems 1))))
-                                                          (if (> width 0)
-                                                            (fpExprTail p (vecGet elems 0)
-                                                              (+ 2 width))
-                                                            (fpExpr p (vecGet elems 0))))
-                                                        (fpTypeAfter p (vecGet elems 1)
-                                                          (+ 1 (fpSuffixWidth p)))
-                                                        (fpP p ")")
-                                                      }))
+                                                  (fpTypedExpr p n "::")
                                                   ; Any other identifier head is an
                                                   ; application, as `parseInner` falls
                                                   ; through to `parseAppForm`: `(data 1)`
@@ -3640,16 +3636,18 @@
 ; ------------------------------------------------------------------
 ; Typed lists share the call layout: keep complete items on a row,
 ; reserve the enclosing suffix and place comments by source ownership.
-; Modes: 0 type, 1 pattern, 2 imported name.
+; Modes: 0 type, 1 pattern, 2 name, 3 pattern field, 4 type field.
 (pub :: fpListItem (-> Int Int Int Int))
 (pub fn (fpListItem p n mode)
   (if (== mode 0)
     (fpType p n)
     (if (== mode 1)
       (fpPat p n)
-      (if (fpIsIdentAtom n)
-        (fpP p (fnText (fpSrc p) n))
-        (fpBad p)))))
+      (if (|| (== mode 3) (== mode 4))
+        (fpFieldItem p n mode)
+        (if (fpIsIdentAtom n)
+          (fpP p (fnText (fpSrc p) n))
+          (fpBad p))))))
 
 (pub :: fpListItemSuffix (-> Int Int Int Int Int))
 (pub fn (fpListItemSuffix p n mode width)
@@ -3660,6 +3658,16 @@
       (memSetWord p 4 saved)
       p
     }))
+
+; A comma belongs to its field, before any trailing comment.
+(pub :: fpListItemEnd (-> Int Int Int Int Int Int))
+(pub fn (fpListItemEnd p n mode suffix comma)
+  {
+    (fpListItemSuffix p n mode (+ suffix comma))
+    (if (== comma 1)
+      (fpP p ","))
+    p
+  })
 
 (pub :: fpListItemFlat (-> Int Int Int String))
 (pub fn (fpListItemFlat p n mode)
@@ -3683,7 +3691,10 @@
         {
           (if (> i 0)
             (fpP p " "))
-          (fpListItemSuffix p (vecGet elems i) mode 0)
+          (fpListItemEnd p (vecGet elems i) mode 0
+            (if (&& (>= mode 3) (< (+ i 1) (vecLen elems)))
+              1
+              0))
           (set i (+ i 1))
         })
       (fpP p close)
@@ -3732,6 +3743,9 @@
       (while (< i (vecLen elems))
         (let (
           (item (vecGet elems i))
+          (comma (if (&& (>= mode 3) (< (+ i 1) (vecLen elems)))
+            1
+            0))
           (suffix (if (== i (- (vecLen elems) 1))
             (+ (strLen close) (fpSuffixWidth p))
             0))
@@ -3750,7 +3764,7 @@
                   })
                 (let ((mark (foNl out)))
                   {
-                    (fpListItemSuffix p item mode suffix)
+                    (fpListItemEnd p item mode suffix comma)
                     (set lastTrailing (fpAppTrailing p item
                                         (if (< (+ i 1) (vecLen elems))
                                           (fnStart (vecGet elems (+ i 1)))
@@ -3761,27 +3775,30 @@
               (if (== i 0)
                 (let ((mark (foNl out)))
                   {
-                    (fpListItemSuffix p item mode suffix)
+                    (fpListItemEnd p item mode suffix comma)
                     (set previousBroken (> (foNl out) mark))
                   })
                 (let ((flat (fpListItemFlat p item mode)))
                   (if (|| (== (strLen flat) 0)
-                        (> (+ (+ (foIndent out) (strLen flat)) rowSuffix) fmtWidth))
+                        (> (+ (+ (foIndent out) (strLen flat)) (+ rowSuffix comma)) fmtWidth))
                     {
                       (fpP p "\n")
                       (foEmitIndent out)
-                      (fpListItemSuffix p item mode suffix)
+                      (fpListItemEnd p item mode suffix comma)
                       (set previousBroken true)
                     }
                     {
                       (if (|| previousBroken
-                            (> (+ (+ (+ (foColumn out) 1) (strLen flat)) rowSuffix) fmtWidth))
+                            (> (+ (+ (+ (foColumn out) 1) (strLen flat)) (+ rowSuffix comma))
+                              fmtWidth))
                         {
                           (fpP p "\n")
                           (foEmitIndent out)
                         }
                         (fpP p " "))
                       (fpP p flat)
+                      (if (== comma 1)
+                        (fpP p ","))
                       (set previousBroken false)
                     }))))
             (set i (+ i 1))
@@ -4089,48 +4106,94 @@
 ; A named-field pattern group's fields: `(Name { w = p, h })`.
 (pub :: fpPatNamed (-> Int Int Int Int))
 (pub fn (fpPatNamed p name brace)
+  (fpList p brace (fpNamedFields p brace 1) 3 (concat (concat "(" (fnText (fpSrc p) name)) " {")
+    "})"))
+
+; Canonical field nodes keep their name and complete pattern span.
+(pub :: fpNamedFields (-> Int Int Int (Vec Int)))
+(pub fn (fpNamedFields p brace mode)
   (let (
-    (src (fpSrc p))
     (flat (fpFlattenCommas brace))
+    (items vecNew)
     (mut i 0)
-    (mut nth 0)
   )
     {
-      (fpP p "(")
-      (fpP p (fnText src name))
-      (fpP p " {")
       (while (< i (vecLen flat))
-        (let ((fname (vecGet flat i)))
-          (if (if (== (fnKind fname) FN_ATOM)
-            (== (ftKind (fnTok fname)) FT_IDENT)
-            false)
-            {
-              (if (> nth 0)
-                (fpP p ", ")
-                p)
-              (fpP p (fnText src fname))
-              (fpP p " = ")
-              (if (&& (< (+ i 1) (vecLen flat)) (fpIsAtomText src (vecGet flat (+ i 1)) "="))
-                (if (< (+ i 2) (vecLen flat))
-                  (set i (fpPatVecAt p flat (+ i 2)))
-                  {
-                    (fpBad p)
-                    (set i (vecLen flat))
-                  })
-                ; Punning: `{ w }` binds the field to its own name,
-                ; and prints expanded, as stage0's parser expands it.
-                {
-                  (fpP p (fnText src fname))
-                  (set i (+ i 1))
-                })
-              (set nth (+ nth 1))
-            }
+        (let ((name (vecGet flat i)))
+          (if (! (fpIsIdentAtom name))
             {
               (fpBad p)
               (set i (vecLen flat))
+            }
+            (let ((explicit
+              (&& (< (+ i 1) (vecLen flat))
+                (fpIsAtomText (fpSrc p) (vecGet flat (+ i 1))
+                  (if (== mode 0)
+                    ":"
+                    "=")))))
+              (if (|| (&& (== mode 0) (! explicit)) (&& explicit (>= (+ i 2) (vecLen flat))))
+                {
+                  (fpBad p)
+                  (set i (vecLen flat))
+                }
+                (let ((pattern
+                  (if explicit
+                    (if (== mode 0)
+                      (vecGet flat (+ i 2))
+                      (fpPatItem p flat (+ i 2)))
+                    name)))
+                  {
+                    (vecPush items
+                      (mkFNode FN_PAREN (fnTok name) (vecPush (vecPush vecNew name) pattern)
+                        (fnStart name) (fnEnd pattern)))
+                    (set i (if explicit
+                      (+ (+ i 2)
+                        (if (== mode 0)
+                          1
+                          (fpPatWidth (fpSrc p) flat (+ i 2))))
+                      (+ i 1)))
+                  }))))))
+      items
+    }))
+
+(pub :: fpFieldItem (-> Int Int Int Int))
+(pub fn (fpFieldItem p n mode)
+  (let (
+    (out (fpOut p))
+    (name (fnKid n 0))
+    (pattern (fnKid n 1))
+    (childMode (if (== mode 4)
+      0
+      1))
+  )
+    {
+      (fpP p (fnText (fpSrc p) name))
+      (fpP p
+        (if (== mode 4)
+          " :"
+          " ="))
+      (if (== (foTrial out) 1)
+        {
+          (fpP p " ")
+          (fpListItemSuffix p pattern childMode (fpSuffixWidth p))
+        }
+        (let ((flat (fpListItemFlat p pattern childMode)))
+          (if (&& (> (strLen flat) 0)
+                (&& (! (fqAnyWithin (fpQ p) (fnEnd name) (fnEnd pattern)))
+                  (<= (+ (+ (+ (foColumn out) 1) (strLen flat)) (fpSuffixWidth p)) fmtWidth)))
+            {
+              (fpP p " ")
+              (fpP p flat)
+            }
+            {
+              (fpP p "\n")
+              (foPushIndent out)
+              (flushLeading (fpSrc p) (fpQ p) out (fnStart pattern))
+              (foEmitIndent out)
+              (fpListItemSuffix p pattern childMode (fpSuffixWidth p))
+              (foPopIndent out)
             })))
-      (fpP p "}")
-      (fpP p ")")
+      p
     }))
 
 (pub :: fpPat (-> Int Int Int))
@@ -4406,25 +4469,12 @@
           i
         }))))
 
-; Print the tyvars between `from` and `to`: one prints bare, several
-; print parenthesised, none prints nothing - stage0's
-; `format_type_vars` over the flattened list.
-(pub :: fpTyvars (-> Int Int Int Int Int Int))
-; `paren` is 1 when the spelling MUST be parenthesised and 0 when a
-; single variable may be printed bare.
-;
-; `data` accepts both - `(data Box (a) ..)` and `(data Box a ..)` are
-; the same declaration, and the grammar says so with
-; `_data_type_parameters` - so it prints the shorter one. A STRUCT
-; accepts only the parenthesised form, because a struct's other groups
-; are fields and `(struct Box a (v : a))` gives the parser no `(` to
-; find the parameter list by. Printing a struct's single variable bare
-; produced a file `axiom fmt` could no longer read: a round trip that
-; breaks its input, in the one tool whose whole contract is that it
-; does not change meaning.
-(pub fn (fpTyvars p n from to paren)
+; One type parameter prints bare where the grammar permits it.
+; Several parameters, and every struct parameter list, stay parenthesised.
+; Long lists continue on an indented line.
+(pub :: fpTyvars (-> Int Int Int Int Int Int Int))
+(pub fn (fpTyvars p n from to paren suffix)
   (let (
-    (src (fpSrc p))
     (names vecNew)
     (mut i from)
   )
@@ -4444,24 +4494,37 @@
           }))
       (if (== (vecLen names) 0)
         p
-        {
-          (fpP p " ")
-          (if (&& (== (vecLen names) 1) (== paren 0))
-            (fpP p (fnText src (vecGet names 0)))
-            (let ((mut k 0))
-              {
-                (fpP p "(")
-                (while (< k (vecLen names))
-                  {
-                    (if (> k 0)
-                      (fpP p " ")
-                      p)
-                    (fpP p (fnText src (vecGet names k)))
-                    (set k (+ k 1))
-                  })
-                (fpP p ")")
-              }))
-        })
+        (let (
+          (group (mkFNode FN_PAREN (fnTok (fnKid n from)) names (fnStart (fnKid n from))
+                   (fnEnd (fnKid n (- to 1)))))
+          (open (if (&& (== (vecLen names) 1) (== paren 0))
+            ""
+            "("))
+          (close (if (&& (== (vecLen names) 1) (== paren 0))
+            ""
+            ")"))
+          (saved (fpSuffixWidth p))
+        )
+          (let ((flat (fpListFlat p group names 2 open close)))
+            {
+              (if (&& (> (strLen flat) 0)
+                    (<= (+ (+ (+ (foColumn (fpOut p)) 1) (strLen flat)) suffix) fmtWidth))
+                {
+                  (fpP p " ")
+                  (fpP p flat)
+                }
+                {
+                  (fpP p "\n")
+                  (foPushIndent (fpOut p))
+                  (flushLeading (fpSrc p) (fpQ p) (fpOut p) (fnStart group))
+                  (foEmitIndent (fpOut p))
+                  (memSetWord p 4 suffix)
+                  (fpList p group names 2 open close)
+                  (memSetWord p 4 saved)
+                  (foPopIndent (fpOut p))
+                })
+              p
+            })))
     }))
 
 (pub :: fpIsColonAtom (-> Int Bool))
@@ -4486,64 +4549,23 @@
 (pub :: fpDataCon (-> Int Int Int))
 (pub fn (fpDataCon p con)
   (let ((src (fpSrc p)))
-    (if (|| (!= (fnKind con) FN_PAREN)
-          (|| (< (fnLen con) 1)
-            (if (fpIsIdentAtom (fnKid con 0))
-              false
-              true)))
+    (if (|| (!= (fnKind con) FN_PAREN) (|| (< (fnLen con) 1) (! (fpIsIdentAtom (fnKid con 0)))))
       (fpBad p)
-      {
-        (fpP p "(")
-        (fpP p (fnText src (fnKid con 0)))
-        (if (&& (== (fnLen con) 2) (== (fnKind (fnKid con 1)) FN_BRACE))
-          ; Named fields print named: `(Circle { r : Int })`.
-          ; Erasing the names demotes a struct variant to
-          ; positional, which is the worst of the original six
-          ; formatter bugs.
-          (let (
-            (flat (fpFlattenCommas (fnKid con 1)))
-            (mut i 0)
-            (mut nth 0)
-          )
-            {
-              (fpP p " {")
-              (while (< i (vecLen flat))
-                (if (&& (< (+ i 2) (+ (vecLen flat) 1))
-                      (&& (fpIsIdentAtom (vecGet flat i))
-                        (if (< (+ i 1) (vecLen flat))
-                          (fpIsColonAtom (vecGet flat (+ i 1)))
-                          false)))
-                  (if (< (+ i 2) (vecLen flat))
-                    {
-                      (if (> nth 0)
-                        (fpP p ",")
-                        p)
-                      (fpP p " ")
-                      (fpP p (fnText src (vecGet flat i)))
-                      (fpP p " : ")
-                      (fpType p (vecGet flat (+ i 2)))
-                      (set nth (+ nth 1))
-                      (set i (+ i 3))
-                    }
-                    {
-                      (fpBad p)
-                      (set i (vecLen flat))
-                    })
-                  {
-                    (fpBad p)
-                    (set i (vecLen flat))
-                  }))
-              (fpP p " }")
-            })
-          (let ((mut i 1))
-            (while (< i (fnLen con))
-              {
-                (fpP p " ")
-                (fpType p (fnKid con i))
-                (set i (+ i 1))
-              })))
-        (fpP p ")")
-      })))
+      (if (&& (== (fnLen con) 2) (== (fnKind (fnKid con 1)) FN_BRACE))
+        (let ((brace (fnKid con 1)))
+          (fpList p brace (fpNamedFields p brace 0) 4
+            (concat (concat "(" (fnText src (fnKid con 0))) " { ") " })"))
+        (fpList p con (fnKidsVec con) 0 "(" ")")))))
+
+(pub :: fpDataConSuffix (-> Int Int Int Int))
+(pub fn (fpDataConSuffix p con width)
+  (let ((saved (fpSuffixWidth p)))
+    {
+      (memSetWord p 4 (+ saved width))
+      (fpDataCon p con)
+      (memSetWord p 4 saved)
+      p
+    }))
 
 (pub :: fpDeclData (-> Int Int Int))
 (pub fn (fpDeclData p n)
@@ -4563,7 +4585,7 @@
           (fpVis p n)
           (fpP p "data ")
           (fpP p (fnText src (fnKid n (+ b 1))))
-          (fpTyvars p n (+ b 2) tvEnd 0)
+          (fpTyvars p n (+ b 2) tvEnd 0 1)
           ; A `deriving` clause POISONS the file instead of
           ; printing: the compiler refuses the clause (AX2004,
           ; MAC-CAP-9), and a formatter that accepts and rewrites
@@ -4596,8 +4618,18 @@
                   (if (&& (== ctors 1)
                         (&& (== (fnKind (fnKid n tvEnd)) FN_PAREN) (== (fnLen (fnKid n tvEnd)) 1)))
                     {
-                      (fpP p " ")
-                      (fpDataCon p (fnKid n tvEnd))
+                      (let ((flat (fpListFlat p (fnKid n tvEnd) (fnKidsVec (fnKid n tvEnd)) 0 "("
+                                    ")")))
+                        (if (&& (> (strLen flat) 0)
+                              (<= (+ (+ (foColumn o) (strLen flat)) 2) fmtWidth))
+                          (fpP p " ")
+                          {
+                            (fpP p "\n")
+                            (foPushIndent o)
+                            (foEmitIndent o)
+                            (foPopIndent o)
+                          }))
+                      (fpDataConSuffix p (fnKid n tvEnd) 1)
                       p
                       (fpP p ")")
                     }
@@ -4608,7 +4640,10 @@
                             (fpP p "\n")
                             (foPushIndent o)
                             (foEmitIndent o)
-                            (fpDataCon p (fnKid n j))
+                            (fpDataConSuffix p (fnKid n j)
+                              (if (== j (- end 1))
+                                1
+                                0))
                             (foPopIndent o)
                             (set j (+ j 1))
                           })
@@ -4647,7 +4682,7 @@
             (fpVis p n)
             (fpP p "data ")
             (fpP p (fnText src (fnKid n (+ b 1))))
-            (fpTyvars p n (+ b 2) tvEnd 0)
+            (fpTyvars p n (+ b 2) tvEnd 0 0)
             (fpP p "\n")
             (foPushIndent o)
             (foEmitIndent o)
@@ -4708,7 +4743,7 @@
                   (fpP p (fnText src (fnKid n k)))
                   (set k (+ k 1))
                 }))
-            (fpTyvars p n mEnd tvEnd 1)
+            (fpTyvars p n mEnd tvEnd 1 0)
             ; There is no layout modifier to print. `packed`, `repr(C)`
             ; and `align(N)` were accepted here and by nothing else:
             ; the parser has always answered AX2001 for all three, so
@@ -4814,7 +4849,7 @@
             (fpVis p n)
             (fpP p "type ")
             (fpP p (fnText src (fnKid n (+ b 1))))
-            (fpTyvars p n (+ b 2) tvEnd 0)
+            (fpTyvars p n (+ b 2) tvEnd 0 2)
             (fpP p " =")
             (fpTypeAfter p (fnKid n (+ tvEnd 1)) 1)
             (fpP p ")")
@@ -5091,17 +5126,10 @@
                     {
                       (fpP p "\n")
                       (foEmitIndent o)
-                      (fpP p "(")
-                      (fpP p (fnText src (fnKid it 0)))
-                      (fpP p " :: ")
-                      (fpType p (fnKid it 2))
-                      ; The clause tail - `(symbol "s")` and any
-                      ; future sibling - printed through the
-                      ; expression printer, which is what the
-                      ; declaration-macro arm already does for a
-                      ; call-shaped form.
-                      (fpExternClauses p it 3)
-                      (fpP p ")")
+                      (fpExternItem p it
+                        (if (== i (- (fnLen n) 1))
+                          2
+                          1))
                       (set i (+ i 1))
                     })))
               (if had
@@ -5111,14 +5139,92 @@
           (fpP p ")")
         }))))
 
-(pub :: fpExternClauses (-> Int Int Int Int))
-(pub fn (fpExternClauses p it j)
-  (if (>= j (fnLen it))
-    0
+; Try the complete typed tail once, stopping at the width limit.
+(pub :: fpExternFlat (-> Int Int String))
+(pub fn (fpExternFlat p it)
+  (if (fqAnyWithin (fpQ p) (fnStart it) (fnEnd it))
+    ""
+    (let ((out (mkFOut 0)))
+      (let (
+        (trial (mkFPr (fpSrc p) (fpStarts p) (mkFCq (as vecNew Int)) out))
+        (mut j 3)
+      )
+        {
+          (memSetWord out 4 1)
+          (fpType trial (fnKid it 2))
+          (while (&& (< j (fnLen it)) (== (foBad out) 0))
+            {
+              (fpP trial " ")
+              (fpExpr trial (fnKid it j))
+              (set j (+ j 1))
+            })
+          (if (|| (!= (foBad out) 0) (> (foNl out) 0))
+            ""
+            (foFinish out))
+        }))))
+
+(pub :: fpExternItem (-> Int Int Int Int))
+(pub fn (fpExternItem p it suffix)
+  (let (
+    (out (fpOut p))
+    (flat (fpExternFlat p it))
+  )
     {
-      (fpP p " ")
-      (fpExpr p (fnKid it j))
-      (fpExternClauses p it (+ j 1))
+      (fpP p "(")
+      (fpP p (fnText (fpSrc p) (fnKid it 0)))
+      (fpP p " ::")
+      (if (&& (> (strLen flat) 0) (<= (+ (+ (+ (foColumn out) 1) (strLen flat)) suffix) fmtWidth))
+        {
+          (fpP p " ")
+          (fpP p flat)
+        }
+        {
+          (fpTypeAfter p (fnKid it 2)
+            (if (== (fnLen it) 3)
+              suffix
+              0))
+          (fpExternClauses p it 3 suffix)
+        })
+      (fpP p ")")
+    }))
+
+; A broken extern tail keeps each clause on an indented line.
+(pub :: fpExternClauses (-> Int Int Int Int Int))
+(pub fn (fpExternClauses p it from suffix)
+  (let (
+    (out (fpOut p))
+    (mut j from)
+    (mut trailing false)
+  )
+    {
+      (foPushIndent out)
+      (while (< j (fnLen it))
+        {
+          (fpP p "\n")
+          (flushLeading (fpSrc p) (fpQ p) out (fnStart (fnKid it j)))
+          (foEmitIndent out)
+          (let ((mark (foNl out)))
+            {
+              (fpExprSuffix p (fnKid it j)
+                (if (== j (- (fnLen it) 1))
+                  suffix
+                  0))
+              (set trailing (fpAppTrailing p (fnKid it j)
+                              (if (< (+ j 1) (fnLen it))
+                                (fnStart (fnKid it (+ j 1)))
+                                (fnEnd it))
+                              mark))
+            })
+          (set j (+ j 1))
+        })
+      (foPopIndent out)
+      (if (|| trailing (fqAnyWithin (fpQ p) (fnStart it) (fnEnd it)))
+        {
+          (fpP p "\n")
+          (flushLeading (fpSrc p) (fpQ p) out (fnEnd it))
+          (foEmitIndent out)
+        })
+      p
     }))
 
 (pub :: fpDeclEffect (-> Int Int Int))

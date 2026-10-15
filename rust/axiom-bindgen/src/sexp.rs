@@ -286,6 +286,63 @@ fn tail_body(body: &Ex, level: usize, suffix: usize, out: &mut String) {
     }
 }
 
+/// A type after a declaration prefix, moving to a fresh line when needed.
+fn type_after(ty: &Ex, level: usize, suffix: usize, out: &mut String) {
+    let mut flat = String::new();
+    if print_flat(ty, &mut flat) && column(out) + 1 + flat.len() + suffix <= WIDTH {
+        out.push(' ');
+        out.push_str(&flat);
+    } else {
+        out.push('\n');
+        out.push_str(&ind(level + 2));
+        print_shape(ty, level + 2, suffix, out);
+    }
+}
+
+/// A typed function signature, using the canonical declaration layout.
+pub fn decl_sig(public: bool, name: &str, ty: &Ex) -> String {
+    let mut out = String::from(if public { "(pub :: " } else { "(:: " });
+    out.push_str(name);
+    type_after(ty, 0, 1, &mut out);
+    out.push(')');
+    out
+}
+
+/// A positional record declaration with a bounded constructor type list.
+pub fn decl_data(name: &str, fields: Vec<Ex>) -> String {
+    let mut out = format!("(pub data {name}\n  ");
+    let mut constructor = vec![atom(name)];
+    constructor.extend(fields);
+    print_shape(&Ex::App(constructor), 2, 1, &mut out);
+    out.push(')');
+    out
+}
+
+/// A raw extern block. A broken item keeps its symbol on its own line.
+pub fn decl_extern(lib: &str, items: &[(String, Ex, String)]) -> String {
+    let mut out = format!("(pub extern \"{lib}\"");
+    for (i, (name, ty, symbol)) in items.iter().enumerate() {
+        out.push_str(&format!("\n  ({name} ::"));
+        let suffix = if i + 1 == items.len() { 2 } else { 1 };
+        let clause = app(vec![atom("symbol"), atom(&format!("\"{symbol}\""))]);
+        let mut flat = String::new();
+        let type_fits = print_flat(ty, &mut flat);
+        flat.push(' ');
+        let tail_fits = print_flat(&clause, &mut flat);
+        if type_fits && tail_fits && column(&out) + 1 + flat.len() + suffix <= WIDTH {
+            out.push(' ');
+            out.push_str(&flat);
+        } else {
+            type_after(ty, 2, 0, &mut out);
+            out.push_str("\n    ");
+            print_shape(&clause, 4, suffix, &mut out);
+        }
+        out.push(')');
+    }
+    out.push(')');
+    out
+}
+
 /// `(pub fn (name params...) body)` as the formatter lays it out.
 pub fn decl_fn(name: &str, params: &[String], body: &Ex) -> String {
     decl_fn_vis(true, name, params, body)

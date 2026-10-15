@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- Fixed leaked reference results when surplus arguments invoke a closure
+  returned by a generic function. The final checked result type controls
+  cleanup for arguments, bound values, return tails and generic field
+  stores. Tested by `tests/stdlib/962-overapplied-result-ownership.ax`.
+
 - Task pools check cancellation between spawn attempts while filling a
   launch window. Refused spawns and answer-budget exhaustion start grace
   from a fresh clock reading. Controlled interleaving and native ablation
@@ -818,6 +823,29 @@ unsaved files, malformed-source recovery and close/reopen.
   and lowercase module paths in qualified types. Generated parser files
   and namespace highlighting match those forms; the whole source corpus
   parses without errors.
+
+### Compact integer struct fields
+
+Ordinary structs store fixed-width integers at their declared width with
+natural alignment. References stay word-aligned, and their ownership maps
+follow the physical offsets. Field access and mutable assignment retain
+canonical values. Calls, closures, ADTs and vectors keep their word ABI.
+Unsafe code using word indices for narrow fields must use the new layout
+or typed field access. Generic mutable fields substitute the receiver's type
+arguments while preserving declared word storage and their ownership bits.
+Native regressions cover signed-byte transitions, reference replacement and
+balanced string and callback counts. Tested by
+`tests/stdlib/959-compact-struct-fields.ax` and
+`tests/diagnostics/1446-mutable-generic-invariance.ax`.
+
+### Complete typed formatter layouts
+
+Signed casts and ascriptions format without changing their value. Long type
+parameter lists, named fields and extern declarations use bounded layouts,
+keeping field comments attached. Generated Rust bindings share these layouts.
+Native before/after programs cover the new cases in
+`tests/fmt/readability.py`; binding generation is covered by
+`rust/axiom-bindgen/tests/snapshot.rs`.
 
 ## 0.7.8 — 2026-10-07
 

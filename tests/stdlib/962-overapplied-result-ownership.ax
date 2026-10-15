@@ -1,0 +1,161 @@
+; Final closure results own a share even when a generic global is the head.
+; Live String counts expose leaks; large scalar results expose false releases.
+(import IO)
+(import Str)
+(import Vec)
+
+(struct Callback (a)
+  (value : a))
+
+(struct Output
+  (value : String))
+
+(:: readCallback (-> (Callback a) a))
+(fn (readCallback cell)
+  cell.value)
+
+(:: countString (-> String Int))
+;@axiom:effect(unsafe)
+(fn (countString text)
+  (__load64 (- (as text Int) 16) 0))
+
+(:: forwarded (-> (Callback (-> Int String)) Int String))
+(fn (forwarded cell n)
+  (readCallback cell n))
+
+(:: touch (-> a Bool))
+(fn (touch value)
+  true)
+
+(:: storeGeneric (-> (Callback (-> Int a)) Bool))
+(fn (storeGeneric cell)
+  (let ((stored (Callback (readCallback cell 1))))
+    (touch stored.value)))
+
+(:: directDelta (-> String (-> Int String) Int))
+(fn (directDelta text callback)
+  (let (
+    (cell (Callback callback))
+    (before (countString text))
+  )
+    {
+      (for i in 0..32
+        (strEq (readCallback cell i) text))
+      (- (countString text) before)
+    }))
+
+(:: boundDelta (-> String (-> Int String) Int))
+(fn (boundDelta text callback)
+  (let (
+    (cell (Callback callback))
+    (before (countString text))
+  )
+    {
+      (for i in 0..32
+        (let ((value (readCallback cell i)))
+          (strEq value text)))
+      (- (countString text) before)
+    }))
+
+(:: tailDelta (-> String (-> Int String) Int))
+(fn (tailDelta text callback)
+  (let (
+    (cell (Callback callback))
+    (before (countString text))
+  )
+    {
+      (for i in 0..32
+        (strEq (forwarded cell i) text))
+      (- (countString text) before)
+    }))
+
+(:: vectorDelta (-> String (-> Int String) Int))
+(fn (vectorDelta text callback)
+  (let (
+    (cells (vecPush vecNew callback))
+    (before (countString text))
+  )
+    {
+      (for i in 0..32
+        (strEq (vecGet cells 0 i) text))
+      (- (countString text) before)
+    }))
+
+(:: fieldDelta (-> String (-> Int String) Int))
+(fn (fieldDelta text callback)
+  (let (
+    (cell (Callback callback))
+    (before (countString text))
+  )
+    {
+      (for i in 0..32
+        (let ((output (Output (readCallback cell i))))
+          (strEq output.value text)))
+      (- (countString text) before)
+    }))
+
+(:: genericFieldDelta (-> String (-> Int String) Int))
+(fn (genericFieldDelta text callback)
+  (let (
+    (cell (Callback callback))
+    (before (countString text))
+  )
+    {
+      (for i in 0..32
+        (storeGeneric cell))
+      (- (countString text) before)
+    }))
+
+(:: curriedDelta (-> String (-> Int Int String) Int))
+(fn (curriedDelta text callback)
+  (let (
+    (cell (Callback callback))
+    (before (countString text))
+  )
+    {
+      (for i in 0..32
+        (strEq (readCallback cell i 2) text))
+      (- (countString text) before)
+    }))
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  (let (
+    (text (concat "owned" " result"))
+    (callback (as (lambda (n)
+      (if (>= n 0)
+        text
+        "unused")
+    ) (-> Int String)))
+    (curried (as (lambda (n m)
+      (if (>= (+ n m) 0)
+        text
+        "unused")
+    ) (-> Int Int String)))
+    (direct (directDelta text callback))
+    (bound (boundDelta text callback))
+    (tail (tailDelta text callback))
+    (vector (vectorDelta text callback))
+    (field (fieldDelta text callback))
+    (genericField (genericFieldDelta text callback))
+    (chain (curriedDelta text curried))
+    (scalar (storeGeneric (Callback (as (lambda (n) (+ n 100000000)) (-> Int Int)))))
+  )
+    {
+      (println "direct result count delta: {direct}")
+      (println "bound result count delta: {bound}")
+      (println "returned result count delta: {tail}")
+      (println "imported accessor count delta: {vector}")
+      (println "stored result count delta: {field}")
+      (println "generic stored result count delta: {genericField}")
+      (println "curried result count delta: {chain}")
+      (println
+        (if scalar
+          "scalar results stay words: correct"
+          "wrong"))
+      (if (&& scalar
+            (== (+ (+ (+ direct bound) (+ tail vector)) (+ (+ field genericField) chain)) 0))
+        42
+        1)
+    }))
