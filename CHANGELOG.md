@@ -23,6 +23,11 @@ its changelog too.
   (AX3123), the expander's binders are `q.N`, and tree-sitter calls the
   form `propagate_expression`.
 
+- `Tui.Edit`'s `ledNotWord` is removed: it existed because a comment
+  believed Axiom had no `!`. Write `(! (ledIsWord ed cp))`. The
+  `Tui` modules' doc comments now say what each name does.
+  **BREAKING**: `compat/BREAKING` names it.
+
 - A cast into a struct or `data` type another module keeps private is
   judged like any other cast into a reference: `(cast Map 4096)` in a
   user file forged a map header in safe code, and is AX3073 now. Tested

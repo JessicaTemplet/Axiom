@@ -2264,7 +2264,7 @@ Test - assertions, and the effect an assertion failure raises.
 
 ## `Tui.Edit`
 
-`stdlib/Tui/Edit.ax` — 63 public names
+`stdlib/Tui/Edit.ax` — 62 public names
 
 Tui.Edit — a line editor: buffer, cursor, kills, and a redraw that
 survives wrapping.
@@ -2273,67 +2273,66 @@ survives wrapping.
 |---|---|---|---|---|
 | `LED_GO` | value | `Int` |  | Keep editing. |
 | `LED_DONE` | value | `Int` |  | Enter: the caller takes `ledSnapshot`. |
-| `LED_EOF` | value | `Int` |  | Ctrl-D on an EMPTY buffer: end of input, the same answer the piped reader gives at EOF, so `replMain`'s farewell path is shared. |
-| `LED_ABORT` | value | `Int` |  | Ctrl-C: abandon this line. NOT end of session - see the header of `term.ax` for why, and for why it cannot leave the terminal raw. |
+| `LED_EOF` | value | `Int` |  | Ctrl-D on an empty buffer: end of input, the same answer the piped reader gives at the end of its input. |
+| `LED_ABORT` | value | `Int` |  | Ctrl-C: abandon this line, but not the session. `Tui/Term.ax`'s header says why, and why it can't leave the terminal raw. |
 | `LED_RING_MAX` | value | `Int` |  | How many kills the ring remembers. |
 | `LineEd` | struct |  |  | A line being edited: the code points `left` and `right` of the cursor, the kill `ring`, the prompt width and the terminal width the refresh wraps at. |
 | `ledRingNew` | value | `(Vec String)` | `Alloc,Mut` | The kill ring, created once per session and outliving every line. |
-| `ledNew` | value | `(-> (Vec String) String LineEd)` | `Alloc,Mut` | One editor over a session's ring, with the caller's word set. The gap vectors hold CODE POINTS, `Int`s, so they stay plain: a leaf block costs nothing to release. |
+| `ledNew` | value | `(-> (Vec String) String LineEd)` | `Alloc,Mut` | One editor over a session's kill ring, with the caller's word set: the bytes besides letters, digits and `_` that count as word characters. |
 | `ledReset` | value | `(-> LineEd String Int Int Int)` | `Mut` | Prepare for the next physical line. Keeps both vectors' capacity. |
 | `ledLen` | value | `(-> LineEd Int)` |  | How many code points the line holds. |
-| `ledCursor` | value | `(-> LineEd Int)` |  | The cursor, as a code-point index. It IS `(vecLen left)`. |
+| `ledCursor` | value | `(-> LineEd Int)` |  | The cursor, as a code-point index: `(vecLen left)`. |
 | `ledCpAt` | value | `(-> LineEd Int Int)` |  | Code point `i` of the logical buffer, or 0 out of range. |
 | `ledRangeStr` | value | `(-> LineEd Int Int String)` | `Alloc,Mut` | `cnt` code points from `s`, as a String. |
-| `ledSnapshot` | value | `(-> LineEd String)` | `Alloc,Mut` | The whole buffer. This is the value handed to `replMain`, and it is the ONLY place the gap representation becomes a String - which is what keeps `replTrim`, `replParenDepth` and `replDispatch` taking exactly what they take today. |
+| `ledSnapshot` | value | `(-> LineEd String)` | `Alloc,Mut` | The whole line as a `String`. |
 | `ledInsert` | value | `(-> LineEd Int Int)` | `Alloc,Mut` | Insert one code point before the cursor. 1 if it went in. |
-| `ledInsertStr` | value | `(-> LineEd String Int)` | `Alloc,Mut` | Decode a String and insert every code point; answers how many went in. Steps with `utf8Next`, never `utf8CharAt` in a rising loop - Utf8.ax's own comment records that as the quadratic mistake. |
+| `ledInsertStr` | value | `(-> LineEd String Int)` | `Alloc,Mut` | Insert every code point of `s` before the cursor. Answers how many went in. |
 | `ledSetStr` | value | `(-> LineEd String Int)` | `Alloc,Mut` | Replace the buffer, cursor at the end. What history and completion need: one call to put a whole line in. |
 | `ledBackspace` | value | `(-> LineEd Int)` | `Mut` | Delete the code point before the cursor. Answers 1 when one was deleted, 0 at the start of the line. |
 | `ledDelete` | value | `(-> LineEd Int)` | `Mut` | Delete the code point under the cursor. Answers 1 when one was deleted, 0 at the end of the line. |
-| `ledLeft` | value | `(-> LineEd Int)` | `Alloc,Mut` | Every motion is one code point moved from one gap vector to the other. O(1) per character; nothing re-derives the cursor. |
+| `ledLeft` | value | `(-> LineEd Int)` | `Alloc,Mut` | Move the cursor one code point left. Answers 1 when it moved, 0 at the start of the line. |
 | `ledRight` | value | `(-> LineEd Int)` | `Alloc,Mut` | Move the cursor one code point right. Answers 1 when it moved, 0 at the end of the line. |
 | `ledHome` | value | `(-> LineEd Int)` | `Alloc,Mut` | Move the cursor to the start of the line. Answers how many code points it moved. |
 | `ledEnd` | value | `(-> LineEd Int)` | `Alloc,Mut` | Move the cursor to the end of the line. Answers how many code points it moved. |
 | `ledIsWord` | value | `(-> LineEd Int Bool)` |  | Whether code point `cp` is part of a word for the word-wise motions: a letter, a digit, `_` or anything outside ASCII. |
-| `ledNotWord` | value | `(-> LineEd Int Bool)` |  | The complement, as a function because Axiom has no `!` - stdlib's `assertFalse` carries the same note for the same reason. |
-| `ledWordLeft` | value | `(-> LineEd Int)` | `Alloc,Mut` | readline's rule: skip a run of non-word characters, then a run of word characters. Answers how many code points were crossed. |
+| `ledWordLeft` | value | `(-> LineEd Int)` | `Alloc,Mut` | Move the cursor to the start of the previous word, by readline's rule: skip a run of non-word characters, then a run of word characters. Answers how many code points it moved. |
 | `ledWordRight` | value | `(-> LineEd Int)` | `Alloc,Mut` | Move the cursor to the end of the next word. Answers how many code points it moved. |
-| `ledWordRightSpan` | value | `(-> LineEd Int)` |  | How many code points a forward word kill would take, WITHOUT moving the cursor - the backward kills can move and then pop, because a leftward motion pushes exactly what it crossed onto `right`, but a forward one has nowhere to put it back. |
+| `ledWordRightSpan` | value | `(-> LineEd Int)` |  | How many code points a forward word kill would take, without moving the cursor. |
 | `ledKillPush` | value | `(-> LineEd String Int Int)` | `Alloc,Mut` | Put `text` on the kill ring. A kill in the same direction `dir` as the last one extends its entry, so repeated kills yank back as one. Answers 0. |
-| `ledRingIdx` | value | `(-> LineEd Int)` |  | Which ring entry a yank would take. Read by the test harness, and by whatever eventually shows the kill ring; the ring itself is the session's `Vec` and is already reachable. |
+| `ledRingIdx` | value | `(-> LineEd Int)` |  | Which kill-ring entry a yank would take. |
 | `ledKillToEnd` | value | `(-> LineEd Int)` | `Alloc,Mut` | Kill from the cursor to the end of the line onto the ring. Answers how many code points were killed. |
 | `ledKillToStart` | value | `(-> LineEd Int)` | `Alloc,Mut` | Kill from the start of the line to the cursor onto the ring. Answers how many code points were killed. |
-| `ledKillWordLeft` | value | `(-> LineEd Int)` | `Alloc,Mut` | Move left over the word, then pop what the motion pushed onto `right` - the run the cursor just crossed is exactly the top `moved` entries of that vector. |
+| `ledKillWordLeft` | value | `(-> LineEd Int)` | `Alloc,Mut` | Kill from the start of the previous word to the cursor onto the ring. Answers how many code points were killed. |
 | `ledKillWordRight` | value | `(-> LineEd Int)` | `Alloc,Mut` | Kill from the cursor to the end of the next word onto the ring. Answers how many code points were killed. |
 | `ledYank` | value | `(-> LineEd Int)` | `Alloc,Mut` | Insert the newest kill-ring entry at the cursor. Answers how many code points were inserted, 0 with an empty ring. |
-| `ledYankPop` | value | `(-> LineEd Int)` | `Alloc,Mut` | Alt-y. Valid only immediately after a yank or another yank-pop, which `yankLen > 0` is exactly: every other key zeroes it in `ledApply`, so pressed cold this is a refusal that changes nothing. |
-| `tuiVisLen` | value | `(-> String Int)` |  | The DISPLAY WIDTH of a string: no `ESC [ ... m` sequence counted, and no UTF-8 continuation byte counted. |
-| `tuiCat` | value | `(-> (Vec String) String)` | `Alloc,Mut` | Every fragment in `v`, concatenated, in ONE allocation. |
-| `ledCharCols` | value | `(-> Int Int)` |  | The display width of one code point. 1 for everything - see the header. The single place a wcwidth table would land. |
-| `ledColsBefore` | value | `(-> LineEd Int Int)` |  | The columns the first `k` code points occupy. O(k), and it is the only reason `ledCharCols` is a function rather than a `1` written in four formulas: with a wcwidth table this stays correct and nothing else changes. |
-| `ledCols` | value | `(-> LineEd Int)` |  | The width to compute with: the terminal's, or 80 when it answered something a division cannot use. A pty that has never been sized reports 0 columns with a SUCCESSFUL ioctl (Sys.ax says so), and dividing by it is the bug that report cannot make. |
+| `ledYankPop` | value | `(-> LineEd Int)` | `Alloc,Mut` | Alt-y: replace the text the last yank inserted with the next older kill-ring entry. Pressed anywhere but straight after a yank, it changes nothing. |
+| `tuiVisLen` | value | `(-> String Int)` |  | The display width of a string: no `ESC [ ... m` sequence counted, and no UTF-8 continuation byte counted. |
+| `tuiCat` | value | `(-> (Vec String) String)` | `Alloc,Mut` | Every fragment in `v`, concatenated, in one allocation. |
+| `ledCharCols` | value | `(-> Int Int)` |  | The display width of one code point: 1 for every code point. Not yet: wide and zero-width characters count as 1 too. |
+| `ledColsBefore` | value | `(-> LineEd Int Int)` |  | The columns the first `k` code points occupy. |
+| `ledCols` | value | `(-> LineEd Int)` |  | The width to compute with: the terminal's, or 80 when it answered something a division can't use. |
 | `ledContentCols` | value | `(-> LineEd Int)` |  | How many terminal columns the prompt and the whole line take, before wrapping. |
 | `ledRowOf` | value | `(-> LineEd Int Int)` |  | The screen row, counted from the prompt's row, that code point `k` lands on after wrapping. |
 | `ledColOf` | value | `(-> LineEd Int Int)` |  | The screen column that code point `k` lands on after wrapping. |
 | `ledRowsUsed` | value | `(-> LineEd Int)` |  | How many screen rows the prompt and line take after wrapping. |
 | `ledCup` | value | `(-> Int Int String)` | `Alloc,Mut` | `ESC [ n <final>`, or "" when n < 1 so a zero-distance move costs no bytes. 65 A up, 66 B down, 67 C forward, 68 D back. |
 | `ledClearScreen` | value | `(-> Int String)` | `Alloc,Mut` | `ESC [ H ESC [ 2 J` - cursor home, erase the whole screen. Ctrl-L. |
-| `ledEraseRow` | value | `(-> Int String)` | `Alloc,Mut` | `ESC [ 0 K` - erase from the cursor to the end of the row. Spelled out rather than routed through `ledCup`, which refuses n < 1 and would answer "" - an erase that emits nothing is a redraw that leaves the old line's tail on the screen. |
+| `ledEraseRow` | value | `(-> Int String)` | `Alloc,Mut` | `ESC [ 0 K`: erase from the cursor to the end of the row. |
 | `ledEraseOld` | value | `(-> LineEd (Vec String) Int)` | `Alloc,Mut` | Erase what the previous refresh drew and leave the cursor at column 0 of the first row. |
-| `ledRefreshFull` | value | `(-> LineEd (Vec String) Int)` | `Alloc,Mut,Unsafe` | The multi-row repaint. |
+| `ledRefreshFull` | value | `(-> LineEd (Vec String) Int)` | `Alloc,Mut,Unsafe` | Append to `out` the sequences that redraw the whole line across as many rows as it wraps to, and put the cursor back. Answers 0. |
 | `ledRefreshWindow` | value | `(-> LineEd (Vec String) Int)` | `Alloc,Mut,Unsafe` | Append to `out` the escape sequences that redraw the line within the terminal's width and put the cursor back. Answers 0. |
-| `ledRefresh` | value | `(-> LineEd (Vec String) Int)` | `Alloc,Mut` | The one dispatcher, so the choice between the two repaints lives in exactly one place. |
+| `ledRefresh` | value | `(-> LineEd (Vec String) Int)` | `Alloc,Mut` | Append to `out` the redraw of the line: the windowed repaint when the line is taller than the terminal, the full one otherwise. |
 | `ledRefreshFullPainted` | value | `(-> LineEd (Vec String) String Int)` | `Alloc,Mut,Unsafe` | Append to `out` the sequences that redraw the whole line from `painted`, the line already run through a highlighter, and put the cursor back. Answers 0. |
 | `ledRefreshPainted` | value | `(-> LineEd (Vec String) String Int)` | `Alloc,Mut` | Like `ledRefresh`, but the full repaint draws `painted` - the caller's rendering of the current buffer - instead of the plain snapshot. See `ledRefreshFullPainted` for the width contract that makes the cursor land correctly. |
-| `ledResize` | value | `(-> LineEd Int Int Int)` | `Mut` | Called with the terminal's current size before every refresh. When the width changed we cannot know how the terminal reflowed the text it already holds, so `rows` and `curRow` are reset rather than used: refusing to compute motions from a stale width beats computing them wrongly, and one more keystroke fully repairs the line. 1 when it changed. |
+| `ledResize` | value | `(-> LineEd Int Int Int)` | `Mut` | Record the terminal's current size before a refresh. Answers 1 when the size changed. |
 | `ledApply` | value | `(-> LineEd KeyEv (Vec String) Int)` | `Alloc,Mut` | Apply one key event to the line, appending any redraw to `out`. Answers `LED_DONE` on Enter, `LED_EOF` on end of input, and 0 otherwise. |
 | `ledIsKillKey` | value | `(-> KeyEv Bool)` |  | Whether the key is a kill: Ctrl-K, Ctrl-U or Ctrl-W. |
 | `ledIsYankKey` | value | `(-> KeyEv Bool)` |  | Whether the key is a yank: Ctrl-Y. |
-| `ledByWord` | value | `(-> KeyEv Bool)` |  | A motion key carrying Ctrl or Alt is the WORD variant. Terminals disagree about which modifier they send for Ctrl-Left - xterm sends MOD_CTRL, several send MOD_ALT, and Alt-b is the same motion by another name - so both are accepted rather than one being picked. |
+| `ledByWord` | value | `(-> KeyEv Bool)` |  | Whether a motion key moves by word: it carries Ctrl or Alt. |
 | `ledDispatch` | value | `(-> LineEd KeyEv (Vec String) Int)` | `Alloc,Mut` | Route one key event to the editing operation it names and append any redraw to `out`. Answers `LED_DONE` on Enter, `LED_EOF` on end of input, 0 otherwise. |
-| `ledNavKey` | value | `(-> LineEd KeyEv Int)` | `Alloc,Mut` | Arrows, Home and End - and the keys this effort deliberately leaves alone. Up and Down belong to the HISTORY effort and Tab to COMPLETION; they are decoded, they arrive here, and they do nothing. Adding them is a branch beside these, not a change to the decoder. |
-| `ledCharKey` | value | `(-> LineEd KeyEv Int)` | `Alloc,Mut` | A printable key, or an Alt-<letter> word command. Alt-b/f/d/y are the bindings every terminal can produce, where Ctrl-Left and Alt-Delete are the ones only some can. |
-| `ledCtrlKey` | value | `(-> LineEd KeyEv (Vec String) Int)` | `Alloc,Mut` | The control keys. readline's letters, and only the ones this effort owns: Ctrl-N and Ctrl-P are history's and are left unbound so that effort can take them without moving anything here. |
+| `ledNavKey` | value | `(-> LineEd KeyEv Int)` | `Alloc,Mut` | Apply an arrow, Home or End key to the line. Up, Down and Tab do nothing here: history and completion are the caller's. |
+| `ledCharKey` | value | `(-> LineEd KeyEv Int)` | `Alloc,Mut` | Apply a printable key, or an Alt-<letter> word command: Alt-b and Alt-f move by word, Alt-d kills one and Alt-y yank-pops. |
+| `ledCtrlKey` | value | `(-> LineEd KeyEv (Vec String) Int)` | `Alloc,Mut` | Apply a control key, with readline's bindings. Ctrl-N and Ctrl-P are left to the caller's history. |
 
 ## `Tui.Keys`
 
@@ -2343,11 +2342,11 @@ Tui.Keys — terminal input bytes to key events, as a pure function.
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `KEY_NONE` | value | `Int` |  | The event was consumed and means nothing to the editor - a mouse report, a device reply, a stray byte. It is NOT "nothing happened": `used` is still the bytes to advance by. |
-| `KEY_MORE` | value | `Int` |  | A strict prefix. Read more, or resolve it with `keyResolve`. This kind never leaves `term.ax`. |
+| `KEY_NONE` | value | `Int` |  | An event that means nothing to the editor: a mouse report, a device reply, a stray byte. Its `used` is still the bytes to advance by. |
+| `KEY_MORE` | value | `Int` |  | The bytes so far are a strict prefix of a key: read more, or settle it with `keyResolve`. `keyNext` never answers this kind. |
 | `KEY_EOF` | value | `Int` |  | The key kind for end of input: Ctrl-D on an empty line, or the input closing. |
 | `KEY_CHAR` | value | `Int` |  | `cp` is the code point. |
-| `KEY_CTRL` | value | `Int` |  | `cp` is the LETTER, 64..95: Ctrl-A is 65, Ctrl-@ is 64, Ctrl-_ is 95. Storing the letter rather than the control byte is what lets the binding table read as `(== ev.cp 65)` beside a comment saying A. |
+| `KEY_CTRL` | value | `Int` |  | A control key, with the letter in `cp`, 64 to 95: Ctrl-A is 65, Ctrl-@ is 64 and Ctrl-_ is 95. |
 | `KEY_ENTER` | value | `Int` |  | The key kind for Enter. |
 | `KEY_TAB` | value | `Int` |  | The key kind for Tab. |
 | `KEY_BACKSPACE` | value | `Int` |  | The key kind for Backspace. |
@@ -2367,7 +2366,7 @@ Tui.Keys — terminal input bytes to key events, as a pure function.
 | `MOD_ALT` | value | `Int` |  | The Alt bit in a key event's `mods`. |
 | `MOD_CTRL` | value | `Int` |  | The Ctrl bit in a key event's `mods`. |
 | `keyCsiMax` | value | `Int` |  | How many bytes of a well-formed CSI this decoder will tolerate before calling it line noise. A wedged terminal spewing digits cannot otherwise grow the pending prefix without bound. |
-| `keyStrMax` | value | `Int` |  | And of an OSC/DCS string body. |
+| `keyStrMax` | value | `Int` |  | How many bytes of an OSC or DCS string body this decoder will tolerate before calling it line noise. |
 | `KeyEv` | struct |  |  | One decoded key: its `kind` (a `KEY_*` constant), the code point `cp` for a character or control key, the `MOD_*` bits in `mods`, and how many input bytes it `used`. |
 | `keyScanCtrl` | value | `(-> Int KeyEv)` | `Alloc` | The key event for one control byte: Enter for 13 or 10, Backspace, Tab, Escape, Ctrl-D as end of input, and `KEY_CTRL` with the letter for the rest. |
 | `keyCsiEnd` | value | `(-> String Int Int Int)` |  | The index of the final byte of the CSI sequence that starts at `i0`, or -1 when the sequence is not complete within `len`. |
@@ -2381,7 +2380,7 @@ Tui.Keys — terminal input bytes to key events, as a pure function.
 | `keyStrEnd` | value | `(-> String Int Int Int)` |  | The index just past the string terminator (`ESC \\` or BEL) of the control string starting at `i0`, or -1 when it is not complete within `len`. |
 | `keyScanUtf8` | value | `(-> String Int Int KeyEv)` | `Alloc,Mut` | The key event for one UTF-8 encoded character at `off`, or `KEY_MORE` when its bytes are not all there yet. |
 | `keyScan` | value | `(-> String Int Int KeyEv)` | `Alloc,Mut` | Decode the key that starts at byte `off` of the `len` bytes in `src`: a character, a control byte or an escape sequence. `KEY_MORE` means the bytes so far do not finish a key. |
-| `keyScanEsc` | value | `(-> String Int Int KeyEv)` | `Alloc,Mut` | The escape path. See the header for the case list. |
+| `keyScanEsc` | value | `(-> String Int Int KeyEv)` | `Alloc,Mut` | Decode the key that starts with the ESC at `off`: a CSI or SS3 sequence, a control string, Alt with a key, or a lone Escape. |
 | `keyScanCsi` | value | `(-> String Int Int KeyEv)` | `Alloc` | Decode the CSI escape sequence at `off`, or answer `KEY_MORE` when it is not complete. |
 | `keyScanStr` | value | `(-> String Int Int KeyEv)` | `Alloc` | Skip the control string (OSC, DCS, APC) at `off`, answering `KEY_NONE` with its length, or `KEY_MORE` when it is not complete. |
 | `keyScanAlt` | value | `(-> String Int Int KeyEv)` | `Alloc,Mut` | ESC <anything else> is Alt-that-key: decode the key at off+1 and OR MOD_ALT into it. `used` grows by the ESC. |
@@ -2395,13 +2394,13 @@ Tui.Term — the only part of the TUI that touches a descriptor.
 
 | Name | Kind | Type | Effects | Summary |
 |---|---|---|---|---|
-| `termBufBytes` | value | `Int` |  | One `read` takes up to this much. Large enough that a pasted line arrives in one syscall, which is what makes the redraw coalescing below turn a paste into roughly one repaint. |
+| `termBufBytes` | value | `Int` |  | The most one `read` takes: enough that a pasted line arrives in one syscall and redraws about once. |
 | `keyEscTimeoutMs` | value | `Int` |  | How long to wait for the rest of an escape sequence before deciding there is no rest. |
-| `mkKeyIn` | value | `(-> File Int KeyIn)` | `Alloc,IO,Mut` | A reader over `in`. `active` 0 builds the inert shape: no poller, a one-byte buffer, and nothing ever read - which is what the piped path gets, so that the byte-identical surface pays for none of this. |
+| `mkKeyIn` | value | `(-> File Int KeyIn)` | `Alloc,IO,Mut` | A key reader over `in`. With `active` 0 it is inert, with no poller and nothing ever read, for input that isn't a terminal. |
 | `keyInPending` | value | `(-> KeyIn Int)` |  | Bytes read but not yet consumed. The redraw coalescing asks this. |
 | `keyInFill` | value | `(-> KeyIn Int Int)` | `Alloc,IO,Mut` | Read more input into the key reader, waiting at most `timeoutMs` milliseconds (-1 waits without limit). Answers how many bytes arrived, 0 on timeout, and -1 when the input closed. |
 | `keyNext` | value | `(-> KeyIn KeyEv)` | `Alloc,IO,Mut` | The next decoded key from the reader, reading more input when the buffered bytes do not finish one. |
-| `termReadSize` | value | `(-> KeyIn Int)` | `Alloc,IO,Mut` | Refresh `kin.rows` and `kin.cols` from the terminal on stdout. One ioctl; there is no SIGWINCH handling anywhere in this tree, so the size is asked for rather than delivered. A failed query records 0x0. |
+| `termReadSize` | value | `(-> KeyIn Int)` | `Alloc,IO,Mut` | Refresh `kin.rows` and `kin.cols` from the terminal on standard output. A failed query records 0 for both. |
 | `termWsCols` | value | `(-> KeyIn Int)` |  | Columns, or 80. A pty that has never been sized answers 0 with a successful ioctl, so the fallback is on the value and not only on the return code. |
 | `termWsRows` | value | `(-> KeyIn Int)` |  | The terminal's height in rows from the last window-size query, or 24 when it is unknown. |
 | `termRawEnter` | value | `(-> KeyIn Int)` | `Alloc,IO,Mut` | Enter raw mode on the reader's file, keeping the guard in `kin.guard`. 0, or the negated errno. Signals are off: see the header. |
