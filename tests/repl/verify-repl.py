@@ -7,7 +7,7 @@ a record, not a check: regenerate them from a compiler that evaluates
 green on `result 4`. Nothing in a golden knows what the answer should be.
 
 This does. It reads the session file's own bytes, tokenizes and evaluates the
-subset of Axiom the deterministic sessions use - Int/Bool/Char/String
+subset of Axiom the deterministic sessions use - unit/Int/Bool/Char/String
 literals, `+ - *`, the comparisons, `if`, block locals, `fn` and `::` declarations,
 calls into them, and undefined-name detection - and predicts the whole
 transcript byte for byte: the `OK: <name> defined` line a declaration prints,
@@ -56,6 +56,7 @@ Exit:   0 if every modelled session matches and the floors hold.
 import sys
 import os
 import difflib
+import re
 
 MIN_SESSIONS = 8      # every golden in the bank has a derived half
 MIN_EXACT = 7         # ... and all but the command session are byte-exact
@@ -104,7 +105,7 @@ class Val:
         # REPL trims whitespace off both ends of what the program wrote
         # (repl.ax replTrim). Bool is printed by the wrapper as a word.
         if self.kind == "()":
-            raise Unmodelled("unit rendering is outside the transcript subset")
+            return '()'
         if self.kind == "Int":
             return str(self.v)
         if self.kind == "Bool":
@@ -181,6 +182,8 @@ def tokenize(src):
         while j < n and src[j] not in " \t\r\n(){}":
             j += 1
         word = src[i:j]
+        if re.fullmatch(r'-?\d+\.\d+', word):
+            raise Unmodelled('Float literals are outside the transcript subset')
         if word.lstrip("-").isdigit() and word not in ("-",):
             toks.append(("int", int(word)))
         else:
@@ -240,6 +243,8 @@ class Budget:
 def ev(node, env, defs, budget):
     budget.spend()
     if isinstance(node, Block):
+        if not node:
+            raise Unmodelled('empty brace blocks are outside the transcript subset')
         inner = dict(env)
         result = Val("()", None)
         for statement in node:
@@ -272,7 +277,7 @@ def ev(node, env, defs, budget):
         raise Undefined(val)
 
     if not node:
-        raise Unmodelled("empty form")
+        return Val('()', None)
     head = node[0]
     if not is_sym(head):
         raise Unmodelled("computed head position")
@@ -308,6 +313,8 @@ def ev(node, env, defs, budget):
         return ev(node[2] if c.v else node[3], env, defs, budget)
     if op == "let":
         raise Unmodelled("let declares a local inside a block")
+    if op == 'as':
+        raise Unmodelled('conversions are outside the transcript subset')
 
     if op in env:
         raise Unmodelled("calling a local binding")

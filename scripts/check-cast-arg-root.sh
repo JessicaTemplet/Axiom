@@ -176,13 +176,17 @@ echo "--- 1. user-level cast count does not grow ---"
 # tests/mir/110-cast.ax: its integer-ascription comment and the explicit
 # Int-to-Float conversion that pins the floating-arithmetic refusal.
 # These are MM-VAL-23 test subjects; no application reference is forged.
+# Baseline 972 adds twenty-two scalar conversion occurrences: seven in
+# the precise-numeric REPL transcript, fourteen in its compiled and
+# REPL cross-checks, and one oracle refusal control in local-models.py.
+# The compiler and library add no reference erasure for these tests.
 cast_count="$(git -C "$repo_root" grep -h -o '(as ' -- stdlib tests examples ':!tests/fuzz' | wc -l | tr -d ' ')"
 if [ "$cast_count" -eq 0 ]; then
   bad "user-level: the cast count read 0 - the measurement is broken, not the tree clean"
-elif [ "$cast_count" -le 950 ]; then
-  ok "user-level (cast count $cast_count <= 950)"
+elif [ "$cast_count" -le 972 ]; then
+  ok "user-level (cast count $cast_count <= 972)"
 else
-  bad "user-level (cast count $cast_count > 950): new casts need a MM-VAL-23 reason and a baseline bump"
+  bad "user-level (cast count $cast_count > 972): new casts need a MM-VAL-23 reason and a baseline bump"
 fi
 
 echo "--- 2. type-preserving casts keep ownership ---"

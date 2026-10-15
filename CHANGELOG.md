@@ -49,6 +49,12 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- REPL evaluation keeps unit, Float and fixed-width integer results
+  in their checked types. Unit expressions run before their result is
+  displayed, preserving effects. Numeric conversions remain explicit.
+  Tested by `tests/repl/180-unit.txt` and
+  `tests/repl/190-precise-numeric.txt`.
+
 - Frontend parity waits for the language server's analysed revision
   before shutdown and treats protocol failures as failed checks.
   Terminal checks read wrapped imports as declarations. Symbol snapshots

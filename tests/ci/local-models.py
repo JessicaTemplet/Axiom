@@ -72,6 +72,20 @@ class ScopeModels(unittest.TestCase):
         self.assertEqual(repl('{ (let text "{value}") text }').v, '{value}')
         self.assertEqual(repl("{ (let c '{') c }").v, '{')
 
+    def test_unit_expressions_and_declaration_tails(self):
+        for expression in ('()', '{ (let x 42) }'):
+            with self.subTest(expression=expression):
+                value = repl(expression)
+                self.assertEqual(value.kind, '()')
+                self.assertEqual(value.render(), '()')
+                with self.assertRaises(DDC.InterpError):
+                    ddc(expression)
+
+    def test_numeric_forms_outside_the_model_are_explicit(self):
+        for expression in ('1.25', '(as 255 UInt8)'):
+            with self.assertRaises(REPL.Unmodelled):
+                repl(expression)
+
 
 if __name__ == '__main__':
     unittest.main()

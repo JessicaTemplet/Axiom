@@ -2409,6 +2409,9 @@ stand out in coral, with a code you can look up using `:explain AX3004`.
 Use `:help` for commands, Tab for completion and Ctrl-R to search history.
 Piped sessions keep plain output without prompts or colour.
 
+Unit, floating-point and fixed-width integer results keep their checked
+types when evaluated. Numeric conversions stay explicit with `as`.
+
 ```text
 Axiom 0.7.9 - REPL
 ```
