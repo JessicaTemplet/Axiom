@@ -631,6 +631,9 @@ status=$?
 if ! python3 tests/lsp/incremental-sync.py "$work/stage1"; then
   status=1
 fi
+if ! python3 tests/lsp/semantic-token-updates.py "$work/stage1"; then
+  status=1
+fi
 
 echo "swept $fixtures fixtures (floor $floor), $rows manifest rows, $orows outline rows"
 
@@ -960,6 +963,16 @@ def build(cap, name, uri, text, p, rid):
         return [("textDocument/prepareTypeHierarchy",{**td,"position":p}),
                 ("typeHierarchy/supertypes",{"item":item}),
                 ("typeHierarchy/subtypes",{"item":item})]
+    if name=="semanticTokensProvider":
+        requests=[]
+        if cap.get("full"):
+            requests.append(("textDocument/semanticTokens/full",td))
+        if isinstance(cap.get("full"),dict) and cap["full"].get("delta"):
+            requests.append(("textDocument/semanticTokens/full/delta",
+                             {**td,"previousResultId":"unknown"}))
+        if cap.get("range"):
+            requests.append(("textDocument/semanticTokens/range",{**td,"range":whole}))
+        return requests
     if name=="experimental":
         if isinstance(cap,dict) and cap.get("expandMacro"):
             return [("axiom/expandMacro",{**td,"position":p})]

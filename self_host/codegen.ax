@@ -1413,16 +1413,6 @@
     (+ 1 (spineArity (nodeA e)))
     0))
 
-(pub :: spineArgAt (-> Int Int Int))
-(pub fn (spineArgAt e i)
-  (spineArgFromEnd e (- (- (spineArity e) 1) i)))
-
-(pub :: spineArgFromEnd (-> Int Int Int))
-(pub fn (spineArgFromEnd e k)
-  (if (<= k 0)
-    (nodeB e)
-    (spineArgFromEnd (nodeA e) (- k 1))))
-
 ; The flat name/flag environment: innermost binding wins, -1 when
 ; the name is not bound.
 (pub :: envFlagOf (-> (Vec Int) String Int))
@@ -11095,6 +11085,14 @@
   ; two values arrived silently in whatever register the first
   ; parameter happened to occupy.
   {
+    (emitLine cg "declare i8 @llvm.fptosi.sat.i8.f64(double)")
+    (emitLine cg "declare i8 @llvm.fptoui.sat.i8.f64(double)")
+    (emitLine cg "declare i16 @llvm.fptosi.sat.i16.f64(double)")
+    (emitLine cg "declare i16 @llvm.fptoui.sat.i16.f64(double)")
+    (emitLine cg "declare i32 @llvm.fptosi.sat.i32.f64(double)")
+    (emitLine cg "declare i32 @llvm.fptoui.sat.i32.f64(double)")
+    (emitLine cg "declare i64 @llvm.fptosi.sat.i64.f64(double)")
+    (emitLine cg "declare i64 @llvm.fptoui.sat.i64.f64(double)")
     (emitLine cg "@__axiom_argc = internal global i64 0")
     (emitLine cg "@__axiom_argv = internal global i64 0")
     (emitLine cg "")
@@ -15620,10 +15618,12 @@
 
 (pub :: mirCastClean (-> Int Int Bool))
 (pub fn (mirCastClean cg e)
-  (let ((dst (spineArgAt e 0)))
-    (if (&& (== (nodeTag dst) TAG_E_VAR) (strEq (nodeAName dst) "Float"))
-      false
-      (mirScopeClean cg (spineArgAt e 1)))))
+  (if (!= (nodeIntegerConversion e) 0)
+    false
+    (let ((dst (spineArgAt e 0)))
+      (if (&& (== (nodeTag dst) TAG_E_VAR) (strEq (nodeAName dst) "Float"))
+        false
+        (mirScopeClean cg (spineArgAt e 1))))))
 
 (pub :: mirScopeClean (-> Int Int Bool))
 (pub fn (mirScopeClean cg e)
@@ -15631,7 +15631,7 @@
     (if (== t TAG_E_INT)
       true
       (if (== t TAG_E_VAR)
-        (!= (nodeDefScope e) 1)
+        (&& (!= (nodeDefScope e) 1) (== (nodeC e) 0))
         (if (== t TAG_E_LET)
           (if (mirPlainName cg (nodeAName e))
             (if (mirScopeClean cg (nodeB e))
@@ -19723,25 +19723,29 @@
           (if (>= n 2)
             1
             (- n 1))))
-          (let ((cgc (emitExpr (vecGet args valIdx) cg)))
-            {
-              (memSetWord
-                cgc
-                14
-                (if (>= n 2)
-                  (let ((tyNode (vecGet args 0)))
-                    (if (&& (== (nodeTag tyNode) TAG_E_VAR) (strEq (nodeAName tyNode) "Float"))
-                      1
-                      0))
-                  0))
-              (if (> n 2)
-                ; `emitApplyChain` already takes a start index, so
-                ; the surplus applies one argument at a time from
-                ; position 2 - each application may yield another
-                ; closure, which is exactly the curried case.
-                (emitApplyChain args cgc (strDup (memGetWordStr cgc 2)) 2 evs snode)
-                cgc)
-            })))
+          (let ((cgValue (emitExpr (vecGet args valIdx) cg)))
+            (let ((cgc
+              (if (> (nodeIntegerConversion snode) 0)
+                (emitIntegerConversion cgValue (nodeIntegerConversion snode))
+                cgValue)))
+              {
+                (memSetWord
+                  cgc
+                  14
+                  (if (>= n 2)
+                    (let ((tyNode (vecGet args 0)))
+                      (if (&& (== (nodeTag tyNode) TAG_E_VAR) (strEq (nodeAName tyNode) "Float"))
+                        1
+                        0))
+                    0))
+                (if (> n 2)
+                  ; `emitApplyChain` already takes a start index, so
+                  ; the surplus applies one argument at a time from
+                  ; position 2 - each application may yield another
+                  ; closure, which is exactly the curried case.
+                  (emitApplyChain args cgc (strDup (memGetWordStr cgc 2)) 2 evs snode)
+                  cgc)
+              }))))
       ; `sizeof`/`alignof` are compile-time constants: every Axiom value
       ; is one machine word, so both are 8 for every type - probed
       ; against stage0, which answers 8 for `Int` and for a three-field
@@ -20019,95 +20023,99 @@
 ; ------------------------------------------------------------------
 (pub :: isPrimName (-> String Bool))
 (pub fn (isPrimName nm)
-  (if (||
-        (strEq nm "__indexTrap")
-        (||
-          (strEq nm "__resource_new")
-          (||
-            (strEq nm "__resource_get")
-            (||
-              (strEq nm "__resource_close")
-              (|| (strEq nm "__resource_disarm") (strEq nm "__resource_unwinding"))))))
+  (if (isIntegerWordName nm)
     true
-    (if (strEq nm "__alloc")
+    (if (||
+          (strEq nm "__indexTrap")
+          (||
+            (strEq nm "__resource_new")
+            (||
+              (strEq nm "__resource_get")
+              (||
+                (strEq nm "__resource_close")
+                (|| (strEq nm "__resource_disarm") (strEq nm "__resource_unwinding"))))))
       true
-      (if (strEq nm "__retain")
+      (if (strEq nm "__alloc")
         true
-        (if (strEq nm "__retainref")
+        (if (strEq nm "__retain")
           true
-          (if (strEq nm "__release")
+          (if (strEq nm "__retainref")
             true
-            (if (strEq nm "__load64")
+            (if (strEq nm "__release")
               true
-              (if (strEq nm "__store64")
+              (if (strEq nm "__load64")
                 true
-                (if (strEq nm "__load8")
+                (if (strEq nm "__store64")
                   true
-                  (if (strEq nm "__store8")
+                  (if (strEq nm "__load8")
                     true
-                    (if (strEq nm "__store8v")
+                    (if (strEq nm "__store8")
                       true
-                      (if (strEq nm "__addr")
+                      (if (strEq nm "__store8v")
                         true
-                        (if (||
-                              (strEq nm "__floatToBits")
-                              (|| (strEq nm "__floatFromBits") (strEq nm "__intToFloat")))
+                        (if (strEq nm "__addr")
                           true
-                          (if (strEq nm "__floatToInt")
+                          (if (||
+                                (strEq nm "__floatToBits")
+                                (|| (strEq nm "__floatFromBits") (strEq nm "__intToFloat")))
                             true
-                            (if (strEq nm "__argc")
+                            (if (strEq nm "__floatToInt")
                               true
-                              (if (strEq nm "__argv")
+                              (if (strEq nm "__argc")
                                 true
-                                ; The arena watermark pair. Their absence here was not a missing
-                                ; feature but a miscompile: `(__axiom_arena_mark)` is a bare
-                                ; reference, so it fell through to the ordinary variable path and
-                                ; emitted `%__axiom_arena_mark`, a value nothing defines, which llc
-                                ; rejects. stage0 carries a comment about hitting the identical bug.
-                                (if (strEq nm "__axiom_recover")
+                                (if (strEq nm "__argv")
                                   true
-                                  (if (strEq nm "__axiom_arena_mark")
+                                  ; The arena watermark pair. Their absence here was not a missing
+                                  ; feature but a miscompile: `(__axiom_arena_mark)` is a bare
+                                  ; reference, so it fell through to the ordinary variable path and
+                                  ; emitted `%__axiom_arena_mark`, a value nothing defines, which llc
+                                  ; rejects. stage0 carries a comment about hitting the identical bug.
+                                  (if (strEq nm "__axiom_recover")
                                     true
-                                    (if (||
-                                          (strEq nm "__axiom_arena_reset")
-                                          (strEq nm "__axiom_arena_mark_into"))
+                                    (if (strEq nm "__axiom_arena_mark")
                                       true
-                                      (if (strEq nm "__axiom_arena_reset_keeping")
+                                      (if (||
+                                            (strEq nm "__axiom_arena_reset")
+                                            (strEq nm "__axiom_arena_mark_into"))
                                         true
-                                        (if (||
-                                              (strEq nm "__axiom_mem_stat")
-                                              (||
-                                                (strEq nm "__axiom_arena_cap")
-                                                (strEq nm "__axiom_stack_run")))
+                                        (if (strEq nm "__axiom_arena_reset_keeping")
                                           true
-                                          ; Not spellable in source: `checkNumeric` rewrites `==`/`!=` into
-                                          ; these when it can see that BOTH operands are `String`. They are
-                                          ; primitives rather than a `Str` call because the rewrite must work
-                                          ; in a program that never imported `Str`.
-                                          (if (strEq nm "__streq")
+                                          (if (||
+                                                (strEq nm "__axiom_mem_stat")
+                                                (||
+                                                  (strEq nm "__axiom_arena_cap")
+                                                  (strEq nm "__axiom_stack_run")))
                                             true
-                                            (if (strEq nm "__strne")
+                                            ; Not spellable in source: `checkNumeric` rewrites `==`/`!=` into
+                                            ; these when it can see that BOTH operands are `String`. They are
+                                            ; primitives rather than a `Str` call because the rewrite must work
+                                            ; in a program that never imported `Str`.
+                                            (if (strEq nm "__streq")
                                               true
-                                              (if (strEq nm "__call_word")
+                                              (if (strEq nm "__strne")
                                                 true
-                                                ; `(__contract cond "message")` - the run-time
-                                                ; half of a `;@axiom:pre(...)` / `post(...)`,
-                                                ; written by `expLowerContracts` and by nothing
-                                                ; else. A primitive rather than a call because
-                                                ; there is no function to reach: it is a compare,
-                                                ; a branch and a trap. A name this misses is an
-                                                ; `@__contract` nothing defines - measured, and
-                                                ; exactly what the arena pair's note above
-                                                ; records for its own omission.
-                                                (if (strEq nm "__contract")
+                                                (if (strEq nm "__call_word")
                                                   true
-                                                  (if (|| (isParPrimName nm) (isHandlePrimName nm))
+                                                  ; `(__contract cond "message")` - the run-time
+                                                  ; half of a `;@axiom:pre(...)` / `post(...)`,
+                                                  ; written by `expLowerContracts` and by nothing
+                                                  ; else. A primitive rather than a call because
+                                                  ; there is no function to reach: it is a compare,
+                                                  ; a branch and a trap. A name this misses is an
+                                                  ; `@__contract` nothing defines - measured, and
+                                                  ; exactly what the arena pair's note above
+                                                  ; records for its own omission.
+                                                  (if (strEq nm "__contract")
                                                     true
-                                                    (if (isAtomicPrimName nm)
+                                                    (if (||
+                                                          (isParPrimName nm)
+                                                          (isHandlePrimName nm))
                                                       true
-                                                      (if (isDevicePrimName nm)
+                                                      (if (isAtomicPrimName nm)
                                                         true
-                                                        (|| (isAsmPrimName nm) (isSyscallName nm))))))))))))))))))))))))))))))
+                                                        (if (isDevicePrimName nm)
+                                                          true
+                                                          (|| (isAsmPrimName nm) (isSyscallName nm)))))))))))))))))))))))))))))))
 
 ; `__syscall0` through `__syscall6`, distinguished only by how many
 ; arguments follow the syscall number.
@@ -20159,96 +20167,98 @@
 (pub :: emitPrim (-> String (Vec Int) Int Int Int))
 ;@axiom:effect(io)
 (pub fn (emitPrim fnName args cg stamp)
-  (if (strEq fnName "__floatToBits")
+  (if (isIntegerWordName fnName)
     (emitPrimFloatBits args cg 0)
-    (if (strEq fnName "__floatFromBits")
-      (emitPrimFloatBits args cg 1)
-      (if (strEq fnName "__intToFloat")
-        (emitPrimIntToFloat args cg)
-        (if (strEq fnName "__floatToInt")
-          (emitPrimFloatToInt args cg)
-          (zeroFloat
-            (if (strEq fnName "__alloc")
-              (emitPrimAlloc args cg)
-              (if (strEq fnName "__retain")
-                (emitPrimRetRel args cg "@axiom_retain")
-                (if (strEq fnName "__retainref")
-                  (emitPrimRetainRef args cg stamp)
-                  (if (strEq fnName "__release")
-                    (emitPrimRetRel args cg "@axiom_release")
-                    (if (strEq fnName "__load64")
-                      (emitPrimLoad args cg 8)
-                      (if (strEq fnName "__store64")
-                        (emitPrimStore args cg 8 0)
-                        (if (strEq fnName "__load8")
-                          (emitPrimLoad args cg 1)
-                          (if (strEq fnName "__store8")
-                            (emitPrimStore args cg 1 0)
-                            (if (strEq fnName "__store8v")
-                              (emitPrimStore args cg 1 1)
-                              (if (strEq fnName "__addr")
-                                (emitPrimAddr args cg)
-                                (if (||
-                                      (strEq fnName "__indexTrap")
-                                      (||
-                                        (strEq fnName "__resource_new")
+    (if (strEq fnName "__floatToBits")
+      (emitPrimFloatBits args cg 0)
+      (if (strEq fnName "__floatFromBits")
+        (emitPrimFloatBits args cg 1)
+        (if (strEq fnName "__intToFloat")
+          (emitPrimIntToFloat args cg)
+          (if (strEq fnName "__floatToInt")
+            (emitPrimFloatToInt args cg)
+            (zeroFloat
+              (if (strEq fnName "__alloc")
+                (emitPrimAlloc args cg)
+                (if (strEq fnName "__retain")
+                  (emitPrimRetRel args cg "@axiom_retain")
+                  (if (strEq fnName "__retainref")
+                    (emitPrimRetainRef args cg stamp)
+                    (if (strEq fnName "__release")
+                      (emitPrimRetRel args cg "@axiom_release")
+                      (if (strEq fnName "__load64")
+                        (emitPrimLoad args cg 8)
+                        (if (strEq fnName "__store64")
+                          (emitPrimStore args cg 8 0)
+                          (if (strEq fnName "__load8")
+                            (emitPrimLoad args cg 1)
+                            (if (strEq fnName "__store8")
+                              (emitPrimStore args cg 1 0)
+                              (if (strEq fnName "__store8v")
+                                (emitPrimStore args cg 1 1)
+                                (if (strEq fnName "__addr")
+                                  (emitPrimAddr args cg)
+                                  (if (||
+                                        (strEq fnName "__indexTrap")
                                         (||
-                                          (strEq fnName "__resource_get")
+                                          (strEq fnName "__resource_new")
                                           (||
-                                            (strEq fnName "__resource_close")
+                                            (strEq fnName "__resource_get")
                                             (||
-                                              (strEq fnName "__resource_disarm")
-                                              (strEq fnName "__resource_unwinding"))))))
-                                  (if (strEq fnName "__indexTrap")
-                                    (emitPrimIndexTrap cg)
-                                    (if (strEq fnName "__resource_unwinding")
-                                      (emitPrimResUnwinding cg)
-                                      (emitPrimResource fnName args cg)))
-                                  (if (strEq fnName "__argc")
-                                    (emitPrimArgc cg)
-                                    (if (strEq fnName "__argv")
-                                      (emitPrimArgv args cg)
-                                      (if (strEq fnName "__axiom_recover")
-                                        (emitPrimRecover args cg)
-                                        (if (strEq fnName "__axiom_arena_mark")
-                                          (emitPrimArenaMark cg)
-                                          (if (||
-                                                (strEq fnName "__axiom_arena_reset")
-                                                (strEq fnName "__axiom_arena_mark_into"))
-                                            (if (strEq fnName "__axiom_arena_mark_into")
-                                              (emitPrimArenaMarkInto args cg)
-                                              (emitPrimArenaReset args cg))
-                                            (if (strEq fnName "__axiom_arena_reset_keeping")
-                                              (emitPrimArenaResetKeeping args cg)
-                                              (if (||
-                                                    (strEq fnName "__axiom_mem_stat")
-                                                    (||
-                                                      (strEq fnName "__axiom_arena_cap")
-                                                      (strEq fnName "__axiom_stack_run")))
-                                                (if (strEq fnName "__axiom_mem_stat")
-                                                  (emitPrimMemStat args cg)
-                                                  (if (strEq fnName "__axiom_arena_cap")
-                                                    (emitPrimArenaCap args cg)
-                                                    (emitPrimStackRun args cg)))
-                                                (if (strEq fnName "__streq")
-                                                  (emitPrimStrEq args cg 1)
-                                                  (if (strEq fnName "__strne")
-                                                    (emitPrimStrEq args cg 0)
-                                                    (if (strEq fnName "__call_word")
-                                                      (emitPrimCallWord args cg)
-                                                      (if (strEq fnName "__contract")
-                                                        (emitPrimContract args cg)
-                                                        (if (isParPrimName fnName)
-                                                          (emitPrimPar fnName args cg)
-                                                          (if (isHandlePrimName fnName)
-                                                            (emitPrimHandle fnName args cg)
-                                                            (if (isAtomicPrimName fnName)
-                                                              (emitPrimAtomic fnName args cg)
-                                                              (if (isDevicePrimName fnName)
-                                                                (emitPrimDevice fnName args cg)
-                                                                (if (isAsmPrimName fnName)
-                                                                  (emitPrimAsm args cg)
-                                                                  (emitPrimSyscall args cg))))))))))))))))))))))))))))))))))
+                                              (strEq fnName "__resource_close")
+                                              (||
+                                                (strEq fnName "__resource_disarm")
+                                                (strEq fnName "__resource_unwinding"))))))
+                                    (if (strEq fnName "__indexTrap")
+                                      (emitPrimIndexTrap cg)
+                                      (if (strEq fnName "__resource_unwinding")
+                                        (emitPrimResUnwinding cg)
+                                        (emitPrimResource fnName args cg)))
+                                    (if (strEq fnName "__argc")
+                                      (emitPrimArgc cg)
+                                      (if (strEq fnName "__argv")
+                                        (emitPrimArgv args cg)
+                                        (if (strEq fnName "__axiom_recover")
+                                          (emitPrimRecover args cg)
+                                          (if (strEq fnName "__axiom_arena_mark")
+                                            (emitPrimArenaMark cg)
+                                            (if (||
+                                                  (strEq fnName "__axiom_arena_reset")
+                                                  (strEq fnName "__axiom_arena_mark_into"))
+                                              (if (strEq fnName "__axiom_arena_mark_into")
+                                                (emitPrimArenaMarkInto args cg)
+                                                (emitPrimArenaReset args cg))
+                                              (if (strEq fnName "__axiom_arena_reset_keeping")
+                                                (emitPrimArenaResetKeeping args cg)
+                                                (if (||
+                                                      (strEq fnName "__axiom_mem_stat")
+                                                      (||
+                                                        (strEq fnName "__axiom_arena_cap")
+                                                        (strEq fnName "__axiom_stack_run")))
+                                                  (if (strEq fnName "__axiom_mem_stat")
+                                                    (emitPrimMemStat args cg)
+                                                    (if (strEq fnName "__axiom_arena_cap")
+                                                      (emitPrimArenaCap args cg)
+                                                      (emitPrimStackRun args cg)))
+                                                  (if (strEq fnName "__streq")
+                                                    (emitPrimStrEq args cg 1)
+                                                    (if (strEq fnName "__strne")
+                                                      (emitPrimStrEq args cg 0)
+                                                      (if (strEq fnName "__call_word")
+                                                        (emitPrimCallWord args cg)
+                                                        (if (strEq fnName "__contract")
+                                                          (emitPrimContract args cg)
+                                                          (if (isParPrimName fnName)
+                                                            (emitPrimPar fnName args cg)
+                                                            (if (isHandlePrimName fnName)
+                                                              (emitPrimHandle fnName args cg)
+                                                              (if (isAtomicPrimName fnName)
+                                                                (emitPrimAtomic fnName args cg)
+                                                                (if (isDevicePrimName fnName)
+                                                                  (emitPrimDevice fnName args cg)
+                                                                  (if (isAsmPrimName fnName)
+                                                                    (emitPrimAsm args cg)
+                                                                    (emitPrimSyscall args cg)))))))))))))))))))))))))))))))))))
 
 ; `(__contract cond "message")` - the run-time half of a
 ; `;@axiom:pre(...)` / `;@axiom:post(...)`, and the only thing that
@@ -22532,18 +22542,20 @@
 (pub :: emitCall (-> String (Vec Int) Int Int Int Int))
 ;@axiom:effect(io)
 (pub fn (emitCall fnName args stamp cg snode)
-  (if (&& (== (vecLen args) 2) (isBinop fnName))
-    (emitBinop2 fnName args cg snode)
-    (if (&& (== (vecLen args) 2) (isCmpOp fnName))
-      (emitCmp2 fnName args cg)
-      ; `(- x)` used to be rewritten to `0 - x` here, which is what stage0
-      ; does at PARSE time - and that is where stage1 does it now
-      ; (`unaryMinusToBinary`). Doing it in the emitter meant the type
-      ; checker still met a two-parameter builtin supplied with one
-      ; argument, and reported AX3013 partial-application on a program
-      ; stage0 compiles: the form was handled at the end of the pipeline and
-      ; absent at the front, so nothing that reached here ever got here.
-      (emitPlainCall fnName args stamp cg snode))))
+  (if (&& (== (vecLen args) 2) (> (nodeIntegerOp snode) 0))
+    (emitIntegerOperation fnName args cg snode (nodeIntegerOp snode))
+    (if (&& (== (vecLen args) 2) (isBinop fnName))
+      (emitBinop2 fnName args cg snode)
+      (if (&& (== (vecLen args) 2) (isCmpOp fnName))
+        (emitCmp2 fnName args cg)
+        ; `(- x)` used to be rewritten to `0 - x` here, which is what stage0
+        ; does at PARSE time - and that is where stage1 does it now
+        ; (`unaryMinusToBinary`). Doing it in the emitter meant the type
+        ; checker still met a two-parameter builtin supplied with one
+        ; argument, and reported AX3013 partial-application on a program
+        ; stage0 compiles: the form was handled at the end of the pipeline and
+        ; absent at the front, so nothing that reached here ever got here.
+        (emitPlainCall fnName args stamp cg snode)))))
 
 ; An operator's spelling depends on its operands - `fadd` against
 ; `add` - so the two are evaluated one at a time and their float flags
@@ -22579,6 +22591,193 @@
 ; Guarded now: a compare and a branch to a shared trap that names the
 ; fault on fd 2 and exits 72. One predictable branch, paid only by
 ; `/` and `%`.
+; Narrow arithmetic uses real LLVM integer widths. Canonical words are
+; sign-extended for signed types and zero-extended for unsigned types.
+(pub :: emitIntegerNarrow (-> Int String Int String))
+(pub fn (emitIntegerNarrow cg value bits)
+  (if (== bits 64)
+    value
+    (let ((r (regStr (allocReg cg))))
+      {
+        (emitLine
+          cg
+          (concat
+            "  "
+            (concat r (concat " = trunc i64 " (concat value (concat " to i" (fmtInt bits)))))))
+        r
+      })))
+
+(pub :: emitIntegerExtend (-> Int String Int Int))
+(pub fn (emitIntegerExtend cg value code)
+  (let ((bits (integerBits code)))
+    {
+      (memSetWord cg 14 0)
+      (if (== bits 64)
+        (memSetWord cg 2 value)
+        (let ((r (regStr (allocReg cg))))
+          {
+            (emitLine
+              cg
+              (concat
+                "  "
+                (concat
+                  r
+                  (concat
+                    (if (integerUnsigned code)
+                      " = zext i"
+                      " = sext i")
+                    (concat (fmtInt bits) (concat " " (concat value " to i64")))))))
+            (memSetWord cg 2 r)
+          }))
+      cg
+    }))
+
+(pub :: emitIntegerConversion (-> Int Int Int))
+(pub fn (emitIntegerConversion cg conversion)
+  (let (
+    (from (/ conversion 256))
+    (to (% conversion 256))
+    (value (strDup (memGetWordStr cg 2)))
+  )
+    (if (== to 129)
+      (let (
+        (d (regStr (allocReg cg)))
+        (r (regStr (allocReg cg)))
+      )
+        {
+          (emitLine
+            cg
+            (concat
+              "  "
+              (concat
+                d
+                (concat
+                  (if (integerUnsigned from)
+                    " = uitofp i64 "
+                    " = sitofp i64 ")
+                  (concat value " to double")))))
+          (emitLine cg (concat "  " (concat r (concat " = bitcast double " (concat d " to i64")))))
+          (memSetWord cg 2 r)
+          (memSetWord cg 14 1)
+          cg
+        })
+      (if (== from 129)
+        (let (
+          (bits (integerBits to))
+          (d (regStr (allocReg cg)))
+          (r (regStr (allocReg cg)))
+          (ty (concat "i" (fmtInt (integerBits to))))
+        )
+          {
+            (emitLine
+              cg
+              (concat "  " (concat d (concat " = bitcast i64 " (concat value " to double")))))
+            (emitLine
+              cg
+              (concat
+                "  "
+                (concat
+                  r
+                  (concat
+                    " = call "
+                    (concat
+                      ty
+                      (concat
+                        (if (integerUnsigned to)
+                          " @llvm.fptoui.sat."
+                          " @llvm.fptosi.sat.")
+                        (concat ty (concat ".f64(double " (concat d ")")))))))))
+            (emitIntegerExtend cg r to)
+          })
+        (emitIntegerExtend cg (emitIntegerNarrow cg value (integerBits to)) to)))))
+
+(pub :: integerMinWord (-> Int Int))
+(pub fn (integerMinWord bits)
+  (if (== bits 64)
+    (- (- 0 9223372036854775807) 1)
+    (- 0 (<< 1 (- bits 1)))))
+
+(pub :: integerLLVMOp (-> String Int String))
+(pub fn (integerLLVMOp op code)
+  (if (integerUnsigned code)
+    (if (strEq op "/")
+      "udiv"
+      (if (strEq op "%")
+        "urem"
+        (if (strEq op ">>")
+          "lshr"
+          (binopToLLVM op))))
+    (binopToLLVM op)))
+
+(pub :: integerLLVMCmp (-> String Int String))
+(pub fn (integerLLVMCmp op code)
+  (if (integerUnsigned code)
+    (if (strEq op "<")
+      "ult"
+      (if (strEq op ">")
+        "ugt"
+        (if (strEq op "<=")
+          "ule"
+          (if (strEq op ">=")
+            "uge"
+            (cmpToLLVM op)))))
+    (cmpToLLVM op)))
+
+(pub :: emitIntegerOperation (-> String (Vec Int) Int Int Int Int))
+;@axiom:effect(io)
+(pub fn (emitIntegerOperation op args cg snode code)
+  (let (
+    (cg1 (emitExpr (vecGet args 0) cg))
+    (a (strDup (memGetWordStr cg1 2)))
+    (cg2 (emitExpr (vecGet args 1) cg1))
+    (b (strDup (memGetWordStr cg2 2)))
+    (bits (integerBits code))
+    (ty (concat "i" (fmtInt bits)))
+    (cg3 (if (isDivOp op)
+      (emitDivGuardWidth a b cg2 snode bits (integerUnsigned code))
+      (if (isShiftOp op)
+        (emitShiftGuardWidth b cg2 snode bits)
+        cg2)))
+    (an (emitIntegerNarrow cg3 a bits))
+    (bn (emitIntegerNarrow cg3 b bits))
+    (r (regStr (allocReg cg3)))
+  )
+    (if (isCmpOp op)
+      {
+        (emitLine
+          cg3
+          (concat
+            "  "
+            (concat
+              r
+              (concat
+                " = icmp "
+                (concat
+                  (integerLLVMCmp op code)
+                  (concat " " (concat ty (concat " " (concat an (concat ", " bn))))))))))
+        (let ((word (regStr (allocReg cg3))))
+          {
+            (emitLine cg3 (concat "  " (concat word (concat " = zext i1 " (concat r " to i64")))))
+            (memSetWord cg3 2 word)
+            (memSetWord cg3 14 0)
+            cg3
+          })
+      }
+      {
+        (emitLine
+          cg3
+          (concat
+            "  "
+            (concat
+              r
+              (concat
+                " = "
+                (concat
+                  (integerLLVMOp op code)
+                  (concat " " (concat ty (concat " " (concat an (concat ", " bn))))))))))
+        (emitIntegerExtend cg3 r code)
+      })))
+
 (pub :: emitIBinop (-> String String String Int Int Int))
 (pub fn (emitIBinop fnName a b cg snode)
   ; U4: `binopToLLVM` answers "add" for a name it does not know (pinned
@@ -22647,6 +22846,10 @@
 ; is there.
 (pub :: emitDivGuard (-> String String Int Int Int))
 (pub fn (emitDivGuard a b cg snode)
+  (emitDivGuardWidth a b cg snode 64 false))
+
+(pub :: emitDivGuardWidth (-> String String Int Int Int Bool Int))
+(pub fn (emitDivGuardWidth a b cg snode bits unsigned)
   (let (
     (c0 (regStr (allocReg cg)))
     (c1 (regStr (allocReg cg)))
@@ -22671,9 +22874,17 @@
       (emitLabel cg chk)
       (emitLine
         cg
-        (concat (concat "  " c1) (concat " = icmp eq i64 " (concat a ", -9223372036854775808"))))
+        (concat
+          (concat "  " c1)
+          (concat " = icmp eq i64 " (concat a (concat ", " (fmtInt (integerMinWord bits)))))))
       (emitLine cg (concat (concat "  " c2) (concat " = icmp eq i64 " (concat b ", -1"))))
-      (emitLine cg (concat (concat "  " c3) (concat " = and i1 " (concat c1 (concat ", " c2)))))
+      (emitLine
+        cg
+        (concat
+          (concat "  " c3)
+          (if unsigned
+            " = and i1 false, false"
+            (concat " = and i1 " (concat c1 (concat ", " c2))))))
       (emitLine
         cg
         (concat
@@ -22695,6 +22906,10 @@
 ; `>>`.
 (pub :: emitShiftGuard (-> String Int Int Int))
 (pub fn (emitShiftGuard n cg snode)
+  (emitShiftGuardWidth n cg snode 64))
+
+(pub :: emitShiftGuardWidth (-> String Int Int Int Int))
+(pub fn (emitShiftGuardWidth n cg snode bits)
   (let (
     (c0 (regStr (allocReg cg)))
     (c1 (regStr (allocReg cg)))
@@ -22704,7 +22919,9 @@
   )
     {
       (emitLine cg (concat (concat "  " c0) (concat " = icmp slt i64 " (concat n ", 0"))))
-      (emitLine cg (concat (concat "  " c1) (concat " = icmp sge i64 " (concat n ", 64"))))
+      (emitLine
+        cg
+        (concat (concat "  " c1) (concat " = icmp sge i64 " (concat n (concat ", " (fmtInt bits))))))
       (emitLine cg (concat (concat "  " c2) (concat " = or i1 " (concat c0 (concat ", " c1)))))
       (emitLine
         cg
@@ -23754,53 +23971,10 @@
 (pub :: scalarTyName (-> String Int))
 (pub fn (scalarTyName n)
   (if (||
-        (strEq n "Int")
+        (> (integerTypeCode n) 0)
         (||
           (strEq n "Bool")
-          (||
-            (strEq n "Char")
-            (||
-              (strEq n "Float")
-              (||
-                (strEq n "I8")
-                (||
-                  (strEq n "I16")
-                  (||
-                    (strEq n "I32")
-                    (||
-                      (strEq n "I64")
-                      (||
-                        (strEq n "U8")
-                        (||
-                          (strEq n "U16")
-                          (||
-                            (strEq n "U32")
-                            (||
-                              (strEq n "U64")
-                              (||
-                                (strEq n "F32")
-                                (|| (strEq n "F64") (|| (strEq n "Foreign") (strEq n "Spawn"))))))))))))))))
-    ; `Spawn` - the handle a spawn answers (MM-PAR-8): a word naming a
-    ; slot in the handle table, never a block.
-    ; `Vec` is NOT here: a vector is a counted value its holder owns
-    ; (MM-LIFE-2m), class 2 in `fldClass`, so a record holding one
-    ; takes a share and its death hands it back.
-    ; `check-vec-field-shape.sh` measures the map a `Vec` field gets.
-    ;
-    ; `Foreign` - a raw pointer into memory Axiom did not allocate
-    ; and does not own (MM-FFI-3). It is class 0 for the same reason
-    ; `Int` is, and more urgently: a set bit here would make
-    ; @axiom_release subtract 16 from a Rust allocation and read the
-    ; result as a block header. That is the wild read this whole
-    ; classification exists to make impossible, and it is MM-FFI-5
-    ; requirement 2 - "no arena primitive applies to it" - discharged
-    ; where it is actually decided.
-    ;
-    ; Being classified at all is also what keeps the ENCLOSING record
-    ; mapped. An unknown name answers 1 (unclassifiable), which forces
-    ; the whole block to LEAF, so before this every struct holding a
-    ; foreign handle silently lost the reference map for all its
-    ; OTHER fields and leaked them.
+          (|| (strEq n "Char") (|| (strEq n "Float") (|| (strEq n "Foreign") (strEq n "Spawn"))))))
     1
     0))
 

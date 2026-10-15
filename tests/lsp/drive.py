@@ -5967,9 +5967,10 @@ elif hltail:
     hlwhy = f"{len(hltail)} trailing bytes after the last frame"
 elif 3 not in hlresp:
     hlwhy = "the session never answered shutdown - a request killed the server"
-elif hlcaps != {"legend": {"tokenTypes": HL_TYPES, "tokenModifiers": HL_MODS}, "full": True}:
+elif hlcaps != {"legend": {"tokenTypes": HL_TYPES, "tokenModifiers": HL_MODS},
+                "range": True, "full": {"delta": True}}:
     hlwhy = (f"semanticTokensProvider is {hlcaps!r}, want the legend read off lsp.ax "
-             f"({len(HL_TYPES)} types, {len(HL_MODS)} modifiers) with full and nothing else")
+             f"({len(HL_TYPES)} types, {len(HL_MODS)} modifiers) with range and full/delta support")
 elif hlresp.get(2, {}).get("result") != {"data": []}:
     hlwhy = f"a URI never opened answered {hlresp.get(2)!r:.200}, want {{data: []}}"
 else:
@@ -6223,7 +6224,7 @@ else:
         if got != twin_outline:
             rcwhy = f"{_name}'s outline differs from its twin's: {sorted(set(got) ^ set(twin_outline))[:4]}"
             break
-        if rcres((_name, "textDocument/semanticTokens/full")) != rcres(("rc-twin.ax", "textDocument/semanticTokens/full")):
+        if (rcres((_name, "textDocument/semanticTokens/full")) or {}).get("data") != (rcres(("rc-twin.ax", "textDocument/semanticTokens/full")) or {}).get("data"):
             rcwhy = f"{_name}'s semantic tokens differ from its twin's"
             break
         for (_ln, _ch, _w) in RC_POS:

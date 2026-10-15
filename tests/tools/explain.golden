@@ -208,9 +208,9 @@ reads as neither an `Int` nor a `Float` is this code; a literal that
 reads fine but sits where another type was expected is AX3004.
 
 Write a value the type can hold - the largest `Int` is
-9223372036854775807. Anything wider needs a representation the
-program builds for itself; `u64` written as a TYPE does not buy a
-wider integer, it draws AX3047.
+9223372036854775807. Use explicit casts and arithmetic to construct UInt64 values above
+that literal range. Bare literals remain Int; writing lowercase
+`u64` as a type draws AX3047.
 
 ### explain AX1005
 AX1005 - invalid escape sequence
@@ -530,7 +530,9 @@ alias visible in this module:
 
     (fn (main) ())
 
-The built-ins are `Int`, `Float`, `Bool`, `Char`, `String`,
+The numeric built-ins are `Int`, `Int8`, `Int16`, `Int32`, `UInt8`,
+`UInt16`, `UInt32`, `UInt64` and `Float`. Other built-ins are
+`Bool`, `Char`, `String`,
 `Foreign` and `Handle`, with `Vec`, `Option` and the arrow `(-> a b)` over them.
 `Integer`, `Unit`, `Void` and `Any` look like built-ins and are not:
 write `Int` for `Integer`, `()` for `Unit` and `Void`, and a lowercase
@@ -1918,40 +1920,23 @@ which is the statement position the rule names. What is not reported: an arm ans
 flows onward; and a poisoned item, which a diagnostic elsewhere already owns.
 
 ### explain AX3047
-AX3047 - a C or Rust primitive type name in type position
+AX3047 - a C or Rust primitive type spelling
 
-A lowercase name in type position is a TYPE VARIABLE, and there is no
-such thing as an unknown one. So `u64` in a signature does not fail -
-it succeeds, binding a fresh variable, and the signature generalises
-over it:
+Write Axiom's primitive name: `Int8`, `Int16`, `Int32`, `UInt8`,
+`UInt16`, `UInt32` or `UInt64`. `Int` is signed 64-bit and `Float`
+is binary64. A lowercase name otherwise binds a type parameter, so
+accepting `u8` as one would silently generalise the signature.
 
-  (:: f (-> u64 Int))   is   forall n. n -> Int
+Numeric types are distinct, including in ADTs and aliases. Convert
+explicitly with `(as value Type)`. Integer narrowing keeps the low
+bits; widening sign-extends or zero-extends the source. Float-to-integer
+conversion truncates towards zero and saturates at the destination's
+bounds. A numeric type name does not make a wider expression literal: bare
+integer literals remain Int.
 
-which accepts a String. Measured before this diagnostic existed:
-`check` said OK and the program ran. That is the opposite of the
-constraint the spelling looks like, which is why this is an error and
-not a warning.
-
-Axiom has ONE integer type, `Int`, 64 bits wide, and one float type,
-`Float`, also 64 bits. There are no width-carrying spellings and no
-signedness in the type system; `docs/memory-model.md` MM-VAL-3c
-records that `Double` and `I64` were removed for exactly this reason -
-they had names and no widths.
-
-The uppercase near-misses are already refused, and by a different
-route: `Double` and `I64` draw AX3002, because an unknown UPPERCASE
-name is an unknown type CONSTRUCTOR and the checker resolves it. Only
-the lowercase spellings were silent, and this code closes that.
-
-The narrow integer spellings are real on the OTHER side of an `extern`
-block: `docs/ffi.md` maps `i32 i16 i8 u32 u16 u8 usize isize` onto
-`Int` and range-checks them at the boundary. They belong in the Rust
-signature, never in the Axiom one.
-
-A multi-letter type variable is still perfectly legal - `elem`, `out`,
-`acc` and `xs` all check - because the refusal is a NAMED SET, not a
-rule about length. Refusing every multi-letter variable would reject
-`(-> (Vec elem) (-> elem out) (Vec out))`, a correct program.
+Names such as `I8`, `U64`, `Int64`, `Double` and `F32` are not
+Axiom primitive spellings and draw AX3002. Use the canonical name
+in docs/reference.md.
 
 ### explain AX3048
 AX3048 - a reference to a deprecated name
@@ -2032,6 +2017,10 @@ concrete types is unchecked - a `Port` carrying 99999 and an `Int` read
 back as a `String` are the same one-word act. Under `restrict(no-cast)`
 a type's guarantee is true; without it, it is true of programs that
 did not write `as`.
+
+Left shifts can discard high bits, so `no-wrap` refuses `<<` too.
+Fixed-width arithmetic wraps at its declared width; division, remainder
+and shifts use that width for their traps.
 
 `no-wrap` is LEXICAL for the same reason `no-cast` is: on `Int`
 operands `+`, `-` and `*` lower to plain `add`/`sub`/`mul` with no

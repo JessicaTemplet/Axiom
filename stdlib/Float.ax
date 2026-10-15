@@ -999,30 +999,124 @@
           (if neg
             "-0.0"
             "0.0")
-          (let (
-            (m (if (== be 0)
-              mant
-              (| mant 4503599627370496)))
-            (e (if (== be 0)
-              -1074
-              (- be 1075)))
-            (p bnNew)
-          )
-            {
-              (bnSetInt p m)
-              (let ((text
-                (if (>= e 0)
+          (let ((decimal (exactDecimal bits)))
+            (let ((text (shortestText decimal.digits decimal.decpt bits)))
+              (if neg
+                (concat "-" text)
+                text))))))))
+
+; The exact finite magnitude, shared by shortest and fixed rendering.
+(:: exactDecimal (-> Int Cand))
+;@axiom:effect(unsafe)
+(fn (exactDecimal bits)
+  ; A binary64 magnitude needs at most 53 + 3*1074 bits even when
+  ; each power of five is bounded by eight: fewer than 128 limbs.
+  ; This exclusive scratch fits a reusable allocation class.
+  (let (
+    (be (& (>> bits 52) 2047))
+    (mant (& bits 4503599627370495))
+    (m (if (== be 0)
+      mant
+      (| mant 4503599627370496)))
+    (e (if (== be 0)
+      -1074
+      (- be 1075)))
+    (p (memAlloc (* 8 129)))
+  )
+    {
+      ; Raw allocations start unowned. Adopt this exclusive scratch
+      ; before releasing it after the decimal string has been copied.
+      (__retain p)
+      (bnSetInt p m)
+      (let ((decimal
+        (if (>= e 0)
+          {
+            (bnShl p e)
+            (let ((ds (bnDecimal p)))
+              (Cand ds (strLen ds) true))
+          }
+          {
+            (bnMulPow5 p (- 0 e))
+            (let ((ds (bnDecimal p)))
+              (Cand ds (+ (strLen ds) e) true))
+          })))
+        {
+          (__release p)
+          decimal
+        })
+    }))
+
+;; `x` with `places` decimal places, rounded from its exact binary64
+;; value, with halfway cases away from zero. Negative precision means
+;; zero places. Precision above 4096 traps before allocating output.
+;; Special values render as `inf`, `-inf` and `nan`; signed zero keeps
+;; its sign. The integer part has no Int-sized bound.
+(pub :: floatToFixed (-> Float Int String))
+;@axiom:pre((<= places 4096))
+(pub fn (floatToFixed x places)
+  (let (
+    (bits (floatToBits x))
+    (be (& (>> bits 52) 2047))
+    (mant (& bits 4503599627370495))
+    (precision (if (< places 0)
+      0
+      places))
+  )
+    (if (== be 2047)
+      (floatToString x)
+      ; A finite binary64 has at most 309 integer digits, plus sign,
+      ; point and precision. The returned storage belongs outside the
+      ; scratch region; only its filled length crosses the boundary.
+      (let ((out (strAlloc (+ precision 312))))
+        (let ((length
+          (region fixedFormatting
+            (let ((decimal
+              (if (&& (== be 0) (== mant 0))
+                (Cand "0" 1 true)
+                (exactDecimal bits))))
+              (let ((magnitude (fixedMagnitude decimal.digits decimal.decpt precision)))
+                (let ((text
+                  (if (< bits 0)
+                    (concat "-" magnitude)
+                    magnitude)))
                   {
-                    (bnShl p e)
-                    (let ((ds (bnDecimal p)))
-                      (shortestText ds (strLen ds) bits))
-                  }
-                  {
-                    (bnMulPow5 p (- 0 e))
-                    (let ((ds (bnDecimal p)))
-                      (shortestText ds (+ (strLen ds) e) bits))
-                  })))
-                (if neg
-                  (concat "-" text)
-                  text))
-            }))))))
+                    (memCopy (strData out) (strData text) (strLen text))
+                    (strLen text)
+                  }))))))
+          {
+            ; `out` is fresh and remains exclusive until this return.
+            ; Shrinking its header preserves the zero terminator and
+            ; its existing owner share; no slice needs a second header.
+            (memSetWord (as out Int) 0 length)
+            out
+          })))))
+
+; Round the exact magnitude after shifting its decimal point by places.
+; The resulting integer is a decimal string, so neither scaling nor
+; rounding can overflow an Int.
+(:: fixedMagnitude (-> String Int Int String))
+(fn (fixedMagnitude exact decpt places)
+  (let (
+    (keep (+ decpt places))
+    (n (strLen exact))
+    (digits (if (< keep 0)
+      "0"
+      (if (== keep 0)
+        (if (>= (strByte exact 0) 53)
+          "1"
+          "0")
+        (if (>= keep n)
+          (concat exact (zeros (- keep n)))
+          (let ((cut (strSlice exact 0 keep)))
+            (if (>= (strByte exact keep) 53)
+              (incDigits cut)
+              cut))))))
+    (length (strLen digits))
+  )
+    (if (== places 0)
+      digits
+      (if (<= length places)
+        (concat "0." (concat (zeros (- places length)) digits))
+        (concat
+          (strSlice digits 0 (- length places))
+          (concat "." (strSlice digits (- length places) places)))))))

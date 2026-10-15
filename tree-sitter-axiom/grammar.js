@@ -44,10 +44,8 @@ const OPERATOR_CHAR = /[+\-*\/%^=<>!&|.~@]/;
 // `Int` differently from a user-defined type, which is the only reason
 // the distinction matters outside the compiler.
 const BUILTIN_TYPES = [
-  'Int', 'Float', 'Double', 'Bool', 'Char', 'String',
-  'I8', 'I16', 'I32', 'I64', 'I128', 'Isize',
-  'U8', 'U16', 'U32', 'U64', 'U128', 'Usize',
-  'F32', 'F64',
+  'Int', 'Int8', 'Int16', 'Int32', 'UInt8', 'UInt16', 'UInt32', 'UInt64',
+  'Float', 'Bool', 'Char', 'String', 'Foreign', 'Handle', 'Spawn',
 ];
 
 // Effect names, likewise keywords in the lexer.

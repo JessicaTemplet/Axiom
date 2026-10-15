@@ -1292,7 +1292,7 @@ collector (`MM-LIFE-2`), why escape analysis can't be added without a
 type-level change (`MM-ALLOC-15`), and why the compiler must track
 float-ness statically (`MM-VAL-4`).
 
-**MM-VAL-3 (H).** Integers are 64-bit two's complement. `+`, `-` and
+**MM-VAL-3 (H).** An `Int` is 64-bit two's complement. `+`, `-` and
 `*` **wrap**, with no `nsw`/`nuw` flag and no check. Division and
 remainder are signed and truncate toward zero (`(/ -7 2)` = −3,
 `(% -7 2)` = −1). Comparisons are signed, `>>` is arithmetic, and `<<`
@@ -1346,14 +1346,23 @@ couldn't claim before the guard.
 and pins byte-identical stdout at `--opt` 0, 1, 2 and 3 for the
 checked side.
 
-**MM-VAL-3c (H).** The sized integer types (`I8`…`I128`, `U8`…`U128`,
-`Isize`, `Usize`) are **refused** (`AX3002`). There are **no unsigned
-operations**, and `Int` is the one integer type. Tested by
-`tests/diagnostics/495-widthless-types.ax`.
+**MM-VAL-3c (H).** `Int8`, `Int16` and `Int32` are signed fixed-width
+integers; `UInt8`, `UInt16`, `UInt32` and `UInt64` are unsigned. `Int`
+remains signed 64-bit. Each type is distinct, including inside ADTs and
+aliases. A signed value is sign-extended into its storage word; an unsigned
+value is zero-extended. Calls, closures and aggregate fields carry that word.
+Arithmetic lowers to the declared LLVM integer width and restores this
+canonical representation afterwards. No implicit widening or narrowing occurs.
 
-`I64` survives as a leaked internal. The checker constructs it as the
-type of the `set` form, and diagnostics may print it, but a program
-can't spell it.
+`+`, `-`, `*` and left shifts wrap at the declared width. Unsigned division,
+remainder, comparison and right shift use unsigned operations. Division by
+zero traps with status 72. Signed minimum divided by `-1`, including
+remainder, traps with status 83. Shift counts outside `[0, width)` trap
+with status 84. Integer casts truncate or extend explicitly; Float conversions
+saturate at the destination bounds. `I8`…`I128`, `U8`…`U128`, `Isize` and
+`Usize` remain refused spellings. Tested by
+`tests/stdlib/948-fixed-width-integers.ax` and
+`tests/stdlib/949-fixed-width-alias-callback.ax`.
 
 **MM-VAL-4 (H).** A `Float` is an IEEE-754 binary64 **bit-cast into the
 same word**. The compiler decides statically, from declared types,

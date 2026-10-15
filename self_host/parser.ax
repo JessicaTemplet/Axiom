@@ -984,33 +984,20 @@
 ; a substitution rather than a search.
 (pub :: ax3047Diag (-> (Vec Int) Int String Int))
 (pub fn (ax3047Diag tokens pos n)
-  ; Only `Str`'s names here: `parser.ax` must not depend on
-  ; `codegen.ax`. Whole-program splicing hides that
-  ; mistake from a build of `main.ax` - every module is in one
-  ; namespace by then - and it surfaces the moment anything imports the
-  ; parser ALONE, which `tests/selfhost/280-parse.ax` does and three
-  ; other compiler modules do.
-  (let (
-    (tok (vecGet tokens pos))
-    (meant (sizedTyMeant n))
-  )
-    (let (
-      (msg (concat (concat "`" n) "` is a type VARIABLE here, not a type"))
-      (help (concat
-              (concat
-                (concat
-                  (concat "write `" meant)
-                  "`. A lowercase name in type position is a TYPE VARIABLE, and there is no such thing as an unknown one - so this signature does not constrain anything, it generalises over it and accepts a value of any type at all. ")
-                "Axiom has one integer type, `Int`, 64 bits wide, and one float, `Float`. The narrow spellings belong on the Rust side of an `extern` block, where the boundary widens them - see docs/ffi.md; they are not Axiom types. ")
-              (concat
-                (concat "The uppercase near-misses are refused already: `Double` and `I64` draw AX3002, because an unknown UPPERCASE name is an unknown type constructor. `" n)
-                "` is lowercase, which is the whole difference.")))
-    )
-      (let ((d (mkDiag SEV_ERROR "AX3047" "sized-integer-type" (tokenSpan tok) msg 0 "" help)))
-        {
-          (diagSetLabel d (concat (concat "this binds a fresh type variable named `" n) "`"))
-          d
-        }))))
+  (let ((d (mkDiag
+             SEV_ERROR
+             "AX3047"
+             "sized-integer-type"
+             (tokenSpan (vecGet tokens pos))
+             (concat "`" (concat n "` is a type variable spelling, not an Axiom primitive"))
+             0
+             ""
+             (concat
+               "Write `"
+               (concat
+                 (sizedTyMeant n)
+                 "`. Primitive type names begin with a capital letter. Int is signed 64-bit; Int8, Int16, Int32, UInt8, UInt16, UInt32 and UInt64 carry distinct precision and signedness. Convert explicitly with `(as value Type)`; lowercase primitive spellings cannot stand in for these types.")))))
+    (diagSetLabel d "use the Axiom primitive type name")))
 
 ; A `'` that opens no character literal: AX2001 with a
 ; quote-specific message and help. The shape this catches is a
@@ -2748,19 +2735,33 @@
 ; `(strFindByte s byte from)` is three of them in one signature.
 (pub :: sizedTyMeant (-> String String))
 (pub fn (sizedTyMeant n)
-  (if (sizedTyIn n "i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize size_t int uint long short")
-    "Int"
-    (if (sizedTyIn n "f32 f64 float double")
-      "Float"
-      (if (sizedTyIn n "bool")
-        "Bool"
-        (if (sizedTyIn n "char")
-          "Char"
-          (if (sizedTyIn n "str string")
-            "String"
-            (if (sizedTyIn n "void")
-              "()"
-              "")))))))
+  (if (strEq n "i8")
+    "Int8"
+    (if (strEq n "i16")
+      "Int16"
+      (if (strEq n "i32")
+        "Int32"
+        (if (strEq n "u8")
+          "UInt8"
+          (if (strEq n "u16")
+            "UInt16"
+            (if (strEq n "u32")
+              "UInt32"
+              (if (strEq n "u64")
+                "UInt64"
+                (if (sizedTyIn n "i64 i128 isize u128 usize size_t int uint long short")
+                  "Int"
+                  (if (sizedTyIn n "f32 f64 float double")
+                    "Float"
+                    (if (strEq n "bool")
+                      "Bool"
+                      (if (strEq n "char")
+                        "Char"
+                        (if (sizedTyIn n "str string")
+                          "String"
+                          (if (strEq n "void")
+                            "()"
+                            ""))))))))))))))
 
 ; Is `n` one of the space-separated words in `words`?
 ;
@@ -2805,11 +2806,76 @@
     ((None) (strLen words))
     ((Some sp) (+ sp 1))))
 
+; Integer descriptors are precision plus signedness, independent of their
+; canonical i64 storage word: 8/16/32/64 signed, 72/80/96/128 unsigned.
+(pub :: integerTypeCode (-> String Int))
+(pub fn (integerTypeCode n)
+  (if (strEq n "Int")
+    64
+    (if (strEq n "Int8")
+      8
+      (if (strEq n "Int16")
+        16
+        (if (strEq n "Int32")
+          32
+          (if (strEq n "UInt8")
+            72
+            (if (strEq n "UInt16")
+              80
+              (if (strEq n "UInt32")
+                96
+                (if (strEq n "UInt64")
+                  128
+                  0)))))))))
+
+; A representation view used by generated numeric renderers. The dot
+; keeps it out of source identifiers; each registered variant has an exact
+; integer parameter type and returns its unchanged canonical storage word.
+(pub :: isIntegerWordName (-> String Bool))
+(pub fn (isIntegerWordName n)
+  (&& (strStartsWith n "__integer.word.") (> (integerTypeCode (strSlice n 15 (- (strLen n) 15))) 0)))
+
+(pub :: integerBits (-> Int Int))
+(pub fn (integerBits code)
+  (if (> code 64)
+    (- code 64)
+    code))
+
+(pub :: integerUnsigned (-> Int Bool))
+(pub fn (integerUnsigned code)
+  (> code 64))
+
+; Word 3 is unused on variable nodes. A checked operator carries its
+; integer descriptor here; a numeric conversion carries source * 256 +
+; target. Application payload words remain children for generic walkers.
+(pub :: nodeIntegerCode (-> Int Int))
+(pub fn (nodeIntegerCode e)
+  (if (== e 0)
+    0
+    (let ((head (spineHead e)))
+      (if (== (nodeTag head) TAG_E_VAR)
+        (nodeC head)
+        0))))
+
+(pub :: nodeIntegerOp (-> Int Int))
+(pub fn (nodeIntegerOp e)
+  (let ((code (nodeIntegerCode e)))
+    (if (<= code 128)
+      code
+      0)))
+
+(pub :: nodeIntegerConversion (-> Int Int))
+(pub fn (nodeIntegerConversion e)
+  (let ((code (nodeIntegerCode e)))
+    (if (> code 256)
+      code
+      0)))
+
 (pub :: typeKeywordCanon (-> String String))
 ;@axiom:effect(unsafe)
 (pub fn (typeKeywordCanon n)
-  (if (strEq n "Int")
-    "Int"
+  (if (> (integerTypeCode n) 0)
+    n
     (if (strEq n "Float")
       "Float"
       (if (strEq n "Bool")
@@ -6761,3 +6827,14 @@
       (if (<= i 0)
         (nodeA t)
         (arrowParamTy (nodeB t) (- i 1))))))
+
+; Allocation-free access to one argument of the canonical application spine.
+(pub :: spineArgAt (-> Int Int Int))
+(pub fn (spineArgAt e i)
+  (spineArgFromEnd e (- (- (spineArgs e 0) 1) i)))
+
+(pub :: spineArgFromEnd (-> Int Int Int))
+(pub fn (spineArgFromEnd e k)
+  (if (<= k 0)
+    (nodeB e)
+    (spineArgFromEnd (nodeA e) (- k 1))))

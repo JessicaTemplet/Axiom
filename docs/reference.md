@@ -299,12 +299,12 @@ All operators are prefix. Parentheses decide grouping.
 | Boolean | `&&`, `||`, `!` |
 | bits | `&`, `|`, `^`, `<<`, `>>` |
 
-`&&` and `||` short-circuit. Integer arithmetic uses signed 64-bit
+`&&` and `||` short-circuit. `Int` arithmetic uses signed 64-bit
 words. Addition, subtraction and multiplication wrap; division by zero,
 `intMin / -1`, and shifts outside 0..63 trap. Use `Err`'s checked
 arithmetic when failure should be a `Result`.
 
-Numeric conversions are always explicit. `Int` and `Float` never widen or
+Numeric conversions are always explicit. Numeric types never widen or
 narrow implicitly, including in calls, returns, assignments and ADT
 payloads. An expected type does not convert a literal: `1` is `Int`,
 whereas `1.0` is `Float`.
@@ -522,6 +522,8 @@ Tested by `tests/stdlib/466-for-loop.ax`.
 | Type | Meaning |
 |---|---|
 | `Int` | signed 64-bit integer |
+| `Int8`, `Int16`, `Int32` | signed 8-, 16- and 32-bit integers |
+| `UInt8`, `UInt16`, `UInt32`, `UInt64` | unsigned 8-, 16-, 32- and 64-bit integers |
 | `Float` | IEEE 754 binary64 |
 | `Bool` | `true` or `false` |
 | `Char` | Unicode code point |
@@ -529,6 +531,57 @@ Tested by `tests/stdlib/466-for-loop.ax`.
 | `Foreign` | externally owned pointer; ARC does not follow it |
 | `Handle` | counted owner with an external destructor |
 | `()` | the unit type, whose one value is `()` |
+
+### Fixed-width integers
+
+```scheme
+(import IO)
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  (let ((byte (as 255 UInt8)))
+    {
+      (println (+ byte (as 1 UInt8)))
+      (println (as byte Int))
+    }))
+```
+
+```text
+0
+255
+```
+
+Each integer type has its own precision and signedness. Signed values use
+two's complement. Both operands of an arithmetic, bitwise or comparison
+operator must have the same type. Literals remain `Int`; use `as` to
+construct a fixed-width value. In-range literal patterns test that value
+without converting the scrutinee.
+
+`+`, `-`, `*` and left shifts wrap at the declared width. Right shifts
+preserve the sign for signed types and insert zeroes for unsigned types.
+Division and remainder trap on zero; signed minimum divided by `-1`
+also traps. A negative shift count, or one reaching the type's width, traps.
+These rules hold at every optimisation level. `restrict(no-wrap)` rejects
+addition, subtraction, multiplication and left shifts. `restrict(no-trap)`
+rejects division, remainder and shifts.
+
+Integer `as` conversions keep the low destination bits when narrowing.
+Widening sign-extends a signed source and zero-extends an unsigned source.
+A same-width conversion preserves the bits. Integer-to-`Float` conversions
+round to nearest, with ties to even. `Float`-to-integer conversions truncate
+towards zero, saturate at the destination's bounds and map NaN to zero.
+
+Values use one machine word in calls and aggregate fields, including
+`Vec` elements. `sizeof` and `alignof` therefore remain 8; these types
+do not request packed storage. `UInt64` covers its full unsigned range;
+construct values above the literal range through explicit casts and arithmetic.
+
+Not yet: integer widths beyond 64 bits, wider literal syntax and fixed-width
+`extern` signatures. See the [roadmap](roadmap.md).
+
+Tested by `tests/stdlib/948-fixed-width-integers.ax` and
+`tests/stdlib/949-fixed-width-alias-callback.ax`.
 
 ### The unit type
 
@@ -564,8 +617,8 @@ value is released as a statement's is, and a dropped `Result` is still
 
 Compound types include `(Vec Int)`, `(-> Int String)` and `(* Int)`.
 Use `struct` for products and `data` for sums; list and non-empty tuple
-types are removed. `Int` and `Float` are the numeric types; sized
-integer and float names are refused.
+types are removed. Fixed-width integers use the names in the table above.
+`I8`, `U64`, lowercase Rust spellings and sized float names are refused.
 
 Lowercase type parameters describe polymorphism. For example,
 `(-> a a)` returns the same type it takes. The body is checked for

@@ -1344,9 +1344,9 @@ Tested by `SECTION RECOVER TESTS` in `tests/lsp/drive.py`.
 
 ## Highlighting
 
-The server sends `textDocument/semanticTokens/full`: one token per
-word of the document, classified by the compiler's own lexer and
-parser. An editor that reads semantic tokens colours keywords,
+The server sends semantic tokens for a whole document, a visible range
+or the changes since a previous full result. Each token is classified
+by the compiler's own lexer and parser. An editor that reads semantic tokens colours keywords,
 functions, macros, constructors, types, fields, parameters, effects
 and AXTAGs apart from variables, in every editor the same way.
 
@@ -1382,11 +1382,26 @@ maps to scopes. The token types, in the order the integers index them:
 | `decorator` | an `;@axiom:` line, whole |
 
 The modifiers, in bit order: `declaration`, `definition`, `readonly`,
-`modification`, `deprecated`, `documentation`, `defaultLibrary`. Only
-`full` is offered. A client that wants a range or a delta falls back
-to `full`, which is one parse. The roles mirror
-`tree-sitter-axiom/queries/highlights.scm`, so an editor with both
-sources sees the same colour from each.
+`modification`, `deprecated`, `documentation`, `defaultLibrary`.
+`textDocument/semanticTokens/full` returns the whole array and a
+`resultId`. `textDocument/semanticTokens/full/delta` uses that identifier
+for the next update. An unchanged array gives an empty list of edits;
+a changed one replaces the differing run of integers.
+
+The server retains one full result per document. An unknown or older
+identifier gets a full result. Closing clears the cached tokens, and
+reopening uses fresh identifiers even when the document version restarts.
+
+`textDocument/semanticTokens/range` includes every token overlapping the
+requested range, including whole tokens that cross its edges. Positions
+are relative to the document. Range replies leave the full-result cache
+untouched. All three requests still analyse the document; deltas reduce
+the data sent to your editor.
+
+The roles mirror `tree-sitter-axiom/queries/highlights.scm`, so an editor
+with both sources sees the same colour from each.
+
+Tested by `tests/lsp/semantic-token-updates.py`.
 
 `highlights.scm` stays for the editors that have tree-sitter (Helix,
 Neovim, Emacs 29 and Zed). `queries/rainbows.scm` colours each

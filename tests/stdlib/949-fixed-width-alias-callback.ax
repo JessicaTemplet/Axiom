@@ -1,0 +1,118 @@
+(import IO)
+(import Fmt)
+(import Float)
+(import Vec)
+
+(type Octet = UInt8)
+
+(type Transform a = (-> a a))
+
+(data Packed a
+  (Packed a))
+
+(:: next (-> Octet Octet))
+(fn (next n)
+  (+ n (as 1 Octet)))
+
+(:: apply (-> (Transform a) a a))
+(fn (apply f x)
+  (f x))
+
+(:: unpack (-> (Packed a) a))
+(fn (unpack p)
+  (match p
+    ((Packed n) n)))
+
+(:: trapWidth (-> Int Int))
+(fn (trapWidth k)
+  (if (== k 0)
+    (as (/ (as 128 Int8) (as (- 0 1) Int8)) Int)
+    (== k 1)
+    (as (% (as 32768 Int16) (as (- 0 1) Int16)) Int)
+    (== k 2)
+    (as (/ (as 2147483648 Int32) (as (- 0 1) Int32)) Int)
+    (== k 3)
+    (as (/ (as 1 UInt8) (as 0 UInt8)) Int)
+    (== k 4)
+    (as (/ (as 1 UInt64) (as 0 UInt64)) Int)
+    (== k 5)
+    (as (<< (as 1 UInt8) (as 8 UInt8)) Int)
+    (== k 6)
+    (as (>> (as 1 Int16) (as (- 0 1) Int16)) Int)
+    (== k 7)
+    (as (<< (as 1 UInt32) (as 32 UInt32)) Int)
+    (as (>> (as 1 UInt64) (as 64 UInt64)) Int)))
+
+(:: displayWidth (-> UInt8 String))
+;@axiom:restrict(no-cast)
+(fn (displayWidth n)
+  (format n))
+
+(:: fixedSpin (-> Int Int))
+(fn (fixedSpin n)
+  (if (<= n 0)
+    0
+    {
+      (fmtFloatPrec 1.25 6)
+      (fixedSpin (- n 1))
+    }))
+
+(:: fixedReuses Bool)
+(fn (fixedReuses)
+  {
+    (fixedSpin 100)
+    (let ((before (- (__axiom_mem_stat 0) (__axiom_mem_stat 1))))
+      {
+        (fixedSpin 1000)
+        (== (- (__axiom_mem_stat 0) (__axiom_mem_stat 1)) before)
+      })
+  })
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  (let (
+    (mut count (as 250 Octet))
+    (f (as (lambda (x)
+      (+ x (as 1 Octet))
+    ) (Transform Octet)))
+    (v (vecNew))
+  )
+    {
+      (for i in 0..10
+        (set count (next count)))
+      (vecPush v (Packed count))
+      (println (as (apply f (unpack (vecGet v 0))) Int))
+      (println (Packed (as (- 0 1) UInt64)))
+      (println (displayWidth (as 7 UInt8)))
+      (println
+        (match (as 255 UInt8)
+          (255 true)
+          (_ false)))
+      (println
+        (match (Packed (as 65535 UInt16))
+          ((Packed 65535) true)
+          (_ false)))
+      (println (fmtFloatPrec 2.675 2))
+      (println (fmtFloatPrec (- 0.0 2.675) 2))
+      (println (fmtFloatPrec 1.25 1))
+      (println (fmtFloatPrec (- 0.0 1.25) 1))
+      (println (fmtFloatPrec (floatFromBits (- (- 0 9223372036854775807) 1)) 2))
+      (println (fmtFloatPrec floatInfinity 2))
+      (println (fmtFloatPrec (- 0.0 floatInfinity) 2))
+      (println (fmtFloatPrec floatNan 2))
+      (println (fmtFloatPrec (floatFromBits 9218868437227405311) 2))
+      (println (fmtFloatPrec (floatFromBits 1) 324))
+      (println
+        (__axiom_recover
+          __axiom_arena_mark
+          (lambda (x)
+            {
+              (fmtFloatPrec 1.0 4097)
+              0
+            }
+          )))
+      (println fixedReuses)
+      (for k in 0..9
+        (println (__axiom_recover __axiom_arena_mark (lambda (x) (trapWidth k)))))
+    }))

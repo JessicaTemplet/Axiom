@@ -156,7 +156,13 @@ The [error model](error-model.md) defines propagation and recovery.
 `format`, `println` and `eprintln` select rendering from static types.
 Use `fmtInt`, `fmtHex`, `fmtFloatPrec` and padding functions when you
 want to call a formatter directly. `Float` supplies strict parsing,
-round-tripping text and bit conversions.
+round-tripping text and bit conversions. `fmtFloatPrec` and
+`floatToFixed` round the exact binary64 value, halfway cases away from
+zero, across the full finite range. Negative precision means zero places;
+precision above 4096 traps. Signed zero, infinities and NaN keep clear
+spellings. Formatting scratch is reclaimed inside a lexical region; the
+returned string owns storage outside it. Tested by
+`tests/stdlib/949-fixed-width-alias-callback.ax`.
 
 `Pre` supplies two derivers: `deriveEq` writes structural equality
 for a type with nullary constructors, and `deriveArity` writes a

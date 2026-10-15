@@ -670,6 +670,23 @@ calling a converted function checks its remaining arguments. Tested by
   versions with diagnostics. Stale changes and malformed batches leave
   the document untouched. Tested by `tests/lsp/incremental-sync.py`.
 
+- Added distinct `Int8`, `Int16`, `Int32`, `UInt8`, `UInt16`, `UInt32`
+  and `UInt64` primitives. Explicit `as` conversions and operators retain
+  precision and signedness through aliases, ADTs and callbacks.
+  `restrict(no-wrap)` also refuses left shifts. Tested by
+  `tests/stdlib/948-fixed-width-integers.ax` and
+  `tests/stdlib/949-fixed-width-alias-callback.ax`.
+
+- Fixed Float formatting across the binary64 range. Fixed precision
+  uses the exact value with halfway cases rounded away from zero,
+  preserves signed zero and shares Float's decimal conversion machinery.
+  Repeated formatting reclaims its scratch storage.
+
+- The language server serves semantic token ranges and full-result
+  deltas, retains one full-token result per document and falls back to
+  a full result for an unknown base. Tested by
+  `tests/lsp/semantic-token-updates.py`.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

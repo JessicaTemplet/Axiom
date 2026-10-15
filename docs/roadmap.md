@@ -90,6 +90,8 @@ integrator would still need.
 | Imports form the module header and cannot appear later or inside expressions | Done | `tests/diagnostics/1400-late-import.axbad`, `tests/diagnostics/1401-nested-import.axbad`, `tests/diagnostics/1402-lambda-import.axbad` |
 | REPL uses the brand palette and shares diagnostic and language help with the CLI | Done | `scripts/check-repl-tui.sh`, `tests/repl/170-explain-shape.txt` |
 | Editor and REPL completion exclude retired syntax | Done | `tests/lsp/drive.py`, `scripts/check-replcomp.sh` |
+| Fixed-width signed and unsigned integers through 64 bits, with explicit casts and width-correct operators | Done | `tests/stdlib/948-fixed-width-integers.ax`, `tests/stdlib/949-fixed-width-alias-callback.ax` |
+| Wider integer literals, widths beyond 64 bits and checked fixed-width FFI shims | Planned | |
 | Transparent type aliases support parameters, simultaneous substitution and finite expansion | Done | `tests/stdlib/946-generic-aliases.ax`, `tests/diagnostics/1420-generic-alias-arity.ax`, `tests/diagnostics/1421-generic-alias-parameters.axbad`, `tests/diagnostics/1422-recursive-alias.ax` |
 | Generic bodies are checked for their declared types; each call constrains repeated parameters independently | Done | `tests/diagnostics/1423-generic-rigidity.ax` |
 | Distinguish homonymous nominal types across module boundaries | Planned | |
@@ -168,7 +170,7 @@ ADT instantiation.
 | Unsaved imported documents feed a shared semantic cache, with dependency invalidation and workspace diagnostics | Not started |
 | Completion uses expected types, offers auto-import edits and resolves expensive details on demand | Not started |
 | Safe assists organise top-level imports and preserve attached comments | Not started |
-| Semantic tokens support range and delta requests | Not started |
+| Semantic tokens support range and delta requests | Done |
 | The language server answers inside macro invocations | Not started |
 | Packages can pin a version | Not started |
 | A published performance profile | Not started |

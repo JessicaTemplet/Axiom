@@ -7,6 +7,7 @@
 ; leaves nothing for a C library to do.
 (import Mem)
 (import Str)
+(import Float (floatToFixed))
 
 ; True for the one `Int` that is its own negation: the most negative
 ; value, whose magnitude does not fit in an `Int`. Zero negates to itself
@@ -58,6 +59,19 @@
     (if (< n 0)
       (concat "-" (fmtNat (- 0 n)))
       (fmtNat n))))
+
+;; Format a word's bits as an unsigned decimal integer. `format` uses
+;; this for fixed-width unsigned values through their word representation.
+;@axiom:restrict(no-io,no-foreign)
+(pub :: fmtUIntWord (-> Int String))
+(pub fn (fmtUIntWord n)
+  (if (>= n 0)
+    (fmtInt n)
+    (let (
+      (quotient (/ (& (>> n 1) 9223372036854775807) 5))
+      (digit (- n (* quotient 10)))
+    )
+      (concat (fmtInt quotient) (strFromByte (+ 48 digit))))))
 
 ; `n` (assumed non-negative) in base 10.
 ;@axiom:restrict(no-io,no-foreign)
@@ -253,64 +267,18 @@
 ; Floating point
 ; ------------------------------------------------------------------
 ;
-; Fixed-point rendering with a chosen number of decimal places, not the
-; shortest round-tripping form. Shortest-round-trip (Ryu, Grisu) needs
-; big-integer arithmetic and is a module of its own; this is the part a
-; program printing a measurement actually wants, and it is exact for
-; every value it claims to print because the digits are produced by
-; integer arithmetic after one scaling multiply.
-; 10^n, for the scaling factor. `n` is a place count, so it is small.
-;@axiom:restrict(no-io,no-alloc,no-foreign)
-(:: powTen (-> Int Int))
-(fn (powTen n)
-  (if (<= n 0)
-    1
-    (* 10 (powTen (- n 1)))))
-
-; `n` rendered in base 10, left-padded with `0` to at least `width`.
-;
-; Distinct from `fmtPadLeft`, which pads with spaces: a fractional part
-; needs `0.05` rather than `0. 5`, so the digits it is missing on the
-; left are zeros. The padding itself is `fmtPadZerosLeft`'s, whose
-; sign guard is a no-op here because `fmtNat` never answers a `-`.
-;@axiom:restrict(no-io,no-foreign)
-(:: fmtPadZeros (-> Int Int String))
-(fn (fmtPadZeros n width)
-  (fmtPadZerosLeft (fmtNat n) width))
-
+; Fixed and shortest formatting share Float's exact decimal expansion.
+; Fmt keeps the explicit precision API; Float owns conversion and rounding.
 ;; `x` with six decimal places.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: fmtFloat (-> Float String))
 (pub fn (fmtFloat x)
   (fmtFloatPrec x 6))
 
-;; `x` with `places` decimal places, rounded half away from zero.
+;; `x` with `places` decimal places, rounded from its exact binary64
+;; value, halfway cases away from zero. Negative precision means zero;
+;; values above 4096 trap. The integer part covers every finite Float.
 ;@axiom:restrict(no-io,no-foreign)
 (pub :: fmtFloatPrec (-> Float Int String))
 (pub fn (fmtFloatPrec x places)
-  (if (< x 0.0)
-    (concat "-" (fmtFloatAbs (- 0.0 x) places))
-    (fmtFloatAbs x places)))
-
-; The non-negative case.
-;
-; Rounding is applied to the scaled fraction and can carry - `0.999` at
-; two places is `1.00`, not `0.100` - so the carry is folded back into
-; the integer part rather than left to overflow the fraction field.
-;@axiom:restrict(no-io,no-foreign)
-(:: fmtFloatAbs (-> Float Int String))
-(fn (fmtFloatAbs x places)
-  (let (
-    (whole (as x Int))
-    (frac (- x (as whole Float)))
-    (scale (powTen places))
-    (scaled (as (+ (* frac (as scale Float)) 0.5) Int))
-    (carried (if (>= scaled scale)
-      1
-      0))
-    (whole2 (+ whole carried))
-    (frac2 (- scaled (* carried scale)))
-  )
-    (if (<= places 0)
-      (fmtInt whole2)
-      (concat (concat (fmtInt whole2) ".") (fmtPadZeros frac2 places)))))
+  (floatToFixed x places))

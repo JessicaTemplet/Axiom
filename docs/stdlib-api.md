@@ -1492,7 +1492,7 @@ Ffi - the Axiom half of the Rust boundary, in Axiom.
 
 ## `Float`
 
-`stdlib/Float.ax` — 13 public names
+`stdlib/Float.ax` — 14 public names
 
 Float - IEEE 754 binary64 values, exact integer conversions, and
 text that reads back to exactly the same value.
@@ -1518,10 +1518,11 @@ text that reads back to exactly the same value.
 | `floatToIntExact` | value | `(-> Float (Result Int Error))` | `Alloc` |  | Convert a finite, integral `x` in the signed 64-bit range to `Int`. Both signed zeros answer zero. Fractions, infinities, NaNs and values outside the range answer `Err` with `floatConversionFailed`. |
 | `floatParse` | value | `(-> String (Result Float Error))` | `Alloc,Mut` |  | The number that `s` spells, correctly rounded to the nearest binary64, ties to even. See the module comment for the syntax. |
 | `floatToString` | value | `(-> Float String)` | `Alloc,Mut` |  | The shortest text that `floatParse` reads back to exactly `x`, in Python's `repr` format: `0.1`, `2.0`, `1e+22`, `-0.0`, `inf`, `nan`. |
+| `floatToFixed` | value | `(-> Float Int String)` | `Alloc,Mut` | `;@axiom:pre((<= places 4096))` | `x` with `places` decimal places, rounded from its exact binary64 value, with halfway cases away from zero. Negative precision means zero places. Precision above 4096 traps before allocating output. Special values render as `inf`, `-inf` and `nan`; signed zero keeps its sign. The integer part has no Int-sized bound. |
 
 ## `Fmt`
 
-`stdlib/Fmt.ax` — 10 public names
+`stdlib/Fmt.ax` — 11 public names
 
 Fmt - number formatting, in Axiom.
 
@@ -1529,6 +1530,7 @@ Fmt - number formatting, in Axiom.
 |---|---|---|---|---|---|
 | `fmtIntWidth` | value | `(-> Int Int)` |  |  | Decimal digits in `n`, counting a leading `-` and treating 0 as one digit. |
 | `fmtInt` | value | `(-> Int String)` | `Alloc,Mut` |  | `n` in base 10 as a `Str`. |
+| `fmtUIntWord` | value | `(-> Int String)` | `Alloc,Mut` |  | Format a word's bits as an unsigned decimal integer. `format` uses this for fixed-width unsigned values through their word representation. |
 | `fmtHex` | value | `(-> Int String)` | `Alloc,Mut` |  | `n` in lowercase hexadecimal with no prefix, such as `ff` for 255. A negative number is written as its two's-complement 64-bit word. |
 | `fmtPadLeft` | value | `(-> String Int String)` | `Alloc,Mut` |  | `s` padded on the left with spaces to at least `width` bytes. |
 | `fmtPadRight` | value | `(-> String Int String)` | `Alloc,Mut` |  | `s` padded on the right with spaces to at least `width` bytes. |
@@ -1536,7 +1538,7 @@ Fmt - number formatting, in Axiom.
 | `fmtPadZerosLeft` | value | `(-> String Int String)` | `Alloc,Mut,Unsafe` |  | `s` padded on the left with zeros to at least `width` bytes, keeping a leading sign in front of them: `-7` at width 4 is `-007`. This is the `{n:04}` specifier. |
 | `fmtHexUpper` | value | `(-> Int String)` | `Alloc,Mut` |  | `n` in uppercase hexadecimal with no prefix, such as `FF` for 255: the `{n:X}` specifier. |
 | `fmtFloat` | value | `(-> Float String)` | `Alloc,Mut` |  | `x` with six decimal places. |
-| `fmtFloatPrec` | value | `(-> Float Int String)` | `Alloc,Mut` |  | `x` with `places` decimal places, rounded half away from zero. |
+| `fmtFloatPrec` | value | `(-> Float Int String)` | `Alloc,Mut` |  | `x` with `places` decimal places, rounded from its exact binary64 value, halfway cases away from zero. Negative precision means zero; values above 4096 trap. The integer part covers every finite Float. |
 
 ## `IO`
 

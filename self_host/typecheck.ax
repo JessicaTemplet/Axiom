@@ -1102,10 +1102,6 @@
 (pub fn (mkSpawnTy)
   (mkTCon "Spawn" vecNew))
 
-(pub :: mkI64Ty Int)
-(pub fn (mkI64Ty)
-  (mkTCon "I64" vecNew))
-
 (pub :: mkUnitTy Int)
 (pub fn (mkUnitTy)
   (mkTTup vecNew))
@@ -1811,30 +1807,10 @@
 (pub :: evScalarName (-> String Int))
 (pub fn (evScalarName n)
   (if (||
-        (strEq n "Int")
+        (> (integerTypeCode n) 0)
         (||
           (strEq n "Bool")
-          (||
-            (strEq n "Char")
-            (||
-              (strEq n "Float")
-              (||
-                (strEq n "I8")
-                (||
-                  (strEq n "I16")
-                  (||
-                    (strEq n "I32")
-                    (||
-                      (strEq n "I64")
-                      (||
-                        (strEq n "U8")
-                        (||
-                          (strEq n "U16")
-                          (||
-                            (strEq n "U32")
-                            (||
-                              (strEq n "U64")
-                              (|| (strEq n "F32") (|| (strEq n "F64") (strEq n "Foreign")))))))))))))))
+          (|| (strEq n "Char") (|| (strEq n "Float") (|| (strEq n "Foreign") false)))))
     1
     0))
 
@@ -1862,7 +1838,9 @@
     (let ((tg (nodeTag t)))
       (if (== tg TAG_T_CON)
         (let ((n (nodeAName t)))
-          (if (|| (strEq n "Int") (|| (strEq n "Float") (|| (strEq n "Bool") (strEq n "Char"))))
+          (if (||
+                (> (integerTypeCode n) 0)
+                (|| (strEq n "Float") (|| (strEq n "Bool") (strEq n "Char"))))
             1
             0))
         (if (== tg TAG_T_TUP)
@@ -3899,6 +3877,41 @@
       (tcRegAsmPrims fns (+ n 1))
     }))
 
+(pub :: checkIntegerWord (-> Int Int String Int))
+(pub fn (checkIntegerWord tc value name)
+  (let ((ty (checkExprH tc value 0)))
+    {
+      (if (== (isPendingNode ty) 1)
+        (refusePendingOperand tc ty "an integer" (spanOf value)))
+      (if (== (tyIsErr ty) 1)
+        mkTErr
+        (let (
+          (code (tyIntegerCode tc ty))
+          (expected (strSlice name 15 (- (strLen name) 15)))
+        )
+          (if (== code 0)
+            {
+              (emitMismatch tc "an integer" (tyRender ty) (spanOf value))
+              mkTErr
+            }
+            (if (!= code (integerTypeCode expected))
+              {
+                (emitMismatch tc expected (tyRender ty) (spanOf value))
+                mkTErr
+              }
+              mkIntTy))))
+    }))
+
+(pub :: tcRegIntegerWords (-> (Vec Int) (Vec String) Int Int))
+(pub fn (tcRegIntegerWords fns names i)
+  (if (>= i (vecLen names))
+    0
+    {
+      (let ((name (vecGet names i)))
+        (regFn fns (concat "__integer.word." name) (mkTArr (mkTCon name vecNew) mkIntTy)))
+      (tcRegIntegerWords fns names (+ i 1))
+    }))
+
 (pub :: tcNew (-> (Vec Int) (Vec Int) (Vec Int) Int))
 (pub fn (tcNew entryDecls allDecls units)
   (let (
@@ -4196,6 +4209,7 @@
       ; unregistered head is AX3001 on a program that compiles.
       (regFn fns "__streq" (mkTArr mkStringTy (mkTArr mkStringTy mkBoolTy)))
       (regFn fns "__strne" (mkTArr mkStringTy (mkTArr mkStringTy mkBoolTy)))
+      (tcRegIntegerWords fns (strSplit "Int Int8 Int16 Int32 UInt8 UInt16 UInt32 UInt64" 32) 0)
       (regFn fns "__floatToBits" (mkTArr mkFloatTy mkIntTy))
       (regFn fns "__floatFromBits" (mkTArr mkIntTy mkFloatTy))
       (regFn fns "__intToFloat" (mkTArr mkIntTy mkFloatTy))
@@ -7924,7 +7938,7 @@
             (if (== tg TAG_T_CON)
               (let ((n (nodeAName t)))
                 (if (||
-                      (== (evScalarName n) 1)
+                      (&& (== (evScalarName n) 1) (|| (== (integerTypeCode n) 0) (strEq n "Int")))
                       (||
                         (strEq n "String")
                         (|| (strEq n "Foreign") (|| (strEq n "Char") (strEq n "Bool")))))
@@ -9120,7 +9134,9 @@
       (if (== (nodeTag ty) TAG_T_CON)
         (if (== (vecLen (nodeBVec ty)) 0)
           (let ((n (nodeAName ty)))
-            (if (|| (strEq n "Int") (|| (strEq n "Bool") (|| (strEq n "Char") (strEq n "Float"))))
+            (if (||
+                  (> (integerTypeCode n) 0)
+                  (|| (strEq n "Bool") (|| (strEq n "Char") (strEq n "Float"))))
               1
               ; A word struct's value is its word, and the handle table
               ; it names lives outside every arena (MM-PAR-8), so it
@@ -9968,7 +9984,7 @@
       0
       (if (!= (nodeTag t) TAG_T_CON)
         0
-        (if (strEq (nodeAName t) "Int")
+        (if (> (integerTypeCode (nodeAName t)) 0)
           1
           (if (strEq (nodeAName t) "Float")
             2
@@ -9985,21 +10001,41 @@
         "__floatToInt"
         "")))
     (head (spineHead e))
+    (fromInt (tyIntegerCode tc source))
+    (toInt (tyIntegerCode tc target))
   )
-    (if (== (strLen primitive) 0)
+    (if (|| (&& (> fromInt 0) (!= fromInt 64)) (&& (> toInt 0) (!= toInt 64)))
       {
-        (if (&& (== to 2) (== from 0))
-          (emitMismatchTy tc mkFloatTy source (spanOf (spineArgAt e 1))))
-        (if (== to 2)
-          (memSetWord (nodeA e) 2 (mkEVarAt "Float" (spanOf (spineArgAt e 0)))))
+        (if (|| (== from 0) (== to 0))
+          (emitMismatch tc "a numeric type" (tyRender source) (spanOf (spineArgAt e 1))))
+        (memSetWord
+          head
+          3
+          (+
+            (*
+              (if (== from 2)
+                129
+                fromInt)
+              256)
+            (if (== to 2)
+              129
+              toInt)))
         (memSetWord head 1 "cast")
       }
-      (let ((value (spineArgAt e 1)))
+      (if (== (strLen primitive) 0)
         {
-          (memSetWord e 0 TAG_E_APP)
-          (memSetWord e 1 (mkEVarAt primitive (nodeSpan head)))
-          (memSetWord e 2 value)
-        }))))
+          (if (&& (== to 2) (== from 0))
+            (emitMismatchTy tc mkFloatTy source (spanOf (spineArgAt e 1))))
+          (if (== to 2)
+            (memSetWord (nodeA e) 2 (mkEVarAt "Float" (spanOf (spineArgAt e 0)))))
+          (memSetWord head 1 "cast")
+        }
+        (let ((value (spineArgAt e 1)))
+          {
+            (memSetWord e 0 TAG_E_APP)
+            (memSetWord e 1 (mkEVarAt primitive (nodeSpan head)))
+            (memSetWord e 2 value)
+          })))))
 
 (pub :: isCastOperation (-> String Bool))
 (pub fn (isCastOperation name)
@@ -11993,7 +12029,9 @@
           (let ((n (nodeAName ty)))
             (if (||
                   (strEq n "String")
-                  (|| (strEq n "Int") (|| (strEq n "Float") (|| (strEq n "Bool") (strEq n "Char")))))
+                  (||
+                    (> (integerTypeCode n) 0)
+                    (|| (strEq n "Float") (|| (strEq n "Bool") (strEq n "Char")))))
               1
               ; A `sealed shared` struct (MM-PAR-16): its module built
               ; every operation for several bindings at once, and the
@@ -12575,12 +12613,16 @@
                           (&&
                             (|| (strEq hname "__contract") (strEq hname "parallel$lends"))
                             (== (spineArgs e 0) 2))
-                          (&& (strEq hname "__asm.sym") (== (spineArgs e 0) 1))))
-                    (if (strEq hname "parallel$lends")
-                      (checkParLends tc e)
-                      (if (strEq hname "__asm.sym")
-                        (checkAsmSym tc (nodeB e))
-                        (checkContractForm tc e)))
+                          (||
+                            (&& (strEq hname "__asm.sym") (== (spineArgs e 0) 1))
+                            (&& (isIntegerWordName hname) (== (spineArgs e 0) 1)))))
+                    (if (isIntegerWordName hname)
+                      (checkIntegerWord tc (nodeB e) hname)
+                      (if (strEq hname "parallel$lends")
+                        (checkParLends tc e)
+                        (if (strEq hname "__asm.sym")
+                          (checkAsmSym tc (nodeB e))
+                          (checkContractForm tc e))))
                     (if (&&
                           (== headIsVar 1)
                           (&&
@@ -13177,8 +13219,13 @@
                   (showSplice e arg)
                   (if (strEq n "Bool")
                     (showSpliceBool e arg)
-                    (if (strEq n "Int")
-                      (showRewriteTo tc head "Fmt" "fmtInt" (spanOf e))
+                    (if (> (integerTypeCode n) 0)
+                      (if (strEq n "Int")
+                        (showRewriteTo tc head "Fmt" "fmtInt" (spanOf e))
+                        {
+                          (showSplice e (showIntegerExpr tc arg n (spanOf e)))
+                          0
+                        })
                       (if (strEq n "Float")
                         (showRewriteTo tc head "Fmt" "fmtFloat" (spanOf e))
                         (if (strEq n "Char")
@@ -13401,7 +13448,9 @@
           (let ((n (nodeAName ty)))
             (if (||
                   (strEq n "String")
-                  (|| (strEq n "Int") (|| (strEq n "Float") (|| (strEq n "Bool") (strEq n "Char")))))
+                  (||
+                    (> (integerTypeCode n) 0)
+                    (|| (strEq n "Float") (|| (strEq n "Bool") (strEq n "Char")))))
               0
               (let ((key (showTyName ty)))
                 (if (== (showSeenName seen key 0) 1)
@@ -13597,14 +13646,27 @@
 ; the expression `x` that reads it. Scalars take the builtin's own
 ; rendering here rather than an instance - a `String` field is
 ; quoted - and a nested `data`/`struct` takes the ancestor stack.
+(pub :: showIntegerExpr (-> Int Int String Int Int))
+(pub fn (showIntegerExpr tc value name sp)
+  (showCall1
+    (showHelperName
+      tc
+      "Fmt"
+      (if (integerUnsigned (integerTypeCode name))
+        "fmtUIntWord"
+        "fmtInt")
+      sp)
+    (showCall1 (concat "__integer.word." name) value sp)
+    sp))
+
 (pub :: showFieldExpr (-> Int Int Int Int Int))
 (pub fn (showFieldExpr tc fty x sp)
   (let ((ty (tyExpandAliases tc fty 0)))
     (let ((n (nodeAName ty)))
       (if (strEq n "String")
         (showCall1 (showEnsureString tc sp) x sp)
-        (if (strEq n "Int")
-          (showCall1 (showHelperName tc "Fmt" "fmtInt" sp) x sp)
+        (if (> (integerTypeCode n) 0)
+          (showIntegerExpr tc x n sp)
           (if (strEq n "Float")
             (showCall1 (showHelperName tc "Fmt" "fmtFloat" sp) x sp)
             (if (strEq n "Bool")
@@ -14112,27 +14174,29 @@
 
 (pub :: isNumOp (-> String Int))
 (pub fn (isNumOp n)
-  (if (strEq n "+")
+  (if (sizedTyIn n "% & | ^ << >>")
     1
-    (if (strEq n "-")
+    (if (strEq n "+")
       1
-      (if (strEq n "*")
+      (if (strEq n "-")
         1
-        (if (strEq n "/")
+        (if (strEq n "*")
           1
-          (if (strEq n "==")
+          (if (strEq n "/")
             1
-            (if (strEq n "!=")
+            (if (strEq n "==")
               1
-              (if (strEq n "<")
+              (if (strEq n "!=")
                 1
-                (if (strEq n ">")
+                (if (strEq n "<")
                   1
-                  (if (strEq n "<=")
+                  (if (strEq n ">")
                     1
-                    (if (strEq n ">=")
+                    (if (strEq n "<=")
                       1
-                      0)))))))))))
+                      (if (strEq n ">=")
+                        1
+                        0))))))))))))
 
 (pub :: isNumCmpOp (-> String Int))
 (pub fn (isNumCmpOp n)
@@ -14165,6 +14229,35 @@
 ; emitter compares CONTENT rather than the two handles. See
 ; `equalityIsStringly` for when that fires and why it cannot fire on an
 ; ordinary `Int`.
+(pub :: tyIntegerCode (-> Int Int Int))
+(pub fn (tyIntegerCode tc ty)
+  (let ((t (castNormTy tc ty)))
+    (if (&& (!= t 0) (== (nodeTag t) TAG_T_CON))
+      (integerTypeCode (nodeAName t))
+      0)))
+
+; Both operands have one precise integer type. A parser-inserted unary
+; zero adopts the operand's type; a written literal remains Int.
+(pub :: checkIntegerOperands (-> Int String Int Int Int Int Int Int))
+(pub fn (checkIntegerOperands tc op l r lt0 rt head)
+  (let ((mut lt lt0))
+    {
+      (if (&& (strEq op "-") (&& (== (nodeTag l) TAG_E_INT) (== (nodeB l) 1)))
+        (set lt rt))
+      (let ((code (tyIntegerCode tc lt)))
+        {
+          (if (== code 0)
+            (emitMismatch tc (tyRender rt) (tyRender lt) (spanOf l)))
+          (if (== (tyCompat tc lt rt) 0)
+            (emitMismatchTy tc lt rt (spanOf r)))
+          (if (&& (&& (> code 0) (!= code 64)) (== code (tyIntegerCode tc rt)))
+            (memSetWord head 3 code))
+          (if (== (isNumCmpOp op) 1)
+            mkBoolTy
+            lt)
+        })
+    }))
+
 (pub :: checkNumeric (-> Int String Int Int Int Int))
 (pub fn (checkNumeric tc op l r head)
   ; Word 1 of the head VAR node is the operator's name. Writing
@@ -14174,6 +14267,7 @@
   (let ((mut lt (checkExprH tc l 0)))
     (let ((rt (checkExprH tc r 0)))
       {
+        (memSetWord head 3 0)
         ; The parser marks only the zero it inserts for unary `(- x)`.
         ; Give that zero Float's tag when x is Float; a written Int zero
         ; remains an Int and cannot make mixed arithmetic well typed.
@@ -14211,46 +14305,54 @@
             (if (== (isNumCmpOp op) 1)
               mkBoolTy
               (mkNode TAG_T_ERR 0 0 0))
-            (if (|| (== (tyIsFloatTy lt) 1) (== (tyIsFloatTy rt) 1))
-              {
-                (if (&& (== (tyIsFloatTy lt) 0) (== (tyCompat tc lt mkFloatTy) 0))
-                  (emitMismatch tc "Float" (tyRender lt) (spanOf l))
-                  (refuseUnknownOperand tc "Float" lt (spanOf l)))
-                (if (&& (== (tyIsFloatTy rt) 0) (== (tyCompat tc rt mkFloatTy) 0))
-                  (emitMismatch tc "Float" (tyRender rt) (spanOf r))
-                  (refuseUnknownOperand tc "Float" rt (spanOf r)))
-                ; The one thing `restrict(no-wrap)` and
-                ; `restrict(no-trap)` need and cannot
-                ; find out for themselves: this `+`/`-`/`*`/`/` is a
-                ; FLOAT operation, so it lowers to
-                ; `fadd`/`fsub`/`fmul`/`fdiv` and has no wraparound
-                ; to refuse and no integer trap to require. Recorded
-                ; only when
-                ; BOTH operands are Float or compatible with it -
-                ; that is exactly the pair of tests above, so a
-                ; mixed-operand expression, which is a type error
-                ; here, is not also excused there.
-                (if (&&
-                      (|| (== (isWrapOp op) 1) (== (isTrapOp op) 1))
-                      (&&
-                        (|| (== (tyIsFloatTy lt) 1) (== (tyCompat tc lt mkFloatTy) 1))
-                        (|| (== (tyIsFloatTy rt) 1) (== (tyCompat tc rt mkFloatTy) 1))))
-                  (tcFloatOpAdd tc head))
-                (if (== (isNumCmpOp op) 1)
-                  mkBoolTy
-                  mkFloatTy)
-              }
-              {
-                (if (== (subtypeCompatAllows tc mkIntTy lt) 0)
-                  (emitMismatch tc "Int" (tyRender lt) (spanOf l))
-                  (refuseUnknownOperand tc "Int" lt (spanOf l)))
-                (if (== (subtypeCompatAllows tc mkIntTy rt) 0)
-                  (emitMismatch tc "Int" (tyRender rt) (spanOf r))
-                  (refuseUnknownOperand tc "Int" rt (spanOf r)))
-                (if (== (isNumCmpOp op) 1)
-                  mkBoolTy
-                  mkIntTy)
-              })))
+            (if (&&
+                  (||
+                    (&& (> (tyIntegerCode tc lt) 0) (!= (tyIntegerCode tc lt) 64))
+                    (&& (> (tyIntegerCode tc rt) 0) (!= (tyIntegerCode tc rt) 64)))
+                  (&& (== (tyIsFloatTy lt) 0) (== (tyIsFloatTy rt) 0)))
+              (checkIntegerOperands tc op l r lt rt head)
+              (if (|| (== (tyIsFloatTy lt) 1) (== (tyIsFloatTy rt) 1))
+                {
+                  (if (sizedTyIn op "% & | ^ << >>")
+                    (emitMismatch tc "an integer" "Float" (nodeSpan head)))
+                  (if (&& (== (tyIsFloatTy lt) 0) (== (tyCompat tc lt mkFloatTy) 0))
+                    (emitMismatch tc "Float" (tyRender lt) (spanOf l))
+                    (refuseUnknownOperand tc "Float" lt (spanOf l)))
+                  (if (&& (== (tyIsFloatTy rt) 0) (== (tyCompat tc rt mkFloatTy) 0))
+                    (emitMismatch tc "Float" (tyRender rt) (spanOf r))
+                    (refuseUnknownOperand tc "Float" rt (spanOf r)))
+                  ; The one thing `restrict(no-wrap)` and
+                  ; `restrict(no-trap)` need and cannot
+                  ; find out for themselves: this `+`/`-`/`*`/`/` is a
+                  ; FLOAT operation, so it lowers to
+                  ; `fadd`/`fsub`/`fmul`/`fdiv` and has no wraparound
+                  ; to refuse and no integer trap to require. Recorded
+                  ; only when
+                  ; BOTH operands are Float or compatible with it -
+                  ; that is exactly the pair of tests above, so a
+                  ; mixed-operand expression, which is a type error
+                  ; here, is not also excused there.
+                  (if (&&
+                        (|| (== (isWrapOp op) 1) (== (isTrapOp op) 1))
+                        (&&
+                          (|| (== (tyIsFloatTy lt) 1) (== (tyCompat tc lt mkFloatTy) 1))
+                          (|| (== (tyIsFloatTy rt) 1) (== (tyCompat tc rt mkFloatTy) 1))))
+                    (tcFloatOpAdd tc head))
+                  (if (== (isNumCmpOp op) 1)
+                    mkBoolTy
+                    mkFloatTy)
+                }
+                {
+                  (if (== (subtypeCompatAllows tc mkIntTy lt) 0)
+                    (emitMismatch tc "Int" (tyRender lt) (spanOf l))
+                    (refuseUnknownOperand tc "Int" lt (spanOf l)))
+                  (if (== (subtypeCompatAllows tc mkIntTy rt) 0)
+                    (emitMismatch tc "Int" (tyRender rt) (spanOf r))
+                    (refuseUnknownOperand tc "Int" rt (spanOf r)))
+                  (if (== (isNumCmpOp op) 1)
+                    mkBoolTy
+                    mkIntTy)
+                }))))
       })))
 
 ; Does this comparison compare two STRINGS?
@@ -15246,30 +15348,10 @@
 (pub :: tcScalarTyName (-> String Int))
 (pub fn (tcScalarTyName n)
   (if (||
-        (strEq n "Int")
+        (> (integerTypeCode n) 0)
         (||
           (strEq n "Bool")
-          (||
-            (strEq n "Char")
-            (||
-              (strEq n "Float")
-              (||
-                (strEq n "I8")
-                (||
-                  (strEq n "I16")
-                  (||
-                    (strEq n "I32")
-                    (||
-                      (strEq n "I64")
-                      (||
-                        (strEq n "U8")
-                        (||
-                          (strEq n "U16")
-                          (||
-                            (strEq n "U32")
-                            (||
-                              (strEq n "U64")
-                              (|| (strEq n "F32") (|| (strEq n "F64") (strEq n "Foreign")))))))))))))))
+          (|| (strEq n "Char") (|| (strEq n "Float") (|| (strEq n "Foreign") false)))))
     1
     0))
 
@@ -20168,7 +20250,7 @@
               (let ((tys (memGetWordVec c 1)))
                 (if (< j (vecLen tys))
                   (vecGet tys j)
-                  mkI64Ty)))))))))
+                  mkTErr)))))))))
 
 (pub :: declaredFieldIndex (-> (Vec Int) String Int Int))
 (pub fn (declaredFieldIndex declared fname i)
@@ -20262,7 +20344,7 @@
           (refusePendingOperand tc baseTy "struct or data type" (spanOf (nodeA e)))
           (if (&& (== (tyIsSilentWild baseTy) 0) (== (tyIsErr baseTy) 0))
             (emitMismatch tc "struct or data type" (tyRender baseTy) (spanOf (nodeA e))))))
-      mkI64Ty
+      mkIntTy
     }))
 
 ; ------------------------------------------------------------------
@@ -22019,55 +22101,107 @@
       ; literal against a scrutinee the checker knows is not a String
       ; is AX3004 here, where the old address comparison would have
       ; silently never matched.
-      (if (== tag TAG_E_STR)
-        (checkLitPatternTy tc mkStringTy fitTy (nodeSpan pat))
-        (if (== tag TAG_P_CON0)
-          (checkCtorPattern tc (nodeAName pat) vecNew (nodeSpan pat) fitTy scrutTy)
-          (if (== tag TAG_E_APP)
-            (let ((head (spineHead pat)))
-              (if (!= (nodeTag head) TAG_E_VAR)
-                0
-                (checkCtorPattern
-                  tc
-                  (nodeAName head)
-                  (spineArgVec pat vecNew)
-                  (nodeSpan head)
-                  fitTy
-                  scrutTy)))
-            ; A NAMED constructor pattern. Every field it mentions must be one
-            ; the constructor declares - a miss is AX3007, anchored at the
-            ; FIELD NAME, which is why the parser keeps each name as a spanned
-            ; node. The pattern is then reordered into the positional spine
-            ; and checked by the ordinary path, so field types, binding and
-            ; AX3003 all behave as they do for `(Rect w h)`.
-            ;
-            ; There is deliberately no arity check: stage0 fills an omitted
-            ; field with a wildcard, so a partial named pattern is legal.
-            (if (== tag TAG_P_CONNAMED)
-              (let ((ctor (findCtor tc (nodeAName pat))))
-                (if (== ctor 0)
-                  (checkCtorPattern tc (nodeAName pat) vecNew (nodeSpan pat) fitTy scrutTy)
-                  (let ((declared (memGetWordVec ctor 4)))
-                    {
-                      (checkNamedPatFields tc (nodeBVec pat) declared (bareOf (nodeAName pat)) 0)
-                      (if (== (as declared Int) 0)
-                        0
-                        (checkCtorPattern
-                          tc
-                          (nodeAName pat)
-                          (spineArgVec
-                            (namedPatSpine
-                              (nodeAName pat)
-                              declared
-                              (nodeBVec pat)
-                              (nodeCVec pat)
-                              (nodeSpan pat))
-                            vecNew)
-                          (nodeSpan pat)
-                          fitTy
-                          scrutTy))
-                    })))
-              0)))))))
+      (if (&& (> (tyIntegerCode tc fitTy) 0) (!= (tyIntegerCode tc fitTy) 64))
+        (if (== tag TAG_E_INT)
+          (checkIntegerPattern tc pat fitTy)
+          (if (== tag TAG_E_FLT)
+            (emitMismatchTy tc fitTy mkFloatTy (nodeSpan pat))
+            (checkPatternIntegerRest tc pat scrutTy fitTy)))
+        (checkPatternIntegerRest tc pat scrutTy fitTy)))))
+
+(pub :: checkIntegerPattern (-> Int Int Int Int))
+(pub fn (checkIntegerPattern tc pat ty)
+  (let (
+    (code (tyIntegerCode tc ty))
+    (bits (integerBits code))
+    (value (nodeA pat))
+    (minimum (if (integerUnsigned code)
+      0
+      (integerMinPattern bits)))
+    (maximum (if (integerUnsigned code)
+      (if (== bits 64)
+        9223372036854775807
+        (- (<< 1 bits) 1))
+      (- (- 0 (integerMinPattern bits)) 1)))
+  )
+    (if (|| (< value minimum) (> value maximum))
+      (emitDiag
+        tc
+        (diagSetLabel
+          (mkDiag
+            SEV_ERROR
+            "AX3004"
+            "type-mismatch"
+            (nodeSpan pat)
+            (concat
+              "integer pattern `"
+              (concat
+                (fmtInt value)
+                (concat "` is outside the range of `" (concat (tyRender ty) "`"))))
+            0
+            0
+            "Use an integer literal within the scrutinee type's range. Patterns test the mathematical value; they do not truncate or reinterpret its bits.")
+          "pattern is outside the type's range"))
+      0)))
+
+(pub :: integerMinPattern (-> Int Int))
+(pub fn (integerMinPattern bits)
+  (if (== bits 64)
+    (- (- 0 9223372036854775807) 1)
+    (- 0 (<< 1 (- bits 1)))))
+
+(pub :: checkPatternIntegerRest (-> Int Int Int Int Int))
+(pub fn (checkPatternIntegerRest tc pat scrutTy fitTy)
+  (let ((tag (nodeTag pat)))
+    (if (== tag TAG_E_STR)
+      (checkLitPatternTy tc mkStringTy fitTy (nodeSpan pat))
+      (if (== tag TAG_P_CON0)
+        (checkCtorPattern tc (nodeAName pat) vecNew (nodeSpan pat) fitTy scrutTy)
+        (if (== tag TAG_E_APP)
+          (let ((head (spineHead pat)))
+            (if (!= (nodeTag head) TAG_E_VAR)
+              0
+              (checkCtorPattern
+                tc
+                (nodeAName head)
+                (spineArgVec pat vecNew)
+                (nodeSpan head)
+                fitTy
+                scrutTy)))
+          ; A NAMED constructor pattern. Every field it mentions must be one
+          ; the constructor declares - a miss is AX3007, anchored at the
+          ; FIELD NAME, which is why the parser keeps each name as a spanned
+          ; node. The pattern is then reordered into the positional spine
+          ; and checked by the ordinary path, so field types, binding and
+          ; AX3003 all behave as they do for `(Rect w h)`.
+          ;
+          ; There is deliberately no arity check: stage0 fills an omitted
+          ; field with a wildcard, so a partial named pattern is legal.
+          (if (== tag TAG_P_CONNAMED)
+            (let ((ctor (findCtor tc (nodeAName pat))))
+              (if (== ctor 0)
+                (checkCtorPattern tc (nodeAName pat) vecNew (nodeSpan pat) fitTy scrutTy)
+                (let ((declared (memGetWordVec ctor 4)))
+                  {
+                    (checkNamedPatFields tc (nodeBVec pat) declared (bareOf (nodeAName pat)) 0)
+                    (if (== (as declared Int) 0)
+                      0
+                      (checkCtorPattern
+                        tc
+                        (nodeAName pat)
+                        (spineArgVec
+                          (namedPatSpine
+                            (nodeAName pat)
+                            declared
+                            (nodeBVec pat)
+                            (nodeCVec pat)
+                            (nodeSpan pat))
+                          vecNew)
+                        (nodeSpan pat)
+                        fitTy
+                        scrutTy))
+                  })))
+            0))))))
 
 ; The instantiation environment for a constructor pattern: the
 ; declaring type's parameters, paired positionally with the
@@ -22698,6 +22832,26 @@
 ; inferred arrow is recorded only over a still-placeholder type: a
 ; declared signature is authoritative and never overwritten.
 ; ------------------------------------------------------------------
+; Primitive representations are compiler contracts, so a declaration
+; cannot replace one with a heap object under the same spelling.
+(pub :: checkBuiltinTypeDefinition (-> Int Int Int))
+(pub fn (checkBuiltinTypeDefinition tc d)
+  (if (&&
+        (== (declNamespace (nodeTag d)) NS_TYPE)
+        (|| (!= (as (typeKeywordCanon (nodeAName d)) Int) 0) (sizedTyIn (nodeAName d) "Vec Option")))
+    (emitDiag
+      tc
+      (mkDiag
+        SEV_ERROR
+        "AX3006"
+        "duplicate-definition"
+        (nodeSpan d)
+        (concat "cannot redefine built-in type `" (concat (nodeAName d) "`"))
+        0
+        0
+        "Choose another type name. Primitive types and built-in containers keep the representation and ownership rules the compiler assigns them."))
+    0))
+
 (pub :: tcWalkDecls (-> Int Int Int))
 ; The MERGED list, not the entry file's: stage0 type-checks the
 ; bodies of imported modules too, and renders each diagnostic against
@@ -22713,6 +22867,7 @@
       (let ((d (vecGet decls i)))
         {
           (memSetWord tc 14 (unitIndexFor (memGetWordVec tc 13) (nodeModule d)))
+          (checkBuiltinTypeDefinition tc d)
           (let ((tag (nodeTag d)))
             (if (== tag TAG_D_SIG)
               {
@@ -24489,7 +24644,7 @@
     1
     (if (strEq n "-")
       1
-      (if (strEq n "*")
+      (if (|| (strEq n "*") (strEq n "<<"))
         1
         0))))
 
@@ -24512,7 +24667,9 @@
         ; carrying a fix (`addChecked`, `(-> Int Int (Result Int
         ; Error))`) that does not typecheck against a `Float`.
         (if (! (== (tcFloatOpIn tc (spineHead w)) 1))
-          (emitRestrictWrap tc d r (nodeSpan w) (nodeAName (spineHead w))))
+          (if (> (nodeIntegerOp w) 0)
+            (emitRestrictWidth tc d r w false)
+            (emitRestrictWrap tc d r (nodeSpan w) (nodeAName (spineHead w)))))
         (restrictEmitWraps tc d r wraps (+ i 1))
       })))
 
@@ -24721,7 +24878,9 @@
         ; carrying a fix (`divChecked`, `(-> Int Int (Result Int
         ; Error))`) that does not typecheck against a `Float`.
         (if (! (== (tcFloatOpIn tc (spineHead w)) 1))
-          (emitRestrictTrap tc d r (nodeSpan w) (nodeAName (spineHead w))))
+          (if (> (nodeIntegerOp w) 0)
+            (emitRestrictWidth tc d r w true)
+            (emitRestrictTrap tc d r (nodeSpan w) (nodeAName (spineHead w)))))
         (restrictEmitTraps tc d r found (+ i 1))
       })))
 
@@ -24939,6 +25098,30 @@
         0
         "`no-cast` rejects explicit conversions in this body. Use an operation that preserves the required type, or remove the restriction. `no-cast:deep` also follows resolved callees; an unresolved path cannot establish the claim."))))
 
+(pub :: emitRestrictWidth (-> Int Int String Int Bool Int))
+(pub fn (emitRestrictWidth tc d restriction expression trapping)
+  (emitDiag
+    tc
+    (mkDiag
+      SEV_ERROR
+      "AX3049"
+      "restriction-violated"
+      (nodeSpan expression)
+      (concat
+        "`"
+        (concat
+          (nodeAName (spineHead expression))
+          (concat
+            "` in the body of `"
+            (concat
+              (bareOf (nodeAName d))
+              (concat "`, which claims `restrict(" (concat restriction ")`"))))))
+      0
+      0
+      (if trapping
+        "Fixed-width division and remainder trap on zero; signed minimum divided by -1 also traps. Shifts trap when the count is negative or reaches the type's width. Remove this restriction when these operations are intended."
+        "Fixed-width addition, subtraction, multiplication and left shifts wrap at the declared width. Use explicit widening and checked Int arithmetic when the range fits Int, or remove this restriction when wrapping is intended."))))
+
 ; AX3049 at the OPERATOR, for `no-wrap`, LOCAL like `no-cast`: it has
 ; a span, and the fix is where the span is. Unlike `no-cast` there are
 ; three possible fixes rather than one, so the message names which
@@ -24963,7 +25146,7 @@
           ")`")
         0
         0
-        "`no-wrap` is LOCAL, like `no-cast`: on `Int` operands `+`, `-` and `*` lower to plain `add`/`sub`/`mul` with no overflow check, so a silent wraparound is an act this body performs by writing the raw operator, not a fact the effect row or call graph carries - it is refused where it is written, and a callee's arithmetic is the callee's claim to make. `stdlib/Err.ax` has the checked alternative for each: `addChecked`, `subChecked`, `mulChecked`, every one `(-> Int Int (Result Int Error))`. Calling one pulls `Alloc` into this body's effect row (constructing the `Result` allocates), so `no-wrap` cannot be satisfied together with `no-alloc` or `pure` by a body that needs arithmetic - write the checked call and match its `Err`, accept the row, or delete the tag. TWO OPERATORS ARE NOT REFUSED, because neither can wrap: the same three spellings on `Float` operands, which lower to `fadd`/`fsub`/`fmul`, and the `for` keyword's own counter increment, which the parser writes and whose loop guard bounds it"))))
+        "Left shifts can discard high bits and are refused by `no-wrap`. `no-wrap` is LOCAL, like `no-cast`: on `Int` operands `+`, `-` and `*` lower to plain `add`/`sub`/`mul` with no overflow check, so a silent wraparound is an act this body performs by writing the raw operator, not a fact the effect row or call graph carries - it is refused where it is written, and a callee's arithmetic is the callee's claim to make. `stdlib/Err.ax` has the checked alternative for each: `addChecked`, `subChecked`, `mulChecked`, every one `(-> Int Int (Result Int Error))`. Calling one pulls `Alloc` into this body's effect row (constructing the `Result` allocates), so `no-wrap` cannot be satisfied together with `no-alloc` or `pure` by a body that needs arithmetic - write the checked call and match its `Err`, accept the row, or delete the tag. TWO OPERATORS ARE NOT REFUSED, because neither can wrap: the same three spellings on `Float` operands, which lower to `fadd`/`fsub`/`fmul`, and the `for` keyword's own counter increment, which the parser writes and whose loop guard bounds it"))))
 
 ; AX3049 at the OPERATOR, for `no-trap`, LOCAL like `no-cast`
 ; and `no-wrap`: it has a span, and the fix is where the span is.

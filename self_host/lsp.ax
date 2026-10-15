@@ -4289,22 +4289,23 @@
 ;   word 0   total bytes (what the reclaim is told to keep)
 ;   word 1   document count N
 ;   word 2   unconsumed reader bytes U
-;   word 3.. N groups of (uri length, text length, cache length, version, open)
-;   then     U bytes of reader input, then each uri, text and cache
+;   word 3.. N groups of (uri length, text length, generated-name length,
+;                         version, open, semantic-token length)
+;   then     U bytes of reader input, then each uri, text and both caches
 ;            in order
 ;
 ; The third entry is the generated-name cache (`docPutGen`):
 ; it is filled at `didOpen`/`didChange`, which is before the reclaim,
 ; so it crosses the boundary like the text or the first request after
 ; every edit answers from an empty one.
-(pub :: lspSnapshot (-> (Vec String) (Vec String) (Vec String) (Vec Int) Int Int))
-(pub fn (lspSnapshot uris texts gens meta r)
+(pub :: lspSnapshot (-> (Vec String) (Vec String) (Vec String) (Vec Int) (Vec String) Int Int))
+(pub fn (lspSnapshot uris texts gens meta highlights r)
   (let (
     (n (vecLen uris))
     (u (- (rdFilled r) (rdConsumed r)))
   )
     (let (
-      (head (* 8 (+ 3 (* 5 n))))
+      (head (* 8 (+ 3 (* 6 n))))
       (mut total 0)
       (mut i 0)
     )
@@ -4316,7 +4317,9 @@
                          total
                          (+
                            (strLen (vecGetStr uris i))
-                           (+ (strLen (vecGetStr texts i)) (strLen (lspGenAt gens i))))))
+                           (+
+                             (strLen (vecGetStr texts i))
+                             (+ (strLen (lspGenAt gens i)) (strLen (lspHlCacheAt highlights i)))))))
             (set i (+ i 1))
           })
         (let (
@@ -4330,11 +4333,12 @@
             (memSetWord b 2 u)
             (while (< j n)
               {
-                (memSetWord b (+ 3 (* 5 j)) (strLen (vecGetStr uris j)))
-                (memSetWord b (+ 4 (* 5 j)) (strLen (vecGetStr texts j)))
-                (memSetWord b (+ 5 (* 5 j)) (strLen (lspGenAt gens j)))
-                (memSetWord b (+ 6 (* 5 j)) (vecGet meta (* 2 j)))
-                (memSetWord b (+ 7 (* 5 j)) (vecGet meta (+ 1 (* 2 j))))
+                (memSetWord b (+ 3 (* 6 j)) (strLen (vecGetStr uris j)))
+                (memSetWord b (+ 4 (* 6 j)) (strLen (vecGetStr texts j)))
+                (memSetWord b (+ 5 (* 6 j)) (strLen (lspGenAt gens j)))
+                (memSetWord b (+ 6 (* 6 j)) (vecGet meta (* 2 j)))
+                (memSetWord b (+ 7 (* 6 j)) (vecGet meta (+ 1 (* 2 j))))
+                (memSetWord b (+ 8 (* 6 j)) (strLen (lspHlCacheAt highlights j)))
                 (set j (+ j 1))
               })
             (memCopy (+ b at) (strData (rdPending r)) u)
@@ -4345,6 +4349,7 @@
                 (uu (vecGetStr uris j))
                 (tt (vecGetStr texts j))
                 (gg (lspGenAt gens j))
+                (hh (lspHlCacheAt highlights j))
               )
                 {
                   (memCopy (+ b at) (strData uu) (strLen uu))
@@ -4353,6 +4358,8 @@
                   (set at (+ at (strLen tt)))
                   (memCopy (+ b at) (strData gg) (strLen gg))
                   (set at (+ at (strLen gg)))
+                  (memCopy (+ b at) (strData hh) (strLen hh))
+                  (set at (+ at (strLen hh)))
                   (set j (+ j 1))
                 }))
             b
@@ -4370,7 +4377,7 @@
     (vecGetStr gens j)))
 
 ; Rebuild the store and the reader out of a snapshot the reclaim has
-; already moved down to the waterline, and answer the five handles in
+; already moved down to the waterline, and answer the six handles in
 ; a block, since a function answers one value.
 ;
 ; The strings are `strDup`ped out of the block rather than pointed into
@@ -4386,39 +4393,44 @@
     (ft vecNew)
     (fg vecNew)
     (fm vecNew)
+    (fh vecNew)
     (r (rdNew stdin))
   )
     (let (
       (mut j 0)
-      (mut at (* 8 (+ 3 (* 5 n))))
+      (mut at (* 8 (+ 3 (* 6 n))))
     )
       {
         (rdReseat r (+ b at) u)
         (set at (+ at u))
         (while (< j n)
           (let (
-            (ul (memGetWord b (+ 3 (* 5 j))))
-            (tl (memGetWord b (+ 4 (* 5 j))))
-            (gl (memGetWord b (+ 5 (* 5 j))))
+            (ul (memGetWord b (+ 3 (* 6 j))))
+            (tl (memGetWord b (+ 4 (* 6 j))))
+            (gl (memGetWord b (+ 5 (* 6 j))))
+            (hl (memGetWord b (+ 8 (* 6 j))))
           )
             {
-              (vecPush fm (memGetWord b (+ 6 (* 5 j))))
-              (vecPush fm (memGetWord b (+ 7 (* 5 j))))
+              (vecPush fm (memGetWord b (+ 6 (* 6 j))))
+              (vecPush fm (memGetWord b (+ 7 (* 6 j))))
               (vecPush fu (strDup (strWrap (+ b at) ul)))
               (set at (+ at ul))
               (vecPush ft (strDup (strWrap (+ b at) tl)))
               (set at (+ at tl))
               (vecPush fg (strDup (strWrap (+ b at) gl)))
               (set at (+ at gl))
+              (vecPush fh (strDup (strWrap (+ b at) hl)))
+              (set at (+ at hl))
               (set j (+ j 1))
             }))
-        (let ((h (memAlloc 40)))
+        (let ((h (memAlloc 48)))
           {
             (memSetWord h 0 fu)
             (memSetWord h 1 ft)
             (memSetWord h 2 r)
             (memSetWord h 3 fg)
             (memSetWord h 4 fm)
+            (memSetWord h 5 fh)
             h
           })
       })))
@@ -4770,16 +4782,16 @@
     (lspNavHandles method)
     (|| (lspViewHandles method) (|| (lspFixHandles method) (lspHlHandles method)))))
 
-(pub :: lspExtDispatch (-> String Int Int (Vec String) (Vec a) (Vec String) Int))
+(pub :: lspExtDispatch (-> String Int Int (Vec String) (Vec a) (Vec String) (Vec String) Int))
 ;@axiom:effect(io)
-(pub fn (lspExtDispatch method id params uris texts gens)
+(pub fn (lspExtDispatch method id params uris texts gens highlights)
   (if (lspNavHandles method)
     (lspNavDispatch method id params uris texts gens)
     (if (lspViewHandles method)
       (lspViewDispatch method id params uris texts)
       (if (lspFixHandles method)
         (lspFixDispatch method id params uris texts)
-        (lspHlDispatch method id params uris texts)))))
+        (lspHlDispatch method id params uris texts highlights)))))
 
 ; ==================================================================
 ; SECTION NAV: references, rename, document highlights, local
@@ -14724,7 +14736,7 @@
 ; parameter, a `let`, this document's function, type, macro or effect,
 ; a constructor, a name from elsewhere - and not by how it is spelled;
 ; keywords, strings, numbers, comments, AXTAG decorators, region
-; annotations and operators come from the bytes, so a document that
+; names and operators come from the bytes, so a document that
 ; does not parse is still highlighted, every identifier falling back to
 ; a lexical rule and every declaration head keeping its colour.
 ;
@@ -14750,12 +14762,12 @@
 ; occurrences.
 ;
 ; WHAT THE BYTES KNOW THAT THE OCCURRENCES DO NOT. A struct field, a
-; macro rule, a type inside `cast`, the module of an `import`, an
+; macro rule, a type inside `as`, the module of an `import`, an
 ; `effect`'s operations, an `extern` item, a `region`'s name, and the
 ; whole of a document that does not parse have no occurrence. The scan
 ; keeps a stack of the open brackets, each with its head keyword, how
 ; many items have followed the head, and the CONTEXT that head opens -
-; a type (`::`, `struct`, `type`, `extern`, `effect`, `cast`), a `data`
+; a type (`::`, `struct`, `type`, `extern`, `effect`, `as`), a `data`
 ; whose children are constructor forms, an `import` whose identifiers
 ; are namespaces, the header list of a `fn`, `macro` or `lambda` whose
 ; identifiers are parameters, a macro's rules whose patterns bind, a
@@ -14772,9 +14784,8 @@
 ; same line, from column 0 otherwise), length, type index, modifier
 ; bitset - in UTF-16 code units, sorted, never overlapping, and never
 ; spanning a line break: a multi-line string or block comment is one
-; token per line, empty pieces skipped. No `range` and no delta
-; request is offered: a client that wants either falls back to `full`,
-; and `full` is one parse.
+; token per line, empty pieces skipped. Range replies retain whole
+; overlapping tokens. Delta replies edit the previous full integer array.
 ;
 ; WHAT IT COSTS: one parse, one line index, one occurrence walk, one
 ; byte scan, two bucket indexes (start offset -> occurrence, binder
@@ -14785,24 +14796,35 @@
 ; outline is 0.37x. The gate holds it under 2.00x.
 (pub :: lspHlHandles (-> String Bool))
 (pub fn (lspHlHandles method)
-  (strEq method "textDocument/semanticTokens/full"))
+  (||
+    (strEq method "textDocument/semanticTokens/full")
+    (||
+      (strEq method "textDocument/semanticTokens/full/delta")
+      (strEq method "textDocument/semanticTokens/range"))))
 
-(pub :: lspHlDispatch (-> String Int Int (Vec String) (Vec a) Int))
+(pub :: lspHlDispatch (-> String Int Int (Vec String) (Vec a) (Vec String) Int))
 ;@axiom:effect(io)
-(pub fn (lspHlDispatch method id params uris texts)
-  (let ((src (docText uris texts (lspParamsUri params))))
-    (if (strEq method "textDocument/semanticTokens/full")
-      (lspReply id (lspSemanticTokens src))
-      (lspError id (- 0 32601) (concat "method not found: " method)))))
+(pub fn (lspHlDispatch method id params uris texts highlights)
+  (let ((uri (lspParamsUri params)))
+    (let ((src (docText uris texts uri)))
+      (if (strEq method "textDocument/semanticTokens/range")
+        (lspReply id (lspHlRange src (jsonGet params "range")))
+        (if (strEq method "textDocument/semanticTokens/full/delta")
+          (lspReplyEncoded
+            id
+            (lspHlDelta uris highlights uri src (jsonGetStr params "previousResultId")))
+          (lspReplyEncoded id (lspHlFull uris highlights uri src)))))))
 
-; `semanticTokensProvider` carries the legend the integers index, and
-; says which of the three requests exist: `full` alone.
+; Every full result has an identifier while its document is in the store.
 (pub :: lspHlCaps (-> Int Int))
 (pub fn (lspHlCaps caps)
   (jsonObjPut
     caps
     "semanticTokensProvider"
-    (jsonObjPut (jsonObjPut jsonObj "legend" lspSemanticLegend) "full" (jsonBool 1))))
+    (jsonObjPut
+      (jsonObjPut (jsonObjPut jsonObj "legend" lspSemanticLegend) "range" (jsonBool 1))
+      "full"
+      (jsonObjPut jsonObj "delta" (jsonBool 1)))))
 
 ; ------------------------------------------------------------------
 ; The legend. A token type is an index into `tokenTypes`, a modifier
@@ -15520,6 +15542,217 @@
       (jsonObjPut jsonObj "data" (memGetWord st 2))
     }))
 
+; One full token array per document survives the arena reset. Edits keep
+; it as the delta base; closing drops the array and keeps its serial only.
+(pub :: lspHlCacheAt (-> (Vec String) Int String))
+(pub fn (lspHlCacheAt highlights i)
+  (if (|| (< i 0) (>= i (vecLen highlights)))
+    "{}"
+    (vecGetStr highlights i)))
+
+(pub :: lspHlCachePut (-> (Vec String) (Vec String) String String Int))
+(pub fn (lspHlCachePut uris highlights uri result)
+  (let ((i (docFind uris uri)))
+    {
+      (if (>= i 0)
+        {
+          (while (<= (vecLen highlights) i)
+            (vecPush highlights "{}"))
+          (vecSet highlights i result)
+        })
+      0
+    }))
+
+(pub :: lspHlForget (-> (Vec String) (Vec String) String Int))
+(pub fn (lspHlForget uris highlights uri)
+  (let ((old (jsonParse (lspHlCacheAt highlights (docFind uris uri)))))
+    (lspHlCachePut
+      uris
+      highlights
+      uri
+      (jsonWrite (jsonObjPut jsonObj "resultId" (jsonGet old "resultId"))))))
+
+(pub :: lspHlNextId (-> (Vec String) (Vec String) String String))
+(pub fn (lspHlNextId uris highlights uri)
+  (let (
+    (i (docFind uris uri))
+    (old (jsonParse (lspHlCacheAt highlights i)))
+  )
+    (let ((parts (strSplit (jsonGetStr old "resultId") 58)))
+      (let ((serial
+        (if (== (vecLen parts) 2)
+          (match (strParseInt (vecGetStr parts 1))
+            ((None) 0)
+            ((Some n) n))
+          0)))
+        (concat (fmtInt i) (concat ":" (fmtInt (+ serial 1))))))))
+
+; Serialise the token array once for both the wire and the retained cache.
+(pub :: lspHlRemember (-> (Vec String) (Vec String) String String Int String))
+(pub fn (lspHlRemember uris highlights uri resultId data)
+  (let ((encoded (jsonWrite
+                   (jsonObjPut (jsonObjPut jsonObj "resultId" (jsonStr resultId)) "data" data))))
+    {
+      (lspHlCachePut uris highlights uri encoded)
+      encoded
+    }))
+
+(pub :: lspHlFull (-> (Vec String) (Vec String) String String String))
+(pub fn (lspHlFull uris highlights uri src)
+  (let ((result (lspSemanticTokens src)))
+    (if (< (docFind uris uri) 0)
+      (jsonWrite result)
+      (lspHlRemember uris highlights uri (lspHlNextId uris highlights uri) (jsonGet result "data")))))
+
+; One minimal contiguous edit of the encoded integers. Prefix and suffix
+; need not end at token boundaries: the protocol edits array elements.
+(pub :: lspHlEdits (-> Int Int Int))
+(pub fn (lspHlEdits old next)
+  (let (
+    (oldLen (jsonArrLen old))
+    (nextLen (jsonArrLen next))
+    (mut prefix 0)
+    (mut suffix 0)
+    (edits jsonArr)
+  )
+    {
+      (while (&&
+               (< prefix oldLen)
+               (&&
+                 (< prefix nextLen)
+                 (== (jsonInt (jsonArrGet old prefix)) (jsonInt (jsonArrGet next prefix)))))
+        (set prefix (+ prefix 1)))
+      (while (&&
+               (< suffix (- oldLen prefix))
+               (&&
+                 (< suffix (- nextLen prefix))
+                 (==
+                   (jsonInt (jsonArrGet old (- (- oldLen suffix) 1)))
+                   (jsonInt (jsonArrGet next (- (- nextLen suffix) 1))))))
+        (set suffix (+ suffix 1)))
+      (if (|| (!= prefix oldLen) (!= prefix nextLen))
+        (let (
+          (inserted jsonArr)
+          (mut i prefix)
+        )
+          {
+            (while (< i (- nextLen suffix))
+              {
+                (jsonArrPush inserted (jsonArrGet next i))
+                (set i (+ i 1))
+              })
+            (jsonArrPush
+              edits
+              (jsonObjPut
+                (jsonObjPut
+                  (jsonObjPut jsonObj "start" (jsonNum prefix))
+                  "deleteCount"
+                  (jsonNum (- (- oldLen prefix) suffix)))
+                "data"
+                inserted))
+          }))
+      edits
+    }))
+
+(pub :: lspHlDelta (-> (Vec String) (Vec String) String String String String))
+(pub fn (lspHlDelta uris highlights uri src previous)
+  (let (
+    (old (jsonParse (lspHlCacheAt highlights (docFind uris uri))))
+    (result (lspSemanticTokens src))
+  )
+    (if (< (docFind uris uri) 0)
+      (jsonWrite result)
+      (let (
+        (resultId (lspHlNextId uris highlights uri))
+        (data (jsonGet result "data"))
+      )
+        (let ((full (lspHlRemember uris highlights uri resultId data)))
+          (if (&& (!= (jsonGet old "data") 0) (strEq previous (jsonGetStr old "resultId")))
+            (jsonWrite
+              (jsonObjPut
+                (jsonObjPut jsonObj "resultId" (jsonStr resultId))
+                "edits"
+                (lspHlEdits (jsonGet old "data") data)))
+            full))))))
+
+(pub :: lspHlLineEnd (-> String Int Int Int))
+(pub fn (lspHlLineEnd src start end)
+  (let ((mut i start))
+    {
+      (while (&& (< i end) (&& (!= (strByte src i) 10) (!= (strByte src i) 13)))
+        (set i (+ i 1)))
+      i
+    }))
+
+; The result includes whole tokens that overlap the half-open range.
+; Re-encoding starts from document origin, not from the range's start.
+(pub :: lspHlRange (-> String Int Int))
+(pub fn (lspHlRange src range)
+  (let (
+    (ix (lspLineIndex src))
+    (start (lspSyncOffset src ix (jsonGet range "start")))
+    (end (lspSyncOffset src ix (jsonGet range "end")))
+    (out jsonArr)
+  )
+    {
+      (if (&& (>= start 0) (&& (> end start) (lspSyncRangeOrdered range)))
+        (let (
+          (sl (lspLineOfIx ix start))
+          (el (lspLineOfIx ix end))
+          (data (jsonGet (lspSemanticTokens src) "data"))
+        )
+          (let (
+            (sc (lspCharFrom src (vecGet ix sl) start))
+            (ec (lspCharFrom src (vecGet ix el) end))
+            (mut i 0)
+            (mut line 0)
+            (mut column 0)
+            (mut previousLine 0)
+            (mut previousColumn 0)
+          )
+            (while (< i (jsonArrLen data))
+              (let (
+                (dl (jsonInt (jsonArrGet data i)))
+                (dc (jsonInt (jsonArrGet data (+ i 1))))
+                (length (jsonInt (jsonArrGet data (+ i 2))))
+              )
+                {
+                  (set line (+ line dl))
+                  (set column (if (== dl 0)
+                    (+ column dc)
+                    dc))
+                  (if (&&
+                        (|| (> line sl) (&& (== line sl) (> (+ column length) sc)))
+                        (|| (< line el) (&& (== line el) (< column ec))))
+                    {
+                      (jsonArrPush out (jsonNum (- line previousLine)))
+                      (jsonArrPush
+                        out
+                        (jsonNum
+                          (if (== line previousLine)
+                            (- column previousColumn)
+                            column)))
+                      (jsonArrPush out (jsonArrGet data (+ i 2)))
+                      (jsonArrPush out (jsonArrGet data (+ i 3)))
+                      (jsonArrPush out (jsonArrGet data (+ i 4)))
+                      (set previousLine line)
+                      (set previousColumn column)
+                    })
+                  (set i (+ i 5))
+                })))))
+      (jsonObjPut jsonObj "data" out)
+    }))
+
+; `result` is JSON emitted by this server, never client-supplied text.
+(pub :: lspReplyEncoded (-> Int String Int))
+;@axiom:effect(io)
+(pub fn (lspReplyEncoded id result)
+  (rpcWrite
+    stdout
+    (concat
+      "{\"jsonrpc\":\"2.0\",\"id\":"
+      (concat (jsonWrite id) (concat ",\"result\":" (concat result "}"))))))
+
 ; ------------------------------------------------------------------
 ; The indexes, each `fnIdxBuckets` slots of 0 or a Vec.
 ; ------------------------------------------------------------------
@@ -15673,11 +15906,7 @@
 ; tracking advances with every token so the next one's conversion
 ; starts where this one ended.
 ;
-; A `\r` at `e` is not part of the token. The line index and every
-; scanner here split on `\n` alone, so in a CRLF document a `;` line
-; and each piece of a multi-line string would run up to and including
-; the `\r` - one unit past the line a client that ends lines at
-; `\r\n` sees, on every comment of the file.
+; A trailing CR belongs to the line ending and is excluded.
 (pub :: lspHlEmit (-> Int Int Int Int Int Int))
 (pub fn (lspHlEmit st s e0 ty mods)
   (let ((e (lspHlTrimCr (memGetWordStr st 0) s e0)))
@@ -15737,10 +15966,12 @@
   )
     {
       (while (< k e)
-        (let ((nl (findNewline src k e)))
+        (let ((nl (lspHlLineEnd src k e)))
           {
             (lspHlEmit st k nl ty mods)
             (set k (+ nl 1))
+            (if (&& (< k e) (&& (== (strByte src nl) 13) (== (strByte src k) 10)))
+              (set k (+ k 1)))
           }))
       0
     }))
@@ -15779,7 +16010,8 @@
             (if (== ch 59)
               (let ((e (findNewline src i n)))
                 {
-                  (lspHlEmitPacked st i e (lspHlCommentClass src i n))
+                  (let ((code (lspHlCommentClass src i n)))
+                    (lspHlEmitLines st i e (% code 128) (/ code 128)))
                   (set i e)
                 })
               (if (&& (== ch 35) (isBlockOpen src i n))
@@ -16417,15 +16649,16 @@
 ; ------------------------------------------------------------------
 ; The loop
 ; ------------------------------------------------------------------
-; Four store vectors: URI, text, generated-name cache and version/open pairs.
+; Five store vectors: URI, text, generated names, versions and token results.
 (pub :: lspStoreNew Int)
 (pub fn (lspStoreNew)
-  (let ((s (memAlloc 32)))
+  (let ((s (memAlloc 40)))
     {
       (memSetWord s 0 vecNew)
       (memSetWord s 1 vecNew)
       (memSetWord s 2 vecNew)
       (memSetWord s 3 vecNew)
+      (memSetWord s 4 vecNew)
       s
     }))
 
@@ -16437,7 +16670,7 @@
   ; sit below it; everything a message allocates sits above it and
   ; is reclaimed at the end of the message.
   ;
-  ; The store's four vectors live in a raw block (`lspStoreNew`)
+  ; The store's five vectors live in a raw block (`lspStoreNew`)
   ; rather than in `mut` slots. A slot of a counted type owns its
   ; value, so a `set` after the reclaim would release a vector the
   ; reclaim has already handed back to the allocator. A raw word
@@ -16459,6 +16692,7 @@
             (texts (memGetWordVec store 1))
             (gens (memGetWordVec store 2))
             (meta (memGetWordVec store 3))
+            (highlights (memGetWordVec store 4))
           )
             (match (rpcRead r)
               ; The client went away without saying `exit`, or its
@@ -16541,14 +16775,24 @@
                                           (if (strEq method "textDocument/didClose")
                                             (let ((uri (lspParamsUri params)))
                                               (if (lspDocClose uris texts gens meta uri)
-                                                (lspPublish uri jsonArr)))
+                                                {
+                                                  (lspHlForget uris highlights uri)
+                                                  (lspPublish uri jsonArr)
+                                                }))
                                             ; Everything the three extension sections
                                             ; answer - navigation, views, fixes - is
                                             ; dispatched through one door, so the chain
                                             ; above stays the lifecycle and the four
                                             ; original questions.
                                             (if (lspExtHandles method)
-                                              (lspExtDispatch method id params uris texts gens)
+                                              (lspExtDispatch
+                                                method
+                                                id
+                                                params
+                                                uris
+                                                texts
+                                                gens
+                                                highlights)
                                               ; Anything else: a request must be answered,
                                               ; a notification must not be.
                                               (if (! (== id 0))
@@ -16565,6 +16809,7 @@
                         (memGetWordVec store 1)
                         (memGetWordVec store 2)
                         (memGetWordVec store 3)
+                        (memGetWordVec store 4)
                         r)))
             (let ((kept (__axiom_arena_reset_keeping m snap (memGetWord snap 0))))
               (let ((h (lspRestore kept)))
@@ -16574,6 +16819,7 @@
                   (set r (memGetWord h 2))
                   (memSetWord store 2 (memGetWordVec h 3))
                   (memSetWord store 3 (memGetWordVec h 4))
+                  (memSetWord store 4 (memGetWordVec h 5))
                 })))
         })
       (sysExitWith status)
