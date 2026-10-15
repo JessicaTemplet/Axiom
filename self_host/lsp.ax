@@ -1339,6 +1339,592 @@
     }))
 
 ; ------------------------------------------------------------------
+; Reading a document that does not parse
+;
+; Most of an editing session is spent in a file that does not parse:
+; a form is half typed, a paren is missing, a string is still open.
+; The parser stops at the first error, and every request that read
+; its answer used to answer `null` until the file parsed again. So
+; hover, definition, completion, the outline, references and the
+; semantic tokens all went blank exactly while somebody was typing.
+;
+; `lspParse` is the parse those requests read. A document that parses
+; gets its own parse, unchanged. One that does not is read again at
+; the token level, the way a Lisp editor reads it:
+;
+;   1. An unterminated string is closed at the end of its line.
+;   2. The brackets are balanced. A `(` at column zero while a form is
+;      still open starts a new top-level form, and the open one is
+;      closed before it, at its last token. A closer nothing opened is
+;      dropped, and so is a lexical error.
+;   3. Each top-level form is parsed on its own. One that fails is
+;      repaired where the parser stopped: a missing operand before a
+;      closer gets a `()`, a stray atom is dropped, and otherwise the
+;      innermost form around the error becomes `()`, then goes, then
+;      its parent is tried. A form that cannot be repaired is dropped.
+;
+; Every token keeps its own span, and a token the repair adds is given
+; an empty span beside a real one, so every node of the result indexes
+; the document as it is. `(fn (f x)` half typed at the end of a file
+; still binds `x`, and every declaration after a broken one is still
+; there.
+;
+; Word 2 of the answer says how it was got: a clean parse leaves the
+; parser's own position there, which is never negative. `-1` means the
+; repair added tokens and dropped none, and `-2` that it dropped some,
+; so a reference in the dropped text is missing from the tree. Rename
+; refuses a `-2` tree, since its edit would miss that reference.
+;
+; The diagnostics are untouched: `lspCheckDoc` still reports the
+; parser's own error, and nothing here reaches `axiom check`.
+; ------------------------------------------------------------------
+
+;; The declarations of `src` for a request to read: its parse, or the
+;; declarations that still parse around its errors. Word 0 is always
+;; 1 and word 1 the declarations.
+(pub :: lspParse (-> String Int))
+(pub fn (lspParse src)
+  (let (
+    (toks (lex src))
+    (tags (scanAxtags src))
+  )
+    (let ((pr (parseModuleWith toks tags)))
+      (if (== (memGetWord pr 0) 0)
+        (lspRecover src toks tags)
+        pr))))
+
+;; Whether `lspParse` had to drop tokens to answer.
+(pub :: lspParseLossy (-> Int Bool))
+(pub fn (lspParseLossy pr)
+  (== (memGetWord pr 2) (- 0 2)))
+
+;; The recovered parse of a document whose own parse failed.
+(pub :: lspRecover (-> String (Vec Int) (Vec Int) Int))
+(pub fn (lspRecover src toks tags)
+  (let (
+    (fixed (lspRecoverStrings src toks 0))
+    (flat vecNew)
+    (bounds vecNew)
+    (decls vecNew)
+  )
+    (let (
+      (lossy (lspRecoverBalance src fixed flat bounds))
+      (mut drop 0)
+      (mut i 0)
+    )
+      {
+        ; A string closed at its line's end may have taken in code
+        ; that followed the quote on that line.
+        (set drop (if (>= (lspRecOpenString src toks) 0)
+          1
+          lossy))
+        (while (< (+ i 1) (vecLen bounds))
+          (let ((r (lspRepairForm (lspRecSlice flat (vecGet bounds i) (vecGet bounds (+ i 1))))))
+            {
+              (if (== (memGetWord r 0) 0)
+                (set drop 1)
+                {
+                  (if (== (memGetWord r 2) (- 0 2))
+                    (set drop 1))
+                  (lspRecAppend decls (memGetWordVec r 1))
+                })
+              (set i (+ i 2))
+            }))
+        (attachAxtags decls 0 tags 0)
+        (pOk decls (if (== drop 1)
+          (- 0 2)
+          (- 0 1)))
+      })))
+
+;; The tokens of `src` with each unterminated string closed at the end
+;; of its line. The lexer runs a string with no closing quote to the
+;; end of the document, which would swallow every form after it; the
+;; line's newline is read as the quote instead, so the length and
+;; every offset stay the same. A string with no newline after it is
+;; left to the balancing step, which drops it. `round` bounds the
+;; re-lexing: eight open strings in one document are fixed, and any
+;; beyond are dropped.
+(pub :: lspRecoverStrings (-> String (Vec Int) Int (Vec Int)))
+(pub fn (lspRecoverStrings src toks round)
+  (let ((at (lspRecOpenString src toks)))
+    (if (|| (< at 0) (>= round 8))
+      toks
+      (let ((nl (findNewline src at (strLen src))))
+        (if (>= nl (strLen src))
+          toks
+          (let ((src2 (concat (strSlice src 0 nl) (concat "\"" (strSlice src (+ nl 1) (- (strLen src) (+ nl 1)))))))
+            (lspRecoverStrings src2 (lex src2) (+ round 1))))))))
+
+;; The offset of the first unterminated string's opening quote, or -1.
+(pub :: lspRecOpenString (-> String (Vec Int) Int))
+(pub fn (lspRecOpenString src toks)
+  (let (
+    (mut i 0)
+    (mut at (- 0 1))
+  )
+    {
+      (while (if (< i (vecLen toks))
+        (< at 0)
+        false)
+        (let ((t (vecGet toks i)))
+          {
+            (if (== (kindInt (tokenKind t)) (kindInt TK_ERROR))
+              (let ((s (spanStart (tokenSpan t))))
+                (if (< s (strLen src))
+                  (if (== (strByte src s) 34)
+                    (set at s)))))
+            (set i (+ i 1))
+          }))
+      at
+    }))
+
+;; 1, 2 or 3 for a `(`, `{` or `[`, and 0 for any other token.
+(pub :: lspRecOpener (-> Int Int))
+(pub fn (lspRecOpener t)
+  (let ((k (kindInt (tokenKind t))))
+    (if (== k (kindInt TK_LPAREN))
+      1
+      (if (== k (kindInt TK_LBRACE))
+        2
+        (if (== k (kindInt TK_LBRACKET))
+          3
+          0)))))
+
+;; 1, 2 or 3 for a `)`, `}` or `]`, and 0 for any other token.
+(pub :: lspRecCloser (-> Int Int))
+(pub fn (lspRecCloser t)
+  (let ((k (kindInt (tokenKind t))))
+    (if (== k (kindInt TK_RPAREN))
+      1
+      (if (== k (kindInt TK_RBRACE))
+        2
+        (if (== k (kindInt TK_RBRACKET))
+          3
+          0)))))
+
+;; A closer of bracket kind `b` the repair supplies, with an empty span
+;; at `at`.
+(pub :: lspRecClose (-> Int Int Int))
+(pub fn (lspRecClose b at)
+  (if (== b 1)
+    (mkToken TK_RPAREN ")" (mkSpan at at))
+    (if (== b 2)
+      (mkToken TK_RBRACE "}" (mkSpan at at))
+      (mkToken TK_RBRACKET "]" (mkSpan at at)))))
+
+;; Whether `stack` holds bracket kind `b` anywhere.
+(pub :: lspRecHas (-> (Vec Int) Int Bool))
+(pub fn (lspRecHas stack b)
+  (let (
+    (mut i 0)
+    (mut hit false)
+  )
+    {
+      (while (if (< i (vecLen stack))
+        (! hit)
+        false)
+        {
+          (if (== (vecGet stack i) b)
+            (set hit true))
+          (set i (+ i 1))
+        })
+      hit
+    }))
+
+;; Close every form `stack` still holds, innermost first.
+(pub :: lspRecCloseAll (-> (Vec Int) (Vec Int) Int Int))
+(pub fn (lspRecCloseAll stack flat at)
+  {
+    (while (> (vecLen stack) 0)
+      (vecPush flat (lspRecClose (vecPop stack) at)))
+    0
+  })
+
+;; Balance `toks` into `flat`, and record each top-level form as a
+;; start and end index pair in `bounds`. Answers 1 when a token was
+;; dropped and 0 when every token was kept.
+(pub :: lspRecoverBalance (-> String (Vec Int) (Vec Int) (Vec Int) Int))
+(pub fn (lspRecoverBalance src toks flat bounds)
+  (let (
+    (stack vecNew)
+    (n (vecLen toks))
+    (mut i 0)
+    (mut start 0)
+    (mut lastEnd 0)
+    (mut lossy 0)
+  )
+    {
+      (while (< i n)
+        (let ((t (vecGet toks i)))
+          (let (
+            (k (kindInt (tokenKind t)))
+            (op (lspRecOpener t))
+            (cl (lspRecCloser t))
+            (s (spanStart (tokenSpan t)))
+          )
+            {
+              (if (|| (== k (kindInt TK_ERROR)) (== k (kindInt TK_ERROR_ESC)))
+                (set lossy 1)
+                (if (> op 0)
+                  {
+                    ; A `(` at column zero while a form is open: the
+                    ; open form ended before it, at its last token.
+                    (if (&& (== op 1) (&& (> (vecLen stack) 0) (lspRecColZero src s)))
+                      {
+                        (lspRecCloseAll stack flat lastEnd)
+                        (vecPush bounds start)
+                        (vecPush bounds (vecLen flat))
+                      })
+                    (if (== (vecLen stack) 0)
+                      (set start (vecLen flat)))
+                    (vecPush stack op)
+                    (vecPush flat t)
+                    (set lastEnd (spanEnd (tokenSpan t)))
+                  }
+                  (if (> cl 0)
+                    (if (lspRecHas stack cl)
+                      {
+                        ; A closer ends the form it matches, and
+                        ; every form still open inside that one.
+                        (while (!= (vecLast stack) cl)
+                          (vecPush flat (lspRecClose (vecPop stack) lastEnd)))
+                        (vecPop stack)
+                        (vecPush flat t)
+                        (set lastEnd (spanEnd (tokenSpan t)))
+                        (if (== (vecLen stack) 0)
+                          {
+                            (vecPush bounds start)
+                            (vecPush bounds (vecLen flat))
+                          })
+                      }
+                      (set lossy 1))
+                    (if (!= k (kindInt TK_EOF))
+                      {
+                        (if (== (vecLen stack) 0)
+                          (set start (vecLen flat)))
+                        (vecPush flat t)
+                        (set lastEnd (spanEnd (tokenSpan t)))
+                        (if (== (vecLen stack) 0)
+                          {
+                            (vecPush bounds start)
+                            (vecPush bounds (vecLen flat))
+                          })
+                      }))))
+              (set i (+ i 1))
+            })))
+      (if (> (vecLen stack) 0)
+        {
+          (lspRecCloseAll stack flat lastEnd)
+          (vecPush bounds start)
+          (vecPush bounds (vecLen flat))
+        })
+      lossy
+    }))
+
+;; Whether the byte at `s` begins its line.
+(pub :: lspRecColZero (-> String Int Bool))
+(pub fn (lspRecColZero src s)
+  (if (== s 0)
+    true
+    (if (<= s (strLen src))
+      (== (strByte src (- s 1)) 10)
+      false)))
+
+;; `flat[s..e)` as a token vector of its own, ending in the EOF token
+;; the parser expects.
+(pub :: lspRecSlice (-> (Vec Int) Int Int (Vec Int)))
+(pub fn (lspRecSlice flat s e)
+  (let (
+    (out vecNew)
+    (mut i s)
+  )
+    {
+      (while (< i e)
+        {
+          (vecPush out (vecGet flat i))
+          (set i (+ i 1))
+        })
+      (let ((at (if (> e s)
+        (spanEnd (tokenSpan (vecGet flat (- e 1))))
+        0)))
+        (vecPush out (mkToken TK_EOF "" (mkSpan at at))))
+      out
+    }))
+
+;; Append every element of `more` to `out`.
+(pub :: lspRecAppend (-> (Vec Int) (Vec Int) Int))
+(pub fn (lspRecAppend out more)
+  (let ((mut i 0))
+    {
+      (while (< i (vecLen more))
+        {
+          (vecPush out (vecGet more i))
+          (set i (+ i 1))
+        })
+      0
+    }))
+
+;; One top-level form's parse, repaired where it fails. Word 0 is 0
+;; when no repair made it parse. Word 2 is -1 when a repair only added
+;; tokens, and -2 when it dropped some of the form's own.
+(pub :: lspRepairForm (-> (Vec Int) Int))
+(pub fn (lspRepairForm toks)
+  (let ((pr (parseModuleWith toks vecNew)))
+    (if (!= (memGetWord pr 0) 0)
+      pr
+      (lspRepairStep toks pr vecNew 32 (lspRecRealCount toks)))))
+
+(pub :: lspRepairStep (-> (Vec Int) Int (Vec Int) Int Int Int))
+(pub fn (lspRepairStep toks pr tried left want)
+  (if (<= left 0)
+    pr
+    (let ((next (lspRepairEdit toks (lspRecErrAt toks (memGetWord pr 2)) tried)))
+      (if (== (vecLen next) 0)
+        pr
+        (let ((pr2 (parseModuleWith next vecNew)))
+          (if (!= (memGetWord pr2 0) 0)
+            (pOk (memGetWordVec pr2 1) (if (== (lspRecRealCount next) want)
+              (- 0 1)
+              (- 0 2)))
+            (lspRepairStep next pr2 tried (- left 1) want)))))))
+
+;; How many of `toks` the document wrote. A token the repair adds has
+;; an empty span and every token the lexer writes has a byte, so the
+;; count falls exactly when a repair drops one.
+(pub :: lspRecRealCount (-> (Vec Int) Int))
+(pub fn (lspRecRealCount toks)
+  (let (
+    (mut i 0)
+    (mut c 0)
+  )
+    {
+      (while (< i (vecLen toks))
+        (let ((sp (tokenSpan (vecGet toks i))))
+          {
+            (if (> (spanEnd sp) (spanStart sp))
+              (set c (+ c 1)))
+            (set i (+ i 1))
+          }))
+      c
+    }))
+
+;; The token the parser stopped at, as an index of a real token: the
+;; EOF token, and any position past it, is read as the last real one.
+(pub :: lspRecErrAt (-> (Vec Int) Int Int))
+(pub fn (lspRecErrAt toks e)
+  (let ((last (- (vecLen toks) 2)))
+    (if (< last 0)
+      0
+      (if (> e last)
+        last
+        (if (< e 0)
+          0
+          e)))))
+
+;; Whether `tried` records action `a` at span start `s`, recording it
+;; when it does not. Each action is taken once at each place, which is
+;; what makes the repair end.
+(pub :: lspRecTry (-> (Vec Int) Int Int Bool))
+(pub fn (lspRecTry tried a s)
+  (let (
+    (mut i 0)
+    (mut hit false)
+  )
+    {
+      (while (if (< (+ i 1) (vecLen tried))
+        (! hit)
+        false)
+        {
+          (if (&& (== (vecGet tried i) a) (== (vecGet tried (+ i 1)) s))
+            (set hit true))
+          (set i (+ i 2))
+        })
+      (if (! hit)
+        {
+          (vecPush tried a)
+          (vecPush tried s)
+        })
+      (! hit)
+    }))
+
+;; The next repair of `toks` at the token `e` the parser stopped at, as
+;; a new token vector, or an empty one when nothing is left to try.
+;;
+;; At a closer the parser wanted something before it, so a `()` goes
+;; there. At an atom, the atom goes. Otherwise the innermost form
+;; around `e` becomes `()`; a `()` the parser refuses goes; and a form
+;; already replaced passes the question to the form around it. The
+;; form's own outer brackets are never replaced: that would leave
+;; nothing to declare.
+(pub :: lspRepairEdit (-> (Vec Int) Int (Vec Int) (Vec Int)))
+(pub fn (lspRepairEdit toks e tried)
+  (let (
+    (t (vecGet toks e))
+    (s (spanStart (tokenSpan (vecGet toks e))))
+  )
+    (if (if (> (lspRecCloser t) 0)
+      (lspRecTry tried 1 s)
+      false)
+      (lspRecWithHole toks e e s s)
+      (if (if (== (lspRecOpener t) 0)
+        (if (== (lspRecCloser t) 0)
+          (lspRecTry tried 2 s)
+          false)
+        false)
+        (lspRecWithout toks e e)
+        (lspRepairWiden toks (lspRecGroupOf toks e) tried)))))
+
+;; Replace the form opening at `a`, or the one around it when that has
+;; been tried, with `()`; drop a `()` the parser refused.
+(pub :: lspRepairWiden (-> (Vec Int) Int (Vec Int) (Vec Int)))
+(pub fn (lspRepairWiden toks a tried)
+  (if (<= a 0)
+    vecNew
+    (let (
+      (b (lspRecMatch toks a))
+      (sa (spanStart (tokenSpan (vecGet toks a))))
+    )
+      (if (lspRecTry tried 3 sa)
+        (lspRecWithHole toks a (+ b 1) sa (spanStart (tokenSpan (vecGet toks b))))
+        (if (if (== b (+ a 1))
+          (lspRecTry tried 4 sa)
+          false)
+          (lspRecWithout toks a b)
+          (lspRepairWiden toks (lspRecEnclosing toks a) tried))))))
+
+;; The opener of the form a repair at `e` works on: `e` itself when it
+;; opens one, the opener a closer matches, or the innermost opener
+;; around anything else.
+(pub :: lspRecGroupOf (-> (Vec Int) Int Int))
+(pub fn (lspRecGroupOf toks e)
+  (if (> (lspRecOpener (vecGet toks e)) 0)
+    e
+    (if (> (lspRecCloser (vecGet toks e)) 0)
+      (lspRecMatchBack toks e)
+      (lspRecEnclosing toks e))))
+
+;; The index of the closer matching the opener at `a`.
+(pub :: lspRecMatch (-> (Vec Int) Int Int))
+(pub fn (lspRecMatch toks a)
+  (let (
+    (mut i (+ a 1))
+    (mut depth 1)
+    (mut at (- (vecLen toks) 2))
+  )
+    {
+      (while (if (< i (vecLen toks))
+        (> depth 0)
+        false)
+        (let ((t (vecGet toks i)))
+          {
+            (if (> (lspRecOpener t) 0)
+              (set depth (+ depth 1)))
+            (if (> (lspRecCloser t) 0)
+              {
+                (set depth (- depth 1))
+                (if (== depth 0)
+                  (set at i))
+              })
+            (set i (+ i 1))
+          }))
+      at
+    }))
+
+;; The index of the opener matching the closer at `b`.
+(pub :: lspRecMatchBack (-> (Vec Int) Int Int))
+(pub fn (lspRecMatchBack toks b)
+  (let (
+    (mut i (- b 1))
+    (mut depth 1)
+    (mut at 0)
+  )
+    {
+      (while (if (>= i 0)
+        (> depth 0)
+        false)
+        (let ((t (vecGet toks i)))
+          {
+            (if (> (lspRecCloser t) 0)
+              (set depth (+ depth 1)))
+            (if (> (lspRecOpener t) 0)
+              {
+                (set depth (- depth 1))
+                (if (== depth 0)
+                  (set at i))
+              })
+            (set i (- i 1))
+          }))
+      at
+    }))
+
+;; The index of the innermost opener whose form holds index `e`, or -1.
+(pub :: lspRecEnclosing (-> (Vec Int) Int Int))
+(pub fn (lspRecEnclosing toks e)
+  (let (
+    (mut i (- e 1))
+    (mut depth 0)
+    (mut at (- 0 1))
+  )
+    {
+      (while (if (>= i 0)
+        (< at 0)
+        false)
+        (let ((t (vecGet toks i)))
+          {
+            (if (> (lspRecCloser t) 0)
+              (set depth (+ depth 1)))
+            (if (> (lspRecOpener t) 0)
+              (if (== depth 0)
+                (set at i)
+                (set depth (- depth 1))))
+            (set i (- i 1))
+          }))
+      at
+    }))
+
+;; `toks` with indices `[a, b)` replaced by `()`, the opener spanning
+;; from `sa` and the closer from `sb`, each empty.
+(pub :: lspRecWithHole (-> (Vec Int) Int Int Int Int (Vec Int)))
+(pub fn (lspRecWithHole toks a b sa sb)
+  (let (
+    (out vecNew)
+    (mut i 0)
+  )
+    {
+      (while (< i a)
+        {
+          (vecPush out (vecGet toks i))
+          (set i (+ i 1))
+        })
+      (vecPush out (mkToken TK_LPAREN "(" (mkSpan sa sa)))
+      (vecPush out (mkToken TK_RPAREN ")" (mkSpan sb sb)))
+      (set i b)
+      (while (< i (vecLen toks))
+        {
+          (vecPush out (vecGet toks i))
+          (set i (+ i 1))
+        })
+      out
+    }))
+
+;; `toks` without indices `[a, b]`.
+(pub :: lspRecWithout (-> (Vec Int) Int Int (Vec Int)))
+(pub fn (lspRecWithout toks a b)
+  (let (
+    (out vecNew)
+    (mut i 0)
+  )
+    {
+      (while (< i (vecLen toks))
+        {
+          (if (|| (< i a) (> i b))
+            (vecPush out (vecGet toks i)))
+          (set i (+ i 1))
+        })
+      out
+    }))
+
+; ------------------------------------------------------------------
 ; Document symbols
 ;
 ; Every top-level declaration node carries its NAME's span in word 4 -
@@ -1833,7 +2419,7 @@
 (pub :: lspDefinition (-> String String Int String Int))
 ;@axiom:effect(io)
 (pub fn (lspDefinition src uri params gen)
-  (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+  (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonNull
       (let (
@@ -2341,7 +2927,7 @@
 ; lookup below rather than answering null outright.
 ;@axiom:effect(io)
 (pub fn (lspHover src uri params gen)
-  (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+  (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonNull
       (let (
@@ -2894,7 +3480,7 @@
 
 (pub :: lspDocumentSymbols (-> String Int))
 (pub fn (lspDocumentSymbols src)
-  (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+  (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonArr
       (let (
@@ -3136,7 +3722,7 @@
           (lspComplModules out seen (lspUriToPath uri) modPath)
           (lspComplList out)
         }
-      (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+      (let ((pr (lspParse src)))
         {
           (lspComplKeywords out seen prefix)
           (if (! (== (memGetWord pr 0) 0))
@@ -5590,13 +6176,21 @@
         false)
     }))
 
-; The parsed declarations of `src`, or 0 when it does not parse - the
-; one answer every request in this section gives null for.
+;; The parsed declarations of `src`, through `lspParse`: a document
+;; that does not parse answers the declarations that still parse
+;; around its errors.
 (pub :: lspNavParse (-> String (Vec Int)))
-;@axiom:effect(unsafe)
 (pub fn (lspNavParse src)
-  (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
-    (if (== (memGetWord pr 0) 0)
+  (memGetWordVec (lspParse src) 1))
+
+;; The same, or 0 when reading the document meant dropping some of its
+;; tokens: a rename over that tree would leave the dropped references
+;; spelt the old way.
+(pub :: lspNavParseExact (-> String (Vec Int)))
+;@axiom:effect(unsafe)
+(pub fn (lspNavParseExact src)
+  (let ((pr (lspParse src)))
+    (if (lspParseLossy pr)
       (cast (Vec Int) 0)
       (memGetWordVec pr 1))))
 
@@ -5907,7 +6501,7 @@
 ; ------------------------------------------------------------------
 (pub :: lspPrepareRename (-> String Int Int))
 (pub fn (lspPrepareRename src params)
-  (let ((decls (lspNavParse src)))
+  (let ((decls (lspNavParseExact src)))
     (if (==
       (cast Int decls)
       0)
@@ -5941,7 +6535,7 @@
 (pub :: lspRename (-> String String Int (Vec String) (Vec a) Int))
 ;@axiom:effect(io)
 (pub fn (lspRename src uri params uris texts)
-  (let ((decls (lspNavParse src)))
+  (let ((decls (lspNavParseExact src)))
     (if (==
       (cast Int decls)
       0)
@@ -8197,7 +8791,7 @@
 (pub :: lspSignatureHelp (-> String String Int Int))
 ;@axiom:effect(io)
 (pub fn (lspSignatureHelp src uri params)
-  (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+  (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonNull
       (let (
@@ -8679,7 +9273,7 @@
 (pub :: lspInlayHints (-> String String Int Int))
 ;@axiom:effect(io)
 (pub fn (lspInlayHints src uri params)
-  (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+  (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonArr
       ; The heads that are locals - a parameter or a `let`
@@ -9570,6 +10164,12 @@
 ; is dropped - a word that is the whole of a form, say - so the client
 ; sees each range once. Nothing is parsed: a chain of brackets is a
 ; byte question, and a document that does not parse still has one.
+;
+; Every form's end comes from ONE forward scan (`lspFormEnds`), not a
+; `lspFormEnd` per enclosing form, which cost the depth times the
+; document: 50,000 unclosed `(` hung the server for good. The chain
+; keeps the `lspSelMaxDepth` innermost forms, so the answer nests no
+; deeper than the parser itself accepts.
 ; ------------------------------------------------------------------
 (pub :: lspSelectionRanges (-> String Int Int))
 (pub fn (lspSelectionRanges src params)
@@ -9607,9 +10207,12 @@
         false)
         (vecPush opens off)
         (cast (Vec Int) 0))
+      (if (> (vecLen opens) lspSelMaxDepth)
+        (set i (- (vecLen opens) lspSelMaxDepth)))
+      (let ((ends (lspFormEnds src opens)))
       (while (< i (vecLen opens))
         (let ((o (vecGet opens i)))
-          (let ((e (lspFormEnd src o)))
+          (let ((e (vecGet ends i)))
             {
               (if (|| (!= o ps) (!= e pe))
                 {
@@ -9618,13 +10221,77 @@
                   (set pe e)
                 })
               (set i (+ i 1))
-            })))
+            }))))
       (let ((w (lspWordSpan src off)))
         (if (if (!= w 0)
           (|| (!= (spanStart w) ps) (!= (spanEnd w) pe))
           false)
           (jsonObjPut (jsonObjPut jsonObj "range" (lspRangeIx src ix w)) "parent" cur)
           cur))
+    }))
+
+;; How many enclosing forms a selection chain keeps: the parser's own
+;; nesting limit, past which no document parses anyway.
+(pub :: lspSelMaxDepth Int)
+(pub fn (lspSelMaxDepth)
+  parseMaxDepth)
+
+;; The end of every form in `opens`, as `lspFormEnd` answers it, from
+;; one forward scan. `opens` is outermost first, as `lspEnclosingOpens`
+;; answers it, and each form nests inside the one before it: so the
+;; innermost closes first, and the same scan carries on to the end of
+;; the form around it. A form nothing closes ends at the document's
+;; end, as it does for `lspFormEnd`.
+(pub :: lspFormEnds (-> String (Vec Int) (Vec Int)))
+(pub fn (lspFormEnds src opens)
+  (let (
+    (n (strLen src))
+    (k (vecLen opens))
+    (ends vecNew)
+    (mut z 0)
+  )
+    {
+      (while (< z k)
+        {
+          (vecPush ends n)
+          (set z (+ z 1))
+        })
+      (if (> k 0)
+        (let (
+          (mut i (vecGet opens (- k 1)))
+          (mut j (- k 1))
+          (mut depth 0)
+        )
+          (while (if (< i n)
+            (>= j 0)
+            false)
+            (let ((ch (strByte src i)))
+              (if (== ch 34)
+                (set i (skipStringBody src (+ i 1) n))
+                (if (isIdentStart ch)
+                  (set i (skipIdent src (+ i 1) n))
+                  (if (== ch 39)
+                    (set i (skipCharBody src (+ i 1) n))
+                    (if (&& (== ch 35) (isBlockOpen src i n))
+                      (set i (skipBlockComment src (+ i 2) n))
+                      (if (== ch 59)
+                        (set i (findNewline src i n))
+                        {
+                          (if (== ch 40)
+                            (set depth (+ depth 1)))
+                          (if (== ch 41)
+                            {
+                              (set depth (- depth 1))
+                              (if (<= depth 0)
+                                {
+                                  (vecSet ends j (+ i 1))
+                                  (set j (- j 1))
+                                  (set depth 1)
+                                })
+                            })
+                          (set i (+ i 1))
+                        })))))))))
+      ends
     }))
 
 ; ------------------------------------------------------------------
@@ -9640,7 +10307,7 @@
 (pub :: lspDocumentLinks (-> String String Int))
 ;@axiom:effect(io)
 (pub fn (lspDocumentLinks src uri)
-  (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+  (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonArr
       (let (
@@ -9711,7 +10378,7 @@
         )
           {
             (if (> (strLen src) 0)
-              (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+              (let ((pr (lspParse src)))
                 (if (! (== (memGetWord pr 0) 0))
                   (let ((decls (memGetWordVec pr 1)))
                     {
@@ -11906,7 +12573,7 @@
 (pub :: lspTypeDefinition (-> String String Int Int))
 ;@axiom:effect(io)
 (pub fn (lspTypeDefinition src uri params)
-  (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+  (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonNull
       (let (
@@ -12298,7 +12965,7 @@
 ; ------------------------------------------------------------------
 (pub :: lspCodeLens (-> String String Int))
 (pub fn (lspCodeLens src uri)
-  (let ((pr (parseModuleWith (lex src) (scanAxtags src))))
+  (let ((pr (lspParse src)))
     (if (== (memGetWord pr 0) 0)
       jsonArr
       (let (

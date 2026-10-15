@@ -454,8 +454,10 @@ Two things hold for every request that takes a position:
 - One string- and comment-aware scanner (`lspWordSpan`, `lspFormEnd`)
   finds the word under the cursor, so no two requests disagree about
   where a form ends.
-- A document that doesn't parse answers `null` or `[]`. The exceptions
-  are the requests that work from the bytes, which are named below.
+- A document that doesn't parse is still read. Every request below
+  answers from the declarations that parse around the error (see
+  [Broken code](#broken-code)), except the three that run the whole
+  pipeline: formatting, code actions and macro expansion.
 
 The sweep at the end of `scripts/check-lsp-selfhost.sh` checks that
 requests survive awkward positions. It fires every advertised request
@@ -550,8 +552,7 @@ one place where `declaration` answers and `definition` can't: a
 signature whose `fn` isn't written yet. That's what an editor sees
 mid-keystroke, and what `AX3015` reports.
 
-It answers `null` for a keyword, a builtin, a name nothing declares and
-a document that doesn't parse.
+It answers `null` for a keyword, a builtin and a name nothing declares.
 
 Tested by `SECTION NAV TESTS` in `tests/lsp/drive.py`, which asks both
 requests at the same position. The ranges must differ at a `fn` and
@@ -582,8 +583,7 @@ way `definition` resolves it. They leave out builtins, operators and
 constructors.
 
 `prepareCallHierarchy` answers `null` for a local, for a `data`,
-`struct` or macro, for a document that doesn't parse, and for an
-imported name. The two follow-up requests carry only the item, so go to
+`struct` or macro, and for an imported name. The two follow-up requests carry only the item, so go to
 the definition first and ask there. An item whose document the server
 hasn't opened answers `null`, not `[]`. An empty list would claim the
 function has no callers, and the server can't know that without reading
@@ -637,8 +637,7 @@ spelling.
   then the rest in the order they were opened.
 
 A local, a constructor, an effect name and a `fn` answer `null`. So
-does an item nothing declares, or whose document isn't open or doesn't
-parse. An empty list would claim the type stands alone, which the
+does an item nothing declares, or whose document isn't open. An empty list would claim the type stands alone, which the
 server can't know without reading the file.
 
 Tested by `SECTION NAV TESTS` in `tests/lsp/drive.py`. There the
@@ -851,9 +850,8 @@ The list is filtered on the prefix under the cursor and capped at
 client to ask again on the next keystroke. `(` is the trigger
 character.
 
-A document that doesn't parse still completes keywords. That's the
-normal case, since a file is unparseable exactly while a form is half
-written.
+A document that doesn't parse completes from what parses around the
+error, so the menu is there while a form is half written.
 
 Completion doesn't offer a name a macro would generate:
 `(deriveTag Colour)` doesn't put `tagColour` in the menu. The tests
@@ -917,7 +915,8 @@ no link and no error. `resolveProvider` is false.
 
 `textDocument/documentSymbol` answers the outline straight from the
 parse tree, with no checker running. A file with a type error still has
-an outline, and a file that doesn't parse has an empty one.
+an outline, and a file that doesn't parse lists every declaration
+that parses around the error (see [Broken code](#broken-code)).
 
 | Declaration | Symbol kind |
 |---|---|
@@ -979,9 +978,9 @@ links and workspace symbols are tested by `SECTION VIEW TESTS` in
 `textDocument/semanticTokens/full` answers every token of the
 document with its type and modifiers, in the protocol's integer
 array. [Highlighting](#highlighting) lists the legend and what each
-token marks. A document that doesn't parse still answers: keywords,
-literals, comments and every declaration's own name come from the
-bytes, and only the colour of a resolved reference needs the tree.
+token marks. Keywords, literals and comments come from the bytes, and
+a document that doesn't parse is coloured from what parses around the
+error.
 Tested by `SECTION HL TESTS` in `tests/lsp/drive.py`.
 
 ### Changing and running
@@ -1136,7 +1135,7 @@ rust-analyzer's `Run` lens works. On the example document:
              "arguments": ["/path/to/doc.ax"]}}
 ```
 
-`resolveProvider` is false. A document that doesn't parse gets `[]`.
+`resolveProvider` is false.
 
 #### Macro expansion
 
@@ -1276,6 +1275,51 @@ the exact edits, that suppressed documents reopen silent, that the
 simplified program still exits 11, and that the acknowledgement
 silences exactly one error. With every effect acknowledged, the
 program still traps 71.
+
+### Broken code
+
+You spend most of an edit with a file that doesn't parse: a form is
+half typed, a paren is missing, a string is still open. The server
+keeps answering from what still parses around the error, so hover,
+definition, completion, references, the outline and the semantic
+tokens don't go blank while you type.
+
+```scheme fragment
+(:: bump (-> Int Int))
+(fn (bump x) (+ x 1)
+
+(:: f (-> Int Int))
+(fn (f n)
+  (let ((y (bump n)))
+    (+ y (bu
+```
+
+Here the first `fn` is missing its last paren and the second is half
+typed. Hover on either `bump` quotes its signature, `y` and `n` resolve
+to their binders, the outline lists `bump` and `f`, and completion at
+`bu` offers `bump`.
+
+`lspParse` in `self_host/lsp.ax` reads such a document at the token
+level, the way a Lisp editor would:
+
+1. An unterminated string is closed at the end of its line.
+2. Brackets are balanced. A `(` at column zero while a form is still
+   open starts a new top-level form, and the open one is closed before
+   it. A closer that nothing opened is dropped.
+3. Each top-level form is parsed on its own. One that fails is
+   repaired where the parser stopped: a missing operand gets `()`, a
+   stray word is dropped, and otherwise the innermost form around the
+   error becomes `()`. A form that can't be repaired is left out.
+
+Every token keeps its own position, so every answer points at the
+document as you wrote it. The diagnostics still show the parser's own
+error.
+
+A repair that drops tokens loses whatever they named, so `rename`
+refuses such a document rather than leave a reference spelt the old
+way. A repair that only adds closers loses nothing, and rename works.
+
+Tested by `SECTION RECOVER TESTS` in `tests/lsp/drive.py`.
 
 ## Highlighting
 

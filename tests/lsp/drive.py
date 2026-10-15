@@ -1376,15 +1376,16 @@ elif offers(16, "bump", 3, "NavHelper"):
 elif "tagColour" in [i.get("label") for i in its16]:
     nwhy = ("completion offered `tagColour`, which only exists after macro "
             "expansion - these requests read the raw parse tree (MAC-TOOL-3)")
-# The document no longer parses, so nothing but keywords CAN be offered,
-# and the menu is exactly the set derived from parser.ax.
-elif [i.get("label") for i in its17] != KEYWORDS:
-    nwhy = (f"a document that does not parse offered "
-            f"{[i.get('label') for i in its17]},\n          want the "
+# The document no longer parses: a stray `(` ends it. The menu is the
+# head keywords derived from parser.ax, in order, then the names that
+# still parse around the error - this document's and the import's.
+elif [i.get("label") for i in its17 if i.get("kind") == 14] != KEYWORDS:
+    nwhy = (f"a document that does not parse offered the keywords "
+            f"{[i.get('label') for i in its17 if i.get('kind') == 14]},\n          want the "
             f"{len(KEYWORDS)} head keywords parser.ax dispatches on: {KEYWORDS}")
-elif {i.get("kind") for i in its17} != {14}:
-    nwhy = (f"keywords were offered as kinds {sorted({i.get('kind') for i in its17})}, "
-            f"want 14 (CompletionItemKind.Keyword) alone")
+elif offers(17, "Colour", 13) or offers(17, "bump", 3, "NavHelper"):
+    nwhy = ("a document that does not parse must still offer what parses around "
+            "the error: " + (offers(17, "Colour", 13) or offers(17, "bump", 3, "NavHelper")))
 elif r17.get("isIncomplete") is not True:
     nwhy = "the unparseable document's completion answered isIncomplete false"
 
@@ -1423,8 +1424,8 @@ shutil.rmtree(NAVDIR, ignore_errors=True)
 # declares the names the others reference; NavUser.ax, which imports
 # NavMain and references its `fn` and its constructor, so the
 # cross-file half of `references` and `rename` has a second open
-# document to find; and NavBroken.ax, NavMain with an unclosed paren,
-# on which every request must answer null without the session dying.
+# document to find; and NavBroken.ax, NavMain with a stray `(` after it,
+# on which every request answers what NavMain answers, except rename.
 # RefHelper.ax is opened too, so the reverse direction - the cursor on
 # an IMPORTED name, whose declaring file happens to be open - has a
 # document to answer from.
@@ -2006,8 +2007,8 @@ elif want_locs(9, [loc(A_URI, c) for c in CIRCLE_A] + [loc(B_URI, CIRCLE_B[0])])
     nwhy = "constructor `Circle` in a pattern, an expression and another document: " + want_locs(9, [loc(A_URI, c) for c in CIRCLE_A] + [loc(B_URI, CIRCLE_B[0])])
 elif want_null(10, "references on the keyword `match`"):
     nwhy = want_null(10, "references on the keyword `match`")
-elif want_null(11, "references on the document that does not parse"):
-    nwhy = want_null(11, "references on the document that does not parse")
+elif want_locs(11, [loc(C_URI, PH[0]), loc(C_URI, PH[2])]):
+    nwhy = "references on the document that does not parse: " + want_locs(11, [loc(C_URI, PH[0]), loc(C_URI, PH[2])])
 # --- document highlights --------------------------------------------
 # (c) Write on the binder and the `set` target, Read on the reads.
 elif want_hilites(12, [(ACC[0], 3), (ACC[1], 3), (ACC[2], 2), (ACC[3], 2)]):
@@ -2018,19 +2019,20 @@ elif want_hilites(14, [(RAD[0], 3), (RAD[1], 2), (RAD[2], 2)]):
     nwhy = "pattern binder highlights: " + want_hilites(14, [(RAD[0], 3), (RAD[1], 2), (RAD[2], 2)])
 elif want_null(15, "documentHighlight on a literal"):
     nwhy = want_null(15, "documentHighlight on a literal")
-elif want_null(16, "documentHighlight on the document that does not parse"):
-    nwhy = want_null(16, "documentHighlight on the document that does not parse")
+elif want_hilites(16, [(ACC[0], 3), (ACC[1], 3), (ACC[2], 2), (ACC[3], 2)]):
+    nwhy = "documentHighlight on the document that does not parse: " + want_hilites(16, [(ACC[0], 3), (ACC[1], 3), (ACC[2], 2), (ACC[3], 2)])
 # --- rename ---------------------------------------------------------
 # (d) prepareRename: the word's range and its spelling for a local;
-# null for an imported name, a keyword, and a broken document.
+# null for an imported name, a keyword, and a broken document whose
+# repair dropped a token (its stray `(`).
 elif rresp.get(17, {}).get("result") != {"range": rng(PW[1]), "placeholder": "pw"}:
     nwhy = f"prepareRename on `pw` answered {rresp.get(17, {}).get('result')!r}, want its range and placeholder"
 elif want_null(18, "prepareRename on the imported `twice`"):
     nwhy = want_null(18, "prepareRename on the imported `twice`")
 elif want_null(19, "prepareRename on the keyword `let`"):
     nwhy = want_null(19, "prepareRename on the keyword `let`")
-elif want_null(20, "prepareRename on the document that does not parse"):
-    nwhy = want_null(20, "prepareRename on the document that does not parse")
+elif want_null(20, "prepareRename on the document whose repair dropped a token"):
+    nwhy = want_null(20, "prepareRename on the document whose repair dropped a token")
 # (e) The exact edit set for the fn, under both uris.
 elif got_edits(21) != SURFACE_EDITS:
     nwhy = f"rename `area` -> `surface` answered {got_edits(21)!r}, want {SURFACE_EDITS!r}"
@@ -2045,8 +2047,8 @@ elif want_null(24, "rename `area` to `count`, which this document declares"):
     nwhy = want_null(24, "rename `area` to `count`, which this document declares")
 elif want_null(25, "rename `area` to `useArea`, which the importing document declares"):
     nwhy = want_null(25, "rename `area` to `useArea`, which the importing document declares")
-elif want_null(26, "rename on the document that does not parse"):
-    nwhy = want_null(26, "rename on the document that does not parse")
+elif want_null(26, "rename on the document whose repair dropped a token"):
+    nwhy = want_null(26, "rename on the document whose repair dropped a token")
 elif got_edits(27) != TOTAL_EDITS:
     nwhy = f"rename of the local `acc` answered {got_edits(27)!r}, want {TOTAL_EDITS!r}"
 # --- definition and hover on locals ---------------------------------
@@ -2074,10 +2076,10 @@ elif nav_hover(63, [BX_TEXT, "bound by `let` in `main`", f"bx : {BOX_NAME}"], BX
     nwhy = "hover on a struct-bound let: " + nav_hover(63, [BX_TEXT, "bound by `let` in `main`", f"bx : {BOX_NAME}"], BX[1])
 elif nav_hover(64, [TP_TEXT, "bound by `let` in `main`", f"tp : {TP_TYPE}"], TP[1]):
     nwhy = "hover on a field-bound let: " + nav_hover(64, [TP_TEXT, "bound by `let` in `main`", f"tp : {TP_TYPE}"], TP[1])
-elif want_null(32, "hover on the document that does not parse"):
-    nwhy = want_null(32, "hover on the document that does not parse")
-elif want_null(33, "definition on the document that does not parse"):
-    nwhy = want_null(33, "definition on the document that does not parse")
+elif nav_hover(32, [f"pw : {PARAM_TYPE}", "parameter of `area`"], PW[1]):
+    nwhy = "hover on the document that does not parse: " + nav_hover(32, [f"pw : {PARAM_TYPE}", "parameter of `area`"], PW[1])
+elif nav_landed(33, C_URI, PH[1]):
+    nwhy = "definition on the document that does not parse: " + nav_landed(33, C_URI, PH[1])
 # --- type positions ---------------------------------------------------
 # The cursor on `Shape` in a SIGNATURE finds the declaration and every
 # other type position; the declaration's highlight is the one Write
@@ -2359,8 +2361,9 @@ elif nav_hover(47, [SHAPE_DATA_TEXT, "constructor `Circle` of `Shape`",
 elif nav_landed(48, A_URI, CIRCLE_A[0]):
     cwhy = ("definition on the constructor's own declaration: "
             + nav_landed(48, A_URI, CIRCLE_A[0]))
-elif want_null(49, "definition on `Circle` in the document that does not parse"):
-    cwhy = want_null(49, "definition on `Circle` in the document that does not parse")
+elif nav_landed(49, C_URI, CIRCLE_A[0]):
+    cwhy = ("definition on `Circle` in the document that does not parse: "
+            + nav_landed(49, C_URI, CIRCLE_A[0]))
 
 if cwhy:
     print(f"FAIL nav-constructors: {cwhy}")
@@ -2663,11 +2666,14 @@ CH_PREP_NULL = {}
 for _what, _uri, _at in (("an imported name", M_URI, CH_BUMP_CALL),
                          ("a parameter", M_URI, CH_APPLY_HEAD),
                          ("a `let` binder", M_URI, CH_FACTOR_BIND),
-                         ("a signature with no fn", S_URI, CH_PENDING),
-                         ("a broken document", BK_URI, CH_HELPER_FN)):
+                         ("a signature with no fn", S_URI, CH_PENDING)):
     CH_PREP_NULL[_what] = _rid
     ch_msgs.append(ch_req(_rid, "textDocument/prepareCallHierarchy", ch_pos(_uri, _at)))
     _rid += 1
+# The broken twin answers what ChMain answers, under its own uri.
+CH_PREP_BROKEN = _rid
+ch_msgs.append(ch_req(_rid, "textDocument/prepareCallHierarchy", ch_pos(BK_URI, CH_HELPER_FN)))
+_rid += 1
 ch_msgs.append(ch_req(_rid, "textDocument/prepareCallHierarchy",
                       {"textDocument": {"uri": M_URI},
                        "position": {"line": 0, "character": 1}}))
@@ -2763,8 +2769,8 @@ elif ch_null(9, "definition on a signature with no definition"):
     chwhy = ch_null(9, "definition on a signature with no definition")
 elif ch_null(10, "declaration on a keyword"):
     chwhy = ch_null(10, "declaration on a keyword")
-elif ch_null(11, "declaration on a document that does not parse"):
-    chwhy = ch_null(11, "declaration on a document that does not parse")
+elif ch_landed(11, BK_URI, CH_HELPER_SIG, "declaration on a document that does not parse"):
+    chwhy = ch_landed(11, BK_URI, CH_HELPER_SIG, "declaration on a document that does not parse")
 # --- prepareCallHierarchy ---------------------------------------------
 if not chwhy:
     for _fn in CH_FNS:
@@ -2785,6 +2791,9 @@ if not chwhy:
         chwhy = ch_null(_rid, f"prepareCallHierarchy on {_what}")
         if chwhy:
             break
+if not chwhy and chres(CH_PREP_BROKEN) != [ch_item(CH_BROKEN, BK_URI, "helper")]:
+    chwhy = (f"prepareCallHierarchy on `helper` in the document that does not parse answered "
+             f"{chres(CH_PREP_BROKEN)!r:.300}, want {[ch_item(CH_BROKEN, BK_URI, 'helper')]!r:.300}")
 
 # --- incomingCalls and outgoingCalls ---------------------------------
 # A second session, whose items are the ones DERIVED above rather than
@@ -2804,6 +2813,7 @@ IT_RUN = ch_item(CH_USER, U_URI, "run")
 IT_GHOST = dict(IT_HELPER, name="nosuchfn")
 IT_CLOSED = dict(IT_HELPER, uri=ch_uri("ChClosed.ax"))
 IT_BROKEN = dict(IT_HELPER, uri=BK_URI)
+IT_CALLER_BK = ch_item(CH_BROKEN, BK_URI, "caller")
 
 ch2 = [ch_req(1, "initialize", {})]
 ch2 += [{"jsonrpc": "2.0", "method": "textDocument/didOpen",
@@ -2822,9 +2832,14 @@ for _label, _item in (("helper", IT_HELPER), ("caller", IT_CALLER), ("apply", IT
     ch2.append(ch_req(_rid, "callHierarchy/outgoingCalls", {"item": _item}))
     _rid += 1
 CH_HIER_NULL = {}
+CH_IN["broken"] = _rid
+ch2.append(ch_req(_rid, "callHierarchy/incomingCalls", {"item": IT_BROKEN}))
+_rid += 1
+CH_OUT["broken"] = _rid
+ch2.append(ch_req(_rid, "callHierarchy/outgoingCalls", {"item": IT_BROKEN}))
+_rid += 1
 for _what, _item in (("an item nothing declares", IT_GHOST),
-                     ("an item in a document the server has not opened", IT_CLOSED),
-                     ("an item in a document that does not parse", IT_BROKEN)):
+                     ("an item in a document the server has not opened", IT_CLOSED)):
     CH_HIER_NULL[_what + " (incoming)"] = _rid
     ch2.append(ch_req(_rid, "callHierarchy/incomingCalls", {"item": _item}))
     _rid += 1
@@ -2921,6 +2936,12 @@ if not chwhy:
         ("incoming calls to `main`", CH_IN["main"], "from", []),
         ("outgoing calls from `helper`, whose only head is a builtin operator",
          CH_OUT["helper"], "to", []),
+        # The document that does not parse, answered from what parses
+        # around its error: the same calls, inside its own uri.
+        ("incoming calls to `helper` in the document that does not parse",
+         CH_IN["broken"], "from", [ch_edges(IT_CALLER_BK, CH_HELPER_CALLS)]),
+        ("outgoing calls from `helper` in the document that does not parse",
+         CH_OUT["broken"], "to", []),
     ):
         chwhy = ch_calls(_rid, _key, _want, _what)
         if chwhy:
@@ -2941,15 +2962,16 @@ else:
     print(f"ok   declaration (the `(:: helper ...)` on line {CH_HELPER_SIG['line']} where "
           f"`definition` answers the `fn` on line {CH_HELPER_FN['line']}, the same split "
           f"across a file boundary for the imported `bump`, a `let` binder where the two "
-          f"agree, and a signature with no `fn` where only this one answers; null on a "
-          f"keyword and on a document that does not parse)")
+          f"agree, a signature with no `fn` where only this one answers, and a document "
+          f"that does not parse; null on a keyword)")
     print(f"ok   call-hierarchy (prepare over all {len(CH_FNS)} `fn`s of ChMain.ax, each "
           f"item's range the form and its selectionRange the name; `helper` called twice "
           f"from one caller as one entry with two ranges and NOT from the `handoff` that "
           f"names it; `caller` reached from `main` here and from `run` in ChUser.ax; "
           f"`bump` reached from its own module and across the import; nothing either way "
-          f"for the parameter-shadowed `k`; null for an item nothing declares, one in a "
-          f"document the server has not opened, and one that does not parse)")
+          f"for the parameter-shadowed `k`; the same calls in a document that does not "
+          f"parse; null for an item nothing declares and one in a document the server "
+          f"has not opened)")
     passed += 2
 shutil.rmtree(CH_DIR, ignore_errors=True)
 
@@ -3161,11 +3183,15 @@ TH_PREP_NULL = {}
 for _what, _uri, _at in (("a `fn` name", M_TURI, TH_TAKEPOS_CALL),
                          ("a constructor", M_TURI, TH_CIRCLE),
                          ("a parameter read", M_TURI, TH_X_READ),
-                         ("a broken document", BK_TURI, TH_POS_BIND)):
+                         ):
     TH_PREP_NULL[_what] = _rid
     th_msgs.append(ch_req(_rid, "textDocument/prepareTypeHierarchy",
                           ch_pos(_uri, _at)))
     _rid += 1
+# The broken twin answers what ThTypes answers, under its own uri.
+TH_PREP_BROKEN = _rid
+th_msgs.append(ch_req(_rid, "textDocument/prepareTypeHierarchy", ch_pos(BK_TURI, TH_POS_BIND)))
+_rid += 1
 th_msgs.append(ch_req(_rid, "textDocument/prepareTypeHierarchy",
                       {"textDocument": {"uri": M_TURI},
                        "position": {"line": 0, "character": 1}}))
@@ -3251,6 +3277,9 @@ if not thwhy:
         thwhy = th_null(_rid, f"prepareTypeHierarchy on {_what}")
         if thwhy:
             break
+if not thwhy and thres(TH_PREP_BROKEN) != [dict(IT_POSITIVE, uri=BK_TURI)]:
+    thwhy = (f"prepareTypeHierarchy on `Positive` in the document that does not parse "
+             f"answered {thres(TH_PREP_BROKEN)!r:.300}, want ThTypes's item under its own uri")
 if not thwhy:
     _want_refs = [{"uri": M_TURI, "range": rng(a)}
                   for a in (TH_POS_BIND, TH_POS_SIG, TH_POS_CAST)]
@@ -3287,9 +3316,14 @@ for _label, _item in (("Positive", IT_POSITIVE), ("NonNeg", IT_NONNEG),
     th2.append(ch_req(_rid, "typeHierarchy/subtypes", {"item": _item}))
     _rid += 1
 TH_HIER_NULL = {}
+TH_SUP["broken"] = _rid
+th2.append(ch_req(_rid, "typeHierarchy/supertypes", {"item": IT_BROKEN}))
+_rid += 1
+TH_SUB["broken"] = _rid
+th2.append(ch_req(_rid, "typeHierarchy/subtypes", {"item": IT_BROKEN}))
+_rid += 1
 for _what, _item in (("an item nothing declares", IT_GHOST),
-                     ("an item in a document the server has not opened", IT_CLOSED),
-                     ("an item in a document that does not parse", IT_BROKEN)):
+                     ("an item in a document the server has not opened", IT_CLOSED)):
     TH_HIER_NULL[_what + " (supertypes)"] = _rid
     th2.append(ch_req(_rid, "typeHierarchy/supertypes", {"item": _item}))
     _rid += 1
@@ -3349,11 +3383,18 @@ if not thwhy:
         ("supertypes of `Box`", TH_SUP["Box"], []),
         ("supertypes of the alias `Shapes`", TH_SUP["Shapes"], []),
         # The item's own document first, then the others in open order:
-        # the same four declarations in a different order per item.
+        # the same declarations in a different order per item. ThBroken,
+        # opened last, still declares its two from what parses.
         ("subtypes of `Int` from ThTypes.ax", TH_SUB["Int here"],
-         [IT_POSITIVE, IT_NONNEG, IT_INK, IT_TINY]),
+         [IT_POSITIVE, IT_NONNEG, IT_INK, IT_TINY,
+          dict(IT_POSITIVE, uri=BK_TURI), dict(IT_NONNEG, uri=BK_TURI)]),
         ("subtypes of `Int` from ThHelper.ax", TH_SUB["Int in helper"],
-         [IT_INK, IT_POSITIVE, IT_NONNEG, IT_TINY]),
+         [IT_INK, IT_POSITIVE, IT_NONNEG, IT_TINY,
+          dict(IT_POSITIVE, uri=BK_TURI), dict(IT_NONNEG, uri=BK_TURI)]),
+        ("supertypes of `Positive` in the document that does not parse",
+         TH_SUP["broken"], [dict(IT_INT_T, uri=BK_TURI)]),
+        ("subtypes of `Positive` in the document that does not parse",
+         TH_SUB["broken"], []),
         ("subtypes of `Shape`", TH_SUB["Shape"], []),
         ("subtypes of `Positive`", TH_SUB["Positive"], []),
         ("subtypes of `Tiny`", TH_SUB["Tiny"], []),
@@ -3378,13 +3419,12 @@ if thwhy:
 else:
     print(f"ok   type-hierarchy (prepare on the `Positive` binder, its signature use "
           f"and its cast target, on a `data`, a `struct`, an alias, two imported "
-          f"types and the builtin `Int` at a base; null on a `fn` name, a "
-          f"constructor, a local, a keyword and a broken document; supertypes of "
-          f"every subtype the builtin anchored at its own base; subtypes of `Int` "
-          f"the same four declarations in each item's own-document-first order, "
-          f"`[]` for the types nothing constrains; null for an item nothing "
-          f"declares, one unopened and one unparseable; references on the binder "
-          f"finding all three spellings)")
+          f"types, the builtin `Int` at a base and a broken document; null on a `fn` "
+          f"name, a constructor, a local and a keyword; supertypes of every subtype "
+          f"the builtin anchored at its own base; subtypes of `Int` the same "
+          f"declarations in each item's own-document-first order, `[]` for the types "
+          f"nothing constrains; null for an item nothing declares and one unopened; "
+          f"references on the binder finding all three spellings)")
     passed += 1
 shutil.rmtree(TH_DIR, ignore_errors=True)
 
@@ -3867,8 +3907,9 @@ elif sig_says(42, ["(Circle " + " ".join(CIRCLE_FIELDS) + ")"], 0, CIRCLE_FIELDS
 elif sig_says(43, ["(twice " + " ".join(TWICE_PARAMS) + ")", TWICE_TYPE, "ViewHelper"], 0, TWICE_PARAMS, TWICE_DOC):
     vwhy = "signature help on an imported fn: " + \
         sig_says(43, ["(twice " + " ".join(TWICE_PARAMS) + ")", TWICE_TYPE, "ViewHelper"], 0, TWICE_PARAMS, TWICE_DOC)
-elif vres(52) is not None:
-    vwhy = f"signature help on a document that does not parse answered {vres(52)!r}, want null"
+elif sig_says(52, ["(add " + " ".join(ADD_PARAMS) + ")", ADD_TYPE], 1, ADD_PARAMS, ADD_DOC):
+    vwhy = "signature help on a document that does not parse: " + \
+        sig_says(52, ["(add " + " ".join(ADD_PARAMS) + ")", ADD_TYPE], 1, ADD_PARAMS, ADD_DOC)
 elif vres(58) is not None:
     vwhy = (f"signature help on `{CALL_LOCAL}`, whose head is the `let`-bound `add`, "
             f"answered {vres(58)!r:.160}, want null - a local is not the fn it is spelled like")
@@ -3887,8 +3928,9 @@ elif hints_padded(44):
 elif hints_of(45) != HINTS_ONE_LINE:
     vwhy = (f"inlay hints over line {HDR_ADD_LINE} alone answered {hints_of(45)}, "
             f"want only that line's {HINTS_ONE_LINE}")
-elif vres(53) != []:
-    vwhy = f"inlay hints on a document that does not parse answered {vres(53)!r}, want []"
+elif hints_of(53) != HINTS_WANT:
+    vwhy = (f"inlay hints on a document that does not parse are not the parsing document's;\n"
+            f"          server:  {hints_of(53)}\n          derived: {HINTS_WANT}")
 elif vres(57) != []:
     vwhy = f"inlay hints on a signature with no arrow answered {vres(57)!r}, want []"
 # --- folding ---------------------------------------------------------
@@ -3923,8 +3965,9 @@ elif chain_of(sel47[1]) != [DOC_RANGE]:
 elif links_of(48) != LINKS_WANT:
     vwhy = (f"document links are not the derived ones;\n"
             f"          server:  {links_of(48)}\n          derived: {LINKS_WANT}")
-elif vres(55) != []:
-    vwhy = f"document links on a document that does not parse answered {vres(55)!r}, want []"
+elif links_of(55) != LINKS_WANT:
+    vwhy = (f"document links on a document that does not parse are not the parsing document's;\n"
+            f"          server:  {links_of(55)}\n          derived: {LINKS_WANT}")
 # --- workspace symbols -----------------------------------------------
 elif len(vres(49) or []) != 1 or sym_is(49, "twice", 12, vhelper_uri, TWICE_DECL, "ViewHelper"):
     vwhy = (f"workspace/symbol {TWICE_QUERY!r}: " +
@@ -3954,21 +3997,21 @@ else:
     print(f"ok   signature-help (activeParameter 1 on `{CALL_LIT}`, labels "
           f"slicing to {ADD_PARAMS} with {ADD_TYPE!r} cut from the document, a "
           f"constructor, `twice` from ViewHelper with its paragraph; null on a "
-          f"keyword head, on a head that is a local, inside a fn header, and on a "
-          f"document that does not parse)")
+          f"keyword head, on a head that is a local and inside a fn header; the same "
+          f"signature on a document that does not parse)")
     print(f"ok   inlay-hints (exactly the {len(HINTS_WANT)} derived hints: types "
           f"after header parameters, the result after the header, value shapes "
           f"after let binders, names before "
           f"literal and nested arguments, none before the var spelled like its "
           f"parameter, none on a call whose head is a local; {len(HINTS_ONE_LINE)} "
-          f"for one line; [] on a document that does not parse)")
+          f"for one line; the same hints on a document that does not parse)")
     print(f"ok   folding    (the fn {FOLD_FN_L}, the let {FOLD_LET_L}, a comment "
           f"run {COMMENT_L}, an import run {IMPORTS_L}; the same forms on a "
           f"document that does not parse; [] with nothing to fold)")
     print(f"ok   selection  (word -> form -> let -> fn -> document, {len(CHAIN_WANT)} "
           f"derived ranges; the document alone on the empty last line)")
     print(f"ok   links      ({len(LINKS_WANT)} module names, one dotted, to their files' URIs; "
-          f"[] on a document that does not parse)")
+          f"the same on a document that does not parse)")
     print(f"ok   workspace  (`twice` found by {TWICE_QUERY!r} in ViewHelper.ax with "
           f"its container, 6 declarations of 3 kinds in 4 files placed by an "
           f"empty query, [] for a query nothing matches)")
@@ -5413,9 +5456,9 @@ shutil.rmtree(CADIR2, ignore_errors=True)
 # overlapping. The legend is read off `self_host/lsp.ax`'s own two
 # lists and must equal what the server advertises. A document that
 # does not parse answers the same keywords, literals and comments as
-# its parsing twin, and the read of a parameter falls from `parameter`
-# to `variable` there - the witness that the parsing document's answer
-# came from resolution and not from spelling.
+# its parsing twin, and the read of a parameter is `parameter` in both:
+# a spelling alone would colour it `variable`, so the broken twin's
+# answer came from resolving what parses around its error.
 HL_DIR = tempfile.mkdtemp(prefix="axiom-hl-")
 HL = r"""(import RefHelper)
 
@@ -5958,12 +6001,12 @@ else:
         if _name in HL_WITNESS or _twin in HL_WITNESS:
             w, at = HL_WITNESS[_name if _name in HL_WITNESS else _twin]
             t = {(x[0], x[1]): x for x in toks}.get((at["line"], at["start"]))
-            want = "parameter" if _twin is None else "variable"
-            if t is None or HL_TYPES[t[3]] != want:
+            if t is None or HL_TYPES[t[3]] != "parameter":
                 hlwhy = (f"{_name}: the read of `{w}` at {at['line']}:{at['start']} is "
-                         f"{hl_names(t) if t else 'no token'}, want `{want}` - "
+                         f"{hl_names(t) if t else 'no token'}, want `parameter` - "
                          + ("the parsing document must colour it by resolution" if _twin is None
-                            else "the document does not parse, so nothing resolved it"))
+                            else "the document does not parse, and what parses around the "
+                                 "error must still resolve it"))
                 break
 
 if hlwhy:
@@ -5976,13 +6019,277 @@ else:
           f"literals, builtin types, imports, effects, regions, macros and rule heads, "
           f"`set`/`mut`/`let` binders, operator heads, constructor uses; "
           f"{sum(len(v) for v in hl_tok.values() if v)} tokens sorted, non-overlapping and "
-          f"inside their lines; the legend equal to lsp.ax's lists; a parameter read falling to "
-          f"variable in the unparseable twins and a refused head `deprecated`)")
+          f"inside their lines; the legend equal to lsp.ax's lists; a parameter read resolved "
+          f"in the unparseable twins too, and a refused head `deprecated`)")
     passed += 1
 shutil.rmtree(HL_DIR, ignore_errors=True)
 # =====================================================================
 # END SECTION HL TESTS
 # =====================================================================
+
+# =====================================================================
+# SECTION RECOVER TESTS: a document that does not parse.
+# =====================================================================
+# `lspParse` reads a document the parser refuses from the declarations
+# that still parse around the error. Two kinds of check, neither of them
+# re-blessable:
+#
+#   - TWINS. Each broken document is its parsing twin with closers cut
+#     off the ends of lines, so every name sits at the same line and
+#     character in both. The broken one must answer exactly what the
+#     twin answers: the same outline (names, kinds and name ranges), the
+#     same semantic tokens, and the same hover and definition at every
+#     identifier the twin's outline names. A parse error must still be
+#     published for it, or it is not the broken document it claims to be.
+#   - REPAIRS. A form with a missing operand, a stray closer and an
+#     unterminated string: hover, definition and completion still answer
+#     around them, and rename refuses exactly the document whose repair
+#     dropped a token.
+RC_TWIN = r"""(import IO)
+
+;; Add one.
+(:: bump (-> Int Int))
+(fn (bump x)
+  (+ x 1))
+
+(data Colour (Red) (Green))
+
+(struct Point (x : Int) (y : Int))
+
+(:: twice (-> Int Int))
+(fn (twice n)
+  (let ((y (bump n)))
+    (bump (bump y))))
+
+(:: shade (-> Colour Int))
+(fn (shade c)
+  (match c
+    ((Red) 1)
+    ((Green) (twice 2))))
+"""
+
+
+def rc_cut(text, line_no, k):
+    """`text` with the last `k` bytes of line `line_no` (0-based) removed,
+    each of which must be a `)`."""
+    lines = text.split("\n")
+    if not lines[line_no].endswith(")" * k):
+        sys.exit(f"FAIL: RECOVER twin line {line_no} does not end in {k} closers: {lines[line_no]!r}")
+    lines[line_no] = lines[line_no][:-k]
+    return "\n".join(lines)
+
+
+_rc_lines = RC_TWIN.split("\n")
+RC_BUMP_END = _rc_lines.index("  (+ x 1))")
+RC_TWICE_END = _rc_lines.index("    (bump (bump y))))")
+RC_SHADE_END = _rc_lines.index("    ((Green) (twice 2))))")
+RC_BROKEN = {
+    # a `fn` in the middle missing its last paren
+    "rc-mid.ax": rc_cut(RC_TWIN, RC_BUMP_END, 1),
+    # the last form missing three: a form half typed at the end
+    "rc-end.ax": rc_cut(RC_TWIN, RC_SHADE_END, 3),
+    # both, and the `let` in between missing its closers too
+    "rc-both.ax": rc_cut(rc_cut(rc_cut(RC_TWIN, RC_BUMP_END, 1), RC_TWICE_END, 4), RC_SHADE_END, 2),
+}
+RC_REPAIR = {
+    # a `let` binding with no value: repaired with `()`, nothing dropped
+    "rc-hole.ax": RC_TWIN + "\n(:: k (-> Int Int))\n(fn (k x) (let ((w)) (bump x)))\n",
+    # a closer nothing opened, between two forms: dropped
+    "rc-stray.ax": RC_TWIN.replace("\n(data Colour", "\n)\n(data Colour"),
+    # an unterminated string, closed at its line's end
+    "rc-string.ax": RC_TWIN.replace("(fn (twice n)\n", "(fn (twice n)\n  (println \"half\n"),
+    # a word half typed at the end of the file
+    "rc-typing.ax": RC_TWIN + "\n(:: p (-> Int Int))\n(fn (p z)\n  (+ z (bu",
+}
+RC_DIR = tempfile.mkdtemp(prefix="axiom-rc-")
+
+
+def rc_uri(name):
+    return "file://" + os.path.join(RC_DIR, name)
+
+
+def rc_idents(text):
+    """(line, character) of every identifier the twin's outline or body
+    spells, from the bytes: a second reading of the document."""
+    out = []
+    for i, ln in enumerate(text.split("\n")):
+        if ln.lstrip().startswith(";"):
+            continue
+        for m in re.finditer(r"[A-Za-z][A-Za-z0-9]*", ln):
+            if m.group() in ("import", "fn", "data", "struct", "let", "match", "Int", "IO"):
+                continue
+            out.append((i, m.start(), m.group()))
+    return out
+
+
+RC_POS = rc_idents(RC_TWIN)
+rc_msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}]
+rc_plan = {}
+_rid = 100
+for _name, _text in [("rc-twin.ax", RC_TWIN)] + list(RC_BROKEN.items()) + list(RC_REPAIR.items()):
+    rc_msgs.append({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+                    "params": {"textDocument": {"uri": rc_uri(_name), "languageId": "axiom",
+                                                "version": 1, "text": _text}}})
+for _name in ["rc-twin.ax"] + list(RC_BROKEN):
+    for _m in ("textDocument/documentSymbol", "textDocument/semanticTokens/full"):
+        rc_msgs.append({"jsonrpc": "2.0", "id": _rid, "method": _m,
+                        "params": {"textDocument": {"uri": rc_uri(_name)}}})
+        rc_plan[(_name, _m)] = _rid
+        _rid += 1
+    for (_ln, _ch, _w) in RC_POS:
+        for _m in ("textDocument/hover", "textDocument/definition"):
+            rc_msgs.append({"jsonrpc": "2.0", "id": _rid, "method": _m,
+                            "params": {"textDocument": {"uri": rc_uri(_name)},
+                                       "position": {"line": _ln, "character": _ch}}})
+            rc_plan[(_name, _m, _ln, _ch)] = _rid
+            _rid += 1
+
+
+def rc_at(text, needle, sub=0):
+    i = text.index(needle) + sub
+    ln = text.count("\n", 0, i)
+    return {"line": ln, "character": i - (text.rfind("\n", 0, i) + 1)}
+
+
+RC_ASK = [
+    # (key, document, method, needle, offset into needle, extra params)
+    ("hole-hover", "rc-hole.ax", "textDocument/hover", "(bump x)))\n", 1, {}),
+    ("hole-def", "rc-hole.ax", "textDocument/definition", "(bump x)))\n", 1, {}),
+    ("hole-rename", "rc-hole.ax", "textDocument/prepareRename", "(fn (k x)", 8, {}),
+    ("stray-hover", "rc-stray.ax", "textDocument/hover", "(bump (bump y)", 7, {}),
+    ("stray-rename", "rc-stray.ax", "textDocument/prepareRename", "(bump (bump y)", 7, {}),
+    ("stray-refs", "rc-stray.ax", "textDocument/references", "(bump (bump y)", 7,
+     {"context": {"includeDeclaration": True}}),
+    ("string-hover", "rc-string.ax", "textDocument/hover", "(twice 2)", 1, {}),
+    ("string-def", "rc-string.ax", "textDocument/definition", "(twice 2)", 1, {}),
+    ("typing-compl", "rc-typing.ax", "textDocument/completion", "(+ z (bu", 8, {}),
+    ("typing-param", "rc-typing.ax", "textDocument/definition", "(+ z (bu", 3, {}),
+    ("typing-rename", "rc-typing.ax", "textDocument/rename", "(+ z (bu", 3, {"newName": "zz"}),
+]
+for _key, _name, _m, _needle, _sub, _extra in RC_ASK:
+    _p = {"textDocument": {"uri": rc_uri(_name)}, "position": rc_at(RC_REPAIR[_name], _needle, _sub)}
+    _p.update(_extra)
+    rc_msgs.append({"jsonrpc": "2.0", "id": _rid, "method": _m, "params": _p})
+    rc_plan[_key] = _rid
+    _rid += 1
+rc_msgs += [{"jsonrpc": "2.0", "id": 9, "method": "shutdown", "params": None},
+            {"jsonrpc": "2.0", "method": "exit", "params": None}]
+rcp = subprocess.run([stage1, "lsp"], input=b"".join(frame(m) for m in rc_msgs),
+                     capture_output=True, cwd=RC_DIR)
+rcmsgs, rctail = unframe(rcp.stdout)
+rcresp = {m["id"]: m for m in rcmsgs if "id" in m}
+rcpubs = {}
+for m in rcmsgs:
+    if m.get("method") == "textDocument/publishDiagnostics":
+        rcpubs[m["params"]["uri"]] = m["params"]["diagnostics"]
+
+
+def rcres(key):
+    return rcresp.get(rc_plan[key], {}).get("result")
+
+
+def rc_outline(syms):
+    out = []
+    for s in syms or []:
+        out.append((s["name"], s["kind"], json.dumps(s["selectionRange"], sort_keys=True)))
+        out += rc_outline(s.get("children"))
+    return out
+
+
+def rc_hover_text(r):
+    return None if r is None else r["contents"]["value"]
+
+
+rcwhy = ""
+rc_checked = 0
+if rcp.returncode != 0 or 9 not in rcresp:
+    rcwhy = f"the server exited {rcp.returncode} without answering shutdown: {rcp.stderr[:200]!r}"
+elif any("error" in m for m in rcresp.values()):
+    rcwhy = "an error response: " + json.dumps([m for m in rcresp.values() if "error" in m][0])[:200]
+elif [d for d in rcpubs.get(rc_uri("rc-twin.ax"), []) if d.get("severity") == 1]:
+    rcwhy = f"the twin does not check clean: {rcpubs[rc_uri('rc-twin.ax')][0]!r:.200}"
+else:
+    twin_outline = rc_outline(rcres(("rc-twin.ax", "textDocument/documentSymbol")))
+    twin_names = {n for n, _, _ in twin_outline}
+    want_names = set(re.findall(r"^\((?:fn \(|data |struct )([A-Za-z]+)", RC_TWIN, re.M))
+    want_names |= {"Red", "Green", "x", "y"}
+    if twin_names != want_names:
+        rcwhy = f"the twin's outline names {sorted(twin_names)}, want {sorted(want_names)} read off its bytes"
+    for _name, _text in RC_BROKEN.items():
+        if rcwhy:
+            break
+        if not [d for d in rcpubs.get(rc_uri(_name), []) if str(d.get("code", "")).startswith("AX2")]:
+            rcwhy = f"{_name} published no parse error, so it is not the broken document it is meant to be"
+            break
+        got = rc_outline(rcres((_name, "textDocument/documentSymbol")))
+        if got != twin_outline:
+            rcwhy = f"{_name}'s outline differs from its twin's: {sorted(set(got) ^ set(twin_outline))[:4]}"
+            break
+        if rcres((_name, "textDocument/semanticTokens/full")) != rcres(("rc-twin.ax", "textDocument/semanticTokens/full")):
+            rcwhy = f"{_name}'s semantic tokens differ from its twin's"
+            break
+        for (_ln, _ch, _w) in RC_POS:
+            for _m in ("textDocument/hover", "textDocument/definition"):
+                a = rcresp.get(rc_plan[(_name, _m, _ln, _ch)], {}).get("result")
+                b = rcresp.get(rc_plan[("rc-twin.ax", _m, _ln, _ch)], {}).get("result")
+                if _m == "textDocument/definition":
+                    a = json.dumps(a, sort_keys=True).replace(_name, "rc-twin.ax")
+                    b = json.dumps(b, sort_keys=True)
+                if a != b:
+                    rcwhy = f"{_name}: {_m.split('/')[1]} on `{_w}` at {_ln}:{_ch} answered {a!r:.120}, its twin {b!r:.120}"
+                    break
+                rc_checked += 1
+            if rcwhy:
+                break
+    if not rcwhy:
+        sig = RC_TWIN[RC_TWIN.index("(:: bump"):RC_TWIN.index("\n", RC_TWIN.index("(:: bump"))]
+        bump_def = rc_at(RC_TWIN, "(fn (bump", 5)
+        checks = [
+            ("hole-hover", sig in (rc_hover_text(rcres("hole-hover")) or ""),
+             "hover on `bump` beside a `let` with no value must quote its signature"),
+            ("hole-def", (rcres("hole-def") or {}).get("range", {}).get("start") == bump_def,
+             "definition of `bump` beside a `let` with no value must land on its name"),
+            ("hole-rename", rcres("hole-rename") is not None,
+             "prepareRename must answer when the repair only added a `()`"),
+            ("stray-hover", sig in (rc_hover_text(rcres("stray-hover")) or ""),
+             "hover on `bump` after a stray closer must quote its signature"),
+            ("stray-rename", rcres("stray-rename") is None,
+             "prepareRename must refuse a document whose repair dropped a token"),
+            ("stray-refs", len(rcres("stray-refs") or []) == RC_TWIN.count("bump") ,
+             "references to `bump` after a stray closer must find every occurrence"),
+            ("string-hover", "(:: twice" in (rc_hover_text(rcres("string-hover")) or ""),
+             "hover on `twice` after an unterminated string must quote its signature"),
+            ("string-def", (rcres("string-def") or {}).get("range", {}).get("start")
+             == rc_at(RC_REPAIR["rc-string.ax"], "(fn (twice", 5),
+             "definition of `twice` after an unterminated string must land on its name"),
+            ("typing-compl", "bump" in [it["label"] for it in (rcres("typing-compl") or {}).get("items", [])],
+             "completion at a half-typed `bu` must offer `bump`"),
+            ("typing-param", (rcres("typing-param") or {}).get("range", {}).get("start")
+             == rc_at(RC_REPAIR["rc-typing.ax"], "(fn (p z)", 7),
+             "definition of `z` in a half-typed form must land on its parameter"),
+            ("typing-rename", len(((rcres("typing-rename") or {}).get("changes") or {}).get(rc_uri("rc-typing.ax"), [])) == 2,
+             "rename of `z` in a half-typed form must edit its parameter and its read"),
+        ]
+        for key, ok, what in checks:
+            if not ok:
+                rcwhy = f"{what}: got {rcres(key)!r:.200}"
+                break
+            rc_checked += 1
+
+if rcwhy:
+    print(f"FAIL recover: {rcwhy}")
+    failed += 1
+else:
+    print(f"ok   recover ({len(RC_BROKEN)} broken twins answer their parsing twin's outline, "
+          f"semantic tokens, hovers and definitions; {rc_checked} answers compared; a `()` "
+          f"repair, a stray closer, an open string and a half-typed word each still answer, "
+          f"and rename refuses only the repair that dropped a token)")
+    passed += 1
+shutil.rmtree(RC_DIR, ignore_errors=True)
+# =====================================================================
+# END SECTION RECOVER TESTS
+# =====================================================================
+
 
 
 # ---------------------------------------------------------------------
