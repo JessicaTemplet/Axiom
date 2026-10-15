@@ -634,6 +634,13 @@ calling a converted function checks its remaining arguments. Tested by
   parameters and type-constructor arity mismatches, including conversion
   and layout targets. Float aliases retain function argument evidence.
 
+- Added prefix piping, `(|> value (f args...) (g args...))`, with first
+  argument insertion or one direct `_` argument. Hygienic intermediate
+  bindings preserve evaluation order and single evaluation. Ordinary call
+  typing, effects and region rules apply. Tested by
+  `tests/stdlib/945-pipelines.ax` and
+  `tests/diagnostics/1430-pipeline-boundaries.ax`.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

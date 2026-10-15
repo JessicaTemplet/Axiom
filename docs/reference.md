@@ -265,6 +265,29 @@ build a lambda for the missing arguments, from left to right:
 This prints `42` twice. A bare `_` elsewhere in an expression is
 undefined; in a pattern it is a wildcard.
 
+### Pipe values through calls
+
+```scheme
+(import IO)
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  (println (|> 5 (+ 1) (* 3) (- 100 _))))
+```
+
+This prints `82`. Each stage receives the preceding result as its first
+argument. One direct `_` argument places that value elsewhere, as in
+`(- 100 _)`. A bare function name is a unary stage.
+
+The input and each intermediate result are evaluated once, from left to
+right. A pipeline uses ordinary calls, so their types, effects and region
+checks apply. It requires at least one stage and refuses multiple direct
+holes in a stage.
+
+Tested by `tests/stdlib/945-pipelines.ax` and
+`tests/diagnostics/1430-pipeline-boundaries.ax`.
+
 ## Operators
 
 All operators are prefix. Parentheses decide grouping.

@@ -368,3 +368,6 @@
   "{"
   "}"
 ] @punctuation.bracket
+
+(pipe_expression "|>" @operator)
+(pipe_expression stage: (identifier) @function)

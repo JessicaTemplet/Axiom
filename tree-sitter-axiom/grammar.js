@@ -870,6 +870,7 @@ module.exports = grammar({
       $.sizeof_expression,
       $.alignof_expression,
       $.as_expression,
+      $.pipe_expression,
       $.type_signature,
       $.block,
       $.list_literal,
@@ -880,6 +881,15 @@ module.exports = grammar({
       // on the token after `(`. A head that is not a keyword falls through
       // to here, which is what makes `(+ 1 2)` and `(f x)` the same shape.
       $.application,
+    ),
+
+    pipe_expression: $ => seq(
+      '(', '|>',
+      optional(seq(
+        field('value', $._expression),
+        repeat(field('stage', $._expression)),
+      )),
+      ')',
     ),
 
     lambda: $ => seq(

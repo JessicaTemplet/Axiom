@@ -4678,90 +4678,94 @@
 ; ------------------------------------------------------------------
 (pub :: expandVarRef (-> Int Int (Vec Int) Int))
 (pub fn (expandVarRef e env bs)
-  (if (&& (== (expBound bs (nodeAName e)) 1) (== (nodeDefScope e) 0))
-    e
-    ; `(asm)` with no arm parses as the bare name.
-    (if (strEq (nodeAName e) "asm")
-      {
-        (expAsmBad
-          env
-          (nodeSpan e)
-          "`asm` needs at least one arm, such as `(asm (aarch64 \"nop\"))`")
-        (mkEInt 0)
-      }
-      (let ((mac (expFindMacro env (nodeAName e))))
-        (if (== mac 0)
-          e
-          (if (!= (memGetWord mac 9) 0)
-            (if (expMacHasExprRule mac)
-              (expandRuleApp mac (expSrcSpelling (nodeAName e)) vecNew env bs (nodeSpan e))
-              {
-                (expEmit
-                  env
-                  (expMarkUnit
+  (if (strEq (nodeAName e) "|>")
+    (expPipeBad env (nodeSpan e) "a pipeline needs a value and at least one stage")
+    (if (&& (== (expBound bs (nodeAName e)) 1) (== (nodeDefScope e) 0))
+      e
+      ; `(asm)` with no arm parses as the bare name.
+      (if (strEq (nodeAName e) "asm")
+        {
+          (expAsmBad
+            env
+            (nodeSpan e)
+            "`asm` needs at least one arm, such as `(asm (aarch64 \"nop\"))`")
+          (mkEInt 0)
+        }
+        (let ((mac (expFindMacro env (nodeAName e))))
+          (if (== mac 0)
+            e
+            (if (!= (memGetWord mac 9) 0)
+              (if (expMacHasExprRule mac)
+                (expandRuleApp mac (expSrcSpelling (nodeAName e)) vecNew env bs (nodeSpan e))
+                {
+                  (expEmit
                     env
-                    (mkDiagNote
-                      SEV_ERROR
-                      "AX3027"
-                      "declaration-macro"
-                      (nodeSpan e)
-                      (concat
-                        (concat "declaration macro `" (expSrcSpelling (nodeAName e)))
-                        "` referenced in expression position")
-                      0
-                      0
-                      "every rule of this macro generates declarations; invoke it at top level"
-                      "an expression position needs a value, and each rule's template here is declarations (macro-system.md MAC-CAP-8)")
-                    (memGetWord env 11)))
-                (mkEInt 0)
-              })
-            (if (> (vecLen (nodeBVec mac)) 0)
-              {
-                (expArityDiag
-                  env
-                  (expSrcSpelling (nodeAName e))
-                  (vecLen (nodeBVec mac))
-                  0
-                  (nodeSpan e))
-                (mkEInt 0)
-              }
-              (expandInstantiate mac vecNew env bs (nodeSpan e)))))))))
+                    (expMarkUnit
+                      env
+                      (mkDiagNote
+                        SEV_ERROR
+                        "AX3027"
+                        "declaration-macro"
+                        (nodeSpan e)
+                        (concat
+                          (concat "declaration macro `" (expSrcSpelling (nodeAName e)))
+                          "` referenced in expression position")
+                        0
+                        0
+                        "every rule of this macro generates declarations; invoke it at top level"
+                        "an expression position needs a value, and each rule's template here is declarations (macro-system.md MAC-CAP-8)")
+                      (memGetWord env 11)))
+                  (mkEInt 0)
+                })
+              (if (> (vecLen (nodeBVec mac)) 0)
+                {
+                  (expArityDiag
+                    env
+                    (expSrcSpelling (nodeAName e))
+                    (vecLen (nodeBVec mac))
+                    0
+                    (nodeSpan e))
+                  (mkEInt 0)
+                }
+                (expandInstantiate mac vecNew env bs (nodeSpan e))))))))))
 
 ; ------------------------------------------------------------------
 ; An application whose head names a macro.
 ; ------------------------------------------------------------------
 (pub :: expandApp (-> Int Int (Vec Int) Int))
 (pub fn (expandApp e env bs)
-  (let ((head (spineHead e)))
-    (if (!= (nodeTag head) TAG_E_VAR)
-      (expandAppOrHole e env bs)
-      ; A head the template owns (word 10, see `expandVarRef`) is
-      ; looked up even when the caller binds the spelling: it is the
-      ; macro's own helper or self-call, not the caller's variable.
-      (if (&& (== (expBound bs (nodeAName head)) 1) (== (nodeDefScope head) 0))
+  (if (&& (== (nodeTag (spineHead e)) TAG_E_VAR) (strEq (nodeAName (spineHead e)) "|>"))
+    (expandPipe e env bs)
+    (let ((head (spineHead e)))
+      (if (!= (nodeTag head) TAG_E_VAR)
         (expandAppOrHole e env bs)
-        ; `asm` is the built-in inline-assembly macro (MM-FFI-9). It is
-        ; asked before the macro table, so no library macro can take
-        ; the name, and after the local binders, as a macro is.
-        (if (strEq (nodeAName head) "asm")
-          (expandAsm e env bs)
-          ; `(! b)` is `(if b false true)`, so every later pass reads a
-          ; form it already knows. Any other use of `!` stays a call,
-          ; and the checker refuses it as it refuses a misused `&&`
-          ; (AX3013), from the `Bool -> Bool` row `tcNew` registers.
-          ; `true` and `false` resolve to the literals whatever the
-          ; caller binds, so the rewrite can't be captured.
-          (if (&& (strEq (nodeAName head) "!") (== (spineArgs e 0) 1))
-            (mkNodeAt
-              TAG_E_IF
-              (expandExpr (nodeB e) env bs)
-              (mkEVarAt "false" (nodeSpan e))
-              (mkEVarAt "true" (nodeSpan e))
-              (nodeSpan e))
-            (let ((mac (expFindMacro env (nodeAName head))))
-              (if (== mac 0)
-                (expandAppOrHole e env bs)
-                (expandMacroApp e head mac env bs)))))))))
+        ; A head the template owns (word 10, see `expandVarRef`) is
+        ; looked up even when the caller binds the spelling: it is the
+        ; macro's own helper or self-call, not the caller's variable.
+        (if (&& (== (expBound bs (nodeAName head)) 1) (== (nodeDefScope head) 0))
+          (expandAppOrHole e env bs)
+          ; `asm` is the built-in inline-assembly macro (MM-FFI-9). It is
+          ; asked before the macro table, so no library macro can take
+          ; the name, and after the local binders, as a macro is.
+          (if (strEq (nodeAName head) "asm")
+            (expandAsm e env bs)
+            ; `(! b)` is `(if b false true)`, so every later pass reads a
+            ; form it already knows. Any other use of `!` stays a call,
+            ; and the checker refuses it as it refuses a misused `&&`
+            ; (AX3013), from the `Bool -> Bool` row `tcNew` registers.
+            ; `true` and `false` resolve to the literals whatever the
+            ; caller binds, so the rewrite can't be captured.
+            (if (&& (strEq (nodeAName head) "!") (== (spineArgs e 0) 1))
+              (mkNodeAt
+                TAG_E_IF
+                (expandExpr (nodeB e) env bs)
+                (mkEVarAt "false" (nodeSpan e))
+                (mkEVarAt "true" (nodeSpan e))
+                (nodeSpan e))
+              (let ((mac (expFindMacro env (nodeAName head))))
+                (if (== mac 0)
+                  (expandAppOrHole e env bs)
+                  (expandMacroApp e head mac env bs))))))))))
 
 ; ------------------------------------------------------------------
 ; INLINE ASSEMBLY (`docs/memory-model.md` MM-FFI-9). `asm` is a
@@ -10883,3 +10887,82 @@
           (if (== b 34)
             (concat acc "\\\"")
             (concat acc (strSlice s i 1))))))))
+
+; Pipelines are hygienic lets and ordinary calls. Every intermediate
+; result is evaluated once, before the following stage's operands.
+(pub :: expandPipe (-> Int Int (Vec Int) Int))
+(pub fn (expandPipe e env bs)
+  (let ((args (spineArgVec e vecNew)))
+    (if (< (vecLen args) 2)
+      (expPipeBad env (nodeSpan e) "a pipeline needs a value and at least one stage")
+      (expandExpr (expPipeChain args 1 (vecGet args 0) env (nodeSpan e)) env bs))))
+
+(pub :: expPipeChain (-> (Vec Int) Int Int Int Int Int))
+(pub fn (expPipeChain args i value env sp)
+  (if (>= i (vecLen args))
+    value
+    (let ((name (expFresh env "_pipe")))
+      (mkELetAt
+        name
+        value
+        (expPipeChain
+          args
+          (+ i 1)
+          (expPipeStage (vecGet args i) (mkEVarAt name (nodeSpan value)) env)
+          env
+          sp)
+        sp))))
+
+(pub :: expPipeStage (-> Int Int Int Int))
+(pub fn (expPipeStage stage value env)
+  (if (!= (nodeTag stage) TAG_E_APP)
+    (mkEApp stage value)
+    (let (
+      (args (spineArgVec stage vecNew))
+      (out vecNew)
+    )
+      (let ((holes (expHoleCount args 0)))
+        (if (> holes 1)
+          (expPipeBad
+            env
+            (nodeSpan stage)
+            "a pipeline stage accepts at most one direct `_` argument")
+          {
+            (if (== holes 0)
+              (vecPush out value))
+            (expPipeArgs args out value 0)
+            (expBuildSpine (spineHead stage) out 0)
+          })))))
+
+(pub :: expPipeArgs (-> (Vec Int) (Vec Int) Int Int Int))
+(pub fn (expPipeArgs args out value i)
+  (if (>= i (vecLen args))
+    0
+    {
+      (vecPush
+        out
+        (if (== (expIsHole (vecGet args i)) 1)
+          value
+          (vecGet args i)))
+      (expPipeArgs args out value (+ i 1))
+    }))
+
+(pub :: expPipeBad (-> Int Int String Int))
+(pub fn (expPipeBad env sp message)
+  {
+    (expEmit
+      env
+      (expMarkUnit
+        env
+        (mkDiag
+          SEV_ERROR
+          "AX3127"
+          "pipeline-stage"
+          sp
+          message
+          0
+          0
+          "write `(|> value (f args...) (g args...))`; each stage receives the preceding value first, or at its single direct `_` argument")
+        (memGetWord env 11)))
+    (mkEInt 0)
+  })
