@@ -16,6 +16,14 @@ its changelog too.
 
 ## Unreleased
 
+- Handler values now propagate their effects as calls, including local
+  lambdas and handler parameters. Built-in-only handles leave their
+  unused handler expressions unevaluated in effect inference.
+- An unsafe or unrelated effect claim no longer suppresses undeclared
+  I/O. Every required effect needs its own declaration.
+- Regression tests pin ordinary type, effect and restriction checks
+  inside unsafe declarations, and a typed wrapper's safe caller.
+
 - Editor and REPL completion offer current syntax, excluding retired
   heads such as `emacro`, `define` and `consume`. Migration diagnostics
   and deprecated highlighting still identify old source. Contract

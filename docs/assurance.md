@@ -65,6 +65,7 @@ memory model's *Assurance evidence* table.
 | R-A4 | A finished thread returns its arena | `MM-PAR-6a` | `scripts/check-parallel.sh` (H2 only) |
 | R-A5 | The allocator refuses a negative or unrepresentable size with status 70 | `MM-ALLOC-7a` | `tests/stdlib/520-alloc-size.ax` |
 | R-A6 | Every unsafe primitive, syscall, `asm` form and `extern` call needs `effect(unsafe)` | `MM-EXEC-9c`, `MM-EXEC-9d` | `tests/diagnostics/1010-unsafe-primitives.ax`, `tests/diagnostics/1080-unsafe-syscalls.ax`, `tests/diagnostics/1045-inline-asm-unsafe.ax`, `tests/diagnostics/1116-extern-unsafe.ax` |
+| — | Unsafe declarations retain type checks, required effects and restrictions; handler values propagate their effects | `MM-EXEC-9d`, `MM-EXEC-10` | `tests/diagnostics/1395-unsafe-checks-retained.ax`, `tests/diagnostics/1390-handler-effects.ax`, `tests/stdlib/940-handler-values.ax` |
 | R-A7 | A released block's free-list link can't be released as a count | `MM-LIFE-2k` | `tests/stdlib/521-release-filed.ax` |
 | R-A8 | A join of a handle another binding spawned is status 78, refused before it waits or writes | `MM-PAR-7` | `scripts/check-parallel.sh` |
 | R-A9 | A count that would overflow traps with status 70 before the write | `MM-LIFE-2l` | `tests/stdlib/527-retain-overflow.ax` |
@@ -207,24 +208,25 @@ the neighbourhood of the corpus.
 
 ## Standards
 
-The route that fits Axiom's evidence is to verify the executable your
-compiler produces, and treat the compiler as an unqualified tool whose
-checks reduce risk. Its evidence could contribute to these areas:
+Aviation and space projects need evidence for a frozen application and
+toolchain. The links below identify the source documents; the evidence
+column is Axiom's mapping, not a claim that an objective is satisfied.
 
-- **DO-178C and DO-330**: configuration management (reproducible
-  builds, seed lineage); coding standards (the restricted profile);
-  inputs to tool qualification if you choose that route. Multicore
-  objectives in AC 20-193 need evidence from your processor.
-- **ISO 26262**: Part 6 coding and design guidelines (typing, the
-  restricted profile, no recursion or steady-state allocation); Part 8
-  tool confidence (validation by the checks, reproducibility).
-- **IEC 61508-3**: support tools and translators, and the language
-  subset.
-- **ECSS-Q-ST-80 and ECSS-E-ST-40**: tool justification, and the
-  bootstrap's independence from a supplier.
+| Basis | Scope | Axiom evidence and limits |
+|---|---|---|
+| [FAA AC 20-115D](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_20-115D.pdf) | Recognises DO-178C for airborne software and DO-330 for software tool qualification | Seed lineage, reproducibility and the restricted profile provide inputs. Tool qualification and application verification remain project obligations. |
+| [FAA AC 20-193](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_20-193.pdf) | Assurance objectives for airborne multicore processors | Concurrency tests exercise language behaviour. They establish no timing or interference bound for an aircraft processor. |
+| [ECSS-Q-ST-80C Rev.2](https://ecss.nl/standard/ecss-q-st-80c-rev-2-software-product-assurance-30-april-2025/) | Software product assurance, including development tools and other software affecting the delivered product | Clause 5.6 covers tool selection, suitability and correct use; 6.2.6.12 covers milestone traceability review. The guarantee tables above provide trace links, with qualification gaps listed separately. |
+| [ECSS-E-ST-40C Rev.1](https://ecss.nl/standard/ecss-e-st-40c-rev-1-software-30-april-2025/) | Space software engineering from requirements through operations and maintenance | Specifications and tests cover parts of the implementation. A mission still needs its own requirements, verification records and selected configuration. |
 
-These mappings were made without the licensed texts. Check every one
-against the edition your project uses.
+The two ECSS editions are dated 30 April 2025. Apply the edition and
+tailoring agreed for your project. In particular, emulator runs provide
+no evidence for radiation tolerance, hardware fault recovery or timing
+on the flight hardware.
+
+Automotive and general functional-safety projects need their own
+assessment against ISO 26262 or IEC 61508-3. No clause mapping for those
+standards is claimed here.
 
 ## Support
 

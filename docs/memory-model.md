@@ -705,6 +705,11 @@ A cast is judged once its whole body is typed, so the type a value
 ends up with decides. An empty vector cast to `(Vec String)` and then
 filled with `Int`s forges, wherever the push is written.
 
+The tag leaves ordinary checks enabled: signatures must match their
+bodies, heap results retain their types, other required effects remain
+required, and restrictions still apply. Tested by
+`tests/diagnostics/1395-unsafe-checks-retained.ax`.
+
 The tag makes a declaration a *trusted encapsulation*. Its author
 vouches that every well-typed call is safe, so its `Unsafe` ends at the
 declaration: a caller's inferred row doesn't carry it, and a caller

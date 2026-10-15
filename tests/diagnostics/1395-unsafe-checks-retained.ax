@@ -1,0 +1,48 @@
+; Unsafe permits raw operations without disabling ordinary checks.
+; Type mismatch, heap-result typing, I/O declarations and restrictions
+; still apply. Each unsafe tag guards an actual raw operation.
+(import IO)
+
+(struct Box
+  (value : Int))
+
+(:: wrongType (-> Int String))
+;@axiom:effect(unsafe)
+(fn (wrongType p)
+  {
+    (__load64 p 0)
+    7
+  })
+
+(:: erasedOwner (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (erasedOwner p)
+  {
+    (__load64 p 0)
+    (Box 7)
+  })
+
+(:: missingIO (-> Int ()))
+;@axiom:effect(unsafe)
+(fn (missingIO p)
+  {
+    (__load64 p 0)
+    (println "still needs io")
+  })
+
+(:: forbiddenAllocation Int)
+;@axiom:effect(unsafe)
+;@axiom:restrict(no-alloc)
+(fn (forbiddenAllocation)
+  (__alloc 8))
+
+; A typed wrapper can uphold the raw load's obligation for every caller.
+(:: readBox (-> Box Int))
+;@axiom:effect(unsafe)
+(fn (readBox b)
+  (__load64 (cast Int b) 0))
+
+(:: main Int)
+;@axiom:restrict(no-unsafe)
+(fn (main)
+  (readBox (Box 42)))

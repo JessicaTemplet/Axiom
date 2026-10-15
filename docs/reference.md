@@ -731,6 +731,10 @@ effects omitted from a function's declaration are diagnosed.
 | `Unsafe` | caller-established low-level obligations |
 | `Spawn`, `Block`, `Entropy` | process/task creation, waiting, and randomness |
 
+An unsafe declaration keeps ordinary type checks, restrictions and
+checks for other effects. Its author must uphold the raw operation's
+memory obligations and expose a safe interface to callers.
+
 A custom effect declares callable operations with signatures:
 
 ```scheme
@@ -772,7 +776,9 @@ handlers restore the previous one when their extent ends.
 
 `handle` lists every effect the body performs. A custom effect in the
 list is intercepted; a built-in is acknowledged and still reaches the
-caller. The handler's own effects also reach the caller. An operation
+caller. The handler's own effects also reach the caller, including a handler
+stored in a local or supplied as a parameter. A handle listing only
+built-in effects does not evaluate its handler expression. An operation
 cannot be passed bare as a callback; wrap it in a lambda.
 
 ### restrict: what a function never does

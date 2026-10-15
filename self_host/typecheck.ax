@@ -15731,10 +15731,54 @@
       {
         (effUnionUnhandled tc acc inner (nodeBVec e) 0)
         (if (== (handleIsDynamic tc (nodeBVec e) 0) 1)
-          (effAdd acc (builtinEff "Alloc")))
-        (walkCalledLambda tc (nodeC e) bound acc)
+          {
+            (effAdd acc (builtinEff "Alloc"))
+            (walkHandler tc (nodeC e) bound acc)
+          })
         fv
       })))
+
+; Installing a dynamic handler calls the supplied function whenever its
+; operation runs. Follow its value as a call, including local aliases and
+; effect-transparent parameters, in the installation's outer scope.
+(pub :: walkHandler (-> Int Int Int (Vec a) ()))
+(pub fn (walkHandler tc h bound acc)
+  {
+    (if (!= h 0)
+      (if (== (nodeTag h) TAG_E_LAM)
+        (walkCalledLambda tc h bound acc)
+        (match (walkEffectsVal tc h bound acc)
+          ((None)
+            (if (== (nodeTag h) TAG_E_VAR)
+              (walkCallHead tc (nodeAName h) vecNew bound acc 0)
+              (effAdd acc effIncomplete))
+          )
+          ((Some fv)
+            {
+              (fnValsCall tc fv vecNew bound acc 0)
+              (handlerOpaqueArgs acc fv.members)
+            }
+          ))))
+    ()
+  })
+
+; An operation can supply a callback to its handler. Its identity is
+; unknown here, so a named handler that calls such an argument keeps an
+; open row. Lambda parameters already carry bsOpaque in their own walk.
+(pub :: handlerOpaqueArgs (-> (Vec a) (Vec FnVal) ()))
+(pub fn (handlerOpaqueArgs acc members)
+  (let ((mut i 0))
+    {
+      (while (< i (vecLen members))
+        (let ((m (vecGet members i)))
+          {
+            (if (== m.kind 1)
+              (if (> (vecLen (memGetWordVec m.ent 6)) 0)
+                (effAdd acc effIncomplete)))
+            (set i (+ i 1))
+          }))
+      ()
+    }))
 
 ; A lambda applied where it stands - a call head, or a handler - is
 ; walked in place: its parameters are bound opaque and everything its
@@ -22203,10 +22247,10 @@
           (unsafeNotePending tc d own sig eff)
           ; `;@axiom:ct(...)` holds of the body (AX3092, AX3093).
           (checkCtClaim tc d)
-          ; A declaration that made ANY effect claim belongs to AX3010,
-          ; right or wrong. This arm is for the one that made none.
-          (if (! (|| (== (axtagsClaimAny sig) 1) (== (axtagsClaimAny own) 1)))
-            (checkUndeclaredIO tc d eff))
+          ; Each required effect needs its own declaration. A purity
+          ; claim is answered by AX3010; other claims cannot excuse IO.
+          (if (== (tagsClaimPure sig own) 0)
+            (checkUndeclaredOne tc d eff own sig "IO"))
           ; `Entropy`, `Spawn` and `Block` are asked of every
           ; declaration, claims or none: `effect(io)` says the body
           ; reaches the outside world, and says nothing about whether it
@@ -24680,92 +24724,6 @@
           0
           0
           "a `;@axiom:pre(...)` or `;@axiom:post(...)` is a claim the COMPILER cannot decide - there is no value analysis here - so it is compiled into the body and checked at run time, on every call, and a failure writes `axiom: precondition failed in `f`: ...` on fd 2 and exits 80. That is why the expression has to parse, has to be `Bool`, and has to PERFORM nothing: a contract that allocates or writes changes the program by being stated. Comparison, indexing, `strEq`, `strLen`, `vecLen` and `vecGet` are allocation-free and are what a predicate is written from; `concat`, `fmtInt` and `vecNew` are not. `result` names the declared result of a `post` and nothing anywhere else")))))
-
-; Does any AXTAG here make an EFFECT CLAIM - `pure`, or `effect(...)`?
-; A metadata key (`no_refactor`, `agent:readonly`) is not a claim and
-; does not answer this, so a declaration carrying only metadata is
-; still a declaration that said nothing about its effects.
-;
-; This is what keeps AX3042 and AX3010 from both firing on one
-; declaration. A claim that is WRONG is AX3010's to report; AX3042 is
-; for a body that performs IO and says nothing at all. An author who
-; wrote a claim never sees both for the same function.
-;
-; A `pure` tag counts as a claim even though it names no effect: it
-; claims the ABSENCE of every effect, IO included, and a body
-; performing IO under it already draws AX3010 `contradicted`.
-;
-; `restrict` IS NOT ONE, AND MUST NEVER JOIN THIS LIST. It reads like
-; an effect claim - `restrict(no-io)` names an effect - but it is a
-; claim about what the body does NOT reach, checked by `checkRestricts`
-; against the same row. Adding it here would switch AX3042 off for
-; every restricted function, silently and in the safe-looking
-; direction: a `restrict(no-alloc)` body performing undeclared IO would
-; draw nothing at all. A restricted function that performs IO and does
-; not declare it draws AX3042 like any other, and `restrict(no-io)`
-; over it draws AX3049 as well - two facts, two diagnostics.
-(pub :: axtagsClaimAny (-> (Vec Int) Int))
-(pub fn (axtagsClaimAny tags)
-  (if (== (cast Int tags) 0)
-    0
-    (axtagsClaimAt tags 0)))
-
-(pub :: axtagsClaimAt (-> (Vec Int) Int Int))
-(pub fn (axtagsClaimAt tags i)
-  (if (>= i (vecLen tags))
-    0
-    (let ((content (memGetWordStr (vecGet tags i) 1)))
-      (let ((key 
-        (match (strFindByte content 40 0)
-          ((None) content)
-          ((Some op) (strSlice content 0 op)))))
-        (if (|| (strEq key "pure") (strEq key "effect"))
-          1
-          (axtagsClaimAt tags (+ i 1)))))))
-
-; AX3042: a body reaches the outside world and its declaration does
-; not say so.
-;
-; WHY ONLY `IO` IS REQUIRED TRANSITIVELY, measured. Recounted
-; 2026-09-25: of 4,645 functions in `self_host/` and `stdlib/`, 4,092
-; perform something and 2,251 of those perform exactly
-; `Alloc,Mut,Unsafe` - every function that touches a String or a Vec,
-; because allocating is what an expression DOES here, `Mut` is set by
-; writing any struct field, and `Unsafe` rides the byte reads and
-; writes underneath. A declaration required on those is 2,251
-; annotations that distinguish nothing from nothing. `IO` is on 458,
-; and each one of those says the thing a caller actually needs to
-; know: this reaches outside the process. (The 2026-08-30 recount's
-; modal bucket was exactly-`Alloc,Mut` at 1,664; `Unsafe` inference
-; landed 2026-09-21 and that bucket reads 0 today. The ambient mass
-; moved buckets, it did not shrink, and the argument is unchanged.)
-;
-; REQUIRED is not DECLARABLE, and the documents said the second for a
-; while. `;@axiom:effect(mut)` over a body that writes a field is
-; accepted, and over one that does not it is `AX3010`. Alloc, Mut and
-; every custom effect are declarable and checked; what is special about
-; `IO` is that its ABSENCE is a claim every function up the call chain
-; must answer. `Unsafe` has joined since (2026-09-22, `AX3073`),
-; required LEXICALLY rather than transitively: silence means the body
-; touches no raw memory either, but only the body holding the
-; primitive is asked. `Alloc` and `Mut` stay
-; ambient and stay INFERRED - `symbols` still reports them, and
-; `handle`/`(Pure)` still measure them, so nothing that could observe
-; them lost the ability to.
-;
-; `effDefinite` is the same reading `axtagContradicted` makes, and
-; for the same reason: IO that reaches the row only as POSSIBLE -
-; because the body NAMES an arrow-typed function without calling it -
-; is not evidence that the body performs IO, and accusing an author
-; on it refuses a correct program. IO the body performs is accused whatever
-; else the row carries: this used to decline on a row-global marker,
-; and every caller of a function printing a `{hole}` compiled clean
-; and printed (the header above `effIsPossible`).
-(pub :: checkUndeclaredIO (-> Int Int (Vec a) Int))
-(pub fn (checkUndeclaredIO tc d eff)
-  (if (== (effDefinite eff (builtinEff "IO")) 1)
-    (emitUndeclaredEffect tc d "IO")
-    0))
 
 ; AX3042 for the three effects that refine `IO` (`isConcEntropyEffect`).
 ; A purity claim is answered by AX3010 instead, as it is for IO, so one
