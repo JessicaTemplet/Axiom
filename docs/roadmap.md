@@ -163,9 +163,22 @@ ADT instantiation.
 | `asm` takes floating-point, vector and memory operands | Not started |
 | The restricted profile requires `nostack` of an allowed `asm` block, or counts what it pushes | Not started |
 | The test runner runs tests in parallel | Done |
+| UTF-16 ranged document edits apply in order and atomically, with monotonic versions and versioned diagnostics | Done |
+| The language server cancels obsolete work and serves requests from revisioned background analysis | Not started |
+| Unsaved imported documents feed a shared semantic cache, with dependency invalidation and workspace diagnostics | Not started |
+| Completion uses expected types, offers auto-import edits and resolves expensive details on demand | Not started |
+| Safe assists organise top-level imports and preserve attached comments | Not started |
+| Semantic tokens support range and delta requests | Not started |
 | The language server answers inside macro invocations | Not started |
 | Packages can pin a version | Not started |
 | A published performance profile | Not started |
+
+The editor comparison follows rust-analyzer's
+[features](https://rust-analyzer.github.io/book/features.html) and
+[architecture](https://rust-analyzer.github.io/book/contributing/architecture.html).
+Axiom has navigation, hover, completion, refactoring and formatting.
+The rows above track the remaining analysis, responsiveness and completion
+work; they do not claim full feature parity.
 
 ## Platforms and release
 

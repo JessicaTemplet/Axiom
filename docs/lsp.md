@@ -67,11 +67,17 @@ capabilities included.
 
 ### How a session behaves
 
-- Sync is full text: `textDocumentSync: 1`. Every `didChange` carries
-  the whole document, and the server reads the last content change in
-  the notification. The checker takes a whole source string anyway, so
-  an incremental store would only be flattened again before each
-  check.
+- Sync is incremental: `textDocumentSync` advertises `openClose: true`
+  and `change: 2`. Your editor can send UTF-16 ranged edits or full
+  replacements. Multiple edits apply in order, each to the preceding
+  edit's result.
+- A document's version increases on each accepted change. Stale or
+  repeated versions, changes to closed documents and duplicate opens
+  leave the document untouched. Reopening starts a new version sequence.
+- A malformed edit leaves the whole notification unapplied, including
+  its version. Negative positions, missing endpoints, reversed ranges
+  and endpoints inside a surrogate pair are refused. A column beyond
+  its line clamps to the line's end. CRLF counts as one line ending.
 - The server reads three notifications: `didOpen`, `didChange` and
   `didClose`. It drops `didSave`, as it drops any notification it
   doesn't know.
@@ -88,10 +94,15 @@ capabilities included.
   unconsumed bytes. `drive.py`'s editing session edits one document
   many times and checks that the process doesn't grow.
 
+Tested by `tests/lsp/incremental-sync.py`.
+
+Not yet: requests run serially and cannot be cancelled while they are
+being answered. See the [roadmap](roadmap.md#tools).
+
 ### Diagnostics
 
-The server publishes diagnostics on every `didOpen` and `didChange`,
-under the document's own URI. They are `axiom check`'s diagnostics. As
+The server publishes diagnostics on every accepted `didOpen` and
+`didChange`, under the document's own URI and version. They are `axiom check`'s diagnostics. As
 in the compiler, the first stage that fails decides what you see:
 
 1. a lexical error;
@@ -1416,10 +1427,9 @@ Three things run the full pipeline, because its output is the answer:
 - `axiom/expandMacro`, because showing what a macro generated is the
   question being asked.
 
-None of the three is sent per keystroke. A client asks for code
-actions when the cursor rests, and for an expansion on demand. Each
-costs about one `didOpen` of the same document, which the editor
-already paid for on the last keystroke.
+Document changes can arrive on every keystroke and still run the whole
+check. A client asks for code actions when the cursor rests, and for an
+expansion on demand. Each costs about one `didOpen` of the same document.
 
 `scripts/check-lsp-selfhost.sh` holds the rule with a ratio instead of
 a stopwatch, so a slow runner can't fail it and a fast one can't hide a

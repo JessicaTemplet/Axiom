@@ -100,7 +100,8 @@ def run(compiler):
         diagnostics = terminal(compiler, path)
         assert [d["code"] for d in diagnostics] == ["AX3073"], diagnostics
         checked = diagnostics[0]
-        assert "`Message` out of `Int`" in checked["message"], checked
+        # The forging check reports the target resolved in its declaring scope.
+        assert "`Packet` out of `Int`" in checked["message"], checked
         assert len(checked["related"]) == 1, checked
         conversion = source.index("(as address Message)")
         value_start = source.index("address", conversion)

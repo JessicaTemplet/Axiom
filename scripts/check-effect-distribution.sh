@@ -88,14 +88,17 @@ have() { # have <got> <want> <what>
 # helpers add one Alloc,Mut row and one Unsafe row; removing repeated
 # alias expansion moves castNormTy and asNumericKind from Alloc,Mut to Alloc.
 # All required effect rows retain their existing counts.
+# Incremental LSP synchronisation adds document/edit helpers and an IO
+# publisher. Line/column helpers now build the CR/LF-aware line index,
+# moving two pure rows to Alloc,Mut. No existing IO row changes effects.
 echo "== compiler view: symbols --calls self_host/main.ax =="
 "$axc" --diagnostic-format=ai symbols --calls self_host/main.ax > "$work/main.axsym" 2>"$work/main.err" \
   || { fail "could not read symbols over self_host/main.ax"; echo "check-effect-distribution: $failed failed"; exit 1; }
 rows="$(grep -c '^F ' "$work/main.axsym" || true)"
 (( rows >= 4000 )) && ok "$rows functions listed (floor 4000)" \
   || fail "only $rows functions listed; the floor is 4000 (the corpus moved or the read broke)"
-have "$(bucket "$work/main.axsym" 'Alloc,Mut')" 2788 "exactly Alloc,Mut"
-have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut')" 401 "Alloc,IO,Mut"
+have "$(bucket "$work/main.axsym" 'Alloc,Mut')" 2796 "exactly Alloc,Mut"
+have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut')" 402 "Alloc,IO,Mut"
 have "$(bucket "$work/main.axsym" 'Mut')" 157 "exactly Mut"
 have "$(bucket "$work/main.axsym" 'Alloc')" 154 "exactly Alloc"
 have "$(bucket "$work/main.axsym" 'Alloc,IO')" 15 "Alloc,IO"
@@ -125,7 +128,7 @@ have "$(bucket "$work/main.axsym" 'IO,Spawn,Unsafe')" 1 "IO,Spawn,Unsafe"
 have "$(bucket "$work/main.axsym" 'Spawn')" 2 "Spawn"
 have "$(bucket "$work/main.axsym" 'Alloc,Block,IO,Mut')" 5 "Alloc,Block,IO,Mut"
 have "$(bucket "$work/main.axsym" 'Block,IO')" 1 "Block,IO"
-have "$(grep '^F ' "$work/main.axsym" | grep -vc '#effects=\|#effects-incomplete' || true)" 2087 "pure (neither row nor mark)"
+have "$(grep '^F ' "$work/main.axsym" | grep -vc '#effects=\|#effects-incomplete' || true)" 2088 "pure (neither row nor mark)"
 have "$(grep '^F ' "$work/main.axsym" | grep -o '#effects=[^ #]*' | LC_ALL=C sort -u | wc -l | tr -d ' ')" 29 "distinct compiler effect rows"
 have "$(grep -c '#effects-incomplete' "$work/main.axsym" || true)" 35 "incomplete rows"
 have "$(grep -c '#effect-params' "$work/main.axsym" || true)" 11 "effect-params rows"

@@ -628,6 +628,10 @@ fi
 python3 tests/lsp/drive.py "${args[@]}"
 status=$?
 
+if ! python3 tests/lsp/incremental-sync.py "$work/stage1"; then
+  status=1
+fi
+
 echo "swept $fixtures fixtures (floor $floor), $rows manifest rows, $orows outline rows"
 
 # ------------------------------------------------------------------
@@ -960,7 +964,7 @@ def build(cap, name, uri, text, p, rid):
         if isinstance(cap,dict) and cap.get("expandMacro"):
             return [("axiom/expandMacro",{**td,"position":p})]
         return []
-    if name=="textDocumentSync": return []
+    if name in ("textDocumentSync", "positionEncoding"): return []
     if name not in m: return None
     return [m[name]]
 def caps_of():

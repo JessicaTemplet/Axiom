@@ -665,6 +665,11 @@ calling a converted function checks its remaining arguments. Tested by
   Unsafe conversion checks keep the target resolved at its declaration.
   Tested by `tests/diagnostics/1425-alias-nominal-scope.ax`.
 
+- The language server accepts incremental UTF-16 edits, checks every
+  edit in order before committing a batch, and publishes document
+  versions with diagnostics. Stale changes and malformed batches leave
+  the document untouched. Tested by `tests/lsp/incremental-sync.py`.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error
