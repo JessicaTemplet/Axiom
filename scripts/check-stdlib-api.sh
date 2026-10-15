@@ -492,8 +492,10 @@ cp -R "$repo_root/stdlib" "$probe/stdlib"
 cat >> "$probe/stdlib/Path.ax" <<'PROBE'
 
 ; A probe declaration, added by scripts/check-stdlib-api.sh.
+;@axiom:pre((>= (strLen p) 0))
 (pub :: pathProbeForTheGate (-> String String))
 
+;@axiom:post((== (strLen result) (strLen p)))
 (pub fn (pathProbeForTheGate p) p)
 PROBE
 generate "$probe" "$work/probe.md" 2>/dev/null || true
@@ -503,6 +505,12 @@ elif grep -q 'pathProbeForTheGate' "$work/probe.md"; then
   ok "a public name added to a copy appears in the regenerated reference"
 else
   bad "a public name added to a copy did NOT appear - the generator is not reading the source"
+fi
+if grep -qF ';@axiom:pre((>= (strLen p) 0))' "$work/probe.md" \
+   && grep -qF ';@axiom:post((== (strLen result) (strLen p)))' "$work/probe.md"; then
+  ok "contracts on both the signature and definition appear in the reference"
+else
+  bad "a contract on the probe's signature or definition is missing"
 fi
 if cmp -s "$work/probe.md" "$work/fresh.md"; then
   bad "the probe's document is identical to the real one"

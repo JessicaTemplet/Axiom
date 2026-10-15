@@ -423,6 +423,45 @@
       (strSlice p 0 (- (strLen p) 1))
       p)))
 
+; Contract tags immediately above either half of a public function.
+(:: contractsAbove (-> (Vec String) Int String))
+(fn (contractsAbove lines i)
+  (let ((mut start (- i 1)) (mut out ""))
+    {
+      (while (if (>= start 0)
+               (let ((line (strTrim (vecGet lines start))))
+                 (|| (== (strLen line) 0) (strStartsWith line ";")))
+               false)
+        (set start (- start 1)))
+      (set start (+ start 1))
+      (while (< start i)
+        (let ((line (strTrim (vecGet lines start))))
+          {
+            (if (|| (strStartsWith line ";@axiom:pre(") (strStartsWith line ";@axiom:post("))
+              (set out (concat out (concat (if (== (strLen out) 0) "" "<br>")
+                (concat "`" (concat (cell line) "`"))))))
+            (set start (+ start 1))
+          }))
+      out
+    }))
+
+(:: contractsFor (-> (Vec String) String String))
+(fn (contractsFor lines name)
+  (let ((mut i 0) (mut out ""))
+    {
+      (while (< i (vecLen lines))
+        (let ((line (strTrim (vecGet lines i))))
+          {
+            (if (|| (strStartsWith line "(pub :: ") (strStartsWith line "(pub fn ("))
+              (if (strEq (identAt line (if (strStartsWith line "(pub :: ") 8 9)) name)
+                (let ((clauses (contractsAbove lines i)))
+                  (if (> (strLen clauses) 0)
+                    (set out (concat out (concat (if (== (strLen out) 0) "" "<br>") clauses)))))))
+            (set i (+ i 1))
+          }))
+      out
+    }))
+
 (:: renderModule (-> String (Vec String) String))
 ;@axiom:effect(io)
 (fn (renderModule path axsym)
@@ -460,6 +499,7 @@
                                 (declType line dn)
                                 "")
                               (effectsOf axsym dn)
+                              (contractsFor lines dn)
                               (docAbove lines i))))
                           ; The block answers `0` so it agrees with the
                           ; other arm of the `if` above it. Without it
@@ -479,11 +519,11 @@
                     (concat intro "\n\n"))))
               (if (== count 0)
                 ""
-                (concat "| Name | Kind | Type | Effects | Summary |\n|---|---|---|---|---|\n" (concat rows "\n"))))
+                (concat "| Name | Kind | Type | Effects | Contracts | Summary |\n|---|---|---|---|---|---|\n" (concat rows "\n"))))
           })))))
 
-(:: renderRow (-> String String String String String String))
-(fn (renderRow kind name ty effects summary)
+(:: renderRow (-> String String String String String String String))
+(fn (renderRow kind name ty effects contracts summary)
   (concat
     (concat (concat "| `" (cell name)) (concat "` | " kind))
     (concat
@@ -498,7 +538,7 @@
           (if (== (strLen effects) 0)
             ""
             (concat (concat "`" (cell effects)) "`")))
-        (concat (concat " | " (cell summary)) " |\n")))))
+        (concat (concat " | " contracts) (concat (concat " | " (cell summary)) " |\n"))))))
 
 ; The reference states one number per module and this writes it, with
 ; `Fmt.fmtInt`.
@@ -526,4 +566,4 @@
 
 (:: header String)
 (fn (header)
-  "# Axiom standard library\n\nEvery public function, type and macro in Axiom's standard library, one\nsection per module. To find out what each module is for, start with\n[Modules at a glance](reference.md#modules-at-a-glance) in the language\nreference.\n\nEvery name listed is `pub` in the source. The columns are:\n\n- **Kind**: `value` for a function or constant, `struct`, `data`,\n  `effect` or `macro`.\n- **Type**: the signature as you write it in source, such as\n  `(-> Int Int)`.\n- **Effects**: what the compiler infers the definition does. `Alloc`\n  allocates, uses the arena or installs a handler. `IO` reaches the\n  outside world through a syscall, an `extern` call or the command\n  line. `Mut` changes heap state that something else can see. `Unsafe`\n  uses a raw-memory primitive. A blank cell means the compiler inferred\n  no effect, and a macro's cell is always blank. Treat the column as a\n  lower bound: inference doesn't count the allocation a constructor\n  makes (`docs/memory-model.md` MM-EXEC-9a).\n- **Summary**: the first paragraph of the `;;` doc comment above the\n  definition. A blank cell is a name with no doc comment yet.\n\nA module's `;;!` lines open its section.\n\nThis page is generated from the standard library by\n`examples/axdoc/axdoc.ax`, so please don't edit it by hand.\n`scripts/check-stdlib-api.sh` regenerates it in CI and fails if the\ntwo differ.\n\n")
+  "# Axiom standard library\n\nEvery public function, type and macro in Axiom's standard library, one\nsection per module. To find out what each module is for, start with\n[Modules at a glance](reference.md#modules-at-a-glance) in the language\nreference.\n\nEvery name listed is `pub` in the source. The columns are:\n\n- **Kind**: `value` for a function or constant, `struct`, `data`,\n  `effect` or `macro`.\n- **Type**: the signature as you write it in source, such as\n  `(-> Int Int)`.\n- **Effects**: what the compiler infers the definition does. `Alloc`\n  allocates, uses the arena or installs a handler. `IO` reaches the\n  outside world through a syscall, an `extern` call or the command\n  line. `Mut` changes heap state that something else can see. `Unsafe`\n  uses a raw-memory primitive. A blank cell means the compiler inferred\n  no effect, and a macro's cell is always blank. Treat the column as a\n  lower bound: inference doesn't count the allocation a constructor\n  makes (`docs/memory-model.md` MM-EXEC-9a).\n- **Contracts**: the `pre` and `post` clauses checked on every call.\n- **Summary**: the first paragraph of the `;;` doc comment above the\n  definition. A blank cell is a name with no doc comment yet.\n\nA module's `;;!` lines open its section.\n\nThis page is generated from the standard library by\n`examples/axdoc/axdoc.ax`, so please don't edit it by hand.\n`scripts/check-stdlib-api.sh` regenerates it in CI and fails if the\ntwo differ.\n\n")

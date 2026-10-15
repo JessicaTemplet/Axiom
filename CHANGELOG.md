@@ -16,6 +16,12 @@ its changelog too.
 
 ## Unreleased
 
+- Function contracts appear in hover, signature help, `axiom doc` and
+  the generated library reference. Completion inside a clause offers
+  its parameters and, in a postcondition, `result`. The language
+  reference and the website show a complete contracts example.
+  Tested by `tests/lsp/drive.py` and `scripts/check-stdlib-api.sh`.
+
 - `try` is gone from the language: it is not a keyword, not a reserved
   word and not refused. The postfix `?` propagates an error, and `try`
   is an ordinary name a program may use. `?`'s own names follow: the

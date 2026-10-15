@@ -3044,7 +3044,7 @@
         sig)))
       (let ((o (lspFormStart dsrc (spanStart (nodeSpan at)))))
         (let (
-          (code (lspClampLines (lspHoverCode dsrc d sig o) 40))
+          (code (concat (contractSourceFor ddecls d) (lspClampLines (lspHoverCode dsrc d sig o) 40)))
           (doc (lspDocComment dsrc o))
         )
           (let ((fence (concat (concat "```axiom\n" code) "\n```\n")))
@@ -3708,6 +3708,48 @@
 (pub fn (lspComplList items)
   (jsonObjPut (jsonObjPut jsonObj "isIncomplete" (jsonBool 1)) "items" items))
 
+; Parameters of the function whose contract contains the cursor. Signature
+; tags attach to the signature, so find its matching definition as well.
+(pub :: lspComplContract (-> Int (Vec String) String (Vec Int) Int String Int))
+(pub fn (lspComplContract out seen src decls off prefix)
+  (let ((ls (lspLineStartAt src off)))
+    (let ((line (strTrim (strSlice src ls (- (lspLineEndFrom src ls) ls)))))
+      (if (|| (strStartsWith line ";@axiom:pre(") (strStartsWith line ";@axiom:post("))
+        (lspComplContractAt out seen src decls (contractSigIndex decls) off prefix)
+        0))))
+
+(pub :: lspComplContractAt (-> Int (Vec String) String (Vec Int) (Vec Int) Int String Int))
+(pub fn (lspComplContractAt out seen src decls sigs off prefix)
+  (let ((mut i 0))
+    {
+      (while (< i (vecLen decls))
+        (let ((d (vecGet decls i)))
+          {
+            (if (== (nodeTag d) TAG_D_FN)
+              (let ((tags (contractTagsFor sigs d)) (mut j 0))
+                {
+                  (while (< j (vecLen tags))
+                    (let ((t (vecGet tags j)))
+                      {
+                        (if (&& (>= off (memGetWord t 0)) (<= off (findNewline src (memGetWord t 0) (strLen src))))
+                          (let ((ps (nodeBVec d)) (mut k 0))
+                            {
+                              (while (< k (vecLen ps))
+                                {
+                                  (lspComplOffer out seen (vecGetStr ps k) 6 "contract parameter" prefix)
+                                  (set k (+ k 1))
+                                })
+                              (if (strEq (contractKeyOf t) "post")
+                                (lspComplOffer out seen "result" 6 "function result" prefix))
+                            }))
+                        (set j (+ j 1))
+                      }))
+                }))
+            (set i (+ i 1))
+          }))
+      0
+    }))
+
 (pub :: lspCompletion (-> String String Int Int))
 ;@axiom:effect(io)
 (pub fn (lspCompletion src uri params)
@@ -3730,6 +3772,7 @@
           (if (! (== (memGetWord pr 0) 0))
             (let ((decls (memGetWordVec pr 1)))
               {
+                (lspComplContract out seen src decls (lspOffsetOf src ix (jsonGet params "position")) prefix)
                 (lspComplLocal
                   out
                   seen
@@ -9015,21 +9058,25 @@
       (if (> (strLen origin) 0)
         (set label (concat (concat label " from ") origin))
         label)
-      (lspViewSigInfo label starts ends (lspViewSigDoc dsrc d sig))
+      (lspViewSigInfo label starts ends (lspViewSigDoc dsrc ddecls d sig))
     }))
 
 ; The paragraph above the declaration, read where hover reads it: at
 ; the `::` when the `fn` has one, because that is where this language
 ; puts the comment, and at the `fn` itself otherwise.
-(pub :: lspViewSigDoc (-> String Int Int String))
-(pub fn (lspViewSigDoc dsrc d sig)
+(pub :: lspViewSigDoc (-> String (Vec Int) Int Int String))
+(pub fn (lspViewSigDoc dsrc ddecls d sig)
   (let ((at 
     (if (== sig 0)
       d
       sig)))
     (if (== (nodeSpan at) 0)
       ""
-      (lspDocComment dsrc (lspFormStart dsrc (spanStart (nodeSpan at)))))))
+      (let ((doc (lspDocComment dsrc (lspFormStart dsrc (spanStart (nodeSpan at)))))
+            (clauses (contractSourceFor ddecls d)))
+        (if (== (strLen clauses) 0)
+          doc
+          (concat doc (concat "\n\n```axiom\n" (concat clauses "```"))))))))
 
 ; A constructor: `(Circle Int)`, each field type rendered by the
 ; checker's own printer and labelled as a parameter, so the client

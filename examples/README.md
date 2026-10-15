@@ -8,6 +8,23 @@ Run the commands from the repository root. Each program opens with a
 header comment that explains why it's written the way it is, and it's
 worth reading before the code.
 
+## contracts
+
+[`examples/contracts/contracts.ax`](contracts/contracts.ax) clamps an
+integer between two bounds. Its precondition checks the bounds and its
+postcondition checks the returned value.
+
+```bash
+axiom run examples/contracts/contracts.ax
+```
+
+```text
+0 7 10
+```
+
+See [contracts](../docs/reference.md#contracts-pre-and-post) for the
+allowed expressions and what happens when a clause fails.
+
 ## batch-fallible
 
 [`examples/batch-fallible/batch-fallible.ax`](batch-fallible/batch-fallible.ax)

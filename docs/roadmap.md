@@ -69,6 +69,8 @@ integrator would still need.
 
 | Item | State | Where it's specified or tested |
 |---|---|---|
+| Contracts are visible in hover, signature help, completion and generated documentation | Done | `tests/lsp/drive.py`, `scripts/check-stdlib-api.sh` |
+| Contracts diagnose certainly false calls and postconditions at compile time | Planned | |
 | A misspelt checked AXTAG key is an error | Done | `AX3039` |
 | An `effect(unsafe)` claim is judged by what the body itself performs | Done | `AX3010`, `tests/diagnostics/1200-unsafe-claim-open-row.ax` |
 | A statically certain defect or a refuted claim is an error, not a warning | Done | `tests/diagnostics/severity.policy` |
@@ -87,7 +89,7 @@ integrator would still need.
 | Macro hygiene has one implementation | Done | `MAC-HYG-10` |
 | Literal identifiers in macro patterns compare by binding, not spelling | Planned | `MAC-HYG-9`, `MAC-LANG-14a` |
 | `macro` and `emacro` become one form: a rule's template is declarations or one expression, and the invocation's position picks | Done | `MAC-LANG-14`, `tests/stdlib/930-macro-both-positions.ax` |
-| Errors propagate with a postfix `?` | Done | `ERR-SUGAR-4`, `tests/stdlib/847-propagate.ax`, `tests/diagnostics/1303-try-removed.axbad` |
+| Errors propagate with a postfix `?` | Done | `ERR-SUGAR-4`, `tests/stdlib/847-propagate.ax`, `tests/diagnostics/1300-propagate-position.ax` |
 | A unit type with a value, `()`, so an `if` without an else, a dropped branch and a procedure need no filler `0` | Done | `tests/stdlib/890-unit-and-if.ax`, `tests/stdlib/892-dropped-branches.ax` |
 | Functional piping as a structural form: a pipe the tree, the language server and agents see stage by stage, with an explicit `_` hole for where the value goes | Not started | |
 | One code-generation route: the MIR route is finished or removed | Not started | |

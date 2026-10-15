@@ -742,18 +742,70 @@ lists the supported restrictions and their limits.
 
 ### Contracts: pre and post
 
-`pre` checks arguments and `post` checks the bound name `result`:
+Use a contract to state what a function accepts and what it promises.
+A `pre` clause runs before the body. A `post` clause runs after it,
+with `result` bound to the returned value:
 
 ```scheme
-;@axiom:pre((> n 0))
-;@axiom:post((>= result 0))
-(:: half (-> Int Int))
-(fn (half n) (/ n 2))
+(import IO)
+
+;@axiom:pre((<= lo hi))
+;@axiom:post((&& (>= result lo) (<= result hi)))
+(:: clamp (-> Int Int Int Int))
+(fn (clamp n lo hi)
+  (if (< n lo) lo (if (> n hi) hi n)))
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  (let ((n (clamp 18 0 10)))
+    (println "{n}")))
 ```
 
-Checks run on every call and trap with status 80 on failure. They
-cannot be disabled. They are runtime conditions, rather than proofs
-of value ranges.
+```text
+10
+```
+
+Put clauses above the signature or the definition. You can write more
+than one: signature clauses run first, followed by definition clauses,
+in their written order. A postcondition can also read the parameters.
+It sees their current contents; a mutable container has no saved copy
+of its entry state.
+
+Each clause must be one `Bool` expression. Comparisons, indexing and
+allocation-free queries such as `strLen` and `vecLen` are useful here.
+A clause that allocates, mutates state or performs I/O is `AX3050`.
+Malformed expressions and expressions of another type are refused too.
+`result` is available only in a postcondition.
+
+A failed clause writes its kind, the function name and the expression
+to stderr, followed by a backtrace. For example, `(clamp 7 10 0)` writes:
+
+```text
+axiom: precondition failed in `clamp`: (<= lo hi)
+```
+
+Failure traps with status 80. Inside a recovery point, that status
+returns to the handler; otherwise it ends the program. Checks run at
+every optimisation level and cannot be disabled. See
+[recovery points](error-model.md#5-recovery).
+
+Contracts check values at run time. A subtype expresses a value range
+in a type; `restrict` checks what a function's implementation does;
+`effect` declares its effects. A contract adds a condition at the
+function boundary. It does not prove a caller's arguments valid at
+compile time. A precondition preserves the self-recursive tail-call
+rewrite; a postcondition must observe the result and prevents it.
+
+Hover and signature help show the clauses alongside the signature.
+Completion inside a clause offers the parameters, plus `result` in a
+postcondition. `axiom doc` and the generated library reference include
+contracts on public functions.
+
+Run [the contracts example](../examples/contracts/contracts.ax) to see
+both kinds of clause on a complete program.
+
+Tested by `scripts/check-contracts.sh` and `tests/lsp/drive.py`.
 
 ### isr: an interrupt entry point
 

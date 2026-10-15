@@ -6851,6 +6851,82 @@ if failed == 0:
               f"check(s), {sym_named} symbol name(s), discriminating on "
               f"{', '.join(discriminating) or '(nothing in this selection)'}")
 
+# Contracts on both halves of a function are caller-facing documentation.
+# Expected clauses and cursor positions come from these documents' bytes.
+CONTRACT_DIR = tempfile.mkdtemp(prefix="axiom-contract-tools-")
+CONTRACT_HELPER = """;; Divide a positive count in half.
+;@axiom:pre((> count 0))
+(pub :: half (-> Int Int))
+;@axiom:post((>= result 0))
+(pub fn (half count) (/ count 2))
+"""
+CONTRACT_MAIN = """(import ContractHelper)
+(:: main Int)
+(fn (main) (half 4))
+"""
+contract_helper_uri = "file://" + os.path.join(CONTRACT_DIR, "ContractHelper.ax")
+contract_main_uri = "file://" + os.path.join(CONTRACT_DIR, "Main.ax")
+open(os.path.join(CONTRACT_DIR, "ContractHelper.ax"), "w").write(CONTRACT_HELPER)
+open(os.path.join(CONTRACT_DIR, "Main.ax"), "w").write(CONTRACT_MAIN)
+contract_msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}]
+for uri, text in [(contract_helper_uri, CONTRACT_HELPER), (contract_main_uri, CONTRACT_MAIN)]:
+    contract_msgs.append({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+        "textDocument": {"uri": uri, "languageId": "axiom", "version": 1, "text": text}}})
+for rid, method, uri, text, needle, offset in [
+    (2, "textDocument/hover", contract_helper_uri, CONTRACT_HELPER, "(half count)", 2),
+    (3, "textDocument/hover", contract_main_uri, CONTRACT_MAIN, "(half 4)", 2),
+    (4, "textDocument/signatureHelp", contract_main_uri, CONTRACT_MAIN, "(half 4)", 7),
+    (5, "textDocument/completion", contract_helper_uri, CONTRACT_HELPER, "count 0", 3),
+    (6, "textDocument/completion", contract_helper_uri, CONTRACT_HELPER, "result 0", 3),
+]:
+    contract_msgs.append({"jsonrpc": "2.0", "id": rid, "method": method, "params": {
+        "textDocument": {"uri": uri}, "position": rc_at(text, needle, offset)}})
+contract_msgs += [{"jsonrpc": "2.0", "id": 7, "method": "shutdown", "params": None},
+                  {"jsonrpc": "2.0", "method": "exit", "params": None}]
+contract_run = subprocess.run([stage1, "lsp"], cwd=CONTRACT_DIR, capture_output=True,
+    input=b"".join(frame(m) for m in contract_msgs), timeout=60)
+contract_frames, contract_tail = unframe(contract_run.stdout)
+contract_answers = {m["id"]: m.get("result") for m in contract_frames if "id" in m}
+contract_why = ""
+if contract_run.returncode or contract_tail or 7 not in contract_answers:
+    contract_why = "the session did not answer shutdown cleanly"
+clauses = [line for line in CONTRACT_HELPER.splitlines() if line.startswith(";@axiom:")]
+for rid in [2, 3, 4]:
+    result = contract_answers.get(rid) or {}
+    doc = (result.get("contents") or {}).get("value", "") if rid != 4 else (
+        ((result.get("signatures") or [{}])[0].get("documentation") or {}).get("value", ""))
+    for clause in clauses:
+        if doc.count(clause) != 1:
+            contract_why = f"request {rid} carries {doc.count(clause)} copies of {clause!r}, want one"
+for rid, label in [(5, "count"), (6, "result")]:
+    items = (contract_answers.get(rid) or {}).get("items", [])
+    if label not in [item.get("label") for item in items]:
+        contract_why = f"completion inside the clause omitted {label!r}"
+# Rendering a source module uses the same clause collector as the editor.
+contract_docs = os.path.join(CONTRACT_DIR, "docs-out")
+contract_doc_run = subprocess.run([stage1, "doc", "ContractHelper.ax", "--no-open", "--out", contract_docs],
+    cwd=CONTRACT_DIR, capture_output=True, timeout=60,
+    env={**os.environ, "AXIOM_DOC": os.path.dirname(os.path.dirname(os.path.abspath(fixdir)))})
+rendered_contracts = ""
+if contract_doc_run.returncode == 0:
+    import html
+    for root, dirs, files in os.walk(contract_docs):
+        for fn in files:
+            if fn.endswith(".html"):
+                contents = open(os.path.join(root, fn)).read()
+                if "ContractHelper.ax" in contents:
+                    rendered_contracts += html.unescape(re.sub(r"<[^>]+>", "", contents))
+for clause in clauses:
+    if clause not in rendered_contracts:
+        contract_why = f"axiom doc omitted {clause!r} from the module page"
+shutil.rmtree(CONTRACT_DIR, ignore_errors=True)
+if contract_why:
+    print("FAIL contract-tools: " + contract_why)
+    failed += 1
+else:
+    print("ok   contract-tools (clauses on both declaration halves appear once in local and imported hover, signature help and axiom doc; completion offers the parameter and result)")
+    passed += 1
+
 print(f"\nlsp: {passed} passed, {failed} failed, "
       f"{len(fixtures)} fixtures + 2 generated")
 

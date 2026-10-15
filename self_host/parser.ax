@@ -6636,6 +6636,35 @@
       (memGetWordVec (vecGet sigs i) 7)
       (contractSigTags sigs name (+ i 1)))))
 
+; The clauses on either half of a function declaration, in source order.
+; Tools read the raw tag text so the contract they show is the one checked.
+(pub :: contractSourceFor (-> (Vec Int) Int String))
+(pub fn (contractSourceFor decls d)
+  (if (|| (== (nodeTag d) TAG_D_FN) (== (nodeTag d) TAG_D_SIG))
+    (let ((mut subject d) (mut i 0))
+      {
+        (while (< i (vecLen decls))
+          (let ((other (vecGet decls i)))
+            {
+              (if (&& (== (nodeTag other) TAG_D_FN) (strEq (nodeAName other) (nodeAName d)))
+                (set subject other))
+              (set i (+ i 1))
+            }))
+        (let ((tags (if (== (nodeTag subject) TAG_D_FN)
+                       (contractTagsFor (contractSigIndex decls) subject)
+                       (let ((v vecNew)) { (contractTagsInto v (memGetWordVec subject 7)) v })))
+              (mut j 0) (mut out ""))
+          {
+            (while (< j (vecLen tags))
+              {
+                (set out (concat out (concat ";@axiom:" (concat (memGetWordStr (vecGet tags j) 1) "\n"))))
+                (set j (+ j 1))
+              })
+            out
+          })
+      })
+    ""))
+
 ; The TAG_FIELD named `name`, or 0.
 ;
 ; It lives HERE rather than beside its caller because it used to have

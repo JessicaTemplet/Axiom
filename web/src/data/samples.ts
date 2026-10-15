@@ -535,6 +535,34 @@ test: 4 pauses recorded, 0 ms slept`,
     }))`,
   },
   {
+    id: 'contracts',
+    file: 'contracts.ax',
+    tab: 'Contracts',
+    title: 'Check both sides of a call',
+    lede: 'State what your function accepts and what it promises. Every call checks both clauses.',
+    points: [
+      { at: ';@axiom:pre((<= lo hi))', text: '`pre` checks the bounds before the function runs.' },
+      { at: ';@axiom:post((&& (>= result lo) (<= result hi)))', text: '`post` reads the returned value as `result`. A failed clause traps with status 80.' },
+    ],
+    code: `(import IO)
+
+;@axiom:pre((<= lo hi))
+;@axiom:post((&& (>= result lo) (<= result hi)))
+(:: clamp (-> Int Int Int Int))
+(fn (clamp n lo hi)
+  (if (< n lo) lo (if (> n hi) hi n)))
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  (let ((below (clamp -3 0 10))
+        (inside (clamp 7 0 10))
+        (above (clamp 18 0 10)))
+    (println "{below} {inside} {above}")))`,
+    output: '0 7 10',
+    docs: { label: 'Contracts', href: `${REF}#contracts-pre-and-post` },
+  },
+  {
     id: "collections",
     file: "inbox.ax",
     tab: "Collections",
