@@ -1916,8 +1916,9 @@ if call:
     need(re.search(r'ptr @"?triple"?\b', call['args']) is not None, 'the `sym` argument is not `ptr @triple`: ' + call['args'])
     clob = set(re.findall(r'~\{(\w+)\}', call['cons']))
     if a64:
-        want = {'x%d' % i for i in range(1, 18)} | {'x30'} | {'v%d' % i for i in range(32)}
+        want = {'x%d' % i for i in range(1, 18)} | {'lr'} | {'v%d' % i for i in range(32)}
         need(want <= clob, 'clobber_abi misses %s' % sorted(want - clob))
+        need('x30' not in clob, 'LLVM 18 ignores an x30 clobber; use lr')
         need('x0' not in clob, 'clobber_abi clobbers the output register x0')
         reserved = target.startswith('darwin') or target.startswith('windows')
         need(('x18' in clob) == (not reserved), 'x18 clobbered=%s on %s' % ('x18' in clob, target))
@@ -2052,6 +2053,46 @@ if (( rc2 != 4 )) || ! grep -q '^E AX4003 ' "$work/rej2.out" || ! grep -q '<inli
   bad "with llc's cookies hidden the build answered $rc2 (want 4, AX4003 and llc's own text, no AX3117):"; head -4 "$work/rej2.out" | sed 's/^/       /'; prob=1
 fi
 (( prob )) || note "llc's three refusals come back as AX3117 at the template lines the fixture's bytes name, status 1; with the cookies hidden the same build is AX4003, status 4"
+
+# Linux can allocate x18 and lr. This arm needs two input registers,
+# clobbers lr explicitly and leaves only x18. Removing that clobber
+# restores the second register and must make the same IR assemble.
+# LLVM 18 silently ignores `~{x30}`, so spelling alone is not evidence.
+checks=$((checks + 1))
+prob=0
+linkreg="$repo_root/tests/embedded/asm-link-register.ax"
+if ! emit "$axc" linux-aarch64 "$linkreg" "$work/linkreg.ll"; then
+  bad "the explicit link-register probe does not emit:"; head -4 "$work/emit.log" | sed 's/^/       /'; prob=1
+elif ! python3 - "$work/linkreg.ll" "$work/linkreg-control.ll" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+calls = re.findall(r'^  ; axiom-asm-site [^\n]*\n(.*call i64 asm .*)$', text, re.M)
+assert len(calls) == 1, calls
+call = calls[0]
+assert call.count('~{lr}') == 1 and '~{x30}' not in call, call
+control = text.replace(call, call.replace(',~{lr}', ''), 1)
+assert control != text
+open(sys.argv[2], 'w').write(control)
+PY
+then
+  bad "the explicit x30 clobber is not one LLVM lr clobber"; prob=1
+else
+  "$axc" --diagnostic-format=ai build --input "$linkreg" --target=linux-aarch64 \
+    --output "$work/linkreg" > "$work/linkreg.out" 2>&1
+  rc=$?
+  n3117=$(grep -c '^E AX3117 ' "$work/linkreg.out" || true)
+  if (( rc != 1 || n3117 != 1 )) || ! grep -q 'register allocator found no registers' "$work/linkreg.out"; then
+    bad "the explicit link-register probe returned $rc with $n3117 AX3117 diagnostics, want one register-allocation refusal:"; head -4 "$work/linkreg.out" | sed 's/^/       /'; prob=1
+  fi
+  for o in 0 2; do
+    if ! llc -O$o -filetype=obj -relocation-model=pic "$work/linkreg-control.ll" \
+      -o "$work/linkreg-control-$o.o" > "$work/linkreg-control-$o.log" 2>&1; then
+      bad "freeing lr did not let the same probe assemble at -O$o:"; head -4 "$work/linkreg-control-$o.log" | sed 's/^/       /'; prob=1
+    fi
+  done
+fi
+(( prob )) || note "explicit x30 lowers to lr: two inputs cannot fit while it is clobbered; freeing it assembles at -O0 and -O2"
+
 if qemu_or_skip "A15 inline assembly at EL1 under QEMU"; then
   checks=$((checks + 1))
   if ! build_bm asm-el.bm "$asmel" --target="$bm"; then
@@ -2384,7 +2425,7 @@ else
   got="$(hlt_fns "$work/fault-hook.ll")"
   [[ "$got" == '__axiom_cpu_exception __axiom_fault_hook __axiom_fault_trap _start ' ]] \
     || { bad "with a hook the semihosting exit is in [$got], not only the four exit doors"; prob=1; }
-  ntrap=$(grep -cE '^  call void asm sideeffect "bl __axiom_trap_entry", "\{x0\},~\{x30\},~\{memory\}"\(i64 [0-9]+\)$' "$work/fault-hook.ll" || true)
+  ntrap=$(grep -cE '^  call void asm sideeffect "bl __axiom_trap_entry", "\{x0\},~\{lr\},~\{memory\}"\(i64 [0-9]+\)$' "$work/fault-hook.ll" || true)
   (( ntrap >= 5 )) || { bad "with a hook only $ntrap trap exits branch to the trap entry"; prob=1; }
   awk '/^define internal void @__axiom_fault_hook\(/{on=1} on{print} on&&/^}/{exit}' "$work/fault-hook.ll" > "$work/hookfn.ll"
   for w in 'store volatile i64 2, ptr @__axiom_exc_busy' 'store i64 0, ptr @__axiom_recover_top' \

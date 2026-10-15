@@ -46,6 +46,13 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- AArch64 assembly clobbers lower the link register to LLVM's `lr`
+  spelling, including explicit `x30` clobbers, the C calling convention
+  and bare-metal trap exits. LLVM 18 ignores `x30` in a clobber list,
+  allowing live values to occupy a register the assembly overwrites.
+  Tested by `tests/embedded/asm-link-register.ax` and
+  `scripts/check-embedded.sh`.
+
 - Index named-struct declarations after declaration macros finish, so
   ordinary variable and function lookups avoid scanning the whole module.
   Generated structs retain their visibility and written evaluation order.
