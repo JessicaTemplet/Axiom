@@ -1,0 +1,203 @@
+; Named functions are immortal descriptors; capturing closures reclaim their shares.
+(import IO)
+(import Mem)
+(import Str)
+(import Vec)
+
+(:: inc (-> Int Int))
+(fn (inc n)
+  (+ n 1))
+
+(:: local (-> Int Int))
+;@axiom:restrict(no-alloc)
+(fn (local n)
+  {
+    (let f inc)
+    (f n)
+  })
+
+(:: shadow (-> Int Int))
+(fn (shadow n)
+  {
+    (let inc inc)
+    (inc n)
+  })
+
+(:: alias (-> Int Int))
+(fn (alias n)
+  {
+    (let f inc)
+    (let g f)
+    (g n)
+  })
+
+(:: apply (-> (-> Int Int) Int Int))
+(fn (apply inc n)
+  (inc n))
+
+(:: callback (-> Int Int))
+(fn (callback n)
+  (apply inc n))
+
+(:: ordinary (-> Int Int))
+(fn (ordinary n)
+  {
+    (let inc (lambda (value) (+ value 1)))
+    (apply inc n)
+  })
+
+(:: choose (-> Bool Int Int))
+(fn (choose useStatic)
+  (if useStatic
+    inc
+    (lambda (value) (+ value 1))))
+
+(:: returned (-> Int Int))
+(fn (returned n)
+  {
+    (let f (choose (== (& n 1) 0)))
+    (f n)
+  })
+
+(:: makeCaptured (-> Int Int Int))
+(fn (makeCaptured offset)
+  {
+    (let f inc)
+    (lambda (value) (+ (f value) offset))
+  })
+
+(:: captured (-> Int Int))
+(fn (captured n)
+  {
+    (let f (makeCaptured 0))
+    (f n)
+  })
+
+(struct Worker
+  (call : (-> Int Int)))
+
+(:: field (-> Int Int))
+(fn (field n)
+  {
+    (let worker (Worker :call inc))
+    (worker.call n)
+  })
+
+; A template's global call keeps its definition scope under a local callback.
+(:: first (-> (Vec a) a))
+(fn (first values)
+  (vecGet values 0))
+
+(macro (firstAtDefinition values) (first values))
+
+(:: definitionLent (-> (Vec String) Int))
+(fn (definitionLent values)
+  {
+    (let first (lambda (unused) "shadow"))
+    (let answer (firstAtDefinition values))
+    (strLen answer)
+  })
+
+(:: duplicate (-> String String))
+(fn (duplicate text)
+  (strDup text))
+
+(macro (duplicateAtDefinition text) (duplicate text))
+
+(:: definitionOwned (-> Int Int))
+(fn (definitionOwned n)
+  {
+    (let duplicate (lambda (unused) "shadow"))
+    (let answer (duplicateAtDefinition "copied"))
+    (if (== (strLen answer) 6)
+      (+ n 1)
+      0)
+  })
+
+(:: definitionBorrow Bool)
+;@axiom:effect(unsafe)
+(fn (definitionBorrow)
+  {
+    (let text (strDup "held"))
+    (let values (vecPush vecNew text))
+    (vecPush values text)
+    (let before (__load64 (- (as text Int) 16) 0))
+    (let length (definitionLent values))
+    (&& (== length 4) (== (__load64 (- (as text Int) 16) 0) before))
+  })
+
+(:: run (-> (-> Int Int) Int Int))
+(fn (run work count)
+  {
+    (let mut sum 0)
+    (for i in 0..count
+      (set sum (+ sum (work i))))
+    sum
+  })
+
+(:: live Int)
+(fn (live)
+  {
+    (let stats memStats)
+    stats.backlogBytes
+  })
+
+(:: flat (-> String (-> Int Int) Int))
+;@axiom:effect(io)
+(fn (flat name work)
+  {
+    (run work 100)
+    (let before live)
+    (let first (run work 1000))
+    (let after live)
+    (let second (run work 10000))
+    (let growth (- live after))
+    (let ok
+      (&& (== first 500500)
+        (&& (== second 50005000) (&& (< (- after before) 4096) (< growth 4096)))))
+    (if ok
+      (println "{name}: flat")
+      (println "{name}: failed"))
+    (if ok
+      0
+      1)
+  })
+
+(:: staticDescriptors Bool)
+;@axiom:effect(unsafe)
+(fn (staticDescriptors)
+  {
+    (let f inc)
+    (let g inc)
+    (&& (== (as f Int) (as g Int))
+      (&& (== (__load64 (- (as f Int) 16) 0) (- 0 1)) (== (__load64 (- (as f Int) 16) 1) 2)))
+  })
+
+(:: main Int)
+;@axiom:effect(io)
+(fn (main)
+  {
+    (let mut failures 0)
+    (if staticDescriptors
+      (println "descriptors: static")
+      {
+        (set failures 1)
+        (println "descriptors: allocated")
+      })
+    (set failures (+ failures (flat "local" local)))
+    (set failures (+ failures (flat "shadow" shadow)))
+    (set failures (+ failures (flat "alias" alias)))
+    (set failures (+ failures (flat "callback" callback)))
+    (set failures (+ failures (flat "ordinary" ordinary)))
+    (set failures (+ failures (flat "returned" returned)))
+    (set failures (+ failures (flat "captured" captured)))
+    (set failures (+ failures (flat "field" field)))
+    (if definitionBorrow
+      (println "definition-lent: balanced")
+      {
+        (set failures (+ failures 1))
+        (println "definition-lent: failed")
+      })
+    (set failures (+ failures (flat "definition-owned" definitionOwned)))
+    failures
+  })

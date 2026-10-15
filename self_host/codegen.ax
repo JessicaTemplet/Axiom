@@ -1359,19 +1359,23 @@
         1
         (if (== tg TAG_E_VAR)
           {
-            (let k (envFlagOf env (nodeAName e)))
+            (let k
+              (if (== (nodeDefScope e) 1)
+                (- 0 1)
+                (envFlagOf env (nodeAName e))))
             (if (>= k 0)
               k
-              (if (>= (paramIndexIn params (nodeAName e) 0) 0)
+              (if (&& (!= (nodeDefScope e) 1) (>= (paramIndexIn params (nodeAName e) 0) 0))
                 0
                 ; a nullary constructor is an immediate: owned,
                 ; and releasing it is a no-op
                 (if (!= (lookupType (memGetWordVec cg 3) (nodeAName e)) 0)
                   1
-                  ; a bare global name: a nullary function's
-                  ; answer, or a function value - the former by
-                  ; its own flag, the latter a record of its own
-                  (fnResultOwned cg (nodeAName e)))))
+                  ; A nullary global answers according to its own flag;
+                  ; a named function value is an immortal descriptor.
+                  (if (isDefinedFnCg cg (mangledForCg cg (nodeAName e)))
+                    1
+                    (fnResultOwned cg (nodeAName e))))))
           }
           (if (== tg TAG_E_FIELD)
             0
@@ -3348,8 +3352,8 @@
   })
 
 ; Does this expression's VALUE carry a share of its own that the
-; frame holding it may hand back - and is it a reference, so that
-; handing it back means something? A direct construction; a call to a
+; frame holding it may hand back - or is it an immortal reference
+; whose release is a no-op? A direct construction; a call to a
 ; signed global whose result is a reference, applied to exactly its
 ; arity, or a closure application whose checked result is a reference.
 ; Surplus arguments invoke the returned closure. A call is spelled with
@@ -3360,99 +3364,115 @@
 ; arms, and an arm answering a binder is not.
 (pub :: valueOwnedRef (-> Int Int Int))
 (pub fn (valueOwnedRef cg e)
+  (valueOwnedRefIn cg e vecNew))
+
+; Joins are queried after emission restores their symbol scopes. Keep the
+; bindings inside the expression so a local callback still resolves locally.
+(:: valueOwnedRefIn (-> Int Int (Vec Int) Int))
+(fn (valueOwnedRefIn cg e env)
   (if (== e 0)
     0
     (if (== (nodeResWord e) 3)
-      (valueOwnedRef cg (nodeB e))
+      (valueOwnedRefIn cg (nodeB e) env)
       {
         (let tg (nodeTag e))
-        (if (== (argIsDirectCon cg e) 1)
+        (let head
+          (if (== tg TAG_E_APP)
+            (spineHead e)
+            0))
+        (let localHead
+          (if (== head 0)
+            false
+            (&& (== (nodeTag head) TAG_E_VAR)
+              (&& (!= (nodeDefScope head) 1) (>= (envFlagOf env (nodeAName head)) 0)))))
+        (if (&& (! localHead) (== (argIsDirectCon cg e) 1))
           1
           (if (== tg TAG_E_STR)
-            ; a static: immortal, and releasing it is a no-op, so a
-            ; branch answering one does not stop the join being owned
             1
             (if (== tg TAG_E_VAR)
-              ; a nullary constructor - `None`, `Nil` - is an immediate,
-              ; a no-op to release, so `(if c (Some x) None)` is owned
-              ; and the `Some` it builds is given back
-              (if (!= (lookupType (memGetWordVec cg 3) (nodeAName e)) 0)
-                (if (isLocalValue cg (nodeAName e))
-                  0
-                  1)
-                ; a bare reference to a nullary function is a CALL, not a
-                ; use: `parseArgs` answers the head unchanged when no
-                ; argument follows, and `emitVar` emits `call i64 @...()`
-                ; for it. It is owned exactly when the same call spelled
-                ; with arguments is - a signed global whose declared
-                ; result is a reference - with the arity half answered by
-                ; `isNullaryFnCg` itself, the predicate emission asks
-                ; before emitting the call, so the two cannot disagree
-                ; about which spellings call. A bare reference to a
-                ; multi-parameter function answers its closure record
-                ; instead, and keeps the 0 it always got (issue #35).
-                {
-                  (let n (nodeAName e))
-                  (if (|| (isCastName n) (|| (isPrimName n) (isLocalValue cg n)))
+              {
+                (let name (nodeAName e))
+                (let scoped
+                  (if (== (nodeDefScope e) 1)
+                    (- 0 1)
+                    (envFlagOf env name)))
+                (if (>= scoped 0)
+                  scoped
+                  (if (&& (!= (nodeDefScope e) 1) (isLocalValue cg name))
                     0
-                    (if (&& (== (fnResultClass cg n) 2) (isNullaryFnCg cg (mangledForCg cg n)))
+                    (if (!= (lookupType (memGetWordVec cg 3) name) 0)
                       1
-                      0))
-                })
+                      (if (|| (isCastName name) (isPrimName name))
+                        0
+                        {
+                          (let full (mangledForCg cg name))
+                          ; A non-nullary function names an immortal descriptor.
+                          ; Like a static string, it permits owned joins; a
+                          ; release is a no-op. A nullary name makes a call.
+                          (if (isDefinedFnCg cg full)
+                            1
+                            (if (&& (isNullaryFnCg cg full) (== (fnResultClass cg name) 2))
+                              1
+                              0))
+                        }))))
+              }
               (if (== tg TAG_E_APP)
-                {
-                  (let hd (spineHead e))
-                  (if (!= (nodeTag hd) TAG_E_VAR)
+                (if (|| localHead (closureOwnedCall cg e))
+                  (if (== (fldClass cg (checkedValueTy e)) 2)
+                    1
+                    0)
+                  (if (!= (nodeTag head) TAG_E_VAR)
                     (if (== (fldClass cg (checkedValueTy e)) 2)
                       1
                       0)
-                    ; the indexed questions first - most arguments are
-                    ; not calls to reference-returning globals, and the
-                    ; constructor-table scan is the expensive one
                     {
-                      (let n (nodeAName hd))
-                      (if (closureOwnedCall cg e)
-                        (if (== (fldClass cg (checkedValueTy e)) 2)
-                          1
-                          0)
-                        (if (!= (fnResultClass cg n) 2)
+                      (let name (nodeAName head))
+                      (if (!= (fnResultClass cg name) 2)
+                        0
+                        (if (|| (isCastName name)
+                              (|| (isPrimName name)
+                                (&& (!= (nodeDefScope head) 1) (isLocalValue cg name))))
                           0
-                          (if (|| (isCastName n) (|| (isPrimName n) (isLocalValue cg n)))
+                          (if (!= (lookupType (memGetWordVec cg 3) name) 0)
                             0
-                            (if (!= (lookupType (memGetWordVec cg 3) n) 0)
-                              0
-                              (if (== (spineArity e) (fnArityCg cg n))
-                                1
-                                0)))))
-                    })
-                }
+                            (if (== (spineArity e) (fnArityCg cg name))
+                              1
+                              0))))
+                    }))
                 (if (== tg TAG_E_IF)
-                  (if (== (valueOwnedRef cg (nodeB e)) 1)
-                    (valueOwnedRef cg (nodeC e))
+                  (if (== (valueOwnedRefIn cg (nodeB e) env) 1)
+                    (valueOwnedRefIn cg (nodeC e) env)
                     0)
-                  ; `cond` is AX2004: the parser builds none, so no
-                  ; arm asks after one's value. A variadic `if`
-                  ; arrives as nested `if`s.
                   (if (== tg TAG_E_MATCH)
-                    (valueOwnedRefArms cg (nodeBVec e) 0)
+                    (valueOwnedRefArms cg (nodeBVec e) env 0)
                     (if (== tg TAG_E_LET)
-                      (valueOwnedRef cg (nodeC e))
-                      (if (== tg TAG_E_BEGIN)
-                        (if (== (vecLen (nodeAVec e)) 0)
-                          0
-                          (valueOwnedRef cg (vecGet (nodeAVec e) (- (vecLen (nodeAVec e)) 1))))
-                        0))))))))
+                      (valueOwnedRefIn cg (nodeC e)
+                        (envWith env (nodeAName e) (valueOwnedRefIn cg (nodeB e) env)))
+                      (if (== tg TAG_E_LETM)
+                        (valueOwnedRefIn cg (nodeC e) (envWith env (nodeAName e) 0))
+                        (if (== tg TAG_E_BEGIN)
+                          (if (== (vecLen (nodeAVec e)) 0)
+                            0
+                            (valueOwnedRefIn cg (vecGet (nodeAVec e) (- (vecLen (nodeAVec e)) 1))
+                              env))
+                          0)))))))))
       })))
 
-(pub :: valueOwnedRefArms (-> Int (Vec Int) Int Int))
-(pub fn (valueOwnedRefArms cg arms i)
+(pub :: valueOwnedRefArms (-> Int (Vec Int) (Vec Int) Int Int))
+(pub fn (valueOwnedRefArms cg arms env i)
   (if (>= i (vecLen arms))
     (if (== i 0)
       0
       1)
-    (if (== (valueOwnedRef cg (nodeB (vecGet arms i))) 1)
-      (valueOwnedRefArms cg arms (+ i 1))
-      0)))
+    {
+      (let arm (vecGet arms i))
+      (let binders (patBindersCg (nodeA arm) vecNew))
+      (if (== (as binders Int) 0)
+        0
+        (if (== (valueOwnedRefIn cg (nodeB arm) (envWithAll env binders 0)) 1)
+          (valueOwnedRefArms cg arms env (+ i 1))
+          0))
+    }))
 
 ; ------------------------------------------------------------------
 ; MM-LIFE-2d evidence, emission side. A polymorphic function - one
@@ -7741,7 +7761,9 @@
                   (|| (strEq a "--crate")
                     (|| (strEq a "--emit-rust-binding")
                       (|| (strEq a "--filter")
-                        (|| (strEq a "--diagnostic-format") (strEq a "--out"))))))))))))))
+                        (|| (strEq a "--jobs")
+                          (|| (strEq a "--diagnostic-format")
+                            (|| (strEq a "--out") (strEq a "--emit"))))))))))))))))
 
 ; The input file as argv spelled it. `dieImport` above records why
 ; argv is re-derived here rather than imported; the rule below is the
@@ -7775,24 +7797,27 @@
 ; gives.
 (pub :: cgSubcommand (-> String Bool))
 (pub fn (cgSubcommand a)
-  (|| (strEq a "build")
-    (|| (strEq a "lsp")
-      (|| (strEq a "check")
-        (|| (strEq a "run")
-          (|| (strEq a "test")
-            (|| (strEq a "emit-llvm")
-              (|| (strEq a "fmt")
-                (|| (strEq a "explain")
-                  (|| (strEq a "symbols")
-                    (|| (strEq a "doc")
-                      (|| (strEq a "repl")
-                        (|| (strEq a "new")
-                          (|| (strEq a "fetch")
-                            (|| (strEq a "version")
-                              (|| (strEq a "--version")
-                                (|| (strEq a "-V")
-                                  (|| (strEq a "help")
-                                    (|| (strEq a "--help") (strEq a "-h"))))))))))))))))))))
+  (match a
+    ("build" true)
+    ("lsp" true)
+    ("check" true)
+    ("run" true)
+    ("test" true)
+    ("emit-llvm" true)
+    ("fmt" true)
+    ("explain" true)
+    ("symbols" true)
+    ("doc" true)
+    ("repl" true)
+    ("new" true)
+    ("fetch" true)
+    ("version" true)
+    ("--version" true)
+    ("-V" true)
+    ("help" true)
+    ("--help" true)
+    ("-h" true)
+    (_ false)))
 
 (pub :: cgSubcommandIndex Int)
 ;@axiom:effect(io)
@@ -18056,6 +18081,14 @@
     (let full (vecGetStr (memGetWordVec cg 23) i))
     (let ar (vecGet (memGetWordVec cg 24) i))
     {
+      ; Payload word zero is the code pointer. The two preceding words
+      ; preserve the runtime's count/shape ABI; -1 makes retains and
+      ; releases no-ops on every target, without allocator traffic.
+      (emitLine cg
+        (concat "@.fnval."
+          (concat (fmtInt i)
+            (concat " = private constant [3 x i64] [i64 -1, i64 2, i64 ptrtoint (ptr @_thunk_"
+              (concat (fmtInt i) " to i64)], align 8")))))
       (let cg1
         (emitLine cg
           (concat
@@ -20122,9 +20155,9 @@
                           }
                         }
                       }
-                      ; A bare reference to a *defined multi-parameter
-                      ; function* is a function value: a one-word
-                      ; closure record holding a code pointer.
+                      ; A bare reference to a defined non-nullary function
+                      ; is a function value: an immortal descriptor whose
+                      ; payload holds its forwarding thunk's code pointer.
                       ; `emitIndirectCall` passes the record as the
                       ; callee's hidden first argument, so the record
                       ; points at a forwarding thunk rather than at
@@ -20135,31 +20168,13 @@
                       (if (&& (isDefinedFnCg cg full) (! parameter))
                         {
                           (let ti (thunkIndexFor cg full (fnArityOfCg cg full)))
-                          (let pn (allocReg cg))
-                          (let fn2 (allocReg cg))
-                          {
-                            (let pr (regStr pn))
-                            (let fr (tmpStr "f" fn2))
-                            {
-                              (emitLine cg
-                                (concat (concat "  " pr) " = call i64 @axiom_alloc(i64 8)"))
-                              (emitLine cg
-                                (concat (concat "  " fr)
-                                  (concat " = ptrtoint ptr @_thunk_"
-                                    (concat (fmtInt ti) " to i64"))))
-                              (storeWordAt cg pr 0 fr)
-                              ; born at 1, as a lambda is (A1): the
-                              ; frame that built it holds it, and a
-                              ; record it is stored into takes its own
-                              ; share. Born at 0 the store ADOPTED it,
-                              ; and the record's death freed the
-                              ; value under the frame still calling it
-                              (storeCountOneAt cg pr)
-                              (memSetWord cg 2 pr)
-                              (memSetWord cg 14 0)
-                              cg
-                            }
-                          }
+                          ; Capture-free function values share an immutable
+                          ; descriptor with an immortal header, like strings.
+                          (memSetWord cg 2
+                            (concat "ptrtoint (ptr getelementptr ([3 x i64], ptr @.fnval."
+                              (concat (fmtInt ti) ", i64 0, i64 2) to i64)")))
+                          (memSetWord cg 14 0)
+                          cg
                         }
                         ; A parameter reference: `%name` was emitted in
                         ; the function header, and the signature says
@@ -24412,7 +24427,18 @@
     0
     (if (== (nodeTag e) TAG_E_STR)
       1
-      0)))
+      (if (== (nodeTag e) TAG_E_VAR)
+        {
+          (let name (nodeAName e))
+          (if (|| (isNullaryPrimName name)
+                (|| (&& (!= (nodeDefScope e) 1) (isLocalValue cg name))
+                  (!= (lookupType (memGetWordVec cg 3) name) 0)))
+            0
+            (if (isDefinedFnCg cg (mangledForCg cg name))
+              1
+              0))
+        }
+        0))))
 
 (pub :: isNullaryConNode (-> Int Int Int))
 (pub fn (isNullaryConNode cg e)
@@ -26418,10 +26444,12 @@
         (let valReg (strDup (memGetWordStr cg1 2)))
         (let valFlag (memGetWord cg1 14))
         (let mark (symMark cg1))
+        ; Resolve ownership before this binding can shadow its initialiser.
+        (let owned (letOwned cg1 valExpr))
         (let slotAlias (slotReadOf cg1 valExpr))
         {
           (bindSym cg1 name valReg valFlag
-            (if (|| (== (valueOwnedRef cg1 valExpr) 1)
+            (if (|| (== owned 1)
                   (|| (== slotAlias 1)
                     (&& (== (nodeTag valExpr) TAG_E_VAR)
                       (== (lookupSymKind cg1 (nodeAName valExpr)) 3))))
@@ -26510,7 +26538,7 @@
                           0
                           (slotReleasesAtEnd cg1 node tail bnd))
                       }
-                      (letReleasable cg1 valExpr name body))))
+                      (letReleasable cg1 owned name body))))
                 {
                   (let pmark (vecLen (memGetWordVec cg1 42)))
                   {
@@ -26978,27 +27006,18 @@
 ; leaks rather than the one that frees early, which is the asymmetry
 ; this whole strategy turns on.
 (pub :: letReleasable (-> Int Int String Int Int))
-(pub fn (letReleasable cg valExpr name body)
-  (if (!= (letOwned cg valExpr) 1)
+(pub fn (letReleasable cg owned name body)
+  (if (!= owned 1)
     0
     (if (== (escapes cg name body 1 (binderSummary body)) 1)
       0
       1)))
 
-; Does this frame OWN the binding's value - hold a share nobody else
-; handed it?
-;
-; Two ways, and they are the two ways a share is created. A DIRECT
-; CONSTRUCTION is born at count 1 and that birth is the binding's. A
-; CALL to a function whose declared result is a reference hands back a
-; share, because MM-LIFE-2c's event 2 retains a reference result
-; before returning it - which is why the two events are one commit:
-; each is unsound without the other, event 2 leaking on every call and
-; event 3 freeing the caller's value.
-;
-; Anything else - a parameter, a bare name, a field read - is BORROWED,
-; and a borrowed value is never released here. That is the leak side of
-; the asymmetry, taken deliberately.
+; Can the frame release this initialiser? A construction supplies its
+; birth share, and a reference-returning call supplies a result share.
+; Immortal strings and named-function descriptors also permit release,
+; so a join with a fresh branch does not lose that branch's ownership.
+; Reads of parameters, local aliases and fields remain borrowed.
 (pub :: letOwned (-> Int Int Int))
 (pub fn (letOwned cg valExpr)
   (valueOwnedRef cg valExpr))
@@ -29631,13 +29650,7 @@
       ; global function materialised as a closure record.
       {
         (let a (vecGet args 0))
-        (if (|| (== (valueOwnedRef cg1 a) 1)
-              (&& (== (nodeTag a) TAG_E_VAR)
-                (&&
-                  (if (isLocalValue cg1 (nodeAName a))
-                    false
-                    true)
-                  (> (fnArityCg cg1 (nodeAName a)) 0))))
+        (if (&& (== (valueOwnedRef cg1 a) 1) (== (isStaticSentinelNode cg1 a) 0))
           (emitReleaseOf cg1 first)
           cg1)
       }
@@ -29823,7 +29836,7 @@
       (if (== (nodeTag h) TAG_E_VAR)
         {
           (let name (nodeAName h))
-          (if (isLocalValue cg name)
+          (if (&& (!= (nodeDefScope h) 1) (isLocalValue cg name))
             true
             {
               (let full (mangledForCg cg name))

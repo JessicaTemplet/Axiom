@@ -227,18 +227,17 @@ PY
 }
 
 ablate "cast-operand" typecheck.ax \
-  "(if (&& (== (nodeTag head) TAG_E_VAR) (&& (== (isCastLike (nodeAName head)) 1) (== (bsIsLocal bound (nodeAName head)) 0)))
+  "(if (&& (== (nodeTag head) TAG_E_VAR)
+                (&& (== (isCastLike (nodeAName head)) 1) (== (bsIsLocal bound (nodeAName head)) 0)))
             1
             0)" \
   "0"
 ablate "param-first" codegen.ax \
-  "(if (&& (isNullaryFnCg cg full) (< (paramIndexOf cg name) 0))" \
+  "(if (&& (isNullaryFnCg cg full) (! parameter))" \
   "(if (isNullaryFnCg cg full)"
 ablate "named-pattern" typecheck.ax \
-  "          (if (== tag TAG_P_CONNAMED)
-            (patBindersVec (nodeCVec pat) 0 acc)
-            0))))))" \
-  "          0)))))"
+  "(patBindersVec (nodeCVec pat) 0 acc)" \
+  "0"
 
 ablate "nid-fn-wins" symbols.ax \
   "            (saPutIfAbsent (memGetWordVec sm 12) (memGetWordVec sm 13) name \"DSig:\")" \
@@ -260,8 +259,12 @@ ablate "fresh-names" symbols.ax \
   "(concat ty \"\\\"\")" \
   fresh tests/selfhost/1012-fresh-names.ax
 ablate "result-renderer" codegen.ax \
-  "(if (== (findFSigCg cg \"Err\$errorText\") 0)" \
-  "(if true" \
+  "(pub fn (mainResultErrorText cg)
+  \"Err\$errorText\")" \
+  "(pub fn (mainResultErrorText cg)
+  (if (== (findFSigCg cg \"errorText\") 0)
+    \"Err\$errorText\"
+    \"errorText\"))" \
   shadow tests/stdlib/490-main-result-ok.ax
 
 if (( long )); then

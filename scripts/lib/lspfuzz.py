@@ -122,6 +122,8 @@ MAX_DOC = 40000
 # Every request the server answers, by the capability that advertises
 # it. `caps` fails on an advertised key this table does not name, so a
 # provider added to `self_host/lsp.ax` and not here is a red gate.
+# Position encoding has no request; capability_errors checks the default
+# UTF-16 representation used by the session generator and its oracle.
 CAP_METHODS = {
     "definitionProvider": ["textDocument/definition"],
     "declarationProvider": ["textDocument/declaration"],
@@ -150,6 +152,8 @@ CAP_METHODS = {
     "semanticTokensProvider": ["textDocument/semanticTokens/full"],
     "experimental": ["axiom/expandMacro"],
     "textDocumentSync": [],
+    # Negotiated coordinate encoding; it advertises no request method.
+    "positionEncoding": [],
 }
 METHODS = [m for k in sorted(CAP_METHODS) for m in CAP_METHODS[k]]
 # Methods no capability names: the server must answer each request
@@ -952,6 +956,16 @@ def cmd_batch(args):
     return 0
 
 
+def capability_errors(caps):
+    unknown = [k for k in sorted(caps) if caps[k] not in (None, False) and k not in CAP_METHODS]
+    # This probe offers no alternate position encodings. An omitted
+    # value defaults to UTF-16; advertising another encoding here would
+    # disagree with the coordinates the sessions send and judge.
+    if caps.get("positionEncoding", "utf-16") != "utf-16":
+        unknown.append("positionEncoding must be utf-16 for the default client")
+    return unknown
+
+
 def cmd_caps(args):
     server = shlex.split(args["--server"])
     msgs = [frame_bytes(body_bytes(m)) for m in (
@@ -964,7 +978,7 @@ def cmd_caps(args):
         print("the initialize session's output is malformed: " + why)
         return 1
     caps = [m for m in got if m.get("id") == 1][0]["result"]["capabilities"]
-    unknown = [k for k in sorted(caps) if caps[k] not in (None, False) and k not in CAP_METHODS]
+    unknown = capability_errors(caps)
     for k in unknown:
         print(k)
     advertised = [k for k in sorted(caps) if caps[k] not in (None, False)]
@@ -1112,6 +1126,18 @@ def cmd_selftest():
         print("the generator's output for the pinned corpus moved: %s, pinned %s" % (d, PINNED_DIGEST))
         print("(a deliberate change to the sessions updates PINNED_DIGEST; anything else is a determinism defect)")
         return 1
+    for caps, want in (
+        ({}, False),
+        ({"positionEncoding": "utf-16", "hoverProvider": True}, False),
+        ({"positionEncoding": "utf-8"}, True),
+        ({"positionEncoding": "utf-32"}, True),
+        ({"positionEncoding": None}, True),
+        ({"positionEncoding": "made-up"}, True),
+        ({"positionEncoding": "utf-16", "unknownProvider": True}, True),
+    ):
+        if bool(capability_errors(caps)) != want:
+            print("capability coverage misjudged %r" % caps)
+            return 1
     root = "/r"
     sess = [chunk("frame", body_bytes({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}), "answer"),
             chunk("frame", body_bytes({"jsonrpc": "2.0", "id": 2, "method": "textDocument/hover", "params": {}}), "answer"),
@@ -1176,7 +1202,8 @@ def cmd_selftest():
         print("the framer did not round-trip a substituted root: %r %s" % (msgs, why))
         return 1
     print("selftest: the pinned-corpus digest %s..., the oracle on %d hand-made outputs, "
-          "a broken-frame session and two bodies nested 20,000 deep, and the framer" % (d[:12], len(cases)))
+          "a broken-frame session and two bodies nested 20,000 deep, the framer, "
+          "and default-position capability checks" % (d[:12], len(cases)))
     return 0
 
 

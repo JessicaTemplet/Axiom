@@ -32,7 +32,32 @@ numeric callbacks with fixed-width results. RECAP documentation separates checke
 guarantees from unsafe obligations. Restricted reports preserve foreign provenance
 and selected entry roots; they do not establish aviation or space certification.
 
+Sequential block locals use `(let name value)` and `(let mut name value)`.
+Struct construction names each field and preserves written evaluation order.
+The compiler, library, documentation and editor tooling use these forms.
+Named unary function values use static descriptors; capturing lambdas keep
+counted environments.
+
 <!-- release-notes: end of highlights -->
+
+- Named unary function values use immutable static descriptors, avoiding
+  allocations when passed, stored or captured. Capturing lambdas retain
+  their counted environments. Tested by
+  `tests/stdlib/966-function-value-reclaim.ax`.
+
+- Ownership joins preserve local callback bindings and macro definition
+  scope. Borrowed aliases keep their shares, and callback names can shadow
+  constructors safely. Tested by `tests/stdlib/967-closure-result-joins.ax`.
+
+- CI mutation controls follow the canonical source forms. Driver option
+  mirrors include `--jobs` and `--emit`; LSP capability checks validate
+  the negotiated position encoding. Tested by `scripts/check-driver.sh`,
+  `scripts/check-metamorphic.sh` and `scripts/check-lsp-fuzz.sh`.
+
+- Standard-library and freestanding sweeps select numbered executable
+  cases and reach support modules through their importers. Every executable
+  case still requires its golden. Tested by `scripts/check-stdlib-selfhost.sh`
+  and `scripts/check-freestanding.sh`.
 
 - Block-local declarations use `(let name value)` and `(let mut name value)`.
   Named struct construction checks every field and preserves written

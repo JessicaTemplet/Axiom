@@ -88,7 +88,8 @@ manifest_launders() {
 
 status=0
 
-for case_file in tests/stdlib/*.ax; do
+# Named support modules are reached through the numbered executable cases.
+for case_file in tests/stdlib/[0-9]*.ax; do
   name="$(basename "$case_file" .ax)"
 
   ir="$work/$name.ll"
@@ -152,7 +153,7 @@ else
     printf '%s\n' "$laundered" | sed 's/^/    /'
     status=1
   else
-    for case_file in tests/stdlib/*.ax; do
+    for case_file in tests/stdlib/[0-9]*.ax; do
       name="$(basename "$case_file" .ax)"
       for wt in windows-x86_64 windows-aarch64; do
         wir="$work/$name.$wt.ll"

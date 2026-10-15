@@ -230,7 +230,8 @@ echo "== corpus: the goldens are present, distinguishable, and not empty =="
 cases=0
 headers=0
 header_fails=0
-for case_file in $corpus/*.ax; do
+# Numbered files are executable cases; named siblings are imported support modules.
+for case_file in $corpus/[0-9]*.ax; do
   name="$(basename "$case_file" .ax)"
   cases=$((cases + 1))
   if [[ ! -f "$corpus/$name.out" ]]; then
@@ -300,7 +301,7 @@ fi
 # emits one program, and a corpus with one expected exit status would be
 # satisfied by a runner that never reads the status at all.
 distinct_goldens="$(shasum $corpus/*.out | awk '{print $1}' | sort -u | wc -l | tr -d ' ')"
-distinct_exits="$(for f in $corpus/*.ax; do expected_exit_of "$(basename "$f" .ax)"; done | sort -u | wc -l | tr -d ' ')"
+distinct_exits="$(for f in $corpus/[0-9]*.ax; do expected_exit_of "$(basename "$f" .ax)"; done | sort -u | wc -l | tr -d ' ')"
 if [[ "$distinct_goldens" -lt 30 ]]; then
   echo "FAIL: the $cases goldens take only $distinct_goldens distinct values"
   failed=$((failed + 1))
@@ -357,7 +358,7 @@ mkdir -p "$work/observed" "$work/ir"
 # ---------------------------------------------------------------
 echo "== cases: compiled, run, and checked against the goldens at -O0 and -O2 =="
 passed=0; ran=0; runs=0
-for case_file in $corpus/*.ax; do
+for case_file in $corpus/[0-9]*.ax; do
   name="$(basename "$case_file" .ax)"
   [[ -n "$filter" && "$name" != "$filter"* ]] && continue
 

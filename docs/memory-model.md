@@ -1713,10 +1713,14 @@ when the record was built**. A closure never sees a later `set`
 capture takes a share of it, so a later `set` can't free what the
 closure holds. Tested by `tests/stdlib/709-mut-slot-capture.ax`.
 
-**MM-VAL-17 (H).** A closure record built from a bare top-level
-function points at a **forwarding thunk** `_thunk_N`. The thunk ignores
-the record and calls the function with its arguments unshifted, so
-every call through a value uses one calling convention.
+**MM-VAL-17 (H).** A bare top-level unary function names an immutable
+static descriptor. Its payload points at a **forwarding thunk**
+`_thunk_N`, which ignores the descriptor and calls the function with
+its arguments unshifted. Every call through a value uses one calling
+convention. The descriptor has the ordinary two-word header: count
+`-1`, then shape `2` for one payload word. Retains and releases leave
+it unchanged. Taking a named function's value performs no allocation.
+Tested by `tests/stdlib/966-function-value-reclaim.ax`.
 
 **MM-VAL-17a (H).** A lifted lambda's signature is
 `@_lam_N(i64 %.env, i64 %p)`: the environment first, then **exactly
@@ -2064,6 +2068,9 @@ the soak in `scripts/check-reclaim-soak.sh` section 2, whose ablation of
 the same rounding must see memory grow.
 
 ### 3.2 What allocates
+
+A bare named function value uses static storage (`MM-VAL-17`). Lambdas
+and their partial applications allocate closure records.
 
 **MM-ALLOC-9 (H).** These, and only these, allocate:
 
@@ -3761,9 +3768,10 @@ word through a helper or a parameter's header, is never released at
 the jump or by the caller. That errs in the leak direction, which is
 the safe one.
 
-A function value, meaning a bare reference to a top-level function, is
-born at count 1, like a lambda. Born at 0, it would be adopted by a
-record it was stored in, and freed under the frame still calling it.
+A bare top-level function value is an immortal static descriptor
+(`MM-VAL-17`), so storing or capturing it needs no reclaimable share.
+A lambda's allocated closure remains born at count 1. Its capture map
+releases each counted capture when the closure dies.
 
 The release walk has no depth. A dead record is linked into a dead
 list through its own count word, which is dead storage from that

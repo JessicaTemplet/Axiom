@@ -845,7 +845,7 @@ else
   bad "ablation: driver.ax with --heap-ceiling renamed still matched codegen's list"
 fi
 cp self_host/codegen.ax "$work/codegen-abl.ax"
-sed 's/(strEq a "lsp")/(strEq a "xyzzy")/' "$work/codegen-abl.ax" > "$work/codegen-abl2.ax"
+sed 's/("lsp" true)/("xyzzy" true)/' "$work/codegen-abl.ax" > "$work/codegen-abl2.ax"
 if [[ "$(argv_chain self_host/driver.ax isSubcommand)" != "$(argv_chain "$work/codegen-abl2.ax" 'cgSubcommand')" ]]; then
   ok "ablation: a subcommand renamed on codegen's side is refused"
 else

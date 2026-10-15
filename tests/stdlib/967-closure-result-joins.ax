@@ -1,0 +1,214 @@
+; A result remains owned after a callback's lexical binding ends.
+; A borrowed global and its owning function-value adapter stay distinct.
+(import IO)
+(import Err)
+(import Str)
+(import Vec)
+
+(struct Owner sealed
+  (handle : Handle))
+
+(:: makeOwner (-> Int Owner))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (makeOwner hits)
+  (Owner
+    :handle
+      (__resource_new
+        (lambda (n)
+          {
+            (__store64 hits 0 (+ (__load64 hits 0) 1))
+            0
+          }
+        )
+        17)))
+
+(:: readOwner (-> Owner Int))
+;@axiom:effect(unsafe)
+(fn (readOwner owner)
+  (__resource_get owner.handle))
+
+(:: makeResult (-> Int (Result Owner Int)))
+;@axiom:effect(io)
+(fn (makeResult hits)
+  (Ok (makeOwner hits)))
+
+(:: direct (-> Int Int))
+;@axiom:effect(io)
+(fn (direct hits)
+  {
+    (let answer (makeResult hits))
+    (match answer
+      ((Ok owner) (readOwner owner))
+      ((Err n) n))
+  })
+
+(:: mixed (-> Int Bool Int))
+;@axiom:effect(io)
+(fn (mixed hits choose)
+  {
+    (let answer
+      (if choose
+        {
+          (let callback makeResult)
+          (callback hits)
+        }
+        (makeResult hits)))
+    (match answer
+      ((Ok owner) (readOwner owner))
+      ((Err n) n))
+  })
+
+(:: mutable (-> Int Bool Int))
+;@axiom:effect(io)
+(fn (mutable hits choose)
+  {
+    (let answer
+      (if choose
+        {
+          (let mut callback makeResult)
+          (callback hits)
+        }
+        (makeResult hits)))
+    (match answer
+      ((Ok owner) (readOwner owner))
+      ((Err n) n))
+  })
+
+(data Selection
+  (Use (-> Int (Result Owner Int)))
+  (Direct))
+
+(:: patternResult (-> Int Selection Int))
+;@axiom:effect(io)
+(fn (patternResult hits selection)
+  {
+    (let answer
+      (match selection
+        ((Use callback) (callback hits))
+        ((Direct) (makeResult hits))))
+    (match answer
+      ((Ok owner) (readOwner owner))
+      ((Err n) n))
+  })
+
+; This global lends the vector's element. Its bare-function adapter
+; takes a result share using the checked reference-result witness.
+(:: first (-> (Vec a) a))
+(fn (first values)
+  (vecGet values 0))
+
+(:: countString (-> String Int))
+;@axiom:effect(unsafe)
+(fn (countString text)
+  (__load64 (- (as text Int) 16) 0))
+
+(:: directAdapter (-> (Vec String) Int))
+(fn (directAdapter values)
+  {
+    (let callback first)
+    (let answer (callback values))
+    (strLen answer)
+  })
+
+(:: joinedAdapter (-> (Vec String) Bool Int))
+(fn (joinedAdapter values choose)
+  {
+    (let answer
+      (if choose
+        {
+          (let callback first)
+          (callback values)
+        }
+        "static"))
+    (strLen answer)
+  })
+
+(:: shadow (-> (Vec String) Bool Int))
+(fn (shadow values choose)
+  {
+    (let answer
+      (if choose
+        {
+          (let first (lambda (unused) "static"))
+          (first values)
+        }
+        (first values)))
+    (strLen answer)
+  })
+
+(:: nullaryShadow (-> String Bool Int))
+(fn (nullaryShadow text choose)
+  {
+    (let answer
+      (if choose
+        {
+          (let None text)
+          None
+        }
+        {
+          (let None text)
+          None
+        }))
+    (strLen answer)
+  })
+
+(:: chosenWord (-> Bool Int))
+(fn (chosenWord choose)
+  {
+    (let value
+      (if choose
+        {
+          (let Some (lambda (n) (+ n 100000000)))
+          (Some 1)
+        }
+        {
+          (let Some (lambda (n) (+ n 200000000)))
+          (Some 1)
+        }))
+    (+ value 1)
+  })
+
+(:: main ())
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (main)
+  {
+    (let hits (__alloc 8))
+    (println (== (direct hits) 17))
+    (println (== (__load64 hits 0) 1))
+    (println (== (mixed hits true) 17))
+    (println (== (__load64 hits 0) 2))
+    (println (== (mixed hits false) 17))
+    (println (== (__load64 hits 0) 3))
+    (println (== (mutable hits true) 17))
+    (println (== (__load64 hits 0) 4))
+    (println (== (mutable hits false) 17))
+    (println (== (__load64 hits 0) 5))
+    (println (== (patternResult hits (Use makeResult)) 17))
+    (println (== (__load64 hits 0) 6))
+    (println (== (patternResult hits Direct) 17))
+    (println (== (__load64 hits 0) 7))
+    (let text (strDup "held element"))
+    (let values (vecPush vecNew text))
+    (vecPush values text)
+    (let before (countString text))
+    (println (== (directAdapter values) 12))
+    (println (== (countString text) before))
+    (println (== (joinedAdapter values false) 6))
+    (println (== (countString text) before))
+    (println (== (joinedAdapter values true) 12))
+    (println (== (countString text) before))
+    (let shadowBefore (countString text))
+    (println (== (shadow values false) 12))
+    (println (== (countString text) shadowBefore))
+    (println (== (shadow values true) 6))
+    (println (== (countString text) shadowBefore))
+    (let aliasBefore (countString text))
+    (println (== (nullaryShadow text true) 12))
+    (println (== (countString text) aliasBefore))
+    (println (== (nullaryShadow text false) 12))
+    (println (== (countString text) aliasBefore))
+    (println (== (chosenWord true) 100000002))
+    (println (== (chosenWord false) 200000002))
+  })

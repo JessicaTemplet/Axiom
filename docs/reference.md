@@ -217,6 +217,11 @@ A signature `(-> A B C)` takes `A`, then `B`, and returns `C`. A
 function taking no parameters has its result type as its signature.
 Write signatures for public functions and callback interfaces.
 
+A bare `fn` name can be a value when the function takes one parameter.
+That value uses an immutable static descriptor and allocates no memory.
+A lambda allocates a closure record for its code pointer and captures.
+Tested by `tests/stdlib/966-function-value-reclaim.ax`.
+
 ### Lambdas
 
 A lambda is a function value. It can capture values in its enclosing scope.
