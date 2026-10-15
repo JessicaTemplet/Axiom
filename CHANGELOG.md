@@ -16,6 +16,13 @@ its changelog too.
 
 ## Unreleased
 
+- `axiom fmt` sets each branch of an `if` chain two columns deeper than
+  the test it answers, and a final else back at the tests' indent, the
+  layout Emacs Lisp gives `if`. A test and its branch no longer line up
+  as siblings. An `if` with two or three operands prints as before.
+  Tested by `tests/fmt/syntax-zoo.expected.ax` and the four- and
+  five-operand cases in `tests/fmt/parity.golden`.
+
 - Numeric conversion policy follows explicit primitive conversions:
   expected types never insert conversions into calls, returns, assignments
   or ADT payloads. Regression cases cover both directions, generic ADTs

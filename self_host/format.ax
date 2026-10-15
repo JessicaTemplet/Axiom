@@ -2720,10 +2720,13 @@
 
 (pub :: fpIf (-> Int Int Int))
 ; `(if test then else)`, and variadically `(if t1 b1 t2 b2 ... els)`:
-; one operand per line after the head, each at the same indent the
-; three-operand form always used. Three operands print exactly as
-; before; five or more are the flat spelling of the nested chain
-; `parseIfExpr` builds, so what `fmt` prints is what `check` reads.
+; one operand per line after the head. Two or three operands print at
+; one indent. In a chain of two or more pairs, each branch sits two
+; columns deeper than the test it answers, and a final else returns to
+; the tests' indent, so a test and its branch never line up as
+; siblings (the layout Emacs Lisp gives `if`). Four or more operands
+; are the flat spelling of the nested chain `parseIfExpr` builds, so
+; what `fmt` prints is what `check` reads.
 ; An even count, or fewer than three, is `fpBad`: the parser refuses
 ; those where an operand is missing, and the printer refuses what the
 ; parser would.
@@ -2765,6 +2768,7 @@
         (let (
           (src (fpSrc p))
           (o (fpOut p))
+          (chain (>= (vecLen elems) 4))
           (mut i 0)
         )
           {
@@ -2774,13 +2778,22 @@
             (foPushIndent o)
             (set i 1)
             (while (< i (vecLen elems))
-              (let ((el (vecGet elems i)))
+              (let (
+                (el (vecGet elems i))
+                (branch (&& chain (== (% i 2) 1)))
+              )
                 {
                   (fpP p "\n")
+                  (if branch
+                    (foPushIndent o)
+                    o)
                   (flushLeading src (fpQ p) o (fpAnchor src el))
                   (foEmitIndent o)
                   (fpExpr p el)
                   (flushTrailing src (fpQ p) o (fpStartsVec p) (fpAnchor src el) (foNl o))
+                  (if branch
+                    (foPopIndent o)
+                    o)
                   (set i (+ i 1))
                 }))
             (foPopIndent o)
