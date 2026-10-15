@@ -46,6 +46,12 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- Region analysis resolves callee parameter labels when reporting a
+  parameter flow. Silent fixpoint rounds and parameters without stores
+  avoid those whole-module lookups. Lifetime facts and diagnostic wording
+  stay the same. Tested by `tests/region/diagnostic-cost.py` and
+  `scripts/check-region-escape.sh`.
+
 - AArch64 assembly clobbers lower the link register to LLVM's `lr`
   spelling, including explicit `x30` clobbers, the C calling convention
   and bare-metal trap exits. LLVM 18 ignores `x30` in a clobber list,

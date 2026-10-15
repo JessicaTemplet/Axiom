@@ -318,6 +318,16 @@ else
   fi
 fi
 
+# Diagnostic labels must not turn the facts walk into a whole-module
+# lookup per argument. The pre-fix compiler fails this growth probe;
+# the accepted programs exercise region analysis without parameter stores.
+echo "== 4. region analysis avoids unused diagnostic lookups =="
+if python3 "$repo_root/tests/region/diagnostic-cost.py" "$axc"; then
+  ok "region analysis scales with calls whose parameters store nothing"
+else
+  bad "unused parameter labels make region analysis scale quadratically"
+fi
+
 
 echo
 if [[ "$failed" -eq 0 ]]; then
