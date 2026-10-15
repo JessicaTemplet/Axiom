@@ -388,8 +388,14 @@ echo "--- 3. by name: the modules the measurement called out ---"
 # imports and nothing in `println`'s chain calls any of them.
 absent=""
 present=""
+# Read the complete output before searching it. With pipefail, an
+# early grep match can make nm's SIGPIPE look like a missing symbol.
+if ! nm "$work/hello" > "$work/hello.nm" 2>/dev/null; then
+  bad "nm could not read the hello-world binary"
+  exit 1
+fi
 for sym in 'Err$addChecked' 'Err$andThen' 'Err$divChecked' 'Err$errContextOf'; do
-  if nm "$work/hello" 2>/dev/null | grep -qF "$sym"; then
+  if grep -qF "$sym" "$work/hello.nm"; then
     present="$present $sym"
   else
     absent="$absent $sym"
@@ -416,7 +422,7 @@ kept=""
 # with no `File` (7ccb5228); `writeStr` takes a `File` and is not on
 # this path any more.
 for sym in 'IO$writeOut' 'IO$ioWriteAllFrom' 'Str$strLen' 'axiom_alloc'; do
-  nm "$work/hello" 2>/dev/null | grep -qF "$sym" || kept="$kept $sym"
+  grep -qF "$sym" "$work/hello.nm" || kept="$kept $sym"
 done
 if [[ -z "$kept" ]]; then
   ok "println's own chain and the allocator are still in the binary"
@@ -452,9 +458,13 @@ if "$axc" build --input "$work/sorted.ax" --output "$work/sorted" --emit-llvm \
   else
     bad "the probe printed '$sout' and exited $src, wanted '321 42' and 0"
   fi
+  if ! nm "$work/sorted" > "$work/sorted.nm" 2>/dev/null; then
+    bad "nm could not read the callback binary"
+    exit 1
+  fi
   gone=""
   for sym in desc dbl 'quoted!'; do
-    nm "$work/sorted" 2>/dev/null | grep -qF "$sym" || gone="$gone $sym"
+    grep -qF "$sym" "$work/sorted.nm" || gone="$gone $sym"
   done
   if [[ -z "$gone" ]]; then
     ok "named, quoted and lambda callbacks keep their target symbols"
@@ -472,7 +482,7 @@ if "$axc" build --input "$work/sorted.ax" --output "$work/sorted" --emit-llvm \
     cat "$work/sorted.report"
   fi
   if ! grep -qE '^define .*@(neverUsed|unusedCaller)\(' "$work/sorted.ll" \
-     && ! nm "$work/sorted" 2>/dev/null | grep -qE 'neverUsed|unusedCaller'; then
+     && ! grep -qE 'neverUsed|unusedCaller' "$work/sorted.nm"; then
     ok "an unused address-taken callback and its caller are absent from IR and the binary"
   else
     bad "an unused callback descriptor still pins unreachable code"
