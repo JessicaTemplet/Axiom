@@ -71,20 +71,22 @@ the `?` runs:
 
 (:: halveTwice (-> Int (Result Int Error)))
 (fn (halveTwice n)
-  (let (
-    (a (divChecked n 2)?)
-    (b (divChecked a 2)?)
-  )
-    (Ok b)))
+  {
+    (let a (divChecked n 2)?)
+    (let b (divChecked a 2)?)
+    (Ok b)
+  })
 
 (:: main (Result Int Error))
 ;@axiom:effect(io)
 (fn (main)
-  (let ((v (halveTwice 40)?))
+  {
+    (let v (halveTwice 40)?)
     {
       (println "{v}")
       (Ok 0)
-    }))
+    }
+  })
 ```
 
 ```text
@@ -145,8 +147,10 @@ line is a note for whoever maintains the code, and tools leave it out.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((v (bump 1)))
-    (println "{v}")))
+  {
+    (let v (bump 1))
+    (println "{v}")
+  })
 ```
 
 Write the doc comment above the `::` signature when there is one, and
@@ -227,11 +231,13 @@ A lambda is a function value. It can capture values in its enclosing scope.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((offset 100))
+  {
+    (let offset 100)
     {
       (println (apply (lambda (x) (+ x offset)) 5))
       ()
-    }))
+    }
+  })
 ```
 
 This prints `105`. Function parameters and record fields may hold
@@ -257,15 +263,15 @@ build a lambda for the missing arguments, from left to right:
 (fn (main)
   ; (lambda (y) (sub 50 y))
   ; (lambda (x) (sub x 8))
-  (let (
-    (subFrom50 (sub 50 _))
-    (minus8 (sub _ 8))
-  )
+  {
+    (let subFrom50 (sub 50 _))
+    (let minus8 (sub _ 8))
     {
       (println (subFrom50 8))
       (println (minus8 50))
       ()
-    }))
+    }
+  })
 ```
 
 This prints `42` twice. A bare `_` elsewhere in an expression is
@@ -451,7 +457,8 @@ own value is dropped:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((seen vecNew))
+  {
+    (let seen vecNew)
     {
       (for n in 0..10
         (if (== (% n 3) 0)
@@ -459,7 +466,8 @@ own value is dropped:
       (if (> (vecLen seen) 3)
         (println "more than three"))
       (println (vecLen seen))
-    }))
+    }
+  })
 ```
 
 ```text
@@ -483,17 +491,17 @@ that are there for what they do need not agree:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (mut hits 0)
-    (mut seen false)
-  )
+  {
+    (let mut hits 0)
+    (let mut seen false)
     {
       (for n in 0..5
         (if (== (% n 2) 0)
           (set hits (+ hits 1))
           (set seen true)))
       (println "{hits} {seen}")
-    }))
+    }
+  })
 ```
 
 ```text
@@ -548,11 +556,13 @@ Tested by `tests/stdlib/466-for-loop.ax`.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((byte (as 255 UInt8)))
+  {
+    (let byte (as 255 UInt8))
     {
       (println (as (+ byte (as 1 UInt8)) Int))
       (println (as byte Int))
-    }))
+    }
+  })
 ```
 
 ```text
@@ -880,22 +890,25 @@ handle: a `parallel` form lends it to its bindings, and it can't have a
 
 (:: showInt (ShowOf Int))
 (fn (showInt)
-  (ShowOf fmtInt))
+  (ShowOf :render fmtInt))
 
 (:: showSwitch (ShowOf Bool))
 (fn (showSwitch)
   (ShowOf
-    (lambda (b)
-      (if b
-        "on"
-        "off")
-    )))
+    :render
+      (lambda (b)
+        (if b
+          "on"
+          "off")
+      )))
 
 (:: report (-> (ShowOf a) String a Int))
 ;@axiom:effect(io)
 (fn (report s label v)
-  (let ((text (s.render v)))
-    (println "{label}: {text}")))
+  {
+    (let text (s.render v))
+    (println "{label}: {text}")
+  })
 
 (:: main ())
 ;@axiom:effect(io)
@@ -1008,8 +1021,10 @@ with `result` bound to the returned value:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((n (clamp 18 0 10)))
-    (println "{n}")))
+  {
+    (let n (clamp 18 0 10))
+    (println "{n}")
+  })
 ```
 
 ```text
@@ -1089,14 +1104,16 @@ declaration:
 ;@axiom:nolint(lint-dead-branch, lint-unused-let)
 (:: sketch (-> Int Int))
 (fn (sketch n)
-  (let ((later n))
+  {
+    (let later n)
     (if true
       n
-      0)))
+      0)
+  })
 
 (:: main Int)
 (fn (main)
-  (+ (call (Box (lambda (x) x))) (sketch 2)))
+  (+ (call (Box :f (lambda (x) x))) (sketch 2)))
 ```
 
 `call` keeps its unverifiable purity claim without the AX3037 warning,
@@ -1259,18 +1276,20 @@ Tested by `tests/fmt/workflow.py` and
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (name "world")
-    (n 42)
-    (pi 3.14159)
-  )
+  {
+    (let name "world")
+    (let n 42)
+    (let pi 3.14159)
     {
       (println "Hello {name}")
       (println "n={n} pi={pi:.2}")
       (println n)
-      (let ((row (format "{name:<10}{n:>5}")))
-        (println "[{row}]"))
-    }))
+      {
+        (let row (format "{name:<10}{n:>5}"))
+        (println "[{row}]")
+      }
+    }
+  })
 ```
 
 `println` and `eprintln` format a value and add a newline. `format`
@@ -1380,20 +1399,22 @@ Memory-boundary guidance is tested by `tests/lsp/memory-boundaries.py`.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (mut i 0)
-    (mut total 0)
-  )
+  {
+    (let mut i 0)
+    (let mut total 0)
     {
       (while (< i 1000)
         {
           (region req
-            (let ((line (format "request {i}")))
-              (set total (+ total (strLen line)))))
+            {
+              (let line (format "request {i}"))
+              (set total (+ total (strLen line)))
+            })
           (set i (+ i 1))
         })
       (println "built {total} bytes")
-    }))
+    }
+  })
 ```
 
 A `region` reclaims allocations made inside it when its body ends.
@@ -1439,11 +1460,10 @@ values are the same value exactly when their addresses are equal:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (a (Bx "one"))
-    (b (Bx "one"))
-    (c a)
-  )
+  {
+    (let a (Bx "one"))
+    (let b (Bx "one"))
+    (let c a)
     {
       (println
         (if (addrEq (addrOf a) (addrOf c))
@@ -1453,7 +1473,8 @@ values are the same value exactly when their addresses are equal:
         (if (addrEq (addrOf a) (addrOf b))
           "a is b"
           "a is not b"))
-    }))
+    }
+  })
 ```
 
 ```text
@@ -1544,16 +1565,17 @@ instructions read every input before they write the output.
 (:: divmod (-> Int Int Int))
 ;@axiom:effect(unsafe)
 (fn (divmod n d)
-  (let ((mut rem 0))
-    (let ((q (asm
-      (aarch64
-        "udiv {q}, {a}, {b}\nmsub {r}, {q}, {b}, {a}"
-        (out q)
-        (out r into rem)
-        (in a n)
-        (in b d))
-      (x86_64 "xorl %edx, %edx\ndivq {b}" (inout q "rax" n) (out r "rdx" into rem) (in b d)))))
-      (+ (* q 100) rem))))
+  {
+    (let mut rem 0)
+    {
+      (let q
+        (asm
+          (aarch64 "udiv {q}, {a}, {b}\nmsub {r}, {q}, {b}, {a}" (out q) (out r into rem) (in a n)
+            (in b d))
+          (x86_64 "xorl %edx, %edx\ndivq {b}" (inout q "rax" n) (out r "rdx" into rem) (in b d))))
+      (+ (* q 100) rem)
+    }
+  })
 
 ; One instruction reads its input before it writes its output, so the
 ; two may share a register.
@@ -1675,13 +1697,12 @@ barrier between two reads, and counts down in a loop:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (before cycles)
-    (_ fence)
-    (after cycles)
-    (mut total 0)
-    (mut i 0)
-  )
+  {
+    (let before cycles)
+    (let _ fence)
+    (let after cycles)
+    (let mut total 0)
+    (let mut i 0)
     {
       (println (low32 (+ 4294967296 7)))
       (println (viaRegs 41))
@@ -1692,7 +1713,8 @@ barrier between two reads, and counts down in a loop:
           (set i (+ i 1))
         })
       (println total)
-    }))
+    }
+  })
 ```
 
 ```text
@@ -1875,10 +1897,9 @@ Tested by `tests/stdlib/870-inline-asm-operands.ax` and
 
 (:: slowSum (-> Int Int))
 (fn (slowSum n)
-  (let (
-    (mut i 0)
-    (mut acc 0)
-  )
+  {
+    (let mut i 0)
+    (let mut acc 0)
     {
       (while (< i n)
         {
@@ -1886,14 +1907,16 @@ Tested by `tests/stdlib/870-inline-asm-operands.ax` and
           (set i (+ i 1))
         })
       acc
-    }))
+    }
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((n 1000000))
+  {
+    (let n 1000000)
     (parallel p (
       (a (slowSum n))
       (b (* n 2))
@@ -1901,7 +1924,8 @@ Tested by `tests/stdlib/870-inline-asm-operands.ax` and
       {
         (println "a = {a}")
         (println "b = {b}")
-      })))
+      })
+  })
 ```
 
 `parallel` starts the bindings and joins them in source order before
@@ -2050,13 +2074,13 @@ server answers with a greeting.
       (match (andThen (tcpListenerLocalAddr server) tcpConnectAddr)
         ((Err e) (die (errorText e) 1))
         ((Ok client)
-          (let (
-            (_ (tcpWrite client "Ada\n"))
-            (_ (acceptOne server))
-          )
+          {
+            (let _ (tcpWrite client "Ada\n"))
+            (let _ (acceptOne server))
             (match (tcpReadLine client 1024)
               ((Ok (Some reply)) (println reply))
-              (_ (die "no reply" 1))))
+              (_ (die "no reply" 1)))
+          }
         ))
     )))
 ```
@@ -2227,8 +2251,10 @@ A compute callback accepts an `Int` and returns an `Int`:
 
 (:: main Int)
 (fn (main)
-  (let ((offset 7))
-    (applyKernel (lambda (i) (+ i offset)) 5)))
+  {
+    (let offset 7)
+    (applyKernel (lambda (i) (+ i offset)) 5)
+  })
 ```
 
 `compute(worker)` requires that exact callback type, after expanding

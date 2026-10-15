@@ -145,8 +145,10 @@ Here is a slightly bigger program. Put it in `shapes.ax`:
 (:: report (-> String Shape Int))
 ;@axiom:effect(io)
 (fn (report name s)
-  (let ((a (area s)))
-    (println "{name:<10}{a:>8.2}")))
+  {
+    (let a (area s))
+    (println "{name:<10}{a:>8.2}")
+  })
 
 (:: main ())
 ;@axiom:effect(io)

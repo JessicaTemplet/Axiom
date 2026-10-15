@@ -1112,7 +1112,7 @@ exactly one item inside the body of a `fn` in this document. An item is
 a form, a brace block, a literal or an identifier. The expression `E`
 is hoisted above a statement `S`: the innermost enclosing item that is
 a direct child of a `{ }` block, or else the `fn` body. `S` becomes
-`(let ((x E)) S')`, with `x` in place of `E`. The name `x` is
+`{ (let x E) S'}`, with `x` in place of `E`. The name `x` is
 `extracted`, or the first `extractedN` the document doesn't already
 spell.
 
@@ -1122,7 +1122,7 @@ whether, `E` runs:
 - under a `lambda`, `while` or `handle`.
 - in a branch of an `if` or an arm of a `match`. The test and the
   scrutinee are fine.
-- in a head position or a binding list.
+- in a call head or a local declaration name.
 - past the first operand of a `for`.
 - whenever `E` references a binder bound inside the statement.
 
@@ -1336,7 +1336,8 @@ tokens don't go blank while you type.
 
 (:: f (-> Int Int))
 (fn (f n)
-  (let ((y (bump n)))
+  {
+    (let y (bump n))
     (+ y (bu
 ```
 

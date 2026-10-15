@@ -87,7 +87,8 @@ copy in an ordinary build.
   (match obfuscationKeyGenerate
     ((Err e) (Err e))
     ((Ok key)
-      (let ((opened (roundTrip key)))
+      {
+        (let opened (roundTrip key))
         {
           (obfuscationKeyWipe key)
           (match opened
@@ -98,7 +99,8 @@ copy in an ordinary build.
                 (Ok 0)
               }
             ))
-        })
+        }
+      }
     )))
 ```
 

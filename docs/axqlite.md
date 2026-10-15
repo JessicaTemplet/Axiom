@@ -17,33 +17,22 @@ AXQL, its query language.
 ;@axiom:effect(io)
 (fn (shop db)
   {
-    (axqRunOn
-      db
-      (axqlCreateTable
-        IF
-        NOT
-        EXISTS
-        items
-        (id INTEGER PRIMARY KEY)
-        (name TEXT NOT NULL)
+    (axqRunOn db
+      (axqlCreateTable IF NOT EXISTS items (id INTEGER PRIMARY KEY) (name TEXT NOT NULL)
         (price INTEGER NOT NULL)))?
-    (axqRunOn
-      db
-      (axqlInsert
-        items
-        (name price)
-        (values (text "tea") (int 4))
-        (values (text "pot") (int 25))
+    (axqRunOn db
+      (axqlInsert items (name price) (values (text "tea") (int 4)) (values (text "pot") (int 25))
         (values (text "cup") (int 6))))?
-    (let ((rows (axqAll
-                  db
-                  (axqlSelect items (name price) (where (< price (int 10))) (orderBy price)))?))
+    {
+      (let rows
+        (axqAll db (axqlSelect items (name price) (where (< price (int 10))) (orderBy price)))?)
       (for r in rows
-        (let (
-          (name (rowTextOr r "name" "?"))
-          (price (rowIntOr r "price" 0))
-        )
-          (println "{name} costs {price}"))))
+        {
+          (let name (rowTextOr r "name" "?"))
+          (let price (rowIntOr r "price" 0))
+          (println "{name} costs {price}")
+        })
+    }
     (Ok 0)
   })
 
@@ -133,37 +122,52 @@ writes, so a program never touches a column number:
     ((Err e) (println (errorText e)))
     ((Ok db)
       {
-        (let ((_ (axqRunOn db (axqlDropTable IF EXISTS books))))
-          0)
-        (let ((_ (axqRunOn db createBookTable)))
-          0)
-        (let ((_ (insertBook db (Book 1 "Dune" (Some 1965)))))
-          0)
-        (let ((_ (insertBook db (Book 2 "Untitled" None))))
-          0)
-        (let ((_ (upsertBook db (Book 2 "Untitled" (Some 2026)))))
-          0)
+        {
+          (let _ (axqRunOn db (axqlDropTable IF EXISTS books)))
+          0
+        }
+        {
+          (let _ (axqRunOn db createBookTable))
+          0
+        }
+        {
+          (let _ (insertBook db (Book 1 "Dune" (Some 1965))))
+          0
+        }
+        {
+          (let _ (insertBook db (Book 2 "Untitled" None)))
+          0
+        }
+        {
+          (let _ (upsertBook db (Book 2 "Untitled" (Some 2026))))
+          0
+        }
         (match (queryBook db selectAllBook)
           ((Ok books)
             (for b in books
-              (let (
-                (t b.title)
-                (y (match b.year
-                  ((Some n) (format n))
-                  ((None) "unknown")))
-              )
-                (println "{t}: {y}")))
+              {
+                (let t b.title)
+                (let y
+                  (match b.year
+                    ((Some n) (format n))
+                    ((None) "unknown")))
+                (println "{t}: {y}")
+              })
           )
           ((Err e) (println (errorText e))))
         (match (getBook db 1)
           ((Ok (Some b))
-            (let ((t b.title))
-              (println "book 1 is {t}"))
+            {
+              (let t b.title)
+              (println "book 1 is {t}")
+            }
           )
           ((Ok (None)) (println "no book 1"))
           ((Err e) (println (errorText e))))
-        (let ((_ (axqClose db)))
-          0)
+        {
+          (let _ (axqClose db))
+          0
+        }
       }
     )))
 ```
@@ -213,7 +217,14 @@ describe what a database holds:
 
 ```scheme fragment
 (match (axqColumns db "players")
-  ((Ok cols) (for c in cols (let ((n c.name) (t c.columnType)) (println "{n}: {t}"))))
+  ((Ok cols)
+    (for c in cols
+      {
+        (let n c.name)
+        (let t c.columnType)
+        (println "{n}: {t}")
+      })
+  )
   ((Err e) (println (errorText e))))
 ```
 
@@ -332,24 +343,30 @@ scan and comes back unchanged:
     ((Err e) (println (errorText e)))
     ((Ok db)
       {
-        (let ((_ (axqExec db "CREATE TABLE IF NOT EXISTS n (v INTEGER)")))
-          0)
-        (let ((_ (axqExec db "INSERT INTO n VALUES (1), (2), (3), (4), (5)")))
-          0)
-        (match (axqQueryEachOn
-                 db
-                 (axqlSelect n v (orderBy v))
+        {
+          (let _ (axqExec db "CREATE TABLE IF NOT EXISTS n (v INTEGER)"))
+          0
+        }
+        {
+          (let _ (axqExec db "INSERT INTO n VALUES (1), (2), (3), (4), (5)"))
+          0
+        }
+        (match (axqQueryEachOn db (axqlSelect n v (orderBy v))
                  (lambda (r)
-                   (let ((v (unwrapOr (rowInt r 0) 0)))
+                   {
+                     (let v (unwrapOr (rowInt r 0) 0))
                      {
                        (println "saw {v}")
                        (Ok (< v 3))
-                     })
+                     }
+                   }
                  ))
           ((Ok count) (println "called {count} times"))
           ((Err e) (println (errorText e))))
-        (let ((_ (axqClose db)))
-          0)
+        {
+          (let _ (axqClose db))
+          0
+        }
       }
     )))
 ```
@@ -417,11 +434,11 @@ answers `Ok`, and rolls back when it answers `Err`:
 (:: transfer (-> Connection (Result Int Error)))
 ;@axiom:effect(io)
 (fn (transfer db)
-  (let (
-    (a (axqExec db "UPDATE accounts SET balance = balance - 50 WHERE id = 1")?)
-    (b (axqExec db "UPDATE accounts SET balance = balance + 50 WHERE id = 2")?)
-  )
-    (axqErr axqConstraint "changed my mind" "transfer")))
+  {
+    (let a (axqExec db "UPDATE accounts SET balance = balance - 50 WHERE id = 1")?)
+    (let b (axqExec db "UPDATE accounts SET balance = balance + 50 WHERE id = 2")?)
+    (axqErr axqConstraint "changed my mind" "transfer")
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -430,12 +447,19 @@ answers `Ok`, and rolls back when it answers `Err`:
     ((Err e) (println (errorText e)))
     ((Ok db)
       {
-        (let ((_ (axqExec db "DROP TABLE IF EXISTS accounts")))
-          0)
-        (let ((_ (axqExec db "CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance INTEGER NOT NULL)")))
-          0)
-        (let ((_ (axqExec db "INSERT INTO accounts VALUES (1, 100), (2, 0)")))
-          0)
+        {
+          (let _ (axqExec db "DROP TABLE IF EXISTS accounts"))
+          0
+        }
+        {
+          (let _
+            (axqExec db "CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance INTEGER NOT NULL)"))
+          0
+        }
+        {
+          (let _ (axqExec db "INSERT INTO accounts VALUES (1, 100), (2, 0)"))
+          0
+        }
         (match (axqTransaction db transfer)
           ((Ok _) (println "committed"))
           ((Err e) (println (errorText e))))
@@ -445,8 +469,10 @@ answers `Ok`, and rolls back when it answers `Err`:
               (println (unwrapOr (rowInt r 0) -1)))
           )
           ((Err e) (println (errorText e))))
-        (let ((_ (axqClose db)))
-          0)
+        {
+          (let _ (axqClose db))
+          0
+        }
       }
     )))
 ```

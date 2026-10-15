@@ -151,7 +151,7 @@ export const STATUS_SOLID: StatusRow[] = [
   { feature: 'Functions & types', status: 'Complete', note: 'Curried signatures, rigid type variables, exact return types.' },
   { feature: 'ADTs / data types', status: 'Complete', note: 'Sums with positional or named fields.' },
   { feature: 'Pattern matching (`match`)', status: 'Complete', note: 'Nested, exhaustive, checked in every function.' },
-  { feature: 'Structs', status: 'Complete', note: 'Per-field `mut`, generic parameters, automatic rendering.' },
+  { feature: 'Structs', status: 'Complete', note: 'Named construction, per-field `mut`, generic parameters, automatic rendering.' },
   { feature: 'Lambda / function values', status: 'Complete', note: 'Closures, partial application, `_` holes.' },
   { feature: 'Loops', status: 'Complete', note: '`for` over ranges and containers, `while`.' },
   { feature: 'Syscalls', status: 'Complete', note: 'No libc between your program and the kernel on any of the eight hosted targets.' },

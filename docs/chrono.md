@@ -17,17 +17,17 @@ to use it and what it assumes.
   (match (datetimeParse "2024-01-31T09:30:00")
     ((Err e) (die (errorText e) 1))
     ((Ok start)
-      (let (
-        (next (unwrapOr (dateAddMonths start.date 1) start.date))
-        (meeting (unwrapOr (durationParse "PT1H30M") durationZero))
-      )
+      {
+        (let next (unwrapOr (dateAddMonths start.date 1) start.date))
+        (let meeting (unwrapOr (durationParse "PT1H30M") durationZero))
         {
           (println (dateToString next))
           (match (datetimeAdd start meeting)
             ((Ok end) (println (datetimeToString end)))
             ((Err e) (println (errorText e))))
           (println (unwrapOr (datetimeFormat "%A %d %B %Y, %H:%M" start) ""))
-        })
+        }
+      }
     )))
 ```
 
@@ -174,16 +174,16 @@ siblings.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (jan31 (unwrapOr (dateNew 2023 1 31) dateMin))
-    (leapDay (unwrapOr (dateNew 2024 2 29) dateMin))
-  )
+  {
+    (let jan31 (unwrapOr (dateNew 2023 1 31) dateMin))
+    (let leapDay (unwrapOr (dateNew 2024 2 29) dateMin))
     {
       (println (show (dateAddMonths jan31 1)))
       (println (show (dateAddMonths jan31 2)))
       (println (show (dateAddYears leapDay 1)))
       (println (show (dateAddDays dateMax 1)))
-    }))
+    }
+  })
 ```
 
 ```text
@@ -294,7 +294,8 @@ long something took and to set deadlines, and `sleepFor` or
   (match instantNow
     ((Err e) (die (errorText e) 1))
     ((Ok start)
-      (let ((pause (unwrapOr (durationFromMillis 250) durationZero)))
+      {
+        (let pause (unwrapOr (durationFromMillis 250) durationZero))
         {
           (unwrapOr (sleepFor pause) 0)
           (match (instantElapsed start)
@@ -305,7 +306,8 @@ long something took and to set deadlines, and `sleepFor` or
                   "woke early"))
             )
             ((Err e) (println (errorText e))))
-        })
+        }
+      }
     )))
 ```
 

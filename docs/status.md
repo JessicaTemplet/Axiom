@@ -48,7 +48,7 @@ qualification.
 | Process cleanup | A killed parent cannot sweep children; grandchildren are reparented | Supervise process trees externally |
 | Foreign calls | Rust and raw `Int` handles can cross checks that typed Axiom code cannot see; a raw-address function trusts its caller | Review the foreign contract and keep owners typed |
 | Embedded | QEMU has no cache or bus fault model; the 64 KiB stack guard can be stepped over | Check stack and DMA paths on hardware |
-| Compiler | A large single `let` increases compile time faster than linearly | Split long binding lists into scopes or functions |
+| Compiler | A long sequence of locals increases compile time faster than linearly | Split long blocks into scopes or functions |
 
 For bug reports and the supported version, see [security and support](../SECURITY.md).
 
@@ -86,7 +86,7 @@ For bug reports and the supported version, see [security and support](../SECURIT
 | Unions | **Removed** | Use `data` for a tagged sum or `struct` for a product. C interoperability isn't a goal, and `union` stays reserved and reports `AX2004` |
 | Struct layout modifiers | **Removed** | `packed`, `repr(C)` and `align(N)` are `AX2001`. The FFI doesn't need them: a `#[axiom_record]` struct crosses as its fields, one word each ([ffi.md](ffi.md) §8) |
 | Region syntax | **Checked lexical scopes and inferred escape checks** | `(region r body)` reclaims its allocations after its scalar result is computed. A reference result or direct store to an outer binding is `AX3059`; stores through calls are checked by inferred origins (`AX3060`), and escaping captures are `AX3062`. Nested scopes cannot reuse an open name (`AX3058`). The compiler skips releases for values it proves fresh. Not yet: references cannot be promoted out of a region. `tests/stdlib/168-region.ax`, `tests/diagnostics/645-region-escape-store.ax`. See [Regions](reference.md#regions) and [memory-model.md](memory-model.md) §4 |
-| Capability records | **Functional** | An interface is a parameterised struct of functions, such as `(struct ShowOf (a) (render : (-> a String)))`, and an instance is an ordinary value, `(ShowOf fmtInt)`, passed where it's needed. Calling a method is plain application, so a function generic over an interface can call its methods. `trait` and `impl` are reserved and report `AX2004` with migration advice. Rendering needs no record: `(format x)` renders any value from its static type, and `show` isn't a name a program can use. |
+| Capability records | **Functional** | An interface is a parameterised struct of functions, such as `(struct ShowOf (a) (render : (-> a String)))`, and an instance is an ordinary value, `(ShowOf :render fmtInt)`, passed where it's needed. Calling a method is plain application, so a function generic over an interface can call its methods. `trait` and `impl` are reserved and report `AX2004` with migration advice. Rendering needs no record: `(format x)` renders any value from its static type, and `show` isn't a name a program can use. |
 | Effects | **Enforced; two limits stated** | The compiler checks the built-in effects `IO`, `Entropy`, `Spawn`, `Block`, `Pure`, `Alloc`, `Mut`, `Div` and `Unsafe`, declared effects and their `handle` expressions, and AXTAG metadata. A declaration that uses a raw primitive, calls an `extern` or forges a reference must declare `Unsafe` (`AX3073`), and that makes it a trusted wrapper whose callers inherit nothing (`MM-EXEC-9d`). IO propagates through calls, so a function that reaches IO without declaring it is `AX3042`; a call through a capability record's field is resolved through the functions the program stores there, and marked `#effects-incomplete` when the field also holds a value the compiler can't name. An effect operation needs a type (`AX3055`), a declared effect can't take a built-in's name (`AX3054`), and a handle list may name only declared effects (`AX3016`). An operation that reaches `main` unhandled is `AX3053`, an error you can mark intended with `;@axiom:unhandled(trap)`. Two limits: a call the compiler can't resolve reports `#effects-incomplete`, and constructor allocation isn't counted (`MM-EXEC-9a` in [memory-model.md](memory-model.md)). `tests/selfhost/820-effect-handlers.ax`, `tests/diagnostics/450-effect-op-arity.ax` |
 
 | Loops | **Complete** | `while` with `mut` bindings and `set` runs in constant stack (`tests/selfhost/500-while-mut.ax`). `for` has four shapes: `(for i in lo..hi body)` over a range, `(for i in lo..hi by step body)` with a step (a negative one counts down), `(for x in xs body)` over a `(Vec a)`, and `(for (x k) in xs body)` with the index. The parser rewrites it to `let`, `while` and `set`, reading both ends and the step once, before the loop. A missing `in` or a second body is `AX2001`, a literal step of `0` or a pair binder over a range is refused, and a non-container is `AX3004`. Self tail calls run in constant stack at every `--opt` level, in any tail position including a `let` body. So do mutual tail calls when the prototypes match and nothing is owed afterwards (the emitter marks them `musttail`). A tail call to a callee of a different arity, or one that hands over an owned temporary, stays a plain call: it needs `--opt 1` or higher and still has no guarantee ([memory-model.md](memory-model.md) MM-EXEC-6b/6c). Non-tail recursion is limited to about 60,000–80,000 frames. Tested by `tests/stdlib/466-for-loop.ax` and `tests/stdlib/467-mutual-tail.ax`. |
@@ -261,22 +261,24 @@ between them. Given `count.ax`:
 ```scheme refused
 (:: main Int)
 (fn (main)
-  (let ((x 0))
+  {
+    (let x 0)
     {
       (set x 1)
       x
-    }))
+    }
+  })
 ```
 
 <!-- doc-gate:render count.ax human -->
 ```
 error[AX3012]: cannot assign to immutable binding `x`
- --> count.ax:5:12
+ --> count.ax:6:12
   |
-3 |   (let ((x 0))
+4 |     (let x 0)
   |          - `x` is bound here
 ...
-5 |       (set x 1)
+6 |       (set x 1)
   |            ^ `x` cannot be assigned
   |
   = help: declare it mutable: `(mut x ...)` ~> mut x
@@ -314,7 +316,7 @@ substitution, without parsing English. Here is `count.ax` in AXDL:
 
 <!-- doc-gate:render count.ax ai -->
 ```
-E AX3012 count.ax:5:12-13 assign-to-immutable "cannot assign to immutable binding `x`" #"`x` cannot be assigned" ^3:10-11:"`x` is bound here" ?3:10-11:"declare it mutable: `(mut x ...)`"~>"mut x" ?"only a binding introduced by `(let ((mut x ...)) ...)` may be the target of `set`"
+E AX3012 count.ax:6:12-13 assign-to-immutable "cannot assign to immutable binding `x`" #"`x` cannot be assigned" ^4:10-11:"`x` is bound here" ?4:10-11:"declare it mutable: `(mut x ...)`"~>"mut x" ?"only a binding introduced by `(let ((mut x ...)) ...)` may be the target of `set`"
 compilation failed due to 1 previous error
 ```
 

@@ -118,8 +118,10 @@ triangle      6.00`,
 (:: report (-> String Shape Int))
 ;@axiom:effect(io)
 (fn (report name s)
-  (let ((a (area s)))
-    (println "{name:<10}{a:>8.2}")))
+  {
+    (let a (area s))
+    (println "{name:<10}{a:>8.2}")
+  })
 
 (:: main ())
 ;@axiom:effect(io)
@@ -276,7 +278,7 @@ export const TOUR: Program[] = [
     points: [
       { at: "(InTransit { carrier : String, days : Int })", text: "A constructor can carry named fields." },
       { at: "(:: alert (-> Parcel (Option String)))", text: "`alert` returns `Option String`, because some parcels need no action." },
-      { at: "(a (optUnwrapOr (alert p) \"-\"))", text: "`optUnwrapOr` supplies the default where there is no value." },
+      { at: "(let a (optUnwrapOr (alert p) \"-\"))", text: "`optUnwrapOr` supplies the default where there is no value." },
       { at: "(println \"{id:<9}{s:<22}{a}\")", text: "`{id:<9}` pads to nine columns. Format strings are compiled, not interpreted at run time." },
     ],
     docs: { label: "Pattern matching", href: `${REF}#pattern-matching` },
@@ -313,11 +315,11 @@ AX-1044  delivered             -`,
 (:: row (-> String Parcel Int))
 ;@axiom:effect(io)
 (fn (row id p)
-  (let (
-    (s (status p))
-    (a (optUnwrapOr (alert p) "-"))
-  )
-    (println "{id:<9}{s:<22}{a}")))
+  {
+    (let s (status p))
+    (let a (optUnwrapOr (alert p) "-"))
+    (println "{id:<9}{s:<22}{a}")
+  })
 
 (:: main ())
 ;@axiom:effect(io)
@@ -356,25 +358,31 @@ AX-1044  delivered             -`,
 (:: restock (-> Item Int))
 (fn (restock item)
   (if (< item.qty item.min)
-    (let ((order (- (* 2 item.min) item.qty)))
+    {
+      (let order (- (* 2 item.min) item.qty))
       {
         (set item.qty (+ item.qty order))
         order
-      })
+      }
+    }
     0))
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((shelf vecNew))
+  {
+    (let shelf vecNew)
     {
-      (vecPush shelf (Item "bolt-m4" 120 50))
-      (vecPush shelf (Item "nut-m4" 12 50))
-      (vecPush shelf (Item "washer" 0 200))
+      (vecPush shelf (Item :sku "bolt-m4" :qty 120 :min 50))
+      (vecPush shelf (Item :sku "nut-m4" :qty 12 :min 50))
+      (vecPush shelf (Item :sku "washer" :qty 0 :min 200))
       (for item in shelf
-        (let ((ordered (restock item)))
-          (println "{ordered:>4} ordered  {item}")))
-    }))`,
+        {
+          (let ordered (restock item))
+          (println "{ordered:>4} ordered  {item}")
+        })
+    }
+  })`,
     refusal: {
       label: "Write a field that is not mut",
       note: "`min` was never declared `mut`, so writing it is refused, and the help says exactly where the declaration would change.",
@@ -389,30 +397,36 @@ AX-1044  delivered             -`,
 (:: restock (-> Item Int))
 (fn (restock item)
   (if (< item.qty item.min)
-    (let ((order (- (* 2 item.min) item.qty)))
+    {
+      (let order (- (* 2 item.min) item.qty))
       {
         (set item.qty (+ item.qty order))
         (set item.min (+ item.min 10))
         order
-      })
+      }
+    }
     0))
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((shelf vecNew))
+  {
+    (let shelf vecNew)
     {
-      (vecPush shelf (Item "bolt-m4" 120 50))
-      (vecPush shelf (Item "nut-m4" 12 50))
-      (vecPush shelf (Item "washer" 0 200))
+      (vecPush shelf (Item :sku "bolt-m4" :qty 120 :min 50))
+      (vecPush shelf (Item :sku "nut-m4" :qty 12 :min 50))
+      (vecPush shelf (Item :sku "washer" :qty 0 :min 200))
       (for item in shelf
-        (let ((ordered (restock item)))
-          (println "{ordered:>4} ordered  {item}")))
-    }))`,
+        {
+          (let ordered (restock item))
+          (println "{ordered:>4} ordered  {item}")
+        })
+    }
+  })`,
       human: `error[AX3012]: cannot assign to field \`min\` of \`Item\`: the field is not declared \`mut\`
-  --> stock.ax:15:19
+  --> stock.ax:16:19
    |
-15 |         (set item.min (+ item.min 10))
+16 |         (set item.min (+ item.min 10))
    |                   ^^^ \`min\` is not a \`mut\` field
    |
    = note: a struct field is immutable unless its declaration marks it \`mut\`, the rule \`let\` already follows; until 0.6.0 the marker was parsed and discarded and this store compiled in silence
@@ -429,9 +443,9 @@ compilation failed due to 1 previous error`,
     title: "Three steps, one error path",
     lede: "Failure is a value. `Result` carries it, `?` hands it back, and `withContext` records which step failed.",
     points: [
-      { at: "(withContext (okOr (strParseInt text) bad) (concat \"reading \" name))))", text: "`okOr` turns a missing number into an error with a message." },
+      { at: "(withContext (okOr (strParseInt text) bad) (concat \"reading \" name))", text: "`okOr` turns a missing number into an error with a message." },
       { at: "(withContext (mulChecked chunk parts) \"sizing the upload\"))", text: "`mulChecked` fails where `*` would wrap around." },
-      { at: "(size (number \"chunk\" chunk)?)", text: "`?` binds each success and stops at the first failure." },
+      { at: "(let size (number \"chunk\" chunk)?)", text: "`?` binds each success and stops at the first failure." },
     ],
     docs: { label: "The error model", href: `${LIB}docs/error-model.md` },
     output: `4096 x 256 = 1048576 bytes
@@ -443,8 +457,10 @@ product is not representable while sizing the upload`,
 
 (:: number (-> String String (Result Int Error)))
 (fn (number name text)
-  (let ((bad (mkError 20 (concat text " is not a number"))))
-    (withContext (okOr (strParseInt text) bad) (concat "reading " name))))
+  {
+    (let bad (mkError 20 (concat text " is not a number")))
+    (withContext (okOr (strParseInt text) bad) (concat "reading " name))
+  })
 
 ; \`*\` wraps silently on overflow; this is the one that can say no.
 (:: upload (-> Int Int (Result Int Error)))
@@ -453,11 +469,11 @@ product is not representable while sizing the upload`,
 
 (:: sized (-> String String (Result Int Error)))
 (fn (sized chunk parts)
-  (let (
-    (size (number "chunk" chunk)?)
-    (n (number "parts" parts)?)
-  )
-    (upload size n)))
+  {
+    (let size (number "chunk" chunk)?)
+    (let n (number "parts" parts)?)
+    (upload size n)
+  })
 
 (:: report (-> String String Int))
 ;@axiom:effect(io)
@@ -505,7 +521,8 @@ test: 4 pauses recorded, 0 ms slept`,
 (:: retry (-> Int Int))
 ;@axiom:effect(pause)
 (fn (retry attempts)
-  (let ((mut delay 100))
+  {
+    (let mut delay 100)
     {
       (for i in 0..attempts
         {
@@ -513,12 +530,14 @@ test: 4 pauses recorded, 0 ms slept`,
           (set delay (* delay 2))
         })
       attempts
-    }))
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((seen vecNew))
+  {
+    (let seen vecNew)
     {
       ; In the program: say what would happen.
       (handle
@@ -534,7 +553,8 @@ test: 4 pauses recorded, 0 ms slept`,
       (assertEq "doubling" 800 (vecGet seen 3))
       (println "test: 4 pauses recorded, 0 ms slept")
       0
-    }))`,
+    }
+  })`,
   },
   {
     id: 'contracts',
@@ -561,12 +581,12 @@ test: 4 pauses recorded, 0 ms slept`,
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (below (clamp -3 0 10))
-    (inside (clamp 7 0 10))
-    (above (clamp 18 0 10))
-  )
-    (println "{below} {inside} {above}")))`,
+  {
+    (let below (clamp -3 0 10))
+    (let inside (clamp 7 0 10))
+    (let above (clamp 18 0 10))
+    (println "{below} {inside} {above}")
+  })`,
     output: '0 7 10',
     docs: { label: 'Contracts', href: `${REF}#contracts-pre-and-post` },
   },
@@ -578,9 +598,9 @@ test: 4 pauses recorded, 0 ms slept`,
     lede: "`Vec`, `Map` and a string interner from the standard library, which is written in Axiom and calls no C.",
     points: [
       { at: "(for msg in inbox", text: "`for` walks a `Vec` element by element." },
-      { at: "(let ((id (internIntern words w)))", text: "Each word becomes an id, counted in a `Map`. The interner owns its bytes; look them up while it is live." },
-      { at: "(byCount (lambda (a b)", text: "The comparator is a lambda that closes over the map." },
-      { at: "(let ((ranked (vecSortBy (mapKeys count) byCount)))", text: "`vecSortBy` ranks the ids by count." },
+      { at: "(let id (internIntern words w))", text: "Each word becomes an id, counted in a `Map`. The interner owns its bytes; look them up while it is live." },
+      { at: "(let byCount (lambda (a b)", text: "The comparator is a lambda that closes over the map." },
+      { at: "(let ranked (vecSortBy (mapKeys count) byCount))", text: "`vecSortBy` ranks the ids by count." },
     ],
     docs: { label: "Standard library", href: `${REF}#standard-library` },
     output: `   4  mobile
@@ -597,22 +617,23 @@ test: 4 pauses recorded, 0 ms slept`,
 ; "Safari." and "desktop," count as safari and desktop.
 (:: bare (-> String String))
 (fn (bare w)
-  (let ((n (strLen w)))
+  {
+    (let n (strLen w))
     (if (strIsAlpha (strByte w (- n 1)))
       w
-      (strSlice w 0 (- n 1)))))
+      (strSlice w 0 (- n 1)))
+  })
 
 ; Each message is split on byte 32 (a space); each word of four
 ; letters or more is interned and counted, then the ids are ranked.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (inbox vecNew)
-    (words internNew)
-    (count mapNew)
-    (byCount (lambda (a b) (- (mapGet count b 0) (mapGet count a 0))))
-  )
+  {
+    (let inbox vecNew)
+    (let words internNew)
+    (let count mapNew)
+    (let byCount (lambda (a b) (- (mapGet count b 0) (mapGet count a 0))))
     {
       (vecPush inbox "Checkout fails on mobile Safari.")
       (vecPush inbox "The payment sheet spins forever and never loads.")
@@ -621,22 +642,31 @@ test: 4 pauses recorded, 0 ms slept`,
       (vecPush inbox "Safari on iOS shows the same error.")
       (vecPush inbox "Checkout on mobile is unusable.")
       (for msg in inbox
-        (let ((parts (strSplit (strLower msg) 32)))
+        {
+          (let parts (strSplit (strLower msg) 32))
           (for i in 0..(vecLen parts)
-            (let ((w (bare (vecGet parts i))))
+            {
+              (let w (bare (vecGet parts i)))
               (if (>= (strLen w) 4)
-                (let ((id (internIntern words w)))
-                  (mapInsert count id (+ 1 (mapGet count id 0))))
-                0)))))
-      (let ((ranked (vecSortBy (mapKeys count) byCount)))
+                {
+                  (let id (internIntern words w))
+                  (mapInsert count id (+ 1 (mapGet count id 0)))
+                }
+                0)
+            })
+        })
+      {
+        (let ranked (vecSortBy (mapKeys count) byCount))
         (for r in 0..5
-          (let (
-            (id (vecGet ranked r))
-            (n (mapGet count id 0))
-            (w (internLookup words id))
-          )
-            (println "{n:>4}  {w}"))))
-    }))`,
+          {
+            (let id (vecGet ranked r))
+            (let n (mapGet count id 0))
+            (let w (internLookup words id))
+            (println "{n:>4}  {w}")
+          })
+      }
+    }
+  })`,
   },
   {
     id: "concurrency",
@@ -648,7 +678,7 @@ test: 4 pauses recorded, 0 ms slept`,
       { at: "(parallel scan (", text: "The three shards are scanned at once." },
       { at: "(nus (errors us 0))", text: "Each binding borrows its shard: the string's count is frozen until the last join, so no binding's retain or release reaches it." },
       { at: ";@axiom:effect(spawn)", text: "`main` declares `spawn` and `block`: its bindings start beside it, and it waits for them." },
-      { at: "(let ((total (+ nus (+ neu napac))))", text: "The body sees all three counts, joined in written order." },
+      { at: "(let total (+ nus (+ neu napac)))", text: "The body sees all three counts, joined in written order." },
       { at: "; Each binding borrows its shard", text: "What comes back across a join is one machine word, and the compiler enforces it." },
     ],
     docs: { label: "parallel", href: `${REF}#what-a-binding-may-capture` },
@@ -668,21 +698,23 @@ test: 4 pauses recorded, 0 ms slept`,
 ;@axiom:effect(block)
 (fn (main)
   ; Each binding borrows its shard, and a join carries one word back.
-  (let (
-    (us "INFO up\\nERROR db timeout\\nWARN slow disk\\n")
-    (eu "ERROR db timeout\\nERROR cache miss\\nINFO up\\n")
-    (apac "INFO up\\nWARN slow disk\\nINFO up\\n")
-  )
+  {
+    (let us "INFO up\\nERROR db timeout\\nWARN slow disk\\n")
+    (let eu "ERROR db timeout\\nERROR cache miss\\nINFO up\\n")
+    (let apac "INFO up\\nWARN slow disk\\nINFO up\\n")
     (parallel scan (
       (nus (errors us 0))
       (neu (errors eu 0))
       (napac (errors apac 0))
     )
-      (let ((total (+ nus (+ neu napac))))
+      {
+        (let total (+ nus (+ neu napac)))
         {
           (println "errors  us {nus}  eu {neu}  apac {napac}  total {total}")
           0
-        }))))`,
+        }
+      })
+  })`,
     refusal: {
       label: "Share a growing list with a binding",
       note: "A binding may borrow a `String`, but not a `Vec`: two bindings could grow one buffer at once. The capture is refused under either lowering.",
@@ -694,13 +726,14 @@ test: 4 pauses recorded, 0 ms slept`,
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((seen
-    (:: vecNew (Vec Int))))
+  {
+    (let seen (:: vecNew (Vec Int)))
     (parallel scan (
       (us (vecLen (vecPush seen 1)))
       (eu 2)
     )
-      (+ us eu))))`,
+      (+ us eu))
+  })`,
       human: `error[AX3064]: a concurrent binding captures \`seen\`, which has type \`Vec Int\` - a mutable container the parent also holds, which a binding could grow while another reads it
   --> triage.ax:12:28
    |
@@ -738,13 +771,15 @@ compilation failed due to 1 previous error`,
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut bytes 0))
+  {
+    (let mut bytes 0)
     {
       (for id in 0..1000000
         (region req
           (set bytes (+ bytes (strLen (render id))))))
       (println "1000000 requests, {bytes} bytes rendered")
-    }))`,
+    }
+  })`,
     refusal: {
       label: "Keep a string past its region",
       note: "Storing the rendered `String` in a variable outside the region would leave it pointing at reclaimed memory. The compiler refuses the store and the region answering it.",
@@ -759,31 +794,37 @@ compilation failed due to 1 previous error`,
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((mut last ""))
+  {
+    (let mut last "")
     {
       (for id in 0..1000000
         (region req
           (set last (render id))))
       (println "last request: {last}")
-    }))`,
+    }
+  })`,
       human: `error[AX3059]: \`last\` is bound outside region \`req\`, and the value stored into it has type \`String\`
-  --> requests.ax:16:16
+  --> requests.ax:17:16
    |
-16 |           (set last (render id))))
+16 |         (region req
+   |                 --- this region ends before the outer binding is used
+17 |           (set last (render id))))
    |                ^^^^ this store leaves the region
    |
    = note: a store is the one escape channel a scope check can see; a call that stores the value for you is refused too, where the facts walk sees it
-   = help: a reference allocated inside the region would outlive it: store a scalar, or bind the target inside the region
+   = help: move the reference allocation and this store outside the region, or bind the destination inside it; an outer binding may receive a scalar computed inside the region
    = help: run \`axiom explain AX3059\` for a full explanation
 
 error[AX3059]: region \`req\` answers a value of type \`String\`, which may point into the memory the region reclaims
-  --> requests.ax:16:16
+  --> requests.ax:17:16
    |
-16 |           (set last (render id))))
+16 |         (region req
+   |                 --- this region reclaims the result's allocation when its body ends
+17 |           (set last (render id))))
    |                ^^^^ this has type \`String\`
    |
    = note: a \`String\` is a descriptor over a second block, a struct is a block and a closure is a record; every one of them would point at reclaimed memory
-   = help: answer a scalar - Int, Bool, Char or Float - which survives the reset by value; a reference has to be built outside the region because promotion out of the region is unavailable
+   = help: compute a scalar such as (strLen value) inside the region and return it; if you need a reference result, allocate it outside the region
    = help: run \`axiom explain AX3059\` for a full explanation
 
 compilation failed due to 2 previous errors`,
@@ -840,13 +881,14 @@ Team    129385889792 bytes  <- shared`,
 (:: row (-> Plan Int))
 ;@axiom:effect(io)
 (fn (row p)
-  (let (
-    (bytes (quota p))
-    (mark (if (eqPlan p Team)
-      "  <- shared"
-      ""))
-  )
-    (println "{p:<6}{bytes:>14} bytes{mark}")))
+  {
+    (let bytes (quota p))
+    (let mark
+      (if (eqPlan p Team)
+        "  <- shared"
+        ""))
+    (println "{p:<6}{bytes:>14} bytes{mark}")
+  })
 
 (:: main ())
 ;@axiom:effect(io)
@@ -890,12 +932,11 @@ ok   testOlder
 ; which comparing the strings would get backwards.
 (:: versionCmp (-> String String Int))
 (fn (versionCmp a b)
-  (let (
-    (pa (strSplit a 46))
-    (pb (strSplit b 46))
-    (mut i 0)
-    (mut d 0)
-  )
+  {
+    (let pa (strSplit a 46))
+    (let pb (strSplit b 46))
+    (let mut i 0)
+    (let mut d 0)
     {
       (while (&& (== d 0) (< i 3))
         {
@@ -907,7 +948,8 @@ ok   testOlder
         (if (> d 0)
           1
           0))
-    }))
+    }
+  })
 
 (:: testComparesNumerically Int)
 ;@axiom:effect(io)
@@ -948,13 +990,13 @@ ok   testOlder
 
 (:: toJson (-> String (Result String Error)))
 (fn (toJson toml)
-  (let (
-    (config (cerealDecode CerealToml toml)?)
-    (replicas (cerealField cerealIntCodec config "replicas")?)
-  )
+  {
+    (let config (cerealDecode CerealToml toml)?)
+    (let replicas (cerealField cerealIntCodec config "replicas")?)
     (if (< replicas 1)
       (Err (mkError 22 "replicas must be at least 1"))
-      (cerealEncode CerealJson config))))
+      (cerealEncode CerealJson config))
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -997,8 +1039,10 @@ ok   testOlder
 (:: report (-> String Error Int))
 ;@axiom:effect(io)
 (fn (report what e)
-  (let ((why (errorText e)))
-    (eprintln "{what}: {why}")))
+  {
+    (let why (errorText e))
+    (eprintln "{what}: {why}")
+  })
 
 ; Echo each line back until the client hangs up.
 (:: serve (-> TcpStream Int))
@@ -1036,8 +1080,8 @@ ok   testOlder
     title: 'Normalise a timestamp, then add a duration',
     lede: '`Chrono` validates calendar values and returns a Result for parsing and arithmetic. An offset-bearing timestamp can be normalised to UTC; the returned date-time holds no zone field.',
     points: [
-      { at: '(start (datetimeParseUtc "2024-02-29T23:30:00+02:00")?)', text: 'The +02:00 offset is applied before the naive UTC date-time is returned.' },
-      { at: '(delay (durationParse "PT1H30M")?)', text: '`?` binds each success and propagates an error at either step.' },
+      { at: '(let start (datetimeParseUtc "2024-02-29T23:30:00+02:00")?)', text: 'The +02:00 offset is applied before the naive UTC date-time is returned.' },
+      { at: '(let delay (durationParse "PT1H30M")?)', text: '`?` binds each success and propagates an error at either step.' },
       { at: '(datetimeAdd start delay)', text: 'Duration arithmetic refuses results outside the supported range.' },
     ],
     docs: { label: 'Dates and times', href: `${LIB}docs/chrono.md` },
@@ -1048,11 +1092,11 @@ ok   testOlder
 
 (:: arrival (Result NaiveDateTime Error))
 (fn (arrival)
-  (let (
-    (start (datetimeParseUtc "2024-02-29T23:30:00+02:00")?)
-    (delay (durationParse "PT1H30M")?)
-  )
-    (datetimeAdd start delay)))
+  {
+    (let start (datetimeParseUtc "2024-02-29T23:30:00+02:00")?)
+    (let delay (durationParse "PT1H30M")?)
+    (datetimeAdd start delay)
+  })
 
 (:: main ())
 ;@axiom:effect(io)
@@ -1068,7 +1112,7 @@ ok   testOlder
     title: 'Bound the workers, keep submit order',
     lede: '`Task` runs jobs in forked children, limits concurrency and answer size, then returns one Result per job in submit order. Options add deadlines, cancellation and fail-fast behaviour.',
     points: [
-      { at: '(answers (taskMap job 4 2 64))', text: 'Four jobs, at most two running at once, with at most 64 bytes in each answer.' },
+      { at: '(let answers (taskMap job 4 2 64))', text: 'Four jobs, at most two running at once, with at most 64 bytes in each answer.' },
       { at: '(for answer in answers', text: 'Answers keep submit order even when workers finish in a different order.' },
       { at: '((Err e) (println (errorText e)))', text: 'A failed job has an error value in its own slot.' },
     ],
@@ -1084,19 +1128,23 @@ job 3: 9`,
 
 (:: job (-> Int String))
 (fn (job i)
-  (let ((square (* i i)))
-    (format "job {i}: {square}")))
+  {
+    (let square (* i i))
+    (format "job {i}: {square}")
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((answers (taskMap job 4 2 64)))
+  {
+    (let answers (taskMap job 4 2 64))
     (for answer in answers
       (match answer
         ((Ok text) (println text))
-        ((Err e) (println (errorText e)))))))`,
+        ((Err e) (println (errorText e)))))
+  })`,
   },
   {
     id: 'obfuscation',
@@ -1106,8 +1154,8 @@ job 3: 9`,
     title: 'Authenticate an embedded asset',
     lede: '`Crypto.Obfuscate` seals bytes with a fresh nonce and a context-bound key. Use the packing tool before compilation, and optional --obfuscate for literal masking and internal symbols. Running-process inspection can still recover embedded data.',
     points: [
-      { at: '(let ((envelope (obfuscationSeal key "demo/message/v1" "asset opened")?))', text: 'A context identifies the asset purpose and is authenticated with its bytes.' },
-      { at: '(obfuscationOpen key "demo/message/v1" envelope)))', text: 'Open verifies the tag before returning plaintext.' },
+      { at: '(let envelope (obfuscationSeal key "demo/message/v1" "asset opened")?)', text: 'A context identifies the asset purpose and is authenticated with its bytes.' },
+      { at: '(obfuscationOpen key "demo/message/v1" envelope)', text: 'Open verifies the tag before returning plaintext.' },
       { at: '(obfuscationKeyWipe key)', text: 'Erase the key on both success and error before examining the Result.' },
     ],
     docs: { label: 'Pack assets and obfuscate executables', href: `${LIB}docs/obfuscation.md` },
@@ -1120,8 +1168,10 @@ job 3: 9`,
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (roundTrip key)
-  (let ((envelope (obfuscationSeal key "demo/message/v1" "asset opened")?))
-    (obfuscationOpen key "demo/message/v1" envelope)))
+  {
+    (let envelope (obfuscationSeal key "demo/message/v1" "asset opened")?)
+    (obfuscationOpen key "demo/message/v1" envelope)
+  })
 
 (:: main ())
 ;@axiom:effect(io)
@@ -1130,13 +1180,15 @@ job 3: 9`,
   (match obfuscationKeyGenerate
     ((Err e) (die (errorText e) 1))
     ((Ok key)
-      (let ((opened (roundTrip key)))
+      {
+        (let opened (roundTrip key))
         {
           (obfuscationKeyWipe key)
           (match opened
             ((Err e) (die (errorText e) 1))
             ((Ok text) (println text)))
-        })
+        }
+      }
     )))`,
   },
   {
@@ -1146,8 +1198,8 @@ job 3: 9`,
     title: "Rust, one extern away",
     lede: "Mark Rust functions `#[axiom_export]` and `axiom-bindgen` writes the Axiom module for them. `--crate` builds the archive and links it. This caller vouches for the direct scalar extern call with `effect(unsafe)`.",
     points: [
-      { at: "(loud (shout \"ships a binary\"))", text: "`shout` takes a borrowed string and returns an owned one." },
-      { at: "(c (counterNew 40))", text: "`Counter` is an opaque Rust value behind a counted handle, dropped with its last reference." },
+      { at: "(let loud (shout \"ships a binary\"))", text: "`shout` takes a borrowed string and returns an owned one." },
+      { at: "(let c (counterNew 40))", text: "`Counter` is an opaque Rust value behind a counted handle, dropped with its last reference." },
       { at: "(match (parseInt \"12x\")", text: "`parseInt` returns a Rust `Result`, matched like any Axiom one." },
     ],
     crate: "rust/examples/demo",
@@ -1165,21 +1217,23 @@ Err:     invalid digit found in string`,
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (main)
-  (let (
-    (loud (shout "ships a binary"))
-    (h (hypot 3.0 4.0))
-    (c (counterNew 40))
-  )
+  {
+    (let loud (shout "ships a binary"))
+    (let h (hypot 3.0 4.0))
+    (let c (counterNew 40))
     {
       (println "shout:   {loud}")
       (println "hypot:   {h:.1}")
       (counterAdd c 2)
-      (let ((n (counterValue c)))
-        (println "counter: {n}"))
+      {
+        (let n (counterValue c))
+        (println "counter: {n}")
+      }
       (match (parseInt "12x")
         ((Ok n) (println "parsed:  {n}"))
         ((Err why) (println "Err:     {why}")))
-    }))`,
+    }
+  })`,
     rust: {
       path: 'rust/examples/demo/src/lib.rs',
       code: `#[axiom_export]

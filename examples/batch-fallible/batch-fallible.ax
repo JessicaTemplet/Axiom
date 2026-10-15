@@ -47,20 +47,24 @@
 (fn (digitsFrom s i acc)
   (if (>= i (strLen s))
     acc
-    (let ((b (strByte s i)))
+    {
+      (let b (strByte s i))
       (if (&& (>= b 48) (<= b 57))
         (digitsFrom s (+ i 1) (+ (* acc 10) (- b 48)))
-        (- 0 1)))))
+        (- 0 1))
+    }))
 
 ; Argument `i` as a number, or `d` when it is absent or not one.
 (:: argOr (-> Int Int Int))
 ;@axiom:effect(io)
 (fn (argOr i d)
   (if (> sysArgc i)
-    (let ((v (digitsFrom (sysArg i) 0 0)))
+    {
+      (let v (digitsFrom (sysArg i) 0 0))
       (if (< v 0)
         d
-        v))
+        v)
+    }
     d))
 
 ; Record `i` as the text a reader would hand us: its quantity in
@@ -76,54 +80,60 @@
 ; bad record; it says what was wrong and continues with the answer.
 (:: quantity (-> String Int))
 (fn (quantity s)
-  (let ((v (digitsFrom s 0 0)))
+  {
+    (let v (digitsFrom s 0 0))
     (if (< v 0)
       (fallibleMalformed "quantity is not a number")
-      v)))
+      v)
+  })
 
 ; The batch loop: one record at a time, one `fallibleIsSkipped` per
 ; record, and nothing kept between records.
 (:: sumRecords (-> Int Int Int))
 (fn (sumRecords n k)
-  (let (
-    (mut i 1)
-    (mut acc 0)
-  )
+  {
+    (let mut i 1)
+    (let mut acc 0)
     {
       (while (<= i n)
-        (let ((v (quantity (record i k))))
+        {
+          (let v (quantity (record i k)))
           {
             (set acc (if (fallibleIsSkipped v)
               acc
               (+ acc v)))
             (set i (+ i 1))
-          }))
+          }
+        })
       acc
-    }))
+    }
+  })
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
   ; `cast Int`: a `handle` expression's type is the checker's
   ; wildcard, and `println` selects a rendering by type.
-  (let (
-    (n (argOr 1 1000000))
-    (k (argOr 2 7))
-    (tally fallibleTally)
-  )
-    (let (
-      (skipTotal (as (handle
-        (sumRecords n k)
-        (Fallible Alloc Mut Unsafe)
-        (fallibleCounting tally fallibleSkip)) Int))
-      (defaultTotal (as (handle
-        (sumRecords n k)
-        (Fallible Alloc Mut Unsafe)
-        (fallibleDefault 1)) Int))
-      (malformed (fallibleCount tally))
-    )
+  {
+    (let n (argOr 1 1000000))
+    (let k (argOr 2 7))
+    (let tally fallibleTally)
+    {
+      (let skipTotal
+        (as (handle
+          (sumRecords n k)
+          (Fallible Alloc Mut Unsafe)
+          (fallibleCounting tally fallibleSkip)) Int))
+      (let defaultTotal
+        (as (handle
+          (sumRecords n k)
+          (Fallible Alloc Mut Unsafe)
+          (fallibleDefault 1)) Int))
+      (let malformed (fallibleCount tally))
       {
         (println "skip total {skipTotal}")
         (println "default total {defaultTotal}")
         (println "malformed {malformed}")
-      })))
+      }
+    }
+  })

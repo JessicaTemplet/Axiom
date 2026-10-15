@@ -181,12 +181,12 @@ after it and for the body.
   ; prints 1, then 2
   ; prints 3
   ; x is in scope for y
-  (let (
-    (s (two (side 1) (side 2)))
-    (x (side 3))
-    (y (+ x 1))
-  )
-    (- (+ s y) 7)))
+  {
+    (let s (two (side 1) (side 2)))
+    (let x (side 3))
+    (let y (+ x 1))
+    (- (+ s y) 7)
+  })
 ```
 
 ```text
@@ -264,7 +264,7 @@ Two details make the `let` body safe as a tail position:
 The compiler can't leave the `let` body to LLVM. `MM-LIFE-2c` event 3
 releases a `let`'s owned temporary *after* the call its body makes, and
 that release stops LLVM's sibling-call pass. Left to LLVM,
-`(let ((s (concat s "x"))) (grow s (- n 1)))` would overflow the
+`{ (let s (concat s "x")) (grow s (- n 1))}` would overflow the
 stack 200,000 calls deep.
 
 **MM-EXEC-6c (H).** **A mutual tail call runs in constant stack when
@@ -441,18 +441,22 @@ store can also fill a field, and both are unsafe operations
 ```scheme refused
 (import IO)
 
-(struct Logger (emit : (-> String Int)))
+(struct Logger
+  (emit : (-> String Int)))
 
 ;@axiom:effect(io)
 (:: shout (-> String Int))
-(fn (shout s) (println s))
+(fn (shout s)
+  (println s))
 
 (:: relay (-> Logger String Int))
-(fn (relay l s) ((l.emit) s))
+(fn (relay l s)
+  (l.emit s))
 
 ;@axiom:effect(io)
 (:: main Int)
-(fn (main) (relay (Logger shout) "hi"))
+(fn (main)
+  (relay (Logger :emit shout) "hi"))
 ```
 
 Every `Logger` here holds `shout`, so `relay` performs `IO` and draws
@@ -680,12 +684,16 @@ at its own declaration, so nothing outside the body can supply the
 claim (`tests/diagnostics/1200-unsafe-claim-open-row.ax`).
 
 ```scheme refused
-(struct Hid (name : String) (n : Int))
+(struct Hid
+  (name : String)
+  (n : Int))
 
 (:: peek (-> Int Int))
 (fn (peek k)
-  (let ((h (as k Hid)))
-    h.n))
+  {
+    (let h (as k Hid))
+    h.n
+  })
 ```
 
 `peek`'s cast draws `AX3073`. It makes a `Hid` out of whatever word it
@@ -898,10 +906,9 @@ length word bounds it, so an interior NUL is an ordinary byte, and a
 
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (a "hi")
-    (b (strDup "hi"))
-  )
+  {
+    (let a "hi")
+    (let b (strDup "hi"))
     {
       (println
         (if (== a b)
@@ -912,7 +919,8 @@ length word bounds it, so an interior NUL is an ordinary byte, and a
           "same object"
           "two objects"))
       0
-    }))
+    }
+  })
 ```
 
 ```text
@@ -1555,8 +1563,15 @@ an immediate tag, and an unguarded load would dereference a small
 integer.
 
 ```scheme refused
-(data T () (E) (N { v : Int }))
-(fn (main) (let ((x (E))) x.v))     ; AX3070
+(data T
+  (E)
+  (N { v : Int }))
+
+(fn (main)
+  {
+    (let x (E))  ; AX3070
+    x.v
+  })
 ```
 
 On a `data` type whose constructors all have fields, access is legal
@@ -2681,11 +2696,15 @@ saved position and answers the body's scalar result.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((id 42))
-    (let ((n
-      (region r
-        (strLen (format "GET /orders/{id}")))))
-      (println "rendered {n} bytes"))))
+  {
+    (let id 42)
+    {
+      (let n
+        (region r
+          (strLen (format "GET /orders/{id}"))))
+      (println "rendered {n} bytes")
+    }
+  })
 ```
 
 ```text
@@ -2702,9 +2721,15 @@ length, an `Int`, leaves. Answering the string itself is refused:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((id 42))
-    (let ((s (region r (format "GET /orders/{id}"))))
-      { (println s) })))
+  {
+    (let id 42)
+    {
+      (let s
+        (region r
+          (format "GET /orders/{id}")))
+      (println s)
+    }
+  })
 ```
 
 ```text
@@ -2901,7 +2926,7 @@ Evidence: `mkParallel` in [parser.ax](../self_host/parser.ax),
 
 ## 4. Mutation
 
-**MM-MUT-1 (H).** `(let ((mut x e)) ...)` introduces a mutable local,
+**MM-MUT-1 (H).** `{ (let mut x e) ...}` introduces a mutable local,
 which `(set x v)` assigns. It lowers to an `alloca` with loads and
 stores, is invisible outside its function, and is captured by snapshot
 (`MM-VAL-16`). It performs no effect, because nothing else can observe
@@ -2913,11 +2938,13 @@ variable.
 ```scheme
 (:: main Int)
 (fn (main)
-  (let ((mut x 0))
+  {
+    (let mut x 0)
     {
       (set x 3)
       x
-    }))
+    }
+  })
 ```
 
 `axiom emit-llvm` shows the slot:
@@ -2958,15 +2985,17 @@ of a function that returns `Int`: `(fn (bump p) (set p.x 1))` declared
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (p (P 1 2))
-    (q p)
-  )
+  {
+    (let p (P :x 1 :y 2))
+    (let q p)
     {
       (set p.x 99)
-      (let ((seen q.x))
-        (println "q.x is {seen}"))
-    }))
+      {
+        (let seen q.x)
+        (println "q.x is {seen}")
+      }
+    }
+  })
 ```
 
 ```text
@@ -3441,9 +3470,11 @@ of its `let`, `b` here would take its string with it, and the `match`
 would answer freed storage:
 
 ```scheme
-(let ((b (Mk (concat "id-" t))))
+{
+  (let b (Mk (concat "id-" t)))
   (match b
-    ((Mk s) s)))
+    ((Mk s) s))
+}
 ```
 
 Second, a `match` binder, which is the same field under another name.
@@ -3503,10 +3534,9 @@ A `mut` local whose type is a reference owns what it holds:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (mut s "")
-    (mut i 0)
-  )
+  {
+    (let mut s "")
+    (let mut i 0)
     {
       (while (< i 1000)
         {
@@ -3514,7 +3544,8 @@ A `mut` local whose type is a reference owns what it holds:
           (set i (+ i 1))
         })
       (println s)
-    }))
+    }
+  })
 ```
 
 ```text
@@ -3540,7 +3571,7 @@ compiler gives a slot ownership only when it can show that
   another.
 
 A `let` that reads the slot whole takes a share of its own, so
-`(let ((old s)) (set s (concat old "!")))` keeps `old` intact. A `set`
+`{ (let old s) (set s (concat old "!"))}` keeps `old` intact. A `set`
 that stores one slot's value into another takes a share for the slot
 it stores into, as a field store does, whichever slot was declared
 first. So `(set prev s)` never stops `s` owning.
@@ -4409,7 +4440,7 @@ map bit, while the flow model trusted the store (event 6). The caller
 would release the temporary under it: a use-after-free.
 
 A placeholder pinned to a type is a witness of that type. In
-`(let ((out vecNew)) ...)`, `out` is `(Vec _iN)`, and the first
+`{ (let out vecNew) ...}`, `out` is `(Vec _iN)`, and the first
 push of a `String` pins `_iN`. A later
 `(vecSet out k (vecGet out j))` witnesses the element only through
 `_iN`. The checker reads such a witness once the body is typed,
@@ -4791,11 +4822,19 @@ records the correction. There are two independent routes:
 
 ```scheme
 ; 1. Through the standard library, with no unsafe form at all:
-(let ((v vecNew)) { (vecPush v 7) (vecPushVec v v) ... })   ; v contains v
+{ (let v vecNew) { (vecPush v 7) (vecPushVec v v) ... }}   ; v contains v
 
 ; 2. Through a struct's mutable field, using `as` to seed the knot:
-(let ((a (Node 1 (as 0 Node))) (b (Node 2 (as 0 Node))))
-  { (set a.next b) (set b.next a) ... })                 ; walks forever
+(struct Node
+  (v : Int)
+  (mut next : Node))
+{
+  (let a (Node :v 1 :next (as 0 Node)))
+  (let b (Node :v 2 :next (as 0 Node)))
+  (set a.next b)
+  (set b.next a)
+  ...                                                ; walks forever
+}
 ```
 
 The first needs nothing but `stdlib/Vec`: `vecPushVec` stores a vector
@@ -4938,23 +4977,25 @@ dies. So a `Vec` of `File`s closes every descriptor when it dies.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (mut i 0)
-    (mut total 0)
-  )
+  {
+    (let mut i 0)
+    (let mut total 0)
     {
       (while (< i 10000)
         {
-          (let ((rows vecNew))
+          {
+            (let rows vecNew)
             {
               (vecPush rows (concat "row-" (fmtInt i)))
               (vecPush rows (concat "row-" (fmtInt (+ i 1))))
               (set total (+ total (vecLen rows)))
-            })
+            }
+          }
           (set i (+ i 1))
         })
       (println "{total} rows")
-    }))
+    }
+  })
 ```
 
 ```text
@@ -6594,10 +6635,9 @@ There is no free to call:
 ;@axiom:effect(io)
 ;@axiom:effect(block)
 (fn (sumAll c)
-  (let (
-    (mut sum 0)
-    (mut more 1)
-  )
+  {
+    (let mut sum 0)
+    (let mut more 1)
     {
       (while (== more 1)
         (match (chanRecv c)
@@ -6608,7 +6648,8 @@ There is no free to call:
             (set more 0)
           )))
       sum
-    }))
+    }
+  })
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -7648,10 +7689,9 @@ needed.
 ```scheme
 (:: copyBoard (-> (Vec Int) (Vec Int)))
 (fn (copyBoard src)
-  (let (
-    (dst (vecWithCapacity 576))
-    (mut i 0)
-  )
+  {
+    (let dst (vecWithCapacity 576))
+    (let mut i 0)
     {
       (while (< i 576)
         {
@@ -7659,27 +7699,32 @@ needed.
           (set i (+ i 1))
         })
       dst
-    }))
+    }
+  })
 
 (:: advance (-> (Vec Int) Int (Vec Int)))
 ;@axiom:effect(unsafe)
 (fn (advance b n)
-  (let (
-    (m (__axiom_arena_mark))
-    (mut bb b)
-    (mut nn n)
-  )
+  {
+    (let m (__axiom_arena_mark))
+    (let mut bb b)
+    (let mut nn n)
     {
       (while (> nn 0)
-        (let ((b2 (step bb)))
-          (let ((up (copyBoard b2)))
+        {
+          (let b2 (step bb))
+          {
+            (let up (copyBoard b2))
             {
               (__axiom_arena_reset m)  ; `up` is now above the waterline
               (set bb (copyBoard up))  ; and survives being read: MM-ALLOC-14
               (set nn (- nn 1))
-            })))
+            }
+          }
+        })
       bb
-    }))
+    }
+  })
 ```
 
 Memory stays flat at about 1.4 MiB from 80 to 20,000 generations.
@@ -7775,11 +7820,11 @@ list.
   })
 
 (fn (main)
-  (let (
-    (base (Cfg 0))
-    (loud (configure base))
-  )
-    (- loud.verbose base.verbose)))
+  {
+    (let base (Cfg :verbose 0))
+    (let loud (configure base))
+    (- loud.verbose base.verbose)
+  })
 ; 0, not 1
 ```
 
@@ -7822,7 +7867,8 @@ twice or not used at all was accepted:
 (:: dup (-> (linear Int) Int))
 (fn (dup x) (+ (as (consume (consume x)) Int) (as x Int)))   ; once accepted
 (:: drop (-> (linear Int) Int))
-(fn (drop x) 0)                                                  ; once accepted
+(fn (drop x)
+  0)                                                  ; once accepted
 ```
 
 That was `MM-LIFE-7`'s point: the syntax existing was no evidence that

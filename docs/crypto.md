@@ -151,7 +151,8 @@ messages that share one.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((h sha256New))
+  {
+    (let h sha256New)
     {
       (println (hexEncode (sha256 "abc")))
       (sha256Update h "a")
@@ -160,7 +161,8 @@ messages that share one.
       (println (hexEncode (sha3_256 "abc")))
       (println (hexEncode (shake256 "abc" 16)))
       (println (hexEncode (blake2b256 "abc")))
-    }))
+    }
+  })
 ```
 
 ```text
@@ -212,7 +214,8 @@ secret into as many independent keys as you need.
   (match hmacSha256KeyGenerate
     ((Err e) (die (errorText e) 1))
     ((Ok key)
-      (let ((tag (hmacSha256 key "order 17")))
+      {
+        (let tag (hmacSha256 key "order 17"))
         {
           (println (strLen tag))
           (println (hmacSha256Verify key "order 17" tag))
@@ -231,7 +234,8 @@ secret into as many independent keys as you need.
                   }
                 ))
             ))
-        })
+        }
+      }
     )))
 ```
 
@@ -288,7 +292,8 @@ each with the same shape:
       (match aeadNonceRandom
         ((Err e) (die (errorText e) 1))
         ((Ok nonce)
-          (let ((sealed (unwrapOr (aes256GcmSeal key nonce "order 17" "attack at dawn") "")))
+          {
+            (let sealed (unwrapOr (aes256GcmSeal key nonce "order 17" "attack at dawn") ""))
             {
               (println (strLen sealed))
               (match (aes256GcmOpen key nonce "order 17" sealed)
@@ -298,7 +303,8 @@ each with the same shape:
                 ((Ok plain) (println plain))
                 ((Err e) (println (errorText e))))
               (aes256GcmKeyWipe key)
-            })
+            }
+          }
         ))
     )))
 ```
@@ -435,16 +441,16 @@ deterministic, so the same key and message always give the same
   (match ed25519KeyGenerate
     ((Err e) (die (errorText e) 1))
     ((Ok key)
-      (let (
-        (pk (ed25519PublicKey key))
-        (sig (ed25519Sign key "release 0.8.0"))
-      )
+      {
+        (let pk (ed25519PublicKey key))
+        (let sig (ed25519Sign key "release 0.8.0"))
         {
           (println (strLen (ed25519SignatureBytes sig)))
           (println (ed25519Verify pk "release 0.8.0" sig))
           (println (ed25519Verify pk "release 0.8.1" sig))
           (ed25519KeyWipe key)
-        })
+        }
+      }
     )))
 ```
 

@@ -28,13 +28,16 @@ This program makes a new database and asks how many pages it has:
       }
     )
     ((Ok p)
-      (let ((pages
-        (unwrapOr (andThen (pagerBeginRead p) (lambda (_) (pagerPageCount p))) 0)))
+      {
+        (let pages (unwrapOr (andThen (pagerBeginRead p) (lambda (_) (pagerPageCount p))) 0))
         {
           (println "{pages} pages")
-          (let ((_ (pagerClose p)))
-            0)
-        })
+          {
+            (let _ (pagerClose p))
+            0
+          }
+        }
+      }
     )))
 ```
 

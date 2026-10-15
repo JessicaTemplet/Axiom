@@ -404,7 +404,7 @@ There are three, and each is the parser showing through:
   matches everything, and `AX3033`'s help says so by name.
 - A parenthesised pattern never matches a keyword-headed form.
   Arguments are parsed by the ordinary expression parser, so
-  `(if p q r)`, `(let ((p 1)) p)`, `(lambda (p) q)` and `(match …)`
+  `(if p q r)`, `{ (let p 1) p}`, `(lambda (p) q)` and `(match …)`
   arrive under their own tags, not as spines. A shape pattern of the
   right element count refuses them, and the invocation falls through to
   a more general rule. A macro that must accept those shapes takes them
@@ -715,13 +715,16 @@ never outranks a binder:
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (a (f 1))
-    (b (let ((v 2))
-      v))
-    (c v)
-  )
-    (println "{a} {b} {c}")))
+  {
+    (let a (f 1))
+    (let b
+      {
+        (let v 2)
+        v
+      })
+    (let c v)
+    (println "{a} {b} {c}")
+  })
 ```
 
 ```text
@@ -1100,19 +1103,25 @@ capture a name from the call site. That holds for a `let` binder and
 for a `match` arm's pattern binder alike:
 
 ```scheme
-(macro (addTo x) (let ((tmp 100))
-  (+ tmp x)))
+(macro (addTo x) {
+  (let tmp 100)
+  (+ tmp x)
+})
 
-(let ((tmp 1))
-  (addTo tmp))
+{
+  (let tmp 1)
+  (addTo tmp)
+}
 
 ; 101
 (macro (orElse o d) (match o
   ((Some v) d)
   ((None) d)))
 
-(let ((v 42))
-  (orElse (Some 8) v))
+{
+  (let v 42)
+  (orElse (Some 8) v)
+}
 ; 42
 ```
 
@@ -1128,7 +1137,7 @@ it inside the template. That covers `let` and `let mut` binders,
 `tmp.1`. This shape can't collide with anything, on either side:
 
 - Source can't spell it. The lexer reads `.` as `TK_DOT`, never as part
-  of an identifier, so `(let ((tmp.1 5)) tmp.1)` is `AX2001`.
+  of an identifier, so `{ (let tmp.1 5) tmp.1}` is `AX2001`.
 - LLVM accepts it. `.` is legal in an unquoted LLVM identifier, so the
   renamed binder survives codegen's register naming with nothing to
   escape: `llc` accepts `%tmp.1`.
@@ -1143,8 +1152,13 @@ Here a typo inside a template draws a suggestion. It names `tmpvar`,
 the spelling you wrote, and not the renamed `tmpvar.0`:
 
 ```scheme refused
-(macro (m x) (let ((tmpvar x)) (+ tmpvarr 1)))    ; note the typo
-(fn (main) (m 5))
+(macro (m x) {
+  (let tmpvar x)  ; note the typo
+  (+ tmpvarr 1)
+})
+
+(fn (main)
+  (m 5))
 ```
 
 Checked as `leak.ax` with `--diagnostic-format=ai`, the compiler
@@ -1222,7 +1236,7 @@ that gives 50, and an entry file defines its own that gives 6.
 |---|---|---|
 | an entry file that defines its own `helper` | 6, the entry's | 50, the macro module's |
 | a function inside the macro's module | 50 | 50 |
-| under a caller's `(let ((helper 0)) ...)` | `AX3004 expected function type, found Int` | 50: the local can't capture it |
+| under a caller's `{ (let helper 0) ...}` | `AX3004 expected function type, found Int` | 50: the local can't capture it |
 
 The first row is silent. The captured name really is in scope at the
 call site, so nothing reports it.
@@ -1252,7 +1266,7 @@ mechanism that closed it.
    to. A caller's local binding could capture a template's free
    identifier, and the result was a silent wrong answer. An entry-file
    `(macro (useHelper v) (helper v))` invoked under
-   `(let ((helper (lambda (y) 0))) …)` answered 0, where the macro's own
+   `{ (let helper (lambda (y) 0)) …}` answered 0, where the macro's own
    `helper` answers 40, with no diagnostic.
 
    The fix needs one bit, not the scope sets `MAC-HYG-9` describes. A
@@ -1414,8 +1428,10 @@ is which side named the binding.
 Renaming both would make every binding form impossible:
 
 ```scheme
-(macro (bind! x e body) (let ((x e))
-  body))
+(macro (bind! x e body) {
+  (let x e)
+  body
+})
 
 (bind! v 41 (+ v 1))  ; 42
 ```
@@ -1425,7 +1441,7 @@ which arrives through a different parameter, still reads `v`. The
 result would be `` AX3001 undefined variable `v` ``.
 
 A template that binds and reads through the same parameter hides the
-problem. In `(macro (m x e) (let ((x e)) x))`, scope resolution answers
+problem. In `(macro (m x e) { (let x e) x})`, scope resolution answers
 both of the template's `x`s with the same fresh name. The answer comes out
 right for the wrong reason, and the caller's chosen name appears nowhere
 in the output. Only a macro that takes a separate body shows the
@@ -1877,18 +1893,18 @@ hex:
 
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (name "parse")
-    (ms 42)
-    (x 3.14159)
-    (n 255)
-  )
+  {
+    (let name "parse")
+    (let ms 42)
+    (let x 3.14159)
+    (let n 255)
     {
       (println "ok {name} in {ms:>4}ms")
       (println "hex {n:x} {n:X}, pi {x:.2}, [{name:<8}] [{name:^9}] {ms:04}")
       (println "{{literal}}")
       0
-    }))
+    }
+  })
 ```
 
 ```text
@@ -2029,11 +2045,13 @@ prints `n=42`:
 
 ;@axiom:effect(io)
 (fn (main)
-  (let ((n 42))
+  {
+    (let n 42)
     {
       (println "n={n}")
       0
-    }))
+    }
+  })
 ```
 
 ```text
@@ -2094,8 +2112,10 @@ once duplicates its effects. A macro author who must not duplicate one
 **MUST** bind it first:
 
 ```scheme
-(macro (twiceSafe x) (let ((v x))
-  (+ v v)))
+(macro (twiceSafe x) {
+  (let v x)
+  (+ v v)
+})
 ; hygiene renames `v`
 ```
 
@@ -2600,16 +2620,20 @@ also has a `v`. Renaming keeps them apart, so the caller's `v` reaches
 `test` and `acc` untouched:
 
 ```scheme
-(macro (sumIf test x acc) (let ((v x))
+(macro (sumIf test x acc) {
+  (let v x)
   (if test
     ; MAC-SAFE-1: evaluate x once
     (+ acc v)
-    acc)))
+    acc)
+})
 
 (:: main Int)
 (fn (main)
-  (let ((v 10))
-    (sumIf (> v 5) 2 v)))
+  {
+    (let v 10)
+    (sumIf (> v 5) 2 v)
+  })
 ; 10 + 2
 ```
 
@@ -2731,7 +2755,7 @@ It uses four mechanisms beyond §10.2's set:
 - `syntax/same`, deciding the diagonal at expansion time and splicing
   in the chosen branch.
 
-So the "expands to" claim below is literal, not only behavioural:
+The template builds the constructor application at expansion time:
 
 ```scheme
 (pub macro deriveLenses ((deriveLenses S)
@@ -2753,7 +2777,8 @@ So the "expands to" claim below is literal, not only behavioural:
 ; getY  : Point -> Int         withY : Point -> Int -> Point
 ```
 
-`withX` expands to `(fn (withX s v) (Point v s.y))`, a **rebuild**.
+The generated `withX` is equivalent to
+`(fn (withX s v) (Point :x v :y s.y))`, a **rebuild**.
 That's what separates a lens from a field store: `(set p.x 1)` mutates
 through every alias (`MM-MUT-2`), and `(withX p 1)` doesn't.
 

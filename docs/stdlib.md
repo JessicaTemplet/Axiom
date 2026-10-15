@@ -39,15 +39,21 @@ for an absent key.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let ((counts mapNew))
+  {
+    (let counts mapNew)
     {
       (for word in (strSplit "one two three" 32)
-        (let ((n (strLen word)))
-          (mapInsert counts n (+ (mapGet counts n 0) 1))))
+        {
+          (let n (strLen word))
+          (mapInsert counts n (+ (mapGet counts n 0) 1))
+        })
       (for n in (vecSort (mapKeys counts))
-        (let ((count (mapGet counts n 0)))
-          (println "{n}: {count}")))
-    }))
+        {
+          (let count (mapGet counts n 0))
+          (println "{n}: {count}")
+        })
+    }
+  })
 ```
 
 ```text
@@ -81,15 +87,15 @@ processes, the environment, the clock and signals.
 (fn (main)
   {
     (writeFile "note.txt" "hello\n")?
-    (let (
-      (f (openPath "note.txt" oRdonly)?)
-      (text (readAll f)?)
-    )
+    {
+      (let f (openPath "note.txt" oRdonly)?)
+      (let text (readAll f)?)
       {
         (writeStr stdout text)
         (removeFile "note.txt")?
         (Ok 0)
-      })
+      }
+    }
   })
 ```
 
@@ -188,8 +194,10 @@ This server echoes each line a client sends until the client hangs up:
 (:: report (-> String Error Int))
 ;@axiom:effect(io)
 (fn (report what e)
-  (let ((why (errorText e)))
-    (eprintln "{what}: {why}")))
+  {
+    (let why (errorText e))
+    (eprintln "{what}: {why}")
+  })
 
 ; Echo each line back until the client hangs up.
 (:: serve (-> TcpStream Int))
@@ -275,14 +283,14 @@ A client sends a line and waits up to a second for the reply:
         ))
     )
     ((Ok conn)
-      (let (
-        (_ (tcpSetReadTimeout conn (Some 1000)))
-        (reply (ask conn "hello"))
-      )
+      {
+        (let _ (tcpSetReadTimeout conn (Some 1000)))
+        (let reply (ask conn "hello"))
         {
           (println reply)
           0
-        })
+        }
+      }
     )))
 ```
 
@@ -336,21 +344,23 @@ are ready:
 (fn (acceptAll lsn p conns)
   (match (tcpAccept lsn)
     ((Ok conn)
-      (let (
-        (_ (tcpSetNonBlocking conn true))
-        (_ (pollerAddStream p conn (+ (vecLen conns) 1)))
-      )
+      {
+        (let _ (tcpSetNonBlocking conn true))
+        (let _ (pollerAddStream p conn (+ (vecLen conns) 1)))
         {
           (vecPush conns (Some conn))
           (acceptAll lsn p conns)
-        })
+        }
+      }
     )
     ((Err e)
       (match (errorKind e)
         ((WouldBlock) 0)
         (_
-          (let ((why (errorText e)))
-            (eprintln "accept: {why}"))
+          {
+            (let why (errorText e))
+            (eprintln "accept: {why}")
+          }
         ))
     )))
 
@@ -373,16 +383,17 @@ are ready:
           }
         )
         ((Ok p)
-          (let (
-            (conns vecNew)
-            (_ (tcpListenerSetNonBlocking lsn true))
-            (_ (pollerAddListener p lsn 0))
-          )
+          {
+            (let conns vecNew)
+            (let _ (tcpListenerSetNonBlocking lsn true))
+            (let _ (pollerAddListener p lsn 0))
             {
               (while true
-                (let ((n (unwrapOr (pollerWait p -1) 0)))
+                {
+                  (let n (unwrapOr (pollerWait p -1) 0))
                   (for i in 0..n
-                    (let ((token (pollerToken p i)))
+                    {
+                      (let token (pollerToken p i))
                       (if (== token 0)
                         (acceptAll lsn p conns)
                         (match (vecGet conns (- token 1))
@@ -394,9 +405,12 @@ are ready:
                                 0
                               })
                           )
-                          ((None) 0)))))))
+                          ((None) 0)))
+                    })
+                })
               0
-            })
+            }
+          }
         ))
     )))
 ```
@@ -550,15 +564,15 @@ with `internFind`, and recover bytes with `internLookup`.
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
-  (let (
-    (names internNew)
-    (id (internIntern names "compile"))
-  )
+  {
+    (let names internNew)
+    (let id (internIntern names "compile"))
     {
       (println id)
       (println (internLookup names id))
       (internFree names)
-    }))
+    }
+  })
 ```
 
 ```text
@@ -684,18 +698,16 @@ Group small jobs into explicit ranges to reduce process starts:
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (main)
-  (let ((rs (taskMapRanges
-              (lambda (start end) (fmtInt (- end start)))
-              10
-              4
-              (taskOpts 2 8))))
+  {
+    (let rs (taskMapRanges (lambda (start end) (fmtInt (- end start))) 10 4 (taskOpts 2 8)))
     {
       (for i in 0..(vecLen rs)
         (match (vecGet rs i)
           ((Ok answer) (println answer))
           ((Err error) (println error.code))))
       0
-    }))
+    }
+  })
 ```
 
 ```text

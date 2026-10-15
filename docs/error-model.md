@@ -149,7 +149,7 @@ sentinel:
 
 | What the line does | Hits | Where |
 |---|---|---|
-| Seeds a loop accumulator, such as `(mut found (- 0 1))`; never an answer | 4 | `Str.strFind` (which already answers `(Option Int)`), `rdFindHeaderEnd`, `rdContentLength`, `rpcRead` |
+| Seeds a loop accumulator, such as `(let mut found (- 0 1))`; never an answer | 4 | `Str.strFind` (which already answers `(Option Int)`), `rdFindHeaderEnd`, `rdContentLength`, `rpcRead` |
 | A private helper below a wrapper that already answers `Option`, keeping `-1` on the recursion (§10's rule for `internFindFrom`) | 4 | `internFindFrom` (twice), `pathLastSlashFrom`, `pathLastDotFrom` |
 | `Map.ax`'s private probe walk below `mapGet`, whose absent-key answer is a caller-supplied default and not a sentinel | 4 | `mapFindSlot`, `mapFindLoop` (twice), `mapInsertNoGrow` |
 | Passes `-1` as an argument, or sets a local to it, in `stdlib/Sys.ax` | 3 | `netAddrText`'s zero-run seed, `sysSignalOpenRaw`'s syscall slot, `sysRandomBytes`' `(set rc (- 0 1))` |
@@ -286,7 +286,7 @@ caller supplies, and nothing searches for one:
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (match (mapErrWith (ConvertOf errOfInt) (Err 5))
+  (match (mapErrWith (ConvertOf :convert errOfInt) (Err 5))
     ((Ok x) x)
     ((Err e)
       {
@@ -325,7 +325,7 @@ is gone:
 (fn (reContext r ctx)
   (match r
     ((Ok x) (Ok x))
-    ((Err y) (Err (Error y.code y.message ctx)))))
+    ((Err y) (Err (Error :code y.code :message y.message :context ctx)))))
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -546,8 +546,10 @@ tail call MUST pass through a `let` binding.**
 (fn (carry r n)
   (if (<= n 0)
     0
-    (let ((next (Bad (wide n))))
-      (carry next (- n 1)))))
+    {
+      (let next (Bad (wide n)))
+      (carry next (- n 1))
+    }))
 ```
 
 A `data` block is born owned, at count 1. Built inline in a tail-call
@@ -596,10 +598,12 @@ call answering a `Result` allocates one block. It is released after the
   ((Ok v) v)
   ((Err e) 0))
 
-(let ((r (step i)))
+{
+  (let r (step i))
   (match r
     ((Ok v) v)
-    ((Err e) 0)))
+    ((Err e) 0))
+}
 ```
 
 A `match` scrutinee is released after the merge only when no arm's
@@ -839,12 +843,13 @@ fd 2 and exiting:
 (:: main Int)
 ;@axiom:effect(io)
 (fn (main)
-  (let ((status
-    (__axiom_recover __axiom_arena_mark (lambda (x) (divide 10 0)))))
+  {
+    (let status (__axiom_recover __axiom_arena_mark (lambda (x) (divide 10 0))))
     {
       (println "recovered {status}")
       (divide 10 0)
-    }))
+    }
+  })
 ```
 
 ```text
@@ -997,21 +1002,23 @@ the record nothing.**
 
 (:: total (-> Int Int))
 (fn (total n)
-  (let (
-    (mut i 1)
-    (mut acc 0)
-  )
+  {
+    (let mut i 1)
+    (let mut acc 0)
     {
       (while (<= i n)
-        (let ((v (parseRecord i)))
+        {
+          (let v (parseRecord i))
           {
             (set acc (if (fallibleIsSkipped v)
               acc
               (+ acc v)))
             (set i (+ i 1))
-          }))
+          }
+        })
       acc
-    }))
+    }
+  })
 
 (:: main ())
 ;@axiom:effect(io)
@@ -1369,11 +1376,11 @@ function or lambda answers that `Err` unchanged, and nothing after the
 
 (:: halveTwice (-> Int (Result Int Error)))
 (fn (halveTwice n)
-  (let (
-    (a (divChecked n 2)?)
-    (b (divChecked a 2)?)
-  )
-    (Ok b)))
+  {
+    (let a (divChecked n 2)?)
+    (let b (divChecked a 2)?)
+    (Ok b)
+  })
 
 (:: main Int)
 (fn (main)
@@ -1432,15 +1439,17 @@ defects that nothing had recorded. All five are closed: four are
 fixed, and `B2` was resolved by removal in 0.6.0.
 
 **B1 — A macro binder did not scope over another parameter's syntax.
-Fixed.** `(macro (bind! x e body) (let ((x e)) body))` put the
+Fixed.** `(macro (bind! x e body) { (let x e) body})` put the
 caller's `body` outside the binding `x` introduced, so `body` couldn't
 see it and drew `AX3001` (`undefined-variable`). A macro that binds and
 reads through the *same* parameter worked, because both of the
 template's `x`s resolved to the gensym:
 
 ```scheme
-(macro (bindSelf! x e) (let ((x e))
-  x))
+(macro (bindSelf! x e) {
+  (let x e)
+  x
+})
 
 (fn (main)
   (bindSelf! v 42))
@@ -1710,7 +1719,7 @@ The slices, in order, each green before the next starts:
    These head a resource lifetime, so they cost the most. A "did it
    work" call is one expression at each site, but a call that answers a
    descriptor retypes `lsn`, `cli`, `pfd` and everything downstream.
-   Nine fixtures moved from `(let ((lsn netSocketTcp)) BODY)` to a
+   Nine fixtures moved from `{ (let lsn netSocketTcp) BODY}` to a
    `match` whose `Err` arm says what the program does with no socket.
    That is the point: seven of `netSocketTcp`'s seventeen call sites
    never tested the result.
@@ -2246,8 +2255,10 @@ before it crosses a boundary:
 (fn (parseAll toks acc)
   (if (== (vecLen toks) 0)
     (Ok acc)
-    (let ((v (parseOne (vecGet toks 0))?))
-      (parseAll (vecTail toks) (+ acc v)))))
+    {
+      (let v (parseOne (vecGet toks 0))?)
+      (parseAll (vecTail toks) (+ acc v))
+    }))
 
 ; ERR-PROP-3: the arm
 ; The caller says what it was doing. `withContext` takes the whole

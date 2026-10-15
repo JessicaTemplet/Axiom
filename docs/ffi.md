@@ -134,8 +134,14 @@ camelCase names:
 
 ;@axiom:effect(io)
 (pub fn (main)
-  (let ((c (counterNew 41)))
-    { (println (shout "hi")) (println (fmtInt (add 1 (counterValue c)))) 0 }))
+  {
+    (let c (counterNew 41))
+    {
+      (println (shout "hi"))
+      (println (fmtInt (add 1 (counterValue c))))
+      0
+    }
+  })
 ```
 
 ```sh
@@ -402,18 +408,18 @@ one word. So the shim takes a trailing out-cell,
   ; a 16-byte counted cell, zeroed
   ; the call; status ignored here
   ; copy into a fresh Axiom String
-  (let (
-    (__c ffiCellNew)
-    (__st (shoutRaw text __c))
-    (__p (ffiCellWord __c 0))
-    (__n (ffiCellWord __c 1))
-    (__v (ffiBytesToStr __p __n))
-  )
+  {
+    (let __c ffiCellNew)
+    (let __st (shoutRaw text __c))
+    (let __p (ffiCellWord __c 0))
+    (let __n (ffiCellWord __c 1))
+    (let __v (ffiBytesToStr __p __n))
     {
       (ffiFreeBytes __p __n)  ; give the Rust bytes back
       (ffiCellFree __c)
       __v
-    }))
+    }
+  })
 ```
 
 The copy is the central safety rule (C4). Only Axiom's emitter writes
@@ -469,32 +475,33 @@ impossible. The wrapper turns the status into the ordinary `Result` of
 ```scheme
 (pub :: parseInt (-> String (Result Int String)))
 (pub fn (parseInt text)
-  (let (
-    (__c ffiCellNew)
-    (__st (parseIntRaw text __c))
-    (__p (ffiCellWord __c 0))
-    (__n (ffiCellWord __c 1))
-  )
+  {
+    (let __c ffiCellNew)
+    (let __st (parseIntRaw text __c))
+    (let __p (ffiCellWord __c 0))
+    (let __n (ffiCellWord __c 1))
     (if (== __st 0)
       {
         (ffiCellFree __c)
         (Ok __p)
       }
-      (let ((__m (ffiBytesToStr __p __n)))
+      {
+        (let __m (ffiBytesToStr __p __n))
         {
           (ffiFreeBytes __p __n)
           (ffiCellFree __c)
           (Err __m)
-        }))))
+        }
+      })
+  })
 
 (pub :: maybe (-> Int (Option Int)))
 (pub fn (maybe n)
-  (let (
-    (__c ffiCellNew)
-    (__st (maybeRaw n __c))
-    (__p (ffiCellWord __c 0))
-    (__n (ffiCellWord __c 1))
-  )
+  {
+    (let __c ffiCellNew)
+    (let __st (maybeRaw n __c))
+    (let __p (ffiCellWord __c 0))
+    (let __n (ffiCellWord __c 1))
     (if (== __st 0)
       {
         (ffiCellFree __c)
@@ -503,7 +510,8 @@ impossible. The wrapper turns the status into the ordinary `Result` of
       {
         (ffiCellFree __c)
         None
-      })))
+      })
+  })
 ```
 
 This is shown compacted. The generated file is laid out as `axiom fmt`
@@ -611,21 +619,21 @@ that must go *now*, such as a file or a lock, and for nothing else.
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (counterNew start)
-  (let (
-    (__p (as (counterNewRaw start) Int))
-    (__h (ffiHandleNew __p counterDropFn))
-  )
-    (Counter __h)))
+  {
+    (let __p (as (counterNewRaw start) Int))
+    (let __h (ffiHandleNew __p counterDropFn))
+    (Counter :handle __h)
+  })
 
 (pub :: counterValue (-> Counter Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (counterValue c)
-  (let (
-    (__a0 (as (ffiHandlePtr c.handle) Foreign))
-    (__r (counterValueRaw __a0))
-  )
-    __r))
+  {
+    (let __a0 (as (ffiHandlePtr c.handle) Foreign))
+    (let __r (counterValueRaw __a0))
+    __r
+  })
 
 (pub :: counterClose (-> Counter Int))  ; explicit early close, optional
 (pub fn (counterClose c)
@@ -790,14 +798,10 @@ place that casts:
 
 ;@axiom:effect(io)
 (pub fn (sumWords xs)
-  (let ((__r 
-    (sumWordsRaw
-      (as xs Int)
-    )
-  ))
+  {
+    (let __r (sumWordsRaw (as xs Int)))
     __r
-  )
-)
+  })
 ```
 
 Without the wrapper, the raw item would be the name you call. Its
@@ -821,7 +825,7 @@ pub struct Point { pub x: i64, pub y: f64 }
 
 ```scheme
 (sumWords (rangeVec 5))                     ; 10: the Vec goes in as itself
-(__floatFromBits (vecGet (halves 3) 1) )          ; 0.5: a Float element is its bits
+(__floatFromBits (vecGet (halves 3) 1))          ; 0.5: a Float element is its bits
 (joinWords (vecOf "a" "b"))                 ; "a b"
 (match (pointScale (Point 1 2.5) 2)
   ((Point x y) ...))                        ; x = 2, y = 5.0
@@ -841,17 +845,17 @@ each use:
 (pub fn (pointScale p k)
   (match p
     ((Point __f0 __f1)
-      (let (
-        (__c (ffiCellNewN 2))
-        (__st (pointScaleRaw __f0 __f1 k __c))
-        (__w0 (ffiCellWord __c 0))
-        (__w1 (__floatFromBits (ffiCellWord __c 1) ))
-        (__r (Point __w0 __w1))
-      )
+      {
+        (let __c (ffiCellNewN 2))
+        (let __st (pointScaleRaw __f0 __f1 k __c))
+        (let __w0 (ffiCellWord __c 0))
+        (let __w1 (__floatFromBits (ffiCellWord __c 1)))
+        (let __r (Point __w0 __w1))
         {
           (ffiCellFree __c)
           __r
-        })
+        }
+      }
     )))
 ```
 
@@ -956,7 +960,8 @@ archive's own allocator:
 ; hostlib.ax
 (import Str)
 (pub :: addTwo (-> Int Int Int))
-(pub fn (addTwo a b) (+ a b))
+(pub fn (addTwo a b)
+  (+ a b))
 (pub :: shout (-> String String))
 (pub fn (shout s) ...)                      ; ASCII upper-case, a fresh String
 ```

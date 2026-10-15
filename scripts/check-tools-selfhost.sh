@@ -897,6 +897,12 @@ else
 fi
 
 
+echo "== source migration: lexical scopes, constructors and embedded inputs =="
+if ! python3 "$repo_root/tests/tools/verify-route-b-migration.py"; then
+  echo "FAIL source migration: the migration tool changed a checked source property"
+  failed=$((failed + 1))
+fi
+
 echo
 if [[ $failed -eq 0 ]]; then
   echo "tools-selfhost: all checks passed"
