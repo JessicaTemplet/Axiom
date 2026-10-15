@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- Move `spineArity`, `spineArgAt` and `spineArgFromEnd` from the emitter
+  to the parser, beside `spineHead`. The checker calls `spineArgAt`, so
+  checking a file that imports the checker without the emitter, such as
+  `self_host/axir.ax`, was `AX3001`.
+
 - Numeric conversion policy follows explicit primitive conversions:
   expected types never insert conversions into calls, returns, assignments
   or ADT payloads. Regression cases cover both directions, generic ADTs
