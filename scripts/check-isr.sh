@@ -256,8 +256,8 @@ PY
   fi
 done <<'ABL'
 faultsig~(if (== (isrFaultSigOk tc d) 1)~(if (== (isrFaultSigOk tc d) (isrFaultSigOk tc d))~1090-isr-fault-signature.ax
-waits~(if (|| (!= (nodeTag d) TAG_D_FN) (if (strEq v "irq") false (if (strEq v "fault") false true)))~(if true~1091-isr-waits.ax
-norec~          (if (== (strInVec rs "no-recursion" 0) 1)~          (if true~1092-isr-recursion.ax
+waits~(checkIsrWaits tc d (isrVectorOf sig own) eff)~0~1091-isr-waits.ax
+norec~(if (! (== (strInVec rs "no-recursion" 0) 1))~(if false~1092-isr-recursion.ax
 ABL
 
 echo

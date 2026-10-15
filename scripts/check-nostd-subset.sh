@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# The freestanding subset: the eight standard-library modules a
+# The freestanding subset: the nine standard-library modules a
 # bare-metal program may import, checked rather than assumed.
 #
 # docs/embedded-guide.md says `Pre`, `Mem`, `Str`, `Vec`, `Map`, `Fmt`,
-# `Utf8` and `Err` assume no filesystem, process model or sockets, while
+# `Float`, `Utf8` and `Err` assume no filesystem, process model or sockets, while
 # `Sys`, `IO`, `Path`, `Net`, `Rpc` and `Task` do. This gate holds that
 # split in three arms, each catching a different breakage:
 #
@@ -19,13 +19,13 @@
 #      `^\((pub )?extern "` matches a block header with its library
 #      string, and not prose (`an extern block`) or identifiers
 #      (`externTypeRefusal`).
-#   3. End to end. One probe importing all eight builds for every
+#   3. End to end. One probe importing all nine builds for every
 #      supported target, and its import surface must equal hello world's:
 #      linked imports on the host, IR declares elsewhere. The comparison
 #      is differential, so check-freestanding.sh's libc-name table has
 #      no second copy here to drift from it. A libc call the subset starts
 #      emitting shows up as a declare hello doesn't carry. The probe calls
-#      into seven of the eight (`Pre` is macros, which leave no symbol)
+#      into eight of the nine (`Pre` is macros, which leave no symbol)
 #      and each call is asserted in the IR, so a use can't be deleted
 #      while its import stays.
 #
@@ -41,7 +41,7 @@ gate_init
 gate_build_axc axc
 source "$(dirname "${BASH_SOURCE[0]}")/lib/imports.sh"
 
-SUBSET="Pre Mem Str Vec Map Fmt Utf8 Err"
+SUBSET="Pre Mem Str Vec Map Fmt Float Utf8 Err"
 
 failed=0
 checks=0
@@ -123,7 +123,7 @@ if out="$(arm_closure)"; [[ -n "$out" ]]; then
   bad "imports leave the freestanding subset:"
   printf '%s\n' "$out" | sed 's/^/     /' | head -8
 else
-  ok "eight modules, every transitive import inside the subset"
+  ok "nine modules, every transitive import inside the subset"
 fi
 
 # --------------------------------------------------------------------
@@ -134,12 +134,12 @@ if out="$(arm_extern)"; [[ -n "$out" ]]; then
   bad "extern blocks in the freestanding subset, which no bare-metal target provides:"
   printf '%s\n' "$out" | sed 's/^/     /' | head -4
 else
-  ok "no extern block in any of the eight (the pattern finds Ffi's)"
+  ok "no extern block in any of the nine (the pattern finds Ffi's)"
 fi
 
 # --------------------------------------------------------------------
 echo
-echo "== 3. one probe over all eight builds clean on every target =="
+echo "== 3. one probe over all nine builds clean on every target =="
 # --------------------------------------------------------------------
 cat > "$work/nostd-probe.ax" <<'AX'
 (import Pre)
@@ -148,6 +148,7 @@ cat > "$work/nostd-probe.ax" <<'AX'
 (import Vec)
 (import Map)
 (import Fmt)
+(import Float)
 (import Utf8)
 (import Err)
 
@@ -162,12 +163,13 @@ cat > "$work/nostd-probe.ax" <<'AX'
   { (let v (vecPush vecNew 7))
     {
       (if (eqBit Lo Hi) (vecPush v 8))
+      (floatToBits 1.0)
       (+ (vecLen v) (+ (mapLen mapNew) (+ (strLen (fmtInt 42)) (+ (utf8SeqLen 65) (+ (memAlloc 16) (+ errDivideByZero (if (isOk (divChecked 10 2)) 1 0)))))))
     }})
 AX
 printf '(:: main Int)\n\n(fn (main) 0)\n' > "$work/nostd-hello.ax"
 
-# Seven of the eight leave a symbol in the IR. `Pre` is macros, which
+# Eight of the nine leave a symbol in the IR. `Pre` is macros, which
 # expand away, so its only assertion is that its import resolves and the
 # build below succeeds.
 checks=$((checks + 1))
@@ -176,10 +178,10 @@ if ! "$axc" emit-llvm --input "$work/nostd-probe.ax" --output "$work/nostd-probe
   sed 's/^/     /' "$work/nostd.emit" | head -6
 else
   prob=0
-  for sym in 'Vec$vecLen' 'Map$mapLen' 'Str$strLen' 'Mem$memAlloc' 'Fmt$fmtInt' 'Utf8$utf8SeqLen' 'Err$divChecked'; do
+  for sym in 'Vec$vecLen' 'Map$mapLen' 'Str$strLen' 'Mem$memAlloc' 'Fmt$fmtInt' 'Float$floatToBits' 'Utf8$utf8SeqLen' 'Err$divChecked'; do
     grep -qF "$sym" "$work/nostd-probe.ll" || { bad "the probe never reaches $sym - a use was deleted while its import stayed"; prob=1; }
   done
-  (( prob )) || ok "the probe reaches all seven code modules (Pre resolves by building)"
+  (( prob )) || ok "the probe reaches all eight code modules (Pre resolves by building)"
 fi
 
 # The host half: linked imports, probe against hello.
@@ -272,5 +274,5 @@ if (( failed > 0 )); then
   echo "check-nostd-subset: $failed of $checks checks failed"
   exit 1
 fi
-echo "check-nostd-subset: $checks checks - eight modules, closed imports, no extern,"
+echo "check-nostd-subset: $checks checks - nine modules, closed imports, no extern,"
 echo "                    and one probe over all of them importing nothing hello does not"

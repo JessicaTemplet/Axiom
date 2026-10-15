@@ -18,6 +18,13 @@ gates. No behaviour here has been validated on hardware.
 | linker | `ld.lld` with a generated script (`driver.ax` `baremetalLinkScript`) |
 | faults | an exception vector table in every image; an unhandled exception writes its registers on the UART and exits **81**, or calls the program's `isr(fault)` hook (section 5) |
 
+You can import `Pre`, `Mem`, `Str`, `Vec`, `Map`, `Fmt`, `Float`, `Utf8`
+and `Err` without a filesystem, process model or sockets. Their import
+closure stays within this subset. `Sys`, `IO`, `Path`, `Net`, `Rpc`
+and `Task` require host services.
+
+Tested by `scripts/check-nostd-subset.sh`.
+
 ## 2. Startup, linker layout, stack and initialisation
 
 ### The image

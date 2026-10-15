@@ -49,6 +49,12 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- The freestanding library subset includes `Float`, with a live call
+  in the cross-target probe. Its imports stay inside the subset and
+  add no host-service declarations. Interrupt-handler fault probes target
+  the current waiting and recursion checks after the block migration.
+  Tested by `scripts/check-nostd-subset.sh` and `scripts/check-isr.sh`.
+
 - Effect call-graph checks recognise allocation through an unshadowed
   constructor stored into a field. Mixed effects still require source
   evidence. IO origins are read from complete primitive registrations,
