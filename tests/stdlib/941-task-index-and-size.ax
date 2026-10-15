@@ -1,0 +1,69 @@
+; Task indices survive ring reuse, width is clamped before allocation,
+; and an unrepresentable slab is refused before mapping or spawning.
+(import IO)
+(import Sys)
+(import Str)
+(import Fmt)
+(import Vec)
+(import Err)
+(import Task)
+
+(:: checkOrder (-> Int Int ()))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (checkOrder n width)
+  (let ((rs
+    (taskMap (lambda (i) (fmtInt i)) n width 32)))
+    {
+      (if (!= (vecLen rs) n)
+        (sysExitWith 1))
+      (for i in 0..n
+        (match (vecGet rs i)
+          ((Ok s)
+            (if (! (strEq s (fmtInt i)))
+              (sysExitWith 2))
+          )
+          ((Err e) (sysExitWith 3))))
+    }))
+
+; Stop at the first setup error: the declared input count is enormous,
+; while the test needs no child and retains no task answer.
+(:: firstError (-> Int Int (Result String Error) Int))
+;@axiom:effect(io)
+(fn (firstError acc i r)
+  (match r
+    ((Ok s) (sysExitWith 4))
+    ((Err e)
+      (if (&& (== i 0) (&& (== e.code 22) (strEq e.message "task slab size exceeds Int range")))
+        {
+          (println "oversized slab: refused before spawning")
+          (sysExitWith 0)
+        }
+        {
+          (println
+            (concat (concat "unexpected setup error: " (fmtInt e.code)) (concat " " e.message)))
+          (sysExitWith 5)
+        })
+    )))
+
+(:: main ())
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  {
+    (checkOrder 23 3)
+    (checkOrder 5 9223372036854775807)
+    (checkOrder 5 0)
+    (checkOrder 0 9223372036854775807)
+    (println "indices and clamped widths: correct")
+    ; (2^59 + 1) * 32 wraps to 32 in unchecked Int arithmetic.
+    (taskFold
+      (lambda (i) "")
+      9223372036854775807
+      (taskOpts 576460752303423489 0)
+      0
+      (lambda (acc i r) (firstError acc i r)))
+    ()
+  })

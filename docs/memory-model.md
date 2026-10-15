@@ -6612,6 +6612,12 @@ pool keeps (`MM-PAR-13`), and each has a stated outcome:
 | Task memory | `memory` (`taskWithMemory`) | bytes one task's arena may map beyond what its process began with | the task traps 70 in its own process and answers `Err` 70, "task out of memory"; its siblings and the caller go on |
 | Stack | `stack` (`taskWithStack`), `taskStackDefault` (8 MiB) when 0 | the stack one task runs on: that many bytes, rounded up to 64 KiB, mapped in the task's process with a 64 KiB guard below, whichever thread started the pool | the task touches the guard, traps 86 in its own process and answers `Err` 86, "task out of stack"; its siblings and the caller go on |
 
+The aligned slot size times the clamped width **MUST** fit in a positive
+`Int`. The pool checks this before mapping its slab or spawning a task;
+an unrepresentable size answers `Err` 22 for every slot. Task indices
+cross the spawn boundary directly, without packing the index and ring
+slot into one word. Tested by `tests/stdlib/941-task-index-and-size.ax`.
+
 `keep` and `memory` default to 0, no bound, and `stack` to 8 MiB.
 `taskFold` holds no answer, so `keep` doesn't bound it, and each task's
 arena is its own process's. A call still answers one `Result` per task,

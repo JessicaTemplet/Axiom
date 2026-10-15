@@ -579,7 +579,7 @@ cuts = {
   # Section 13. The child never caps its arena.
   "capcut": [("Task.ax", "      (taskCapArena memory)\n", "      0\n")],
   # Section 13. The task runs on the stack its process forked with.
-  "stackcut": [("Task.ax", '      (__axiom_stack_run stack (lambda (i) (taskAnswer f slot limit tok i)) (/ arg w))\n', "      (taskAnswer f slot limit tok (/ arg w))\n")],
+  "stackcut": [("Task.ax", '      (__axiom_stack_run stack (lambda (i) (taskAnswer f slot limit tok i)) arg)\n', "      (taskAnswer f slot limit tok arg)\n")],
   # Section 12. The sleep stops after its first wait, which is asked
   # for a tenth of the time: a sleep that ends short.
   "shortsleep": [("Sys.ax", "            (if (>= now deadline)\n              (set state 1)\n              (sysWaitWordTimeout (+ buf 16) 0 (- deadline now)))", "            {\n              (sysWaitWordTimeout (+ buf 16) 0 (/ (- deadline now) 10))\n              (set state 1)\n            }")],
@@ -1191,8 +1191,8 @@ else
 fi
 
 # ---------------------------------------------------------------------
-echo "== 11. owners: guards and counted disposal, both lowerings =="
-for fx in "$repo_root"/tests/stdlib/80[0-9]-*.ax; do
+echo "== 11. owners and task bounds, both lowerings =="
+for fx in "$repo_root"/tests/stdlib/80[0-9]-*.ax "$repo_root/tests/stdlib/941-task-index-and-size.ax"; do
   name="$(basename "$fx" .ax)"
   golden="$repo_root/tests/stdlib/$name.out"
   want_rc=0; [[ -f "$repo_root/tests/stdlib/$name.exit" ]] && want_rc="$(cat "$repo_root/tests/stdlib/$name.exit")"

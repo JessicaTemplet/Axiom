@@ -39,7 +39,6 @@ command -v "${HYPERFINE:-hyperfine}" > /dev/null || { echo "error: hyperfine not
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-axiom="$AXIOM_AXC"
 
 cat > "$work/b_empty.ax" <<'AX'
 (:: main ())

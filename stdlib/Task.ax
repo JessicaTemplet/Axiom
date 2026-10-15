@@ -26,6 +26,8 @@
 ;
 ; EVERY FAILURE IS A VALUE, and each has its own code:
 ;
+;   Err 22               the aligned slab size cannot fit in Int; no
+;                        slab is mapped and no task is started
 ;   Ok s                 the task answered `s`, at most `limit` bytes
 ;   Err 1..255           the task trapped or died: its wait status, an
 ;                        exit code or 128 plus the signal (Par.ax's
@@ -433,7 +435,7 @@
     {
       (memSetWord slot 2 sysPid)
       (taskCapArena memory)
-      (__axiom_stack_run stack (lambda (i) (taskAnswer f slot limit tok i)) (/ arg w))
+      (__axiom_stack_run stack (lambda (i) (taskAnswer f slot limit tok i)) arg)
     }))
 
 ; Run task `i` and write its answer into `slot`: the length, then the
@@ -788,7 +790,9 @@
       (taskStoreAt slot 1)
       (memSetWord slot 1 0)
       (memSetWord slot 2 0)
-      (let ((hw (taskSpawn wrapper (+ (* t w) s) mark)))
+      ; The child derives its ring slot from the index. Packing both
+      ; into one word would overflow for large indices or widths.
+      (let ((hw (taskSpawn wrapper t mark)))
         (if (taskSpawned hw)
           {
             (let ((h (taskHandleOf hw)))
@@ -1005,14 +1009,17 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (fn (taskWithSlab f n opts sink scoped w limit slotBytes tok)
-  (match (sysMapShared (* w slotBytes))
-    ((Err e) (taskAllFailed n e sink scoped))
-    ((Ok slab)
-      (let ((done (taskLoop f n opts sink scoped w limit slotBytes tok slab)))
-        (match (sysUnmapShared slab (* w slotBytes))
-          ((Ok z) done)
-          ((Err e) done)))
-    )))
+  (if (> w (/ 9223372036854775807 slotBytes))
+    (taskAllFailed n (mkError 22 "task slab size exceeds Int range") sink scoped)
+    (let ((bytes (* w slotBytes)))
+      (match (sysMapShared bytes)
+        ((Err e) (taskAllFailed n e sink scoped))
+        ((Ok slab)
+          (let ((done (taskLoop f n opts sink scoped w limit slotBytes tok slab)))
+            (match (sysUnmapShared slab bytes)
+              ((Ok z) done)
+              ((Err e) done)))
+        )))))
 
 ; The token the pool sleeps on: the caller's, or a fresh one.
 (:: taskTokenFor (-> (Option CancelToken) (Result CancelToken Error)))

@@ -16,6 +16,13 @@ its changelog too.
 
 ## Unreleased
 
+- Task pools reject slab-size overflow before mapping or spawning, and
+  pass task indices directly instead of packing them with ring slots.
+  Tests cover ring reuse, clamped widths and the overflow refusal in both
+  lowerings at optimisation levels 0 and 2.
+- The parallel benchmark respects the selected compiler when `AXIOM` is
+  set without `AXIOM_AXC`.
+
 - The REPL uses Axiom's lime and amber palette for the prompt, syntax,
   completion and results, with coral diagnostics. Piped sessions stay plain.
 - `:explain` looks up diagnostics, language forms and tags inside a session,

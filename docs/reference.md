@@ -1662,6 +1662,10 @@ machine with it. `taskWithStack` sets the stack each task runs on, so a
 task that recurses too deep answers `Err` 86. `taskFold` consumes answers with a scalar
 accumulator; the callback must not retain region-owned values.
 
+Width is clamped to the input count, with a minimum of one for non-empty
+inputs. A slab size that exceeds the `Int` range returns `Err` 22 before
+mapping the answer slab or starting tasks.
+
 `Par` offers word and external-command pools. The
 [library reference](stdlib.md#task-par-chan-and-sync) gives the entry
 points, and the [memory model](memory-model.md) defines publication,

@@ -62,7 +62,7 @@ integrator would still need.
 | `fileFd` and the raw descriptor calls can't close a descriptor a `File` owns | Done | `MM-EXEC-17a`, `tests/diagnostics/1225-descriptor-hole.ax` |
 | Standard input, output and error are `File` values, with one owned poller and one terminal raw-mode guard | Done | `MM-EXEC-17b`, `tests/stdlib/785-stdio-file.ax`, `tests/stdlib/786-poller-owned.ax` |
 | Secrets and keys wipe themselves when dropped, and a child process is an owner | Not started | |
-| A reference can be promoted out of a region | Planned | `MM-RGN-7` |
+| Typed promotion of owned values out of a region, preserving nested ownership, aliases and sharing | Planned | `MM-RGN-7` |
 | Cycles leak until an arena reset | Accepted for 1.0 | `MM-LIFE-3` |
 
 ## Checks and claims
@@ -89,6 +89,7 @@ integrator would still need.
 | Imports form the module header and cannot appear later or inside expressions | Done | `tests/diagnostics/1400-late-import.axbad`, `tests/diagnostics/1401-nested-import.axbad`, `tests/diagnostics/1402-lambda-import.axbad` |
 | REPL uses the brand palette and shares diagnostic and language help with the CLI | Done | `scripts/check-repl-tui.sh`, `tests/repl/170-explain-shape.txt` |
 | Editor and REPL completion exclude retired syntax | Done | `tests/lsp/drive.py`, `scripts/check-replcomp.sh` |
+| Define numeric promotion for literals, mixed arithmetic and expected types, with precision guarantees and explicit lossy conversions | Planned | |
 | Legacy CLI and syntax removed: `axiom FILE`, expression `fn`, keyword struct construction, format aliases | Done | `compat/BREAKING` |
 | The precondition tag removed; contracts are `pre` and `post` | Done | `AX3095` |
 | Macro hygiene has one implementation | Done | `MAC-HYG-10` |
@@ -121,7 +122,9 @@ integrator would still need.
 | Item | State | Where it's specified or tested |
 |---|---|---|
 | Channels, mutexes and cancel tokens are owners, so disposal can't race a use | Done | `MM-PAR-15`, `MM-PAR-16`, `tests/stdlib/803-shared-owner.ax` |
-| Owned task inputs and results, with cleanup across joins, cancellation and failure | In progress | `MM-PAR-6` |
+| Typed promotion of owned task inputs and results across joins, with cleanup on cancellation and failure | In progress | `MM-PAR-6`, `MM-RGN-7` |
+| Task slab sizes are checked before mapping or spawning; indices cross without overflow-prone packing | Done | `tests/stdlib/941-task-index-and-size.ax` |
+| Scale multicore work with bounded worker reuse and scheduling, preserving isolation, submit order and cancellation | Planned | `MM-PAR-3`, `MM-PAR-5`, `MM-PAR-17` |
 | A `parallel` form keeps no arena storage once it returns, in both lowerings | Done | `tests/litmus/par-forms.ax`, `scripts/check-parallel.sh` |
 | Fixed worker, queue, memory and stack budgets, with exhaustion and shutdown tests | Done | `MM-PAR-17`, `tests/stdlib/920-task-stack.ax` |
 | Shared mutable heap graphs across tasks | Not started | |
