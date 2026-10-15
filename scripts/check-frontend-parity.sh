@@ -136,44 +136,38 @@ for src in tests/frontend/*.ax; do
     ok=0
   fi
 
-  # 4. the language server publishes the same (severity, code, line) set
-  lsp="$(SERVER="$axc" FILE="$work/$name.ax" python3 - <<'PY'
-import json, os, subprocess, sys
-srv, path = os.environ["SERVER"], os.environ["FILE"]
-text = open(path, encoding="utf-8").read()
-uri = "file://" + path
-def frame(o):
-    b = json.dumps(o).encode()
-    return b"Content-Length: " + str(len(b)).encode() + b"\r\n\r\n" + b
-msgs = b"".join([
-    frame({"jsonrpc":"2.0","id":1,"method":"initialize",
-           "params":{"processId":None,"rootUri":None,"capabilities":{}}}),
-    frame({"jsonrpc":"2.0","method":"initialized","params":{}}),
-    frame({"jsonrpc":"2.0","method":"textDocument/didOpen",
-           "params":{"textDocument":{"uri":uri,"languageId":"axiom","version":1,"text":text}}}),
-    frame({"jsonrpc":"2.0","id":9,"method":"shutdown","params":{}}),
-    frame({"jsonrpc":"2.0","method":"exit","params":{}}),
-])
-p = subprocess.run([srv, "lsp"], input=msgs, capture_output=True,
-                   cwd=os.path.dirname(path), timeout=120)
-out, sev = p.stdout, {1:"E", 2:"W", 3:"N", 4:"H"}
-rows, i = [], 0
-while True:
-    j = out.find(b"Content-Length:", i)
-    if j < 0: break
-    k = out.find(b"\r\n\r\n", j)
-    n = int(out[j+15:k].strip())
-    body = out[k+4:k+4+n]; i = k + 4 + n
-    try: m = json.loads(body)
-    except Exception: continue
-    if m.get("method") != "textDocument/publishDiagnostics": continue
-    for d in m["params"].get("diagnostics", []):
-        rows.append(f'{sev.get(d.get("severity",1),"E")} {d.get("code","?")} '
-                    f'{d["range"]["start"]["line"] + 1}')
-print("\n".join(sorted(rows)))
-PY
+  # 4. Await analysis before shutdown: shutdown cancels queued work.
+  # The response barrier is the same one exercised by the LSP suite.
+  lsp="$(SERVER="$axc" FILE="$work/$name.ax" CLIENT="$repo_root/tests/lsp/workspace-overlays.py" python3 - <<'PYCLIENT'
+import os, runpy
+from pathlib import Path
+Client = runpy.run_path(os.environ['CLIENT'])['Client']
+path = Path(os.environ['FILE']).resolve()
+uri = path.as_uri()
+client = Client(os.environ['SERVER'], cwd=path.parent)
+try:
+    client.request('initialize', {'processId': None, 'rootUri': None, 'capabilities': {}})
+    client.send('initialized', {})
+    client.opening(uri, path.read_text(encoding='utf-8'), version=1)
+    publication = client.latest(uri)
+    assert publication['version'] == 1, publication
+    severity = {1: 'E', 2: 'W', 3: 'N', 4: 'H'}
+    rows = [f"{severity[d.get('severity', 1)]} {d['code']} {d['range']['start']['line'] + 1}"
+            for d in publication['diagnostics']]
+    client.close()
+    assert client.process.stderr.read() == b''
+    print('\n'.join(sorted(rows)))
+finally:
+    if client.process.poll() is None:
+        client.process.kill()
+        client.process.wait()
+PYCLIENT
 )"
-  if [[ "$lsp" != "$ref" ]]; then
+  lsp_st=$?
+  if [[ $lsp_st -ne 0 ]]; then
+    echo "FAIL $name (language server protocol or analysis failed, exit $lsp_st)"
+    ok=0
+  elif [[ "$lsp" != "$ref" ]]; then
     echo "FAIL $name (server and check disagree on the diagnostic set)"
     diff <(echo "$ref") <(echo "$lsp") | sed 's/^/    /' | head -8
     ok=0

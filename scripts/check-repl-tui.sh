@@ -448,11 +448,15 @@ echo "== layer 6: structural, and mostly free from the compiler =="
 # AX3049 at SEV_ERROR, so a `writeStr` added to any decoder or editor
 # function fails the build. These greps catch what the compiler cannot:
 # a function added without the claim, which is never asked.
-# An import list that names the predicate first, as in
-# `(import IO (isTerminal ...))`, spells `(isTerminal ` without calling
-# it, so `(import` lines are not call sites. Every import in self_host/
-# is one line.
-tty_calls="$(LC_ALL=C grep -rn '(isTerminal ' "$repo_root"/self_host/*.ax | LC_ALL=C grep -v '^[^:]*:[0-9]*:(import ' || true)"
+# A selective import may wrap onto several lines. Read complete forms
+# so import lists and quoted examples cannot masquerade as calls.
+if ! python3 "$repo_root/tests/repl/tui/structural.py" --selftest; then
+  bad "terminal call-site reader controls"
+fi
+if ! tty_calls="$(python3 "$repo_root/tests/repl/tui/structural.py" "$repo_root")"; then
+  bad "terminal call-site reader failed"
+  tty_calls=""
+fi
 tty_lines="$(printf '%s' "$tty_calls" | LC_ALL=C grep -c . || true)"
 tty_sites="$(printf '%s' "$tty_calls" | LC_ALL=C cut -d: -f1 | LC_ALL=C sort -u | LC_ALL=C grep -c . || true)"
 if [[ "$tty_lines" == 1 && "$tty_sites" == 1 ]]; then

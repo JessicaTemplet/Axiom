@@ -49,6 +49,13 @@ conditional layout and migration documentation fixes.
 
 <!-- release-notes: end of highlights -->
 
+- Frontend parity waits for the language server's analysed revision
+  before shutdown and treats protocol failures as failed checks.
+  Terminal checks read wrapped imports as declarations. Symbol snapshots
+  follow the two-line shift from the vector ownership correction.
+  Tested by `scripts/check-frontend-parity.sh` and
+  `tests/repl/tui/structural.py`.
+
 - Independent REPL and diverse-compilation checks read canonical block
   locals. Both models preserve sequential initialisation, shadowing and
   nested scope, and reject mismatched delimiters and the retired `let`
