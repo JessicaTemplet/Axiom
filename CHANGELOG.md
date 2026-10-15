@@ -16,6 +16,13 @@ its changelog too.
 
 ## Unreleased
 
+- Fix AXQL select lists after `as` became a conversion. The parser read
+  every `(as ...)` as `(as value Type)`, so `(as (+ a b) total c)` in an
+  `axqlSelect` was a parse error and `(as score s)` reached the macro as
+  a cast. `(as ...)` now parses as an ordinary call, a macro that takes
+  `as` as a literal receives it as written, and the expander turns one
+  no macro took into the conversion. Tested by
+  `tests/axqlite/620-macro-text.ax` and `tests/stdlib/943-as-numeric.ax`.
 - Move `spineArity`, `spineArgAt` and `spineArgFromEnd` from the emitter
   to the parser, beside `spineHead`. The checker calls `spineArgAt`, so
   checking a file that imports the checker without the emitter, such as

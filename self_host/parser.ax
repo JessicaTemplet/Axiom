@@ -4556,10 +4556,15 @@
     ; `()`, the unit value.
     (pOk (mkEUnitAt (tokenSpan (vecGet tokens (- pos 1)))) (advance pos))
     (if (peekIs tokens pos TK_IDENT)
+      ; A form headed `as`, `(as value Type)`, parses below as an
+      ; ordinary call, so a macro that takes `as` as a literal, as
+      ; AXQL's select list does, still receives it. The expander
+      ; turns one no macro took into the conversion
+      ; (`expandAsConversion`).
       (let ((kw (vecGet tokens pos)))
         (let ((name (tokenLexeme kw)))
           (if (kwEq name "as")
-            (parseAsExpr tokens (advance pos))
+            (parseAppForm tokens pos)
             (if (kwEq name kwImport)
               (pErrCode pos "import-position")
               (if (kwEq name kwPub)
@@ -4709,27 +4714,6 @@
 ; The synthetic head carries the *inner expression's* span, because
 ; stage0's `Expr::span()` for `ETypeSig` delegates to it, and `mkEApp`
 ; copies the head's span to the application.
-; The source order is value, then type. The checking spine keeps its
-; type slot first so type operands never enter the expression walk.
-(pub :: parseAsExpr (-> (Vec Int) Int Int))
-(pub fn (parseAsExpr tokens pos)
-  (let ((value (parseExpr tokens pos)))
-    (if (== (memGetWord value 0) 0)
-      value
-      (let ((target (parseExpr tokens (memGetWord value 2))))
-        (if (== (memGetWord target 0) 0)
-          target
-          (let ((after (memGetWord target 2)))
-            (if (peekIs tokens after TK_RPAREN)
-              (pOk
-                (mkEApp
-                  (mkEApp
-                    (mkEVarAt "__as_numeric" (tokenSpan (vecGet tokens (- pos 1))))
-                    (memGetWord target 1))
-                  (memGetWord value 1))
-                (advance after))
-              (pErrExp after "the end of an as expression"))))))))
-
 (pub :: parseTypeSigExpr (-> (Vec Int) Int Int))
 (pub fn (parseTypeSigExpr tokens pos)
   (let ((er (parseExpr tokens pos)))

@@ -4771,8 +4771,26 @@
               (nodeSpan e))
             (let ((mac (expFindMacro env (nodeAName head))))
               (if (== mac 0)
-                (expandAppOrHole e env bs)
+                (if (&& (strEq (nodeAName head) "as") (== (spineArgs e 0) 2))
+                  (expandAsConversion e head env bs)
+                  (expandAppOrHole e env bs))
                 (expandMacroApp e head mac env bs)))))))))
+
+; `(as value Type)` that no macro took and no local binding names.
+; The parser reads it as a call, so a macro with `as` as a literal
+; receives the form as written. What reaches here is the
+; conversion, rebuilt as the spine the checker reads,
+; `((__as_numeric Type) value)`, with the type slot first so the
+; type operand never enters the expression walk, and every node
+; carrying the `as` token's span (`mkEApp` copies the head's).
+; Tested by `tests/stdlib/943-as-numeric.ax` and
+; `tests/axqlite/620-macro-text.ax`.
+(pub :: expandAsConversion (-> Int Int Int (Vec Int) Int))
+(pub fn (expandAsConversion e head env bs)
+  (expandAppOrHole
+    (mkEApp (mkEApp (mkEVarAt "__as_numeric" (nodeSpan head)) (nodeB e)) (nodeB (nodeA e)))
+    env
+    bs))
 
 ; ------------------------------------------------------------------
 ; INLINE ASSEMBLY (`docs/memory-model.md` MM-FFI-9). `asm` is a
