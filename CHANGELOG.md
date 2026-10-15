@@ -654,6 +654,17 @@ calling a converted function checks its remaining arguments. Tested by
   avoids overflow. Tested by `tests/stdlib/951-task-ranges.ax` and
   `tests/stdlib/952-task-ranges-lifecycle.ax`.
 
+- Added `floatFromIntExact` and `floatToIntExact`, which return `Err`
+  when an integer conversion would lose precision, discard a fraction,
+  accept a non-finite value or leave the signed 64-bit range. Result
+  and Option payloads retain checked Float types in register-pair
+  matches. Tested by `tests/stdlib/944-result-float.ax` and
+  `tests/stdlib/947-exact-numeric-conversions.ax`.
+
+- Type aliases respect nominal types declared in nearer module scopes.
+  Unsafe conversion checks keep the target resolved at its declaration.
+  Tested by `tests/diagnostics/1425-alias-nominal-scope.ax`.
+
 ## 0.7.8 — 2026-10-07
 
 - Refuse a `Result` dropped in statement position, as the error

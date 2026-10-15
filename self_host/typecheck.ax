@@ -6845,7 +6845,55 @@
 ; ------------------------------------------------------------------
 (pub :: tcAliasFind (-> Int String Int))
 (pub fn (tcAliasFind tc name)
-  (tyFind tc TY_ALIAS name 0))
+  (if (!= (as (typeKeywordCanon name) Int) 0)
+    0
+    (let ((al (tyFind tc TY_ALIAS name 0)))
+      (if (|| (== al 0) (!= (modOf name) 0))
+        al
+        (let (
+          (here (memGetWord tc 16))
+          (owner (nodeModule al))
+        )
+          (if (== (typeModuleSame here owner) 1)
+            al
+            (if (== (typeNominalOwned tc name here 0) 1)
+              0
+              (if (== owner 0)
+                al
+                (if (== (typeNominalOwned tc name 0 0) 1)
+                  0
+                  al)))))))))
+
+; Aliases share the type namespace with nominal types. The declaration
+; vector is available before field expansion registers data and structs,
+; so it also resolves shadowing during that earlier pass.
+(:: typeModuleSame (-> Int Int Int))
+;@axiom:effect(unsafe)
+(fn (typeModuleSame a b)
+  (if (|| (== a 0) (== b 0))
+    (if (== a b)
+      1
+      0)
+    (if (strEq (as a String) (as b String))
+      1
+      0)))
+
+(:: typeNominalOwned (-> Int String Int Int Int))
+(fn (typeNominalOwned tc name owner i)
+  (let ((decls (tcAllDeclsVec tc)))
+    (if (>= i (vecLen decls))
+      0
+      (let (
+        (d (vecGet decls i))
+        (tag (nodeTag d))
+      )
+        (if (&&
+              (|| (== tag TAG_D_DATA) (|| (== tag TAG_D_STRUCT) (== tag TAG_D_SUBTYPE)))
+              (&&
+                (strEq (bareOf (nodeAName d)) (bareOf name))
+                (== (typeModuleSame (nodeModule d) owner) 1)))
+          1
+          (typeNominalOwned tc name owner (+ i 1)))))))
 
 ; Existence, deliberately IGNORING visibility and the referencing
 ; module: reaching a type another module keeps private is AX3023's
@@ -14325,21 +14373,23 @@
       0
       (castDataAllNullary ctors (+ i 1)))))
 
-; The type as the forging rule compares it: a pinned placeholder read
-; as what it was pinned to, aliases expanded, and `(-> A B C)` - which
+; The checked type as the forging rule compares it: a pinned placeholder
+; read as what it was pinned to, and `(-> A B C)` - which
 ; `exprToType` spells as a constructor named `->`, because a cast's
 ; type is written in expression position - as the arrow it names.
+; Written types expand aliases when checked in their declaring scope.
+; Re-expanding here would capture an imported nominal type with an
+; unrelated alias in the caller's scope and hide a forging cast.
 (pub :: castNormTy (-> Int Int Int))
 (pub fn (castNormTy tc t0)
   (let ((t (tyResolve t0)))
     (if (== t 0)
       0
-      (let ((x (tyExpandAliases tc t 0)))
-        (if (&&
-              (== (nodeTag x) TAG_T_CON)
-              (&& (strEq (nodeAName x) "->") (>= (vecLen (nodeBVec x)) 2)))
-          (castArrowOf (nodeBVec x) 0)
-          x)))))
+      (if (&&
+            (== (nodeTag t) TAG_T_CON)
+            (&& (strEq (nodeAName t) "->") (>= (vecLen (nodeBVec t)) 2)))
+        (castArrowOf (nodeBVec t) 0)
+        t))))
 
 (pub :: castArrowOf (-> (Vec Int) Int Int))
 (pub fn (castArrowOf parts i)
@@ -14442,7 +14492,7 @@
 ; from a declaration with no tag.
 (pub :: castMayForge (-> Int Int Int Int))
 (pub fn (castMayForge tc tgt src)
-  (let ((k (castTyClass tc (tyExpandedAliases tc tgt))))
+  (let ((k (castTyClass tc tgt)))
     (if (|| (== k 0) (== k 3))
       0
       (if (== (tyIsErr (tyResolve src)) 1)
@@ -14666,10 +14716,11 @@
                           (if (&& (== (vecLen args) 2) (== (castSameTy tc targetTy srcTy) 1))
                             3
                             0))
-                        ; the target as written, so AX3073 names the alias
-                        ; the program spelled; `castMayForge` expands it
+                        ; Keep the target checked in this scope. Resolving
+                        ; its written alias again after the body is checked
+                        ; could capture a nominal type from another module.
                         (if (>= (vecLen args) 2)
-                          (castNoteForge tc e (exprToType (vecGet args 0)) srcTy (vecGet args 1)))
+                          (castNoteForge tc e targetTy srcTy (vecGet args 1)))
                         (if (== (asNumericKind tc targetTy) 2)
                           (memSetWord (nodeA e) 2 (mkEVarAt "Float" (spanOf (vecGet args 0)))))
                         (if (strEq hname "__ascribe")

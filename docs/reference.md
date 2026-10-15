@@ -315,6 +315,30 @@ truncates towards zero and answers `3`. Float-to-Int conversion saturates
 at the integer bounds; a NaN answers zero. Integer-to-Float conversion
 rounds to the nearest representable value, with ties to even.
 
+Use `Float.floatFromIntExact` or `Float.floatToIntExact` when a conversion
+must preserve the numeric value. Both answer a `Result` and refuse loss
+with `floatConversionFailed`. The first refuses integers binary64 would
+round; the second refuses fractions, non-finite values and values outside
+the signed 64-bit range. Both signed zeros convert to `0`.
+
+```scheme
+(import Float)
+(import IO)
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  (match (floatFromIntExact 9007199254740993)
+    ((Ok _) (println "exact"))
+    ((Err _) (println "rounding refused"))))
+```
+
+```text
+rounding refused
+```
+
+Tested by `tests/stdlib/947-exact-numeric-conversions.ax`.
+
 Use `Float.floatToBits` and `Float.floatFromBits` to reinterpret a
 binary64 encoding. `String` equality reads contents; ordering uses
 `strCmp`.

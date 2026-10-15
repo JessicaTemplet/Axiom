@@ -1492,10 +1492,10 @@ Ffi - the Axiom half of the Rust boundary, in Axiom.
 
 ## `Float`
 
-`stdlib/Float.ax` — 10 public names
+`stdlib/Float.ax` — 13 public names
 
-Float - IEEE 754 binary64 values: their bits, and text that reads
-back to exactly the same value.
+Float - IEEE 754 binary64 values, exact integer conversions, and
+text that reads back to exactly the same value.
 
     (floatToString 0.1)              ; "0.1"
     (floatToString (/ 1.0 3.0))      ; "0.3333333333333333"
@@ -1513,6 +1513,9 @@ back to exactly the same value.
 | `floatIsInfinite` | value | `(-> Float Bool)` |  |  | True for positive and negative infinity. |
 | `floatIsFinite` | value | `(-> Float Bool)` |  |  | True for every value that is neither an infinity nor a NaN. |
 | `floatParseFailed` | value | `Int` |  |  | Text that isn't a number `floatParse` reads. |
+| `floatConversionFailed` | value | `Int` |  |  | An integer conversion that would round, discard a fraction, or leave the signed 64-bit range. Non-finite values fail too. |
+| `floatFromIntExact` | value | `(-> Int (Result Float Error))` | `Alloc` |  | Convert `n` to `Float` when binary64 represents its value exactly. A rounded integer answers `Err` with code `floatConversionFailed`. |
+| `floatToIntExact` | value | `(-> Float (Result Int Error))` | `Alloc` |  | Convert a finite, integral `x` in the signed 64-bit range to `Int`. Both signed zeros answer zero. Fractions, infinities, NaNs and values outside the range answer `Err` with `floatConversionFailed`. |
 | `floatParse` | value | `(-> String (Result Float Error))` | `Alloc,Mut` |  | The number that `s` spells, correctly rounded to the nearest binary64, ties to even. See the module comment for the syntax. |
 | `floatToString` | value | `(-> Float String)` | `Alloc,Mut` |  | The shortest text that `floatParse` reads back to exactly `x`, in Python's `repr` format: `0.1`, `2.0`, `1e+22`, `-0.0`, `inf`, `nan`. |
 

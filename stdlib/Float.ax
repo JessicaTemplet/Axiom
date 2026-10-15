@@ -1,5 +1,5 @@
-;;! Float - IEEE 754 binary64 values: their bits, and text that reads
-;;! back to exactly the same value.
+;;! Float - IEEE 754 binary64 values, exact integer conversions, and
+;;! text that reads back to exactly the same value.
 ;;!
 ;;!     (floatToString 0.1)              ; "0.1"
 ;;!     (floatToString (/ 1.0 3.0))      ; "0.3333333333333333"
@@ -95,6 +95,58 @@
 (pub :: floatParseFailed Int)
 (pub fn (floatParseFailed)
   1401)
+
+;; An integer conversion that would round, discard a fraction, or
+;; leave the signed 64-bit range. Non-finite values fail too.
+(pub :: floatConversionFailed Int)
+(pub fn (floatConversionFailed)
+  1402)
+
+(:: floatConversionError (-> String String Error))
+(fn (floatConversionError message context)
+  (errContextOf (mkError floatConversionFailed message) context))
+
+;; Convert `n` to `Float` when binary64 represents its value exactly.
+;; A rounded integer answers `Err` with code `floatConversionFailed`.
+;@axiom:restrict(no-io,no-foreign)
+(pub :: floatFromIntExact (-> Int (Result Float Error)))
+(pub fn (floatFromIntExact n)
+  ; A normal binary64 has 53 significant bits. At exponent e,
+  ; integers need e - 52 trailing zeros to remain exact. The
+  ; rounded exponent keeps this valid at a power-of-two boundary,
+  ; including Int.max rounding to 2^63. `discarded` is at most 11.
+  ; Masking two's-complement words checks negative multiples too,
+  ; without negating Int.min or using a saturating round trip.
+  (let ((value
+    (as n Float)))
+    (let ((discarded (- (& (>> (floatToBits value) 52) 2047) 1075)))
+      (if (<= discarded 0)
+        (Ok value)
+        (if (== (& n (- (<< 1 discarded) 1)) 0)
+          (Ok value)
+          (Err
+            (floatConversionError "integer cannot be represented exactly as Float" "floatFromIntExact")))))))
+
+;; Convert a finite, integral `x` in the signed 64-bit range to `Int`.
+;; Both signed zeros answer zero. Fractions, infinities, NaNs and
+;; values outside the range answer `Err` with `floatConversionFailed`.
+;@axiom:restrict(no-io,no-foreign)
+(pub :: floatToIntExact (-> Float (Result Int Error)))
+(pub fn (floatToIntExact x)
+  (let ((bits (floatToBits x)))
+    (let ((exponent (& (>> bits 52) 2047)))
+      (if (== exponent 2047)
+        (Err (floatConversionError "non-finite Float cannot be converted to Int" "floatToIntExact"))
+        ; At exponent 63 only -2^63 fits Int. Test the encoding before
+        ; converting: saturation would make a rounded Int.max appear
+        ; to round-trip, and cannot prove this boundary is in range.
+        (if (|| (> exponent 1086) (&& (== exponent 1086) (!= bits (- 0 4332462841530417152))))
+          (Err (floatConversionError "Float is outside the Int range" "floatToIntExact"))
+          (let ((integer
+            (as x Int)))
+            (if (== (as integer Float) x)
+              (Ok integer)
+              (Err (floatConversionError "Float has a fractional part" "floatToIntExact")))))))))
 
 ; ------------------------------------------------------------------
 ; Big non-negative integers, for the exact arithmetic both directions
