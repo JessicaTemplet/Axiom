@@ -1287,7 +1287,7 @@ keeps answering from what still parses around the error, so hover,
 definition, completion, references, the outline and the semantic
 tokens don't go blank while you type.
 
-```scheme fragment
+```scheme excerpt
 (:: bump (-> Int Int))
 (fn (bump x) (+ x 1)
 
