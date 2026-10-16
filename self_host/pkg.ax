@@ -128,6 +128,7 @@
 ; The ENTRY FILE'S own directory is untouched and still shadows a
 ; library module, because that is documented, intended, and is a file
 ; the author wrote rather than one that arrived with a dependency.
+(import core (Ints Strings IntRows StringRows))
 (import Str)
 (import Vec)
 (import Sys)
@@ -201,7 +202,7 @@
   })
 
 ; Every value of `key`, in file order.
-(pub :: pkgValues (-> String String (Vec Int)))
+(pub :: pkgValues (-> String String Ints))
 ;@axiom:effect(unsafe)
 (pub fn (pkgValues text key)
   {
@@ -316,7 +317,7 @@
 ; An empty Vec when there is no manifest, which is every invocation
 ; this repository's own gates make: the mechanism costs a project that
 ; does not use it one `sysFileExists` per directory level.
-(pub :: pkgDependDirs (-> String (Vec Int)))
+(pub :: pkgDependDirs (-> String Ints))
 ;@axiom:effect(io)
 (pub fn (pkgDependDirs entryDir)
   (pkgDirsFor entryDir "depend"))
@@ -331,21 +332,21 @@
 ; `axiom/` is not there rather than generating one - see this file's
 ; header for why a checked-in line may not run another project's build
 ; system.
-(pub :: pkgCrateDirs (-> String (Vec Int)))
+(pub :: pkgCrateDirs (-> String Ints))
 ;@axiom:effect(io)
 (pub fn (pkgCrateDirs entryDir)
   (pkgDirsFor entryDir "crate"))
 
 ; `DIR/axiom/` for each declared crate, in file order: the one
 ; directory of a crate that holds `.ax`.
-(pub :: pkgCrateAxiomDirs (-> String (Vec Int)))
+(pub :: pkgCrateAxiomDirs (-> String Ints))
 ;@axiom:effect(io)
 (pub fn (pkgCrateAxiomDirs entryDir)
   (pkgAxiomSub (pkgCrateDirs entryDir)))
 
 ; The shared body of the two above: every value of `key`, resolved
 ; against the manifest's directory, each with a trailing slash.
-(pub :: pkgDirsFor (-> String String (Vec Int)))
+(pub :: pkgDirsFor (-> String String Ints))
 ;@axiom:effect(io)
 (pub fn (pkgDirsFor entryDir key)
   {
@@ -364,7 +365,7 @@
 ; URL is where the dependency lives, the checkout is where it is
 ; read from, and `pkgVerify` refuses the latter with the clone that
 ; fills it when it is not there.
-(pub :: pkgDirsIn (-> String String String (Vec Int)))
+(pub :: pkgDirsIn (-> String String String Ints))
 (pub fn (pkgDirsIn text base key)
   {
     (let raw (pkgValues text key))
@@ -390,7 +391,7 @@
     (pathWithSlash (pkgResolve base v))))
 
 ; `DIR/axiom/` for each directory in `dirs`.
-(pub :: pkgAxiomSub (-> (Vec Int) (Vec Int)))
+(pub :: pkgAxiomSub (-> Ints Ints))
 (pub fn (pkgAxiomSub dirs)
   {
     (let out vecNew)
@@ -417,7 +418,7 @@
 ; cost this file bounds rather than pays. Measured after the fact is
 ; too late for a cost that is paid by every project in the world that
 ; does not use the feature.
-(pub :: pkgSearchDirs (-> String (Vec Int)))
+(pub :: pkgSearchDirs (-> String Ints))
 ;@axiom:effect(io)
 (pub fn (pkgSearchDirs entryDir)
   {
@@ -558,7 +559,7 @@
 
 ; The 64 round constants: the first 32 bits of the fractional parts of
 ; the cube roots of the first 64 primes.
-(:: pkgShaK (Vec Int))
+(:: pkgShaK Ints)
 (fn (pkgShaK)
   {
     (let k vecNew)
@@ -633,7 +634,7 @@
 
 ; The message's bytes, padded: a 1 bit, zeros to 56 bytes mod 64, then
 ; the length in bits as eight big-endian bytes.
-(:: pkgShaPad (-> String (Vec Int)))
+(:: pkgShaPad (-> String Ints))
 (fn (pkgShaPad s)
   {
     (let n (strLen s))
@@ -660,7 +661,7 @@
 
 ; One 64-byte block of `m` from `at`, folded into the state `h`; `w` is
 ; the 64-word schedule, reused across blocks.
-(:: pkgShaBlock (-> (Vec Int) Int (Vec Int) (Vec Int) (Vec Int) Int))
+(:: pkgShaBlock (-> Ints Int Ints Ints Ints Int))
 (fn (pkgShaBlock m at k h w)
   {
     (let mut t 0)
@@ -861,7 +862,7 @@
 ; Every URL dependency's checkout was cloned from that URL - the build's
 ; half of what `pkgOrigin` says. Called after `pkgVerify` has refused a
 ; checkout that is not there at all, so each one here exists.
-(pub :: pkgCheckOrigins (-> (Vec Int) String String Int Int))
+(pub :: pkgCheckOrigins (-> Ints String String Int Int))
 ;@axiom:effect(io)
 (pub fn (pkgCheckOrigins urls base mf i)
   (if (>= i (vecLen urls))
@@ -887,11 +888,11 @@
 
 ; Every registry (`depend` URL) value in an already-read manifest,
 ; in file order: what `fetch` checks out and nothing else.
-(pub :: pkgFetchUrls (-> String (Vec Int)))
+(pub :: pkgFetchUrls (-> String Ints))
 (pub fn (pkgFetchUrls text)
   (pkgFetchUrlsFrom (pkgValues text "depend") 0 vecNew))
 
-(pub :: pkgFetchUrlsFrom (-> (Vec Int) Int (Vec Int) (Vec Int)))
+(pub :: pkgFetchUrlsFrom (-> Ints Int Ints Ints))
 ;@axiom:effect(unsafe)
 (pub fn (pkgFetchUrlsFrom vs i out)
   (if (>= i (vecLen vs))
@@ -913,7 +914,7 @@
 (pub fn (pkgUrlHint text base dir)
   (pkgUrlHintVals (pkgValues text "depend") base dir 0))
 
-(pub :: pkgUrlHintVals (-> (Vec Int) String String Int String))
+(pub :: pkgUrlHintVals (-> Ints String String Int String))
 (pub fn (pkgUrlHintVals vs base dir i)
   (if (>= i (vecLen vs))
     ""
@@ -1261,7 +1262,7 @@
 ; `a` then `b`, in order, in a NEW Vec - the caller is still holding
 ; both of them, and `pkgCrateAxiomDirs`' answer is also what
 ; `moduleSearchDirs` pushes.
-(pub :: pkgConcatDirs (-> (Vec Int) (Vec Int) (Vec Int)))
+(pub :: pkgConcatDirs (-> Ints Ints Ints))
 (pub fn (pkgConcatDirs a b)
   {
     (let out vecNew)
@@ -1286,7 +1287,7 @@
 ; fail to be. The messages name the DIRECTORY and what was looked for
 ; inside it, because "crate directory" is a shape the reader has to be
 ; told, not one they can infer from a path.
-(pub :: pkgCheckCrates (-> (Vec Int) String Int Int))
+(pub :: pkgCheckCrates (-> Ints String Int Int))
 ;@axiom:effect(io)
 (pub fn (pkgCheckCrates dirs mf i)
   (if (>= i (vecLen dirs))
@@ -1325,7 +1326,7 @@
 ; Every pair of dependency directories, checked for a module both
 ; provide. Quadratic in the number of dependencies and linear in their
 ; contents, which is the right shape for a list a human typed.
-(pub :: pkgCheckOverlap (-> (Vec Int) String Int Int))
+(pub :: pkgCheckOverlap (-> Ints String Int Int))
 ;@axiom:effect(io)
 (pub fn (pkgCheckOverlap dirs mf i)
   (if (>= i (vecLen dirs))
@@ -1335,7 +1336,7 @@
       (pkgCheckOverlap dirs mf (+ i 1))
     }))
 
-(pub :: pkgCheckPair (-> (Vec Int) String Int Int Int))
+(pub :: pkgCheckPair (-> Ints String Int Int Int))
 ;@axiom:effect(io)
 (pub fn (pkgCheckPair dirs mf i j)
   (if (>= j (vecLen dirs))
@@ -1396,7 +1397,7 @@
 ; module nested deeper than `A.B.C` is one nobody in this repository
 ; writes. The walk runs once inside `pkgVerify`, per declared
 ; dependency, and never per module lookup.
-(pub :: pkgModules (-> String (Vec Int)))
+(pub :: pkgModules (-> String Ints))
 ;@axiom:effect(io)
 (pub fn (pkgModules dir)
   {
@@ -1407,14 +1408,14 @@
     }
   })
 
-(pub :: pkgWalkModules (-> (Vec Int) String String Int Int))
+(pub :: pkgWalkModules (-> Ints String String Int Int))
 ;@axiom:effect(io)
 (pub fn (pkgWalkModules out root rel depth)
   (if (> depth 2)
     0
     (pkgWalkEntries out root rel (unwrapOr (listDir (concat root rel)) vecNew) 0 depth)))
 
-(pub :: pkgWalkEntries (-> (Vec Int) String String (Vec String) Int Int Int))
+(pub :: pkgWalkEntries (-> Ints String String Strings Int Int Int))
 ;@axiom:effect(io)
 (pub fn (pkgWalkEntries out root rel entries i depth)
   (if (>= i (vecLen entries))
