@@ -16,6 +16,14 @@ its changelog too.
 
 ## Unreleased
 
+- Add opt-in parallel import parsing with `AXIOM_FRONTEND_JOBS=2`
+  through `8`. Workers return bounded syntax packets, and the parent
+  preserves depth-first import resolution and diagnostic order. Editor
+  source overlays take precedence over disk reads. Packet or worker
+  limits fall back to serial parsing. The frontend benchmark can now
+  include AST transfer with `--ast-transfer`. Tested by
+  `tests/frontend/parallel/verify.py`.
+
 - Rename `trunk` to `stable` as the default release branch. Development
   stays on `nightly`. CI, website deployment and install links follow
   the new name. Tested by `tests/ci/gate-cache.py`.

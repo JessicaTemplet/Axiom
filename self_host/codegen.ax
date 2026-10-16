@@ -6,10 +6,13 @@
 (import Fmt)
 (import Vec)
 (import Sys)
+(import Sys.Platform (sysForkNum sysCloseNum))
 (import IO (fileExists readFile stderr writeStr))
 (import Err)
 (import Path)
 (import parser)
+(import frontpack)
+(import Task)
 (import typecheck (tyResolve tyIsBareFloat declHasAxtag))
 (import namespace)
 (import diag)
@@ -7917,6 +7920,126 @@
           (cgFlagInputScan (+ i 1))))
     }))
 
+; One resolution owns its speculative parse cache. Workers never mutate
+; namespace tables, source units or declarations the resolver has used.
+(pub struct FrontModule
+  (name : String)
+  (path : String)
+  (parsed : FrontParsed))
+
+(pub struct FrontCache
+  (width : Int)
+  (modules : (Vec FrontModule)))
+
+; Opt in while transfer costs are measured. Invalid values use the
+; ordinary serial path; cap process and shared-packet memory together.
+(pub :: frontJobs Int)
+;@axiom:effect(io)
+(pub fn (frontJobs)
+  {
+    (let text (sysEnv "AXIOM_FRONTEND_JOBS"))
+    (let width (strToInt text))
+    (if (&& (!= sysForkNum 0)
+          (&& (&& (>= width 2) (<= width 8)) (strEq text (fmtInt width)))) width 1)
+  })
+
+(pub :: frontCached (-> FrontCache String (Option FrontModule)))
+(pub fn (frontCached cache name)
+  {
+    (let mut i 0)
+    (let mut found None)
+    (while (< i (vecLen cache.modules))
+      {
+        (let candidate (vecGet cache.modules i))
+        (if (strEq candidate.name name)
+          {
+            (set found (Some candidate))
+            (set i (vecLen cache.modules))
+          }
+          (set i (+ i 1)))
+      })
+    found
+  })
+
+(pub :: frontReadPacket (-> String String))
+;@axiom:effect(io)
+(pub fn (frontReadPacket path)
+  {
+    ; Runs only in the speculative child. Resource traps there must
+    ; not print ahead of the parent's deterministic diagnostic pass.
+    (__syscall1 sysCloseNum 2)
+    (match (readFile path)
+      ((Err e) "")
+      ((Ok source)
+        (match (frontParse source)
+          ((None) "")
+          ((Some parsed) (frontEncode parsed)))))
+  })
+
+; Prefetch only siblings, then let the existing depth-first traversal
+; consume them. Failures stay silent until that traversal reaches the
+; import, so a faster failing sibling cannot change the first diagnostic.
+; Source overlays already in `units` always win over files on disk.
+(pub :: frontPrefetchImports
+  (-> (Vec Int) (Vec String) Int String (Vec Int) FrontCache Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (frontPrefetchImports decls seen tcode entryDir units cache)
+  {
+    (if (&& (> cache.width 1) (!= sysForkNum 0))
+      {
+        (let names vecNew)
+        (let paths vecNew)
+        (let mut i 0)
+        (while (< i (vecLen decls))
+          {
+            (let decl (vecGet decls i))
+            (if (== (nodeTag decl) TAG_D_IMPORT)
+              {
+                (let name (nodeAName decl))
+                (if (&& (! (seenHas seen name))
+                      (&& (! (seenHas names name))
+                        (&& (< (unitIndexOf units name 0) 0) (isNone (frontCached cache name)))))
+                  {
+                    (let path (moduleSrcPath name tcode entryDir))
+                    (if (> (strLen path) 0)
+                      {
+                        (vecPush names name)
+                        (vecPush paths path)
+                      })
+                  })
+              })
+            (set i (+ i 1))
+          })
+        ; A one-module frontier still discovers its independent imports.
+        (if (> (vecLen names) 0)
+          {
+            (let results
+              (taskMapWith (lambda (j) (frontReadPacket (vecGetStr paths j))) (vecLen names)
+                (taskWithKeep
+                  (taskWithMemory (taskOpts cache.width frontPacketLimit) 536870912) 67108864)))
+            (set i 0)
+            (while (< i (vecLen results))
+              {
+                (match (vecGet results i)
+                  ((Err e) 0)
+                  ((Ok packet)
+                    (match (frontDecode packet)
+                      ((None) 0)
+                      ((Some parsed)
+                        {
+                          (vecPush cache.modules
+                            (FrontModule :name (vecGetStr names i) :path (vecGetStr paths i) :parsed parsed))
+                          0
+                        }))))
+                (set i (+ i 1))
+              })
+          })
+      })
+    0
+  })
+
 ; Declaration Vec for module `name`; a module that cannot be read or
 ; parsed is a fatal diagnostic, never a 0 this returns.
 (pub :: parseModuleOrDie (-> String Int String Int Int Int))
@@ -7925,10 +8048,24 @@
 ; UNIT TABLE - the path a diagnostic about this module renders
 ; against, its text, and its name so the checker can find the index
 ; from a declaration's `module` stamp.
-(pub :: parseModuleOrDieUnit (-> String Int String (Vec Int) String Int (Vec Int)))
+(pub :: parseModuleOrDieUnit (-> String Int String (Vec Int) String Int FrontCache (Vec Int)))
+;@axiom:effect(io)
+(pub fn (parseModuleOrDieUnit name tcode entryDir units parentName site cache)
+  (match (frontCached cache name)
+    ((None) (parseModuleOrDieUnitSerial name tcode entryDir units parentName site))
+    ((Some module)
+      (if (>= (unitIndexOf units name 0) 0)
+        (parseModuleOrDieUnitSerial name tcode entryDir units parentName site)
+        {
+          (let parsed module.parsed)
+          (vecPush units (as (CUnit2 :file module.path :src parsed.source :name name) Int))
+          parsed.decls
+        }))))
+
+(pub :: parseModuleOrDieUnitSerial (-> String Int String (Vec Int) String Int (Vec Int)))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
-(pub fn (parseModuleOrDieUnit name tcode entryDir units parentName site)
+(pub fn (parseModuleOrDieUnitSerial name tcode entryDir units parentName site)
   {
     (let parent
       (vecGet units
@@ -8287,11 +8424,64 @@
   ; allocated, so nothing they do with it afterwards changes.
   {
     (let idx mangleIdxNew)
+    (let cache (FrontCache :width 1 :modules vecNew))
     {
       (recordEntryFns decls idx bares fulls 0)
       (resolveDecls decls vecNew vecNew 0 (as 0 String) idx bares fulls mods (as 0 (Vec String))
-        tcode entryDir units)
+        tcode entryDir units cache)
     }
+  })
+
+; CLI opt-in: parse the discovered import graph in bounded frontiers,
+; then use the same resolver. Namespace and diagnostic order stay serial.
+(pub :: resolveImportsParallel
+  (-> (Vec Int) (Vec String) (Vec String) (Vec Int) Int String (Vec Int) (Vec Int)))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+;@axiom:effect(unsafe)
+(pub fn (resolveImportsParallel decls bares fulls mods tcode entryDir units)
+  {
+    (let width frontJobs)
+    (if (<= width 1)
+      (resolveImports decls bares fulls mods tcode entryDir units)
+      {
+        (let idx mangleIdxNew)
+        (let cache (FrontCache :width width :modules vecNew))
+        (let scheduled vecNew)
+        (let mut pending decls)
+        (while (> (vecLen pending) 0)
+          {
+            (let before (vecLen cache.modules))
+            (frontPrefetchImports pending scheduled tcode entryDir units cache)
+            (let mut i 0)
+            (while (< i (vecLen pending))
+              {
+                (let node (vecGet pending i))
+                (if (== (nodeTag node) TAG_D_IMPORT) (vecPush scheduled (nodeAName node)))
+                (set i (+ i 1))
+              })
+            (let next vecNew)
+            (set i before)
+            (while (< i (vecLen cache.modules))
+              {
+                (let module (vecGet cache.modules i))
+                (let parsed module.parsed)
+                (let mut j 0)
+                (while (< j (vecLen parsed.decls))
+                  {
+                    (let node (vecGet parsed.decls j))
+                    (if (== (nodeTag node) TAG_D_IMPORT) (vecPush next node))
+                    (set j (+ j 1))
+                  })
+                (set i (+ i 1))
+              })
+            (set pending next)
+          })
+        (recordEntryFns decls idx bares fulls 0)
+        (resolveDecls decls vecNew vecNew 0 (as 0 String) idx bares fulls mods (as 0 (Vec String))
+          tcode entryDir units cache)
+      })
   })
 
 ; Append every non-import declaration reachable from `decls` onto `acc`,
@@ -8312,12 +8502,12 @@
 ; traversal and siblings observe each other's additions.
 (pub :: resolveDecls
   (-> (Vec Int) (Vec Int) (Vec String) Int String Int (Vec String) (Vec String) (Vec Int)
-    (Vec String) Int String (Vec Int) (Vec Int)))
+    (Vec String) Int String (Vec Int) FrontCache (Vec Int)))
 ;@axiom:effect(io)
-(pub fn (resolveDecls decls acc seen i modName idx bares fulls mods filter tcode entryDir units)
+(pub fn (resolveDecls decls acc seen i modName idx bares fulls mods filter tcode entryDir units cache)
   (resolveDeclsPhase decls
-    (resolveDeclsPhase decls acc seen i modName idx bares fulls mods filter tcode entryDir units 0)
-    seen i modName idx bares fulls mods filter tcode entryDir units 1))
+    (resolveDeclsPhase decls acc seen i modName idx bares fulls mods filter tcode entryDir units 0 cache)
+    seen i modName idx bares fulls mods filter tcode entryDir units 1 cache))
 
 ; Two passes: stage0 partitions a module's imports into
 ; `Module::imports` and resolves ALL of them before any of the
@@ -8333,11 +8523,11 @@
 ; the module's own declarations.
 (pub :: resolveDeclsPhase
   (-> (Vec Int) (Vec Int) (Vec String) Int String Int (Vec String) (Vec String) (Vec Int)
-    (Vec String) Int String (Vec Int) Int (Vec Int)))
+    (Vec String) Int String (Vec Int) Int FrontCache (Vec Int)))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (resolveDeclsPhase decls acc seen i modName idx bares fulls mods filter tcode entryDir
-          units phase)
+          units phase cache)
   (if (>= i (vecLen decls))
     acc
     {
@@ -8345,7 +8535,7 @@
       (if (== (nodeTag first) TAG_D_IMPORT)
         (if (== phase 1)
           (resolveDeclsPhase decls acc seen (+ i 1) modName idx bares fulls mods filter tcode
-            entryDir units phase)
+            entryDir units phase cache)
           {
             (let name (memGetWordStr first 1))
             (if (seenHas seen name)
@@ -8357,7 +8547,7 @@
               ; checker's remedy ("add the name to the import's
               ; list", AX3023) is a lie the author already obeyed.
               (resolveDeclsPhase decls (resolveRepeatImport name first idx bares fulls mods acc)
-                seen (+ i 1) modName idx bares fulls mods filter tcode entryDir units phase)
+                seen (+ i 1) modName idx bares fulls mods filter tcode entryDir units phase cache)
               {
                 (vecPush seen name)
                 ; The import's name list, recorded against
@@ -8371,7 +8561,7 @@
                 ; exist yet when the filter is applied here
                 ; (MAC-EXP-16).
                 {
-                  (let modDecls (parseModuleOrDieUnit name tcode entryDir units modName first))
+                  (let modDecls (parseModuleOrDieUnit name tcode entryDir units modName first cache))
                   (let subFilter
                     {
                       (let ns (nodeBVec first))
@@ -8385,15 +8575,15 @@
                     (modFilterRecord mods name (as subFilter Int))
                     (resolveDeclsPhase decls
                       (resolveDecls modDecls acc seen 0 name idx bares fulls mods subFilter tcode
-                        entryDir units)
-                      seen (+ i 1) modName idx bares fulls mods filter tcode entryDir units phase)
+                        entryDir units cache)
+                      seen (+ i 1) modName idx bares fulls mods filter tcode entryDir units phase cache)
                   }
                 }
               })
           })
         (if (== phase 0)
           (resolveDeclsPhase decls acc seen (+ i 1) modName idx bares fulls mods filter tcode
-            entryDir units phase)
+            entryDir units phase cache)
           ; `pub` and the import's name list decide which BARE
           ; NAMES are visible, not which declarations exist. They
           ; used to decide both, through this one `if`, and the
@@ -8432,7 +8622,7 @@
               (memSetWord first 5 exported)
               (mangleDecl first modName idx bares fulls exported)
               (resolveDeclsPhase decls (vecPush acc first) seen (+ i 1) modName idx bares fulls
-                mods filter tcode entryDir units phase)
+                mods filter tcode entryDir units phase cache)
             }
           }))
     }))

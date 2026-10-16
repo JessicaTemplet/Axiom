@@ -1,0 +1,51 @@
+(import codegen)
+(import frontpack)
+(import parser)
+(import core)
+(import Sys)
+(import Mem)
+(import Str)
+(import Vec)
+(import Test)
+(import IO)
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+;@axiom:effect(unsafe)
+(fn (main)
+  {
+    (let source "(import Left)\n(import Right)\n(import Overlay)\n")
+    (match (frontParse source)
+      ((None) (assertTrue "entry parses" false))
+      ((Some parsed)
+        {
+          (let units vecNew)
+          (vecPush units (as (CUnit2 :file "entry.ax" :src source :name (as 0 String)) Int))
+          (vecPush units
+            (as (CUnit2 :file "overlay.ax" :src "(pub fn (overlay) 99)" :name "Overlay") Int))
+          (let cache (FrontCache :width 4 :modules vecNew))
+          (let target (targetCode "darwin-aarch64"))
+          (frontPrefetchImports parsed.decls vecNew target (sysArg 1) units cache)
+          (assertEq "both disk imports were parsed by workers" 2 (vecLen cache.modules))
+          (assertEq "workers leave unit order to the resolver" 2 (vecLen units))
+          (assertTrue "an overlay is never prefetched from disk" (isNone (frontCached cache "Overlay")))
+          (match (frontCached cache "Left")
+            ((None) (assertTrue "left has a worker result" false))
+            ((Some module)
+              {
+                (let left module.parsed)
+                (assertEq "worker declarations are usable after join" TAG_D_IMPORT
+                  (nodeTag (vecGet left.decls 0)))
+                (assertTrue "worker import keeps its name"
+                  (strEq "Leaf" (nodeAName (vecGet left.decls 0))))
+              }))
+          (let decls
+            (parseModuleOrDieUnit "Overlay" target (sysArg 1) units (as 0 String)
+              (vecGet parsed.decls 2) cache))
+          (assertEq "unsaved source wins over disk" 99 (nodeA (nodeC (vecGet decls 0))))
+        }))
+    (println "worker cache and source overlays: OK")
+    0
+  })

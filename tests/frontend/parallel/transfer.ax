@@ -1,0 +1,74 @@
+; Rebuild every parsed field after the packet's worker has exited.
+(import frontpack)
+(import IO)
+(import Err)
+(import Task)
+(import Sys)
+(import Str)
+(import Fmt)
+(import Vec)
+(import core)
+
+(:: packet (-> String String))
+;@axiom:effect(io)
+(fn (packet file)
+  (match (readFile file)
+    ((Err e) "")
+    ((Ok source)
+      (match (frontParse source)
+        ((None) "")
+        ((Some parsed) (frontEncode parsed))))))
+
+(:: inspect (-> String Bool String))
+(fn (inspect bytes digest)
+  (match (frontDecode bytes)
+    ((None) "fallback")
+    ((Some parsed)
+      (if (&& digest (! (strEq bytes (frontEncode parsed))))
+        "changed"
+        {
+          (let mut hash 1469598103934665603)
+          (let mut i 0)
+          (while (&& digest (< i (strLen bytes)))
+            {
+              (set hash (* (^ hash (strByte bytes i)) 1099511628211))
+              (set i (+ i 1))
+            })
+          (concat "ok "
+            (concat (fmtInt (vecLen parsed.decls))
+              (concat " " (concat (fmtInt (strLen bytes)) (concat " " (fmtInt hash))))))
+        }))))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  {
+    (let width (strToInt (sysArg 1)))
+    (let digest (strEq (sysArg 2) "verify"))
+    (let count (- sysArgc 3))
+    (if (<= width 1)
+      {
+        (let mut i 0)
+        (while (< i count)
+          {
+            (println (inspect (packet (sysArg (+ i 3))) digest))
+            (set i (+ i 1))
+          })
+      }
+      {
+        (let results
+          (taskMapWith (lambda (i) (packet (sysArg (+ i 3)))) count
+            (taskWithMemory (taskOpts width frontPacketLimit) 536870912)))
+        (let mut i 0)
+        (while (< i (vecLen results))
+          {
+            (match (vecGet results i)
+              ((Ok bytes) (println (inspect bytes digest)))
+              ((Err e) (println (concat "worker-error " (fmtInt e.code)))))
+            (set i (+ i 1))
+          })
+      })
+    0
+  })

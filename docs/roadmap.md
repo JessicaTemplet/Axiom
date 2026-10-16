@@ -199,7 +199,7 @@ including pattern matching, remain work to do.
 | Semantic tokens support range and delta requests | Done |
 | The language server answers inside macro invocations | Not started |
 | Packages can pin a version | Not started |
-| Independent module lexing and parsing in bounded workers | Prototype | `scripts/bench-frontend.sh`; AST transfer and deterministic dependency scheduling remain |
+| Independent module lexing and parsing in bounded workers | In progress | CLI opt-in with `AXIOM_FRONTEND_JOBS`; syntax transfer and deterministic import scheduling are tested by `tests/frontend/parallel/verify.py`. Reduce packet and reconstruction costs before enabling it by default |
 | A published performance profile | Not started |
 
 The editor comparison follows rust-analyzer's

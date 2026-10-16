@@ -1,0 +1,524 @@
+; Parsed syntax packets for process workers. Only pre-expansion trees
+; cross this boundary: no address, scope identity or checker stamp does.
+; Words are little-endian and strings are padded to a word boundary.
+; Unsupported shapes and malformed packets answer None, allowing the
+; caller to parse normally at the import's deterministic visit point.
+(import core)
+(import parser)
+(import lexer)
+(import Mem)
+(import Str)
+(import Vec)
+
+(pub struct FrontParsed
+  (source : String)
+  (decls : (Vec Int)))
+
+(struct FrontWriter
+  (bytes : String)
+  (mut pos : Int)
+  (mut good : Bool)
+  (sizing : Bool))
+
+(struct FrontReader
+  (bytes : String)
+  (mut pos : Int)
+  (mut good : Bool))
+
+; The private packet version. Changing a parsed field requires a new
+; schema here and corpus round trips before workers can use that field.
+(:: frontMagic Int)
+(fn (frontMagic)
+  1096306737)
+
+(pub :: frontPacketLimit Int)
+(pub fn (frontPacketLimit)
+  16777216)
+
+(:: frontString (-> Int String))
+;@axiom:effect(unsafe)
+(fn (frontString word)
+  (as word String))
+
+(:: frontVector (-> Int (Vec Int)))
+;@axiom:effect(unsafe)
+(fn (frontVector word)
+  (as word (Vec Int)))
+
+; w = word, s = string, n = node, N/S/W/P = vector of nodes/strings/
+; words/spans, p = span, R = macro rules, A = annotations, L = literal pair.
+; The three letters describe a, b and c. A field declaration's b is
+; discriminated separately: a type node for effect/extern members,
+; a float flag for struct fields (whose type is in word 6). Its c is
+; a linker name for extern members, a mutable marker for struct fields.
+(:: frontShape (-> Int String))
+(fn (frontShape tag)
+  (match tag
+    (0 "www")
+    (1 "www")
+    (2 "sww")
+    (3 "sww")
+    (4 "nnP")
+    (5 "Snw")
+    (6 "snn")
+    (7 "nnn")
+    (8 "Nww")
+    (10 "sSn")
+    (11 "sWw")
+    (12 "sNw")
+    (13 "sNN")
+    (14 "sSw")
+    (15 "sSn")
+    (16 "nNw")
+    (17 "nnw")
+    (20 "swW")
+    (21 "sws")
+    (22 "www")
+    (23 "sww")
+    (24 "snn")
+    (25 "snw")
+    (26 "nNw")
+    (27 "nsw")
+    (28 "nsn")
+    (30 "sSN")
+    (32 "sww")
+    (33 "sNw")
+    (34 "nnw")
+    (35 "Nww")
+    (37 "nww")
+    (38 "www")
+    (39 "www")
+    (42 "nNn")
+    (43 "sNN")
+    (47 "snS")
+    (50 "sNw")
+    (51 "snN")
+    (52 "snN")
+    (53 "sSN")
+    (54 "snp")
+    (55 "snN")
+    (57 "nww")
+    (_ "!")))
+
+(:: frontKind (-> Int Int Int))
+(fn (frontKind tag field)
+  (if (<= field 3)
+    (strByte (frontShape tag) (- field 1))
+    (match field
+      (4 112)
+      (5 119)
+      (6
+        (if (|| (== tag TAG_D_DATA) (== tag TAG_D_STRUCT))
+          83
+          (if (== tag TAG_CTOR)
+            78
+            (if (|| (== tag TAG_D_SIG) (== tag TAG_FIELD))
+              110
+              119)))
+      )
+      (7 65)
+      (9
+        (if (== tag TAG_D_MACRO)
+          82
+          (if (|| (== tag TAG_CTOR) (== tag TAG_E_APP))
+            83
+            119))
+      )
+      (_ 119))))
+
+; An unused scalar must stay zero. Accepting an arbitrary word there
+; could smuggle an address into a slot a later phase uses for metadata.
+(:: frontRawValid (-> Int Int Int Bool))
+(fn (frontRawValid tag field value)
+  (if (== field 5)
+    (|| (== value 0) (== value 1))
+    (if (&& (== field 1) (|| (== tag TAG_E_INT) (|| (== tag TAG_E_FLT) (== tag TAG_E_CHAR))))
+      true
+      (if (&& (== tag TAG_E_INT) (== field 2))
+        (&& (>= value 0) (<= value 2))
+        (if (&& (== tag TAG_CTOR) (== field 2))
+          (>= value 0)
+          (if (&& (== tag TAG_FIELD) (|| (== field 2) (== field 3)))
+            (|| (== value 0) (== value 1))
+            (== value 0)))))))
+
+(:: frontPad (-> Int Int))
+(fn (frontPad bytes)
+  (* (/ (+ bytes 7) 8) 8))
+
+(:: frontPutWord (-> FrontWriter Int Int))
+;@axiom:effect(unsafe)
+(fn (frontPutWord out value)
+  {
+    (if (&& out.good (<= out.pos (- frontPacketLimit 8)))
+      {
+        (if (! out.sizing)
+          (__store64 (strData out.bytes) (/ out.pos 8) value))
+        (set out.pos (+ out.pos 8))
+      }
+      (set out.good false))
+    0
+  })
+
+(:: frontPutString (-> FrontWriter Int Int))
+(fn (frontPutString out value)
+  (if (== value 0)
+    (frontPutWord out (- 0 1))
+    {
+      (let text (frontString value))
+      (let size (strLen text))
+      (frontPutWord out size)
+      (if (&& out.good (<= size (- frontPacketLimit out.pos)))
+        {
+          (if (! out.sizing)
+            (memCopy (+ (strData out.bytes) out.pos) (strData text) size))
+          (set out.pos (+ out.pos (frontPad size)))
+          (if (> out.pos frontPacketLimit)
+            (set out.good false))
+        }
+        (set out.good false))
+      0
+    }))
+
+(:: frontPutVector (-> FrontWriter Int Int Int Int))
+(fn (frontPutVector out value kind depth)
+  (if (== value 0)
+    (frontPutWord out (- 0 1))
+    {
+      (let values (frontVector value))
+      (frontPutWord out (vecLen values))
+      (let mut i 0)
+      (while (&& out.good (< i (vecLen values)))
+        {
+          (frontPutValue out (vecGet values i) kind (+ depth 1))
+          (set i (+ i 1))
+        })
+      0
+    }))
+
+(:: frontPutRecord (-> FrontWriter Int String Int Int))
+(fn (frontPutRecord out value shape depth)
+  {
+    (let record (frontVector value))
+    (if (!= (vecLen record) (strLen shape))
+      (set out.good false)
+      {
+        (let mut i 0)
+        (while (&& out.good (< i (vecLen record)))
+          {
+            (frontPutValue out (vecGet record i) (strByte shape i) (+ depth 1))
+            (set i (+ i 1))
+          })
+      })
+    0
+  })
+
+(:: frontPutNode (-> FrontWriter Int Int Int))
+(fn (frontPutNode out value depth)
+  (if (== value 0)
+    (frontPutWord out (- 0 1))
+    {
+      (let tag (nodeTag value))
+      (if (|| (strEq (frontShape tag) "!")
+            (|| (!= (nodeModule value) 0)
+              (|| (!= (nodeDefScope value) 0)
+                (|| (!= (nodeBinderTy value) 0) (!= (nodeSyntaxIdentity value) 0)))))
+        (set out.good false)
+        {
+          (frontPutWord out tag)
+          (let mut field 1)
+          (while (&& out.good (< field 10))
+            {
+              (let kind
+                (if (&& (== tag TAG_FIELD) (|| (== field 2) (== field 3)))
+                  (if (== (nodeTy value) 0)
+                    (if (== field 2)
+                      110
+                      115)
+                    119)
+                  (frontKind tag field)))
+              (if (&& (== tag TAG_FIELD) (|| (== field 2) (== field 3)))
+                (frontPutWord out kind))
+              (let payload (memGetWord value field))
+              (if (&& (== kind 119) (! (frontRawValid tag field payload)))
+                (set out.good false))
+              (frontPutValue out payload kind (+ depth 1))
+              (set field (+ field 1))
+            })
+        })
+      0
+    }))
+
+(:: frontPutValue (-> FrontWriter Int Int Int Int))
+(fn (frontPutValue out value kind depth)
+  {
+    (if (> depth 512)
+      (set out.good false)
+      (match kind
+        (119 (frontPutWord out value))
+        (115 (frontPutString out value))
+        (110 (frontPutNode out value depth))
+        (78 (frontPutVector out value 110 depth))
+        (83 (frontPutVector out value 115 depth))
+        (87 (frontPutVector out value 119 depth))
+        (80 (frontPutVector out value 112 depth))
+        (112
+          {
+            (frontPutWord out
+              (if (== value 0)
+                (- 0 1)
+                (spanStart value)))
+            (if (!= value 0)
+              (frontPutWord out (spanEnd value)))
+          }
+        )
+        (82 (frontPutVector out value 114 depth))
+        (114 (frontPutRecord out value "SNNSWLn" depth))
+        (76 (frontPutRecord out value "SS" depth))
+        (65 (frontPutVector out value 97 depth))
+        (97
+          {
+            (frontPutWord out (memGetWord value 0))
+            (frontPutString out (memGetWord value 1))
+          }
+        )
+        (_
+          (set out.good false)
+        )))
+    0
+  })
+
+(:: frontGetWord (-> FrontReader Int))
+;@axiom:effect(unsafe)
+(fn (frontGetWord input)
+  (if (&& input.good (<= input.pos (- (strLen input.bytes) 8)))
+    {
+      (let value (__load64 (strData input.bytes) (/ input.pos 8)))
+      (set input.pos (+ input.pos 8))
+      value
+    }
+    {
+      (set input.good false)
+      0
+    }))
+
+(:: frontGetString (-> FrontReader Int))
+(fn (frontGetString input)
+  {
+    (let size (frontGetWord input))
+    (if (== size (- 0 1))
+      0
+      (if (&& input.good (&& (>= size 0) (<= size (- (strLen input.bytes) input.pos))))
+        {
+          (let text (strDup (strSlice input.bytes input.pos size)))
+          (set input.pos (+ input.pos (frontPad size)))
+          (__retainref text)
+          (as text Int)
+        }
+        {
+          (set input.good false)
+          0
+        }))
+  })
+
+(:: frontGetVector (-> FrontReader Int Int Int))
+(fn (frontGetVector input kind depth)
+  {
+    (let count (frontGetWord input))
+    (if (== count (- 0 1))
+      0
+      (if (&& input.good (&& (>= count 0) (<= count (/ (- (strLen input.bytes) input.pos) 8))))
+        {
+          (let values vecNew)
+          (let mut i 0)
+          (while (&& input.good (< i count))
+            {
+              (vecPush values (frontGetValue input kind (+ depth 1)))
+              (set i (+ i 1))
+            })
+          (__retainref values)
+          (as values Int)
+        }
+        {
+          (set input.good false)
+          0
+        }))
+  })
+
+(:: frontGetRecord (-> FrontReader String Int Int))
+(fn (frontGetRecord input shape depth)
+  {
+    (let record vecNew)
+    (let mut i 0)
+    (while (&& input.good (< i (strLen shape)))
+      {
+        (vecPush record (frontGetValue input (strByte shape i) (+ depth 1)))
+        (set i (+ i 1))
+      })
+    (__retainref record)
+    (as record Int)
+  })
+
+(:: frontGetNode (-> FrontReader Int Int))
+(fn (frontGetNode input depth)
+  {
+    (let tag (frontGetWord input))
+    (if (== tag (- 0 1))
+      0
+      (if (strEq (frontShape tag) "!")
+        {
+          (set input.good false)
+          0
+        }
+        {
+          (let node (mkNode tag 0 0 0))
+          (let mut field 1)
+          (let mut fieldKind 0)
+          (let mut symbolKind 0)
+          (while (&& input.good (< field 10))
+            {
+              (let kind
+                (if (&& (== tag TAG_FIELD) (|| (== field 2) (== field 3)))
+                  (frontGetWord input)
+                  (frontKind tag field)))
+              (if (&& (== tag TAG_FIELD) (|| (== field 2) (== field 3)))
+                {
+                  (if (== field 2)
+                    (set fieldKind kind)
+                    (set symbolKind kind))
+                  (if (!
+                        (|| (== kind 119)
+                          (== kind
+                            (if (== field 2)
+                              110
+                              115))))
+                    (set input.good false))
+                })
+              (let payload (frontGetValue input kind (+ depth 1)))
+              (if (&& (== kind 119) (! (frontRawValid tag field payload)))
+                (set input.good false))
+              (memSetWord node field payload)
+              (set field (+ field 1))
+            })
+          (if (|| (!= (nodeModule node) 0)
+                (&& (== tag TAG_FIELD)
+                  (||
+                    (!= fieldKind
+                      (if (== (nodeTy node) 0)
+                        110
+                        119))
+                    (!= symbolKind
+                      (if (== (nodeTy node) 0)
+                        115
+                        119)))))
+            (set input.good false))
+          node
+        }))
+  })
+
+(:: frontGetValue (-> FrontReader Int Int Int))
+(fn (frontGetValue input kind depth)
+  (if (|| (! input.good) (> depth 512))
+    {
+      (set input.good false)
+      0
+    }
+    (match kind
+      (119 (frontGetWord input))
+      (115 (frontGetString input))
+      (110 (frontGetNode input depth))
+      (78 (frontGetVector input 110 depth))
+      (83 (frontGetVector input 115 depth))
+      (87 (frontGetVector input 119 depth))
+      (80 (frontGetVector input 112 depth))
+      (112
+        {
+          (let start (frontGetWord input))
+          (if (== start (- 0 1))
+            0
+            {
+              (let end (frontGetWord input))
+              (if (|| (< start 0) (< end start))
+                (set input.good false))
+              (mkSpan start end)
+            })
+        }
+      )
+      (82 (frontGetVector input 114 depth))
+      (114 (frontGetRecord input "SNNSWLn" depth))
+      (76 (frontGetRecord input "SS" depth))
+      (65 (frontGetVector input 97 depth))
+      (97
+        {
+          (let off (frontGetWord input))
+          (let content (frontString (frontGetString input)))
+          (as (AxtagEnt :off off :content content) Int)
+        }
+      )
+      (_
+        {
+          (set input.good false)
+          0
+        }
+      ))))
+
+(:: frontPutParsed (-> FrontWriter FrontParsed Int))
+(fn (frontPutParsed out parsed)
+  {
+    (frontPutWord out frontMagic)
+    (frontPutString out (as parsed.source Int))
+    (frontPutVector out (as parsed.decls Int) 110 0)
+    0
+  })
+
+; A zero-length packet means that the ordinary parser must handle this
+; module. A two-pass writer allocates exactly the size it copies once.
+(pub :: frontEncode (-> FrontParsed String))
+(pub fn (frontEncode parsed)
+  {
+    (let size (FrontWriter :bytes "" :pos 0 :good true :sizing true))
+    (frontPutParsed size parsed)
+    (if (! size.good)
+      ""
+      {
+        (let bytes (strAlloc size.pos))
+        (let out (FrontWriter :bytes bytes :pos 0 :good true :sizing false))
+        (frontPutParsed out parsed)
+        (if (&& out.good (== out.pos size.pos))
+          bytes
+          "")
+      })
+  })
+
+(pub :: frontDecode (-> String (Option FrontParsed)))
+(pub fn (frontDecode bytes)
+  (if (|| (> (strLen bytes) frontPacketLimit) (!= (% (strLen bytes) 8) 0))
+    None
+    {
+      (let input (FrontReader :bytes bytes :pos 0 :good true))
+      (if (!= (frontGetWord input) frontMagic)
+        None
+        {
+          (let source (frontString (frontGetString input)))
+          (let decls (frontVector (frontGetVector input 110 0)))
+          (if (&& input.good
+                (&& (== input.pos (strLen bytes))
+                  (&& (!= (as source Int) 0) (!= (as decls Int) 0))))
+            (Some (FrontParsed :source source :decls decls))
+            None)
+        })
+    }))
+
+(pub :: frontParse (-> String (Option FrontParsed)))
+(pub fn (frontParse source)
+  {
+    (let tokens (lex source))
+    (if (!= (lexErrDiag tokens source) 0)
+      None
+      {
+        (let parsed (parseModuleWith tokens (scanAxtags source)))
+        (if (== (memGetWord parsed 0) 0)
+          None
+          (Some (FrontParsed :source source :decls (memGetWordVec parsed 1))))
+      })
+  })

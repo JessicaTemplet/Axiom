@@ -242,3 +242,13 @@ if [[ -z "$filter" && $swept -lt 7 ]]; then
 fi
 
 [[ $fail -eq 0 ]] || exit 1
+
+if [[ -z "$filter" ]]; then
+  for probe in transfer packets cache; do
+    "$axc" --diagnostic-format=ai build --input "tests/frontend/parallel/$probe.ax" \
+      --output "$work/$probe" >"$work/$probe.build.log" 2>&1 \
+      || { cat "$work/$probe.build.log" >&2; exit 1; }
+  done
+  python3 tests/frontend/parallel/verify.py --compiler "$axc" \
+    --transfer "$work/transfer" --packets "$work/packets" --cache "$work/cache" || exit 1
+fi
