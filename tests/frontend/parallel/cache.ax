@@ -8,6 +8,8 @@
 (import Vec)
 (import Test)
 (import IO)
+(import Task)
+(import Err)
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -45,7 +47,18 @@
             (parseModuleOrDieUnit "Overlay" target (sysArg 1) units (as 0 String)
               (vecGet parsed.decls 2) cache))
           (assertEq "unsaved source wins over disk" 99 (nodeA (nodeC (vecGet decls 0))))
+          (let limited
+            (taskMapWith (lambda (i) (frontReadPacket (concat (sysArg 1) "/Large.ax"))) 2
+              (taskWithMemory (taskOpts 2 frontPacketLimit) 8192)))
+          (let mut i 0)
+          (while (< i (vecLen limited))
+            {
+              (match (vecGet limited i)
+                ((Ok bytes) (assertTrue "the memory limit refuses the worker" false))
+                ((Err error) (assertEq "worker exhaustion remains a value" 70 error.code)))
+              (set i (+ i 1))
+            })
         }))
-    (println "worker cache and source overlays: OK")
+    (println "worker cache, source overlays and resource refusal: OK")
     0
   })

@@ -65,13 +65,17 @@ def main():
             "Right.ax": "(import Leaf)\n(pub fn (right) (Leaf::value))\n",
             # A cycle and diamond are merged exactly once, in DFS order.
             "Cycle.ax": "(import Left)\n(import Cycle)\n(pub fn (cycle) 0)\n",
-            "Main.ax": "(import Left (twice left))\n(import Right)\n(import Cycle)\n(:: main Int)\n(fn (main) (Left::twice (+ (Left::left) (Right::right))))\n",
+            "Main.ax": "(import Left (twice))\n(import Right)\n(import Left (left))\n(import Cycle)\n(:: main Int)\n(fn (main) (Left::twice (+ (Left::left) (Right::right))))\n",
             "Broken.ax": '(fn (bad) "\\q")\n',
             "Nested.ax": "(import Broken)\n(pub fn (nested) 1)\n",
             "OtherBad.ax": "(fn (bad)\n",
             "Refused.ax": "(import Nested)\n(import OtherBad)\n(fn (main) 0)\n",
             "Missing.ax": "(import Absent)\n(import OtherBad)\n(fn (main) 0)\n",
             "Overlay.ax": "(pub fn (overlay) 1)\n",
+            "Large.ax": " " * 5_000_000 + "(pub fn (large) 1)\n",
+            "Variant.ax": "(pub fn (variant) 1)\n",
+            "Variant.linux-x86_64.ax": "(pub fn (variant) 7)\n",
+            "VariantMain.ax": "(import Variant)\n(import Left)\n(fn (main) (Variant::variant))\n",
             # This parses within the language's nesting limit but exceeds
             # the packet walk budget. The parent must parse it normally.
             "Deep.ax": "(pub fn (deep) " + "(+ 1 " * 600 + "0" + ")" * 600 + ")\n",
@@ -98,6 +102,12 @@ def main():
         result = identical([compiler, "--diagnostic-format=ai", "emit-llvm", str(root / "DeepMain.ax")])
         if result.returncode:
             raise AssertionError(f"serial fallback failed: {result.stderr!r}")
+        variant = identical([
+            compiler, "--diagnostic-format=ai", "--target=linux-x86_64", "emit-llvm",
+            str(root / "VariantMain.ax"),
+        ])
+        if variant.returncode or b"ret i64 7" not in variant.stdout:
+            raise AssertionError("worker module lookup did not preserve the target suffix ladder")
         result = identical([compiler, "--diagnostic-format=ai", "run", str(root / "Main.ax")])
         if result.returncode != 84:
             raise AssertionError(f"macro graph returned {result.returncode}, expected 84")
