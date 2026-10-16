@@ -30322,9 +30322,13 @@
 ; machinery below stays exactly as it is (word 28 goes to 2, word 33
 ; carries 1, `#mir-truncated` prints): a net, not a number any program
 ; reaches, and the gate that watched the old boundary now watches a
-; 60-deep chain converge instead. The worklist over `callersIdxBuild`
-; stays future work: it buys speed on adversarial declaration orders,
-; and this buys correctness on every order.
+; 60-deep chain converge instead. Rounds after the first are a
+; worklist over `callersIdxBuild`, the same shape `inferEffectsWork`
+; runs: only callers of functions whose facts grew are re-walked.
+; A final full pass verifies the frontier result, because the index
+; is built from call edges that a mid-walk demand may see only in
+; part; a change there restarts the rounds rather than trusting a
+; quiet frontier.
 ;
 ; The value is 2 rather than a second word because every reader of
 ; word 28 asks `!= 0`; 2 is still "done".
@@ -30338,6 +30342,71 @@
 ; ACCEPTED, on a body that provably stores a fresh allocation into its
 ; parameter. Declaration order is why this hid so long - the same chain
 ; written leaf-first converges in two passes at any depth.
+; One declaration's region walk; answers whether its facts changed.
+; Split out of `rgnPass` so the worklist rounds walk single
+; declarations, as `inferEffectsOne` does for the effects fixpoint.
+(pub :: rgnWalkOne (-> Int Int Int Int))
+(pub fn (rgnWalkOne tc d report)
+  (if (!= (nodeTag d) TAG_D_FN)
+    0
+    {
+      (let _m (memSetWord tc 16 (nodeModule d)))
+      (let ent (findFnEnt tc (nodeAName d)))
+      (let _m0 (memSetWord tc 16 0))
+      (if (== ent 0)
+        0
+        {
+          (let _m1 (memSetWord tc 16 (nodeModule d)))
+          (let changed (rgnWalkFn tc d ent report))
+          (let _m2 (memSetWord tc 16 0))
+          changed
+        })
+    }))
+
+; One worklist pass over `work`: walk each, and collect the callers
+; of every function whose facts grew into `next`. Answers 1 when
+; anything grew. The frontier is visited from its last element, for
+; the reason `inferEffectsDirtyPass` states.
+(pub :: rgnDirtyPass (-> Int Ints IntRows Ints Ints Ints Int Int))
+(pub fn (rgnDirtyPass tc decls bs work marks next i)
+  {
+    (let mut j (- (vecLen work) 1))
+    (let mut changed 0)
+    (while (>= j i)
+      {
+        (let d (vecGet decls (vecGet work j)))
+        (if (!= (rgnWalkOne tc d 0) 0)
+          {
+            (markCallers tc bs marks next d)
+            (set changed 1)
+          })
+        (set j (- j 1))
+      })
+    changed
+  })
+
+; Worklist rounds: each walks the previous round's frontier. A quiet
+; frontier is verified by one full pass before convergence is
+; claimed, and a change there restarts the ordinary rounds.
+(pub :: rgnWork (-> Int Ints IntRows Ints Ints Int Int Int))
+(pub fn (rgnWork tc decls bs work marks round limit)
+  (if (>= round limit)
+    {
+      (memSetWord tc 28 2)
+      1
+    }
+    {
+      (let next vecNew)
+      (if (== (rgnDirtyPass tc decls bs work marks next 0) 0)
+        (if (== (rgnPass tc decls 0 0) 0)
+          0
+          (rgnRounds tc decls (+ round 1) limit))
+        {
+          (clearMarks marks next 0)
+          (rgnWork tc decls bs next marks (+ round 1) limit)
+        })
+    }))
+
 (pub fn (rgnRounds tc decls round limit)
   (if (>= round limit)
     ; The cap was reached with facts still moving. TWO consumers need
@@ -30353,7 +30422,8 @@
     }
     (if (== (rgnPass tc decls 0 0) 0)
       0
-      (rgnRounds tc decls (+ round 1) limit))))
+      (rgnWork tc decls (callersIdxBuild tc decls) (allIndexes (vecLen decls))
+        (flagsNew (vecLen decls)) (+ round 1) limit))))
 
 ; Whether the facts fixpoint stopped at its round cap rather than
 ; converging. Read by the AXSYM/AXIR projection, which must not
@@ -30381,24 +30451,10 @@
     (if (>= i (vecLen decls))
       0
       {
-        (let d (vecGet decls i))
-        (if (!= (nodeTag d) TAG_D_FN)
-          (rgnPass tc decls (+ i 1) report)
-          {
-            (let _m (memSetWord tc 16 (nodeModule d)))
-            (let ent (findFnEnt tc (nodeAName d)))
-            (let _m0 (memSetWord tc 16 0))
-            (if (== ent 0)
-              (rgnPass tc decls (+ i 1) report)
-              {
-                (let _m1 (memSetWord tc 16 (nodeModule d)))
-                (let changed (rgnWalkFn tc d ent report))
-                (let _m2 (memSetWord tc 16 0))
-                (if (== (rgnPass tc decls (+ i 1) report) 1)
-                  1
-                  changed)
-              })
-          })
+        (let changed (rgnWalkOne tc (vecGet decls i) report))
+        (if (== (rgnPass tc decls (+ i 1) report) 1)
+          1
+          changed)
       })))
 
 ; ---- `restrict(no-escape)` ----
