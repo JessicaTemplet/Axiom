@@ -2,6 +2,7 @@
 """Compare native serial parsing with bounded process worker parsing."""
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -58,12 +59,53 @@ def verify(probe, widths, transfer=False):
                 raise RuntimeError(f"{width} workers changed ordered parse results")
 
 
+def graph_profile(args, widths):
+    if not args.graph_probe or not args.entry.is_file():
+        raise ValueError("--entry requires an existing input and --graph-probe")
+
+    def sample(width, entry=True):
+        env = dict(os.environ, AXIOM_FRONTEND_JOBS=str(width))
+        command = [str(args.graph_probe), *([str(args.entry)] if entry else [])]
+        start = time.perf_counter()
+        result = subprocess.run(command, env=env, capture_output=True, timeout=180)
+        elapsed = time.perf_counter() - start
+        if result.returncode or result.stderr:
+            raise RuntimeError(f"graph parsing failed: {result.stderr.decode(errors='replace')}")
+        return elapsed, result.stdout
+
+    startup = min(sample(1, False)[0] for _ in range(args.reps))
+    expected = sample(1)[1]
+    results = []
+    for width in widths:
+        samples = []
+        for _ in range(args.reps):
+            elapsed, answer = sample(width)
+            if answer != expected:
+                raise RuntimeError(f"{width} workers changed the resolved graph summary")
+            samples.append(elapsed)
+        results.append({"workers": width, "best_seconds": max(min(samples) - startup, 1e-9), "samples": samples})
+    serial = results[0]["best_seconds"]
+    print(f"{args.entry}: {expected.decode().strip()}; best of {args.reps} runs")
+    print(f"Process startup: {1000 * startup:.1f} ms, subtracted from each best time")
+    print("workers    milliseconds    speedup")
+    for result in results:
+        result["speedup"] = serial / result["best_seconds"]
+        print(f"{result['workers']:7d}    {1000 * result['best_seconds']:12.1f}    {result['speedup']:6.2f}x")
+    print("Includes entry parsing, dependency discovery, AST transfer, reconstruction and namespace resolution.")
+    if args.json:
+        args.json.write_text(json.dumps({"entry": str(args.entry), "summary": expected.decode().strip(),
+            "startup_seconds": startup, "repetitions": args.reps, "results": results,
+            "scope": "The compiler's actual import graph and namespace resolution, without expansion or checking."}, indent=2) + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--probe", type=Path, required=True)
     parser.add_argument("--transfer-probe", type=Path)
     parser.add_argument("--ast-transfer", action="store_true", help="include syntax packets and parent reconstruction")
     parser.add_argument("--phase-profile", action="store_true", help="measure encoding and reconstruction separately")
+    parser.add_argument("--entry", type=Path, help="profile the compiler's actual import graph")
+    parser.add_argument("--graph-probe", type=Path)
     parser.add_argument("--jobs", type=int, nargs="+", default=[1, 2, 4])
     parser.add_argument("--reps", type=int, default=3)
     parser.add_argument("--json", type=Path)
@@ -76,6 +118,9 @@ def main():
     if args.reps < 1 or any(width < 1 for width in args.jobs):
         parser.error("jobs and reps must be positive")
     widths = list(dict.fromkeys([1, *args.jobs]))
+    if args.entry:
+        graph_profile(args, widths)
+        return
     files = args.input or sorted(Path("self_host").glob("*.ax"))
     if not files or any(not file.is_file() for file in files):
         parser.error("every input must be an existing source file")

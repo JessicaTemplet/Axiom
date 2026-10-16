@@ -1,5 +1,6 @@
 ; Rebuild every parsed field after the packet's worker has exited.
 (import frontpack)
+(import frontjobs)
 (import IO)
 (import Err)
 (import Task)
@@ -93,15 +94,25 @@
           })
       }
       {
-        (let results
-          (taskMapWith (lambda (i) (packet (sysArg (+ i 3)))) count
-            (taskWithMemory (taskOpts width frontPacketLimit) 536870912)))
+        (let paths vecNew)
         (let mut i 0)
+        (while (< i count)
+          {
+            (vecPush paths (sysArg (+ i 3)))
+            (set i (+ i 1))
+          })
+        (let results (frontParseFiles paths (frontFileSizes paths) width))
+        (set i 0)
         (while (< i (vecLen results))
           {
             (match (vecGet results i)
-              ((Ok bytes) (println (inspect bytes digest)))
-              ((Err e) (println (concat "worker-error " (fmtInt e.code)))))
+              ((None) (println "fallback"))
+              ((Some parsed)
+                (println
+                  (if digest
+                    (inspect (frontEncode parsed) true)
+                    (concat "ok " (concat (fmtInt (vecLen parsed.decls))
+                      (concat " " (concat (fmtInt (strLen parsed.source)) " 0"))))))))
             (set i (+ i 1))
           })
       })

@@ -1,0 +1,53 @@
+; Profile the compiler's actual import traversal without later phases.
+(import codegen)
+(import frontpack)
+(import Host)
+(import core)
+(import IO)
+(import Sys)
+(import Path)
+(import Err)
+(import Mem)
+(import Vec)
+(import Str)
+(import Fmt)
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+;@axiom:effect(unsafe)
+(fn (main)
+  (if (< sysArgc 2)
+    0
+    {
+      (let file (sysArg 1))
+      (match (readFile file)
+        ((Err error) 1)
+        ((Ok source)
+          (match (frontParse source)
+            ((None) 1)
+            ((Some parsed)
+              {
+                (let units vecNew)
+                (vecPush units (as (CUnit2 :file file :src source :name (as 0 String)) Int))
+                (let decls
+                  (resolveImportsParallel parsed.decls vecNew vecNew vecNew (targetCode hostTarget)
+                    (pathDir file) units))
+                (let mut bytes 0)
+                (let mut i 0)
+                (while (< i (vecLen units))
+                  {
+                    (set bytes (+ bytes (strLen (memGetWordStr (vecGet units i) 1))))
+                    (set i (+ i 1))
+                  })
+                (println
+                  (concat (fmtInt (vecLen decls))
+                    (concat " declarations, "
+                      (concat (fmtInt (vecLen units))
+                        (concat " modules, " (concat (fmtInt bytes) " source bytes"))))))
+                0
+              }
+            ))
+        ))
+    }))

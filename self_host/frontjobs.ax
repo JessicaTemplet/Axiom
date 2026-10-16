@@ -1,0 +1,165 @@
+; Bounded frontend batches. Largest files are placed first into the
+; lightest batch; result indices restore caller order independently of
+; worker order. Decoding runs in the parent while the pool is alive.
+(import frontpack)
+(import IO (readFile fileSize))
+(import Err)
+(import Str)
+(import Vec)
+(import Task)
+(import Sys.Platform (sysCloseNum))
+
+(pub :: frontFileSizes (-> (Vec String) (Vec Int)))
+;@axiom:effect(io)
+(pub fn (frontFileSizes paths)
+  {
+    (let sizes (vecWithCapacity (vecLen paths)))
+    (let mut i 0)
+    (while (< i (vecLen paths))
+      {
+        (let size (unwrapOr (fileSize (vecGet paths i)) 0))
+        (vecPush sizes
+          (if (< size 0)
+            0
+            (if (> size frontPacketLimit)
+              frontPacketLimit
+              size)))
+        (set i (+ i 1))
+      })
+    sizes
+  })
+
+(pub :: frontPlan (-> (Vec Int) Int (Vec (Vec Int))))
+(pub fn (frontPlan sizes width)
+  {
+    (let n (vecLen sizes))
+    (let workers
+      (if (< width 1)
+        1
+        (if (> width 8)
+          8
+          width)))
+    (let order (vecWithCapacity n))
+    (let mut total 0)
+    (let mut i 0)
+    (while (< i n)
+      {
+        (vecPush order i)
+        (set total (+ total (vecGet sizes i)))
+        (set i (+ i 1))
+      })
+    (vecSortBy order
+      (lambda (a b)
+        {
+          (let difference (- (vecGet sizes b) (vecGet sizes a)))
+          (if (== difference 0)
+            (- a b)
+            difference)
+        }
+      ))
+    ; Four MiB of source per batch limits packet and arena growth. An
+    ; individual large file stays in one batch and can fall back alone.
+    (let needed (/ (+ total 4194303) 4194304))
+    (let count
+      (if (< n workers)
+        n
+        (if (> needed workers)
+          (if (> needed n)
+            n
+            needed)
+          workers)))
+    (let groups (vecWithCapacity count))
+    (let loads (vecWithCapacity count))
+    (set i 0)
+    (while (< i count)
+      {
+        (vecPush groups vecNew)
+        (vecPush loads 0)
+        (set i (+ i 1))
+      })
+    (set i 0)
+    (while (< i n)
+      {
+        (let mut lightest 0)
+        (let mut j 1)
+        (while (< j count)
+          {
+            (if (< (vecGet loads j) (vecGet loads lightest))
+              (set lightest j))
+            (set j (+ j 1))
+          })
+        (let index (vecGet order i))
+        (vecPush (vecGet groups lightest) index)
+        (vecSet loads lightest (+ (vecGet loads lightest) (vecGet sizes index)))
+        (set i (+ i 1))
+      })
+    groups
+  })
+
+(pub :: frontReadMany (-> (Vec String) (Vec Int) String))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (frontReadMany paths indices)
+  {
+    (__syscall1 sysCloseNum 2)
+    (let files (vecWithCapacity (vecLen indices)))
+    (let mut i 0)
+    (while (< i (vecLen indices))
+      {
+        (vecPush files
+          (match (readFile (vecGet paths (vecGet indices i)))
+            ((Err error) None)
+            ((Ok source) (frontParse source))))
+        (set i (+ i 1))
+      })
+    (frontEncodeMany files)
+  })
+
+(:: frontDecodeBatch (-> String (Result (Vec (Option FrontParsed)) Error)))
+(fn (frontDecodeBatch bytes)
+  (match (frontDecodeMany bytes)
+    ((None) (Err (mkError 22 "invalid frontend batch")))
+    ((Some files) (Ok files))))
+
+(pub :: frontParseFiles (-> (Vec String) (Vec Int) Int (Vec (Option FrontParsed))))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (frontParseFiles paths sizes width)
+  {
+    (let groups (frontPlan sizes width))
+    (let results
+      (taskMapDecodedWith (lambda (i) (frontReadMany paths (vecGet groups i)))
+        (lambda (bytes) (frontDecodeBatch bytes)) (vecLen groups)
+        (taskWithKeep (taskWithMemory (taskOpts width frontPacketLimit) 536870912) 67108864)))
+    (let files (vecWithCapacity (vecLen paths)))
+    (let mut i 0)
+    (while (< i (vecLen paths))
+      {
+        (vecPush files None)
+        (set i (+ i 1))
+      })
+    (set i 0)
+    (while (< i (vecLen groups))
+      {
+        (let indices (vecGet groups i))
+        (match (vecGet results i)
+          ((Err error) 0)
+          ((Ok parsed)
+            {
+              (if (== (vecLen indices) (vecLen parsed))
+                {
+                  (let mut j 0)
+                  (while (< j (vecLen indices))
+                    {
+                      (vecSet files (vecGet indices j) (vecGet parsed j))
+                      (set j (+ j 1))
+                    })
+                })
+              0
+            }
+          ))
+        (set i (+ i 1))
+      })
+    files
+  })

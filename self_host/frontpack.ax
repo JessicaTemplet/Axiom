@@ -17,10 +17,9 @@
   (decls : (Vec Int)))
 
 (struct FrontWriter
-  (bytes : String)
+  (mut bytes : String)
   (mut pos : Int)
-  (mut good : Bool)
-  (sizing : Bool))
+  (mut good : Bool))
 
 (struct FrontReader
   (bytes : String)
@@ -149,21 +148,49 @@
 (fn (frontPad bytes)
   (* (/ (+ bytes 7) 8) 8))
 
+; Grow only when a write needs more room. Large modules start with a
+; source-sized estimate; growth copies bytes, never walks syntax again.
+(:: frontWriter (-> Int FrontWriter))
+(fn (frontWriter sourceBytes)
+  (FrontWriter
+    :bytes (strAlloc (if (> sourceBytes (/ frontPacketLimit 4)) frontPacketLimit
+                       (if (< sourceBytes 64) 256 (* sourceBytes 4))))
+    :pos 0 :good true))
+
+(:: frontReserve (-> FrontWriter Int Bool))
+(fn (frontReserve out bytes)
+  {
+    (if (&& out.good (&& (>= bytes 0) (<= bytes (- frontPacketLimit out.pos))))
+      {
+        (let need (+ out.pos bytes))
+        (if (> need (strLen out.bytes))
+          {
+            (let mut capacity (strLen out.bytes))
+            (while (< capacity need)
+              (set capacity (if (> capacity (/ frontPacketLimit 2)) frontPacketLimit (* capacity 2))))
+            (let grown (strAlloc capacity))
+            (memCopy (strData grown) (strData out.bytes) out.pos)
+            (set out.bytes grown)
+          })
+      }
+      (set out.good false))
+    out.good
+  })
+
 (:: frontPutWord (-> FrontWriter Int Int))
 ;@axiom:effect(unsafe)
 (fn (frontPutWord out value)
   {
-    (if (&& out.good (<= out.pos (- frontPacketLimit 8)))
+    (if (frontReserve out 8)
       {
-        (if (! out.sizing)
-          (__store64 (strData out.bytes) (/ out.pos 8) value))
+        (__store64 (strData out.bytes) (/ out.pos 8) value)
         (set out.pos (+ out.pos 8))
-      }
-      (set out.good false))
+      })
     0
   })
 
 (:: frontPutString (-> FrontWriter Int Int))
+;@axiom:effect(unsafe)
 (fn (frontPutString out value)
   (if (== value 0)
     (frontPutWord out (- 0 1))
@@ -171,15 +198,18 @@
       (let text (frontString value))
       (let size (strLen text))
       (frontPutWord out size)
-      (if (&& out.good (<= size (- frontPacketLimit out.pos)))
+      (let padded (frontPad size))
+      (if (frontReserve out padded)
         {
-          (if (! out.sizing)
-            (memCopy (+ (strData out.bytes) out.pos) (strData text) size))
-          (set out.pos (+ out.pos (frontPad size)))
-          (if (> out.pos frontPacketLimit)
-            (set out.good false))
-        }
-        (set out.good false))
+          (memCopy (+ (strData out.bytes) out.pos) (strData text) size)
+          (let mut i size)
+          (while (< i padded)
+            {
+              (__store8 (strData out.bytes) (+ out.pos i) 0)
+              (set i (+ i 1))
+            })
+          (set out.pos (+ out.pos padded))
+        })
       0
     }))
 
@@ -505,23 +535,87 @@
   })
 
 ; A zero-length packet means that the ordinary parser must handle this
-; module. A two-pass writer allocates exactly the size it copies once.
+; module. Each tree is walked once, directly into its growing byte buffer.
 (pub :: frontEncode (-> FrontParsed String))
 (pub fn (frontEncode parsed)
   {
-    (let size (FrontWriter :bytes "" :pos 0 :good true :sizing true))
-    (frontPutParsed size parsed)
-    (if (! size.good)
-      ""
-      {
-        (let bytes (strAlloc size.pos))
-        (let out (FrontWriter :bytes bytes :pos 0 :good true :sizing false))
-        (frontPutParsed out parsed)
-        (if (&& out.good (== out.pos size.pos))
-          bytes
-          "")
-      })
+    (let out (frontWriter (strLen parsed.source)))
+    (frontPutParsed out parsed)
+    (if out.good (strSlice out.bytes 0 out.pos) "")
   })
+
+; A batch writes each parsed tree directly into one buffer. A zero frame
+; preserves a file that must fall back to serial parsing. Length prefixes
+; let the parent check each frame before its ordinary decoder sees it.
+(pub :: frontEncodeMany (-> (Vec (Option FrontParsed)) String))
+;@axiom:effect(unsafe)
+(pub fn (frontEncodeMany files)
+  {
+    (let mut estimate 0)
+    (let mut i 0)
+    (while (< i (vecLen files))
+      {
+        (match (vecGet files i)
+          ((None) 0)
+          ((Some parsed)
+            (set estimate (+ estimate (strLen parsed.source)))))
+        (set i (+ i 1))
+      })
+    (let out (frontWriter estimate))
+    (frontPutWord out 1096306740)
+    (frontPutWord out (vecLen files))
+    (set i 0)
+    (while (&& out.good (< i (vecLen files)))
+      {
+        (let prefix out.pos)
+        (frontPutWord out 0)
+        (let start out.pos)
+        (match (vecGet files i)
+          ((None) 0)
+          ((Some parsed)
+            {
+              (frontPutParsed out parsed)
+              (if out.good
+                (__store64 (strData out.bytes) (/ prefix 8) (- out.pos start)))
+              0
+            }))
+        (set i (+ i 1))
+      })
+    (if out.good (strSlice out.bytes 0 out.pos) "")
+  })
+
+(pub :: frontDecodeMany (-> String (Option (Vec (Option FrontParsed)))))
+(pub fn (frontDecodeMany bytes)
+  (if (|| (> (strLen bytes) frontPacketLimit) (!= (% (strLen bytes) 8) 0))
+    None
+    {
+      (let input (FrontReader :bytes bytes :pos 0 :good true :sourceBytes 0))
+      (let magic (frontGetWord input))
+      (let count (frontGetWord input))
+      (if (|| (!= magic 1096306740)
+            (|| (< count 0) (> count (/ (- (strLen bytes) input.pos) 8))))
+        None
+        {
+          (let files (vecWithCapacity count))
+          (let mut i 0)
+          (while (&& input.good (< i count))
+            {
+              (let size (frontGetWord input))
+              (if (|| (< size 0) (|| (!= (% size 8) 0) (> size (- (strLen bytes) input.pos))))
+                (set input.good false)
+                (if (== size 0)
+                  (vecPush files None)
+                  {
+                    (let parsed (frontDecode (strSlice bytes input.pos size)))
+                    (if (isNone parsed) (set input.good false))
+                    (vecPush files parsed)
+                  }))
+              (set input.pos (+ input.pos (if (< size 0) 0 size)))
+              (set i (+ i 1))
+            })
+          (if (&& input.good (== input.pos (strLen bytes))) (Some files) None)
+        })
+    }))
 
 (pub :: frontDecode (-> String (Option FrontParsed)))
 (pub fn (frontDecode bytes)
