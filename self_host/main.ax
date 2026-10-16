@@ -43,7 +43,9 @@
   {
     (let obscure (hasFlagAnywhere subcommandName "--obfuscate"))
     {
+      (let phaseT (phaseNow))
       (let ir (emitResolvedMode decls bares fulls target obscure))
+      (phaseLog "emit" phaseT)
       (if obscure
         (match (obfuscateIr ir)
           ((Ok masked) masked)
@@ -445,6 +447,66 @@
       true
       (strInVecStr v s (+ i 1)))))
 
+; Opt-in phase timing, in the spirit of rustc's `-Ztime-passes`:
+; AXIOM_TIME_PHASES=1 writes one `phase <name> <ms>` line per pipeline
+; stage to stderr. Stdout, diagnostics and IR are unchanged, and the
+; clock is read either way so the disabled path costs eight syscalls.
+(:: phaseNow Int)
+;@axiom:effect(io)
+(fn (phaseNow)
+  (match (sysNowMonotonic (memAlloc 16))
+    ((Ok us) us)
+    ((Err e) 0)))
+
+(:: phaseLog (-> String Int Int))
+;@axiom:effect(io)
+(fn (phaseLog name start)
+  {
+    (if (strEq (sysEnv "AXIOM_TIME_PHASES") "1")
+      (writeStderrStr
+        (concat "phase " (concat name (concat " " (concat (fmtInt (/ (- (phaseNow) start) 1000)) " ms\n"))))))
+    0
+  })
+
+(:: timedResolve
+  (-> (Vec Int) (Vec String) (Vec String) (Vec Int) Int String (Vec Int) Int (Vec Int)))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (timedResolve decls bares fulls mods tcode dir units start)
+  {
+    (let r (resolveImportsParallel decls bares fulls mods tcode dir units))
+    {
+      (phaseLog "frontend (read, lex, parse, resolve)" start)
+      r
+    }
+  })
+
+(:: timedExpand
+  (-> (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec String) (Vec String) (Vec Int) (Vec Int)))
+;@axiom:effect(io)
+(fn (timedExpand entryDecls decls out frames units bares fulls mods)
+  {
+    (let t (phaseNow))
+    (let r (expandProgram entryDecls decls out frames units bares fulls mods))
+    {
+      (phaseLog "expand" t)
+      r
+    }
+  })
+
+(:: timedCheck (-> (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int) (Vec Int)))
+;@axiom:effect(io)
+(fn (timedCheck decls allDecls units ftbl pubNames)
+  {
+    (let t (phaseNow))
+    (let r (checkWithBindingShims decls allDecls units ftbl pubNames))
+    {
+      (phaseLog "check" t)
+      r
+    }
+  })
+
 ; Compile `fileName` for `tname`, answering its LLVM text - or the empty
 ; string when `doEmit` is 0, which is what `check` wants.
 ;
@@ -496,6 +558,7 @@
   ; before any module is read, which is the property every refusal
   ; in this group shares.
   {
+    (let phaseT0 (phaseNow))
     (let got (readFile fileName))
     (let src (unwrapOr got ""))
     (let rerr (sourceReadErrno got))
@@ -609,12 +672,12 @@
                       })
                     {
                       (let allDecls
-                        (resolveImportsParallel decls bares fulls mods tcode (pathDir fileName) units))
+                        (timedResolve decls bares fulls mods tcode (pathDir fileName) units phaseT0))
                       {
                         (let eds vecNew)
                         (let ftbl vecNew)
                         {
-                          (expandProgram decls allDecls eds ftbl units bares fulls mods)
+                          (timedExpand decls allDecls eds ftbl units bares fulls mods)
                           ; The expander's OWN refusals get the frames too.
                           ; They are diagnostics from inside an expansion by
                           ; construction - AX3021, AX3027, AX3028 - and the
@@ -655,7 +718,7 @@
                             (let ds
                               (orderDiags
                                 (expMergeInto eds
-                                  (checkWithBindingShims decls allDecls units ftbl pubFns))))
+                                  (timedCheck decls allDecls units ftbl pubFns))))
                             {
                               (if (> (vecLen ds) 0)
                                 (writeStderrStr (renderDiagsFormat dfmt ds units)))
