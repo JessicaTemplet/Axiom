@@ -16,6 +16,13 @@ its changelog too.
 
 ## Unreleased
 
+- Compact frontend syntax packets by omitting zero fields and packing
+  source spans into one word. Reconstructed strings share the parent's
+  packet buffer, and vectors allocate their final capacity directly.
+  The frontend benchmark compares workers with direct serial parsing
+  and can measure encoding and reconstruction with `--phase-profile`.
+  Tested by `tests/frontend/parallel/verify.py`.
+
 - Add opt-in parallel import parsing with `AXIOM_FRONTEND_JOBS=2`
   through `8`. Workers return bounded syntax packets, and the parent
   preserves depth-first import resolution and diagnostic order. Editor

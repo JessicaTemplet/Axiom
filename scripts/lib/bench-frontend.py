@@ -63,6 +63,7 @@ def main():
     parser.add_argument("--probe", type=Path, required=True)
     parser.add_argument("--transfer-probe", type=Path)
     parser.add_argument("--ast-transfer", action="store_true", help="include syntax packets and parent reconstruction")
+    parser.add_argument("--phase-profile", action="store_true", help="measure encoding and reconstruction separately")
     parser.add_argument("--jobs", type=int, nargs="+", default=[1, 2, 4])
     parser.add_argument("--reps", type=int, default=3)
     parser.add_argument("--json", type=Path)
@@ -104,24 +105,39 @@ def main():
     byte_count = sum(file.stat().st_size for file in files)
     print(f"{len(files)} files, {byte_count:,} bytes; best of {args.reps} runs")
     print(f"Process startup: {1000 * startup:.1f} ms, subtracted from each best time")
+    if args.ast_transfer:
+        packet_bytes = sum(int(row.split()[2]) for row in fingerprints)
+        print(f"Syntax packets: {packet_bytes:,} bytes ({packet_bytes / byte_count:.2f}x source)")
     print("workers    milliseconds    speedup")
     for result in results:
         result["speedup"] = serial / result["best_seconds"]
         print(f"{result['workers']:7d}    {1000 * result['best_seconds']:12.1f}    {result['speedup']:6.2f}x")
     print("Ordered results match; read, lex and parse failures retain their positions.")
     scope = (
-        "Independent read, lex, annotation scan and parse; syntax packet encoding and parent reconstruction included. Fingerprints checked outside timed runs."
+        "Serial reads and parses directly. Workers include syntax packet encoding, transfer and parent reconstruction. Fingerprints checked outside timed runs."
         if args.ast_transfer else
         "Independent read, lex, annotation scan and parse; count packets returned over Task. Fingerprints checked outside timed runs."
     )
-    print("Timings include AST transfer and reconstruction." if args.ast_transfer else "Timings exclude AST transfer.")
+    print("Serial has no packet work; worker times include AST transfer and reconstruction." if args.ast_transfer else "Timings exclude AST transfer.")
     print("Dependency scheduling and later compiler phases are outside this measurement.")
+    phases = {}
+    if args.phase_profile:
+        if not args.ast_transfer:
+            parser.error("--phase-profile requires --ast-transfer")
+        for mode in ("encode", "roundtrip"):
+            samples = [run(args.probe, 1, files, mode)[0] for _ in range(args.reps)]
+            phases[mode] = {"best_seconds": max(min(samples) - startup, 1e-9), "samples": samples}
+        encode = phases["encode"]["best_seconds"] - serial
+        decode = phases["roundtrip"]["best_seconds"] - phases["encode"]["best_seconds"]
+        print(f"Serial phase differences: encoding {1000 * encode:.1f} ms; reconstruction {1000 * decode:.1f} ms")
     if args.json:
         args.json.write_text(json.dumps({
             "files": [str(file) for file in files], "source_bytes": byte_count,
             "repetitions": args.reps, "startup_seconds": startup,
             "startup_samples": startup_samples, "results": results,
             "scope": scope,
+            "packet_bytes": packet_bytes if args.ast_transfer else None,
+            "phase_profile": phases,
         }, indent=2) + "\n")
 
 

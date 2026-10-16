@@ -17,7 +17,8 @@
     ((Ok source)
       (match (frontParse source)
         ((None) "")
-        ((Some parsed) (frontEncode parsed))))))
+        ((Some parsed) (frontEncode parsed)))
+    )))
 
 (:: inspect (-> String Bool String))
 (fn (inspect bytes digest)
@@ -27,7 +28,7 @@
       (if (&& digest (! (strEq bytes (frontEncode parsed))))
         "changed"
         {
-          (let mut hash 1469598103934665603)
+          (let mut hash (if digest 1469598103934665603 0))
           (let mut i 0)
           (while (&& digest (< i (strLen bytes)))
             {
@@ -36,8 +37,38 @@
             })
           (concat "ok "
             (concat (fmtInt (vecLen parsed.decls))
-              (concat " " (concat (fmtInt (strLen bytes)) (concat " " (fmtInt hash))))))
-        }))))
+              (concat " "
+                (concat
+                  (fmtInt
+                    (if digest
+                      (strLen bytes)
+                      (strLen parsed.source)))
+                  (concat " " (fmtInt hash))))))
+        })
+    )))
+
+; Normal serial parsing has no encoding or decoding work. Keep that
+; baseline honest when deciding whether workers should be the default.
+(:: serial (-> String Bool String))
+;@axiom:effect(io)
+(fn (serial file encode)
+  (match (readFile file)
+    ((Err e) "fallback")
+    ((Ok source)
+      (match (frontParse source)
+        ((None) "fallback")
+        ((Some parsed)
+          (concat "ok "
+            (concat (fmtInt (vecLen parsed.decls))
+              (concat " "
+                (concat
+                  (fmtInt
+                    (if encode
+                      (strLen (frontEncode parsed))
+                      (strLen source)))
+                  " 0"))))
+        ))
+    )))
 
 (:: main Int)
 ;@axiom:effect(io)
@@ -47,13 +78,17 @@
   {
     (let width (strToInt (sysArg 1)))
     (let digest (strEq (sysArg 2) "verify"))
+    (let roundtrip (strEq (sysArg 2) "roundtrip"))
     (let count (- sysArgc 3))
     (if (<= width 1)
       {
         (let mut i 0)
         (while (< i count)
           {
-            (println (inspect (packet (sysArg (+ i 3))) digest))
+            (println
+              (if (|| digest roundtrip)
+                (inspect (packet (sysArg (+ i 3))) digest)
+                (serial (sysArg (+ i 3)) (strEq (sysArg 2) "encode"))))
             (set i (+ i 1))
           })
       }

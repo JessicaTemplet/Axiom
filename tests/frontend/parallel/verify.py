@@ -52,6 +52,10 @@ def main():
     rows = expected.stdout.splitlines()
     if len(rows) != len(files) or any(not row.startswith(b"ok ") for row in rows):
         raise AssertionError("the syntax packet corpus was not fully transferred")
+    packet_bytes = sum(int(row.split()[2]) for row in rows)
+    source_bytes = sum(file.stat().st_size for file in files)
+    if packet_bytes > 5 * source_bytes:
+        raise AssertionError("syntax packets grew beyond five times the source corpus")
     for width in (2, 4):
         actual = run([transfer, str(width), "verify", *map(str, files)])
         if (actual.returncode, actual.stdout, actual.stderr) != (0, expected.stdout, b""):
@@ -125,7 +129,7 @@ def main():
         result = identical([compiler, "--diagnostic-format=ai", "emit-llvm", str(ROOT / "tests/selfhost" / name)])
         if result.returncode:
             raise AssertionError(f"macro hygiene failed: {name}: {result.stderr!r}")
-    print(f"parallel frontend: {len(files)} complete syntax packets; ordered diagnostics, symbols, IR and execution agree")
+    print(f"parallel frontend: {len(files)} complete syntax packets ({packet_bytes:,} bytes); ordered diagnostics, symbols, IR and execution agree")
 
 
 if __name__ == "__main__":

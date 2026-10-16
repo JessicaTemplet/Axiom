@@ -476,7 +476,7 @@ the authority on which scripts do, so check it rather than this table.
 
 | Script | What it's for |
 |---|---|
-| `bench-frontend.sh` | Compares serial module lexing and parsing with bounded process workers. It checks ordered fingerprints and failure results before timing. Add `--ast-transfer` to include syntax packets and reconstruction in the parent. Use `--jobs 1 2 4 --reps 5`, with `--json report.json` to save samples |
+| `bench-frontend.sh` | Compares serial module lexing and parsing with bounded process workers. It checks ordered fingerprints and failure results before timing. Add `--ast-transfer` to compare direct serial parsing against workers including syntax transfer and reconstruction. `--phase-profile` measures encoding and reconstruction separately. Use `--jobs 1 2 4 --reps 5`, with `--json report.json` to save samples |
 
 Command-line compilation can parse imported modules in worker processes.
 Set `AXIOM_FRONTEND_JOBS=2` through `8` to try it with `check`, `build`,
