@@ -16,6 +16,23 @@ its changelog too.
 
 ## Unreleased
 
+- Add a native frontend concurrency experiment. `scripts/bench-frontend.sh`
+  compares serial module reading, lexing, annotation scanning and parsing
+  with bounded process workers. It verifies ordered fingerprints and
+  failure results before timing; AST transfer and import scheduling
+  remain outside the experiment.
+
+- Complete macro hygiene with lexical scope records and retained binding
+  identities across nested expansion. Literal patterns respect local
+  shadowing, qualified names and the originating module. Repeated
+  pattern binders constrain equal syntax, including within repeated
+  elements. Tested by `tests/selfhost/1025-macro-literal-scopes.ax` and
+  `tests/selfhost/1026-macro-repeated-binders.ax`.
+
+- Develop new work on `nightly` and validate it before merging into
+  stable `trunk`. CI runs on both branches; website deployment follows
+  trunk.
+
 ## 0.7.9 — 2026-10-15
 
 This release adds explicit numeric conversions and fixed-width integers,

@@ -52,8 +52,11 @@ does. `template` is an expression, and the parameters are a flat
 positional list of distinct identifiers. This is the head-list form.
 §1.5 adds the rule forms.
 
-**MAC-LANG-2 (H).** Two parameters with the same name are rejected with
-`AX3020`.
+**MAC-LANG-2 (H).** A head-list macro rejects two parameters with the
+same name with `AX3020`. In a rule pattern, a repeated binder instead
+constrains syntax (`MAC-LANG-15`). A name shared between a fixed
+pattern and its repeating element is `AX3020`: one form and a
+sequence need separate names.
 
 **MAC-LANG-3 (H).** You can invoke a zero-parameter macro bare or in
 parentheses, and both spellings mean the same thing:
@@ -329,9 +332,8 @@ expression-only macro in declaration position and an invocation that
 matches no rule, and `tests/diagnostics/1341-macro-rule-kind.ax` a rule
 of the wrong kind in each position.
 
-**MAC-LANG-14a (P, prerequisite).** Patterns are not a distinct
-syntactic category today, and a pattern-macro design must say what it
-does about that. `(Cons h t)` in match position is an ordinary
+**MAC-LANG-14a (H, prerequisite).** Pattern-ness **SHALL** remain
+positional. Patterns share their nodes with expressions. `(Cons h t)` in match position is an ordinary
 `TAG_E_APP`, and its tag can't tell it from an application. Only
 `TAG_P_CON0` (a parenthesised nullary constructor) and `TAG_P_CONNAMED`
 (a named-field pattern) are pattern-specific. Whether a form is a
@@ -352,7 +354,9 @@ specification chooses the second:
 Choice 2 costs nothing structurally. It has one consequence that
 **MUST** be stated: a macro can't tell whether it was invoked in
 pattern or expression position, so a macro usable in both **MUST**
-expand to a form that is valid in both.
+expand to a form that is valid in both. Tested by
+`tests/selfhost/365-macro-pattern-literal.ax` and
+`tests/selfhost/392-macro-patterns.ax`.
 
 **MAC-LANG-15 (H).** A pattern **SHALL** be one of:
 
@@ -363,7 +367,7 @@ expand to a form that is valid in both.
 | a literal integer, float, char or string | itself | Holds |
 | `(p1 ... pn)` | a form of exactly *n* elements, each matching | Holds |
 | `(p ...)` | zero or more forms matching `p` (`MAC-LANG-16`) | Holds. A repeat over a nested pattern binds each binder in lockstep (`tests/selfhost/397-nested-repeat.ax`, 170) |
-| a literal identifier declared in the macro's literal list | itself, compared by binding rather than spelling (`MAC-LANG-17`) | Holds, by canonical-spelling comparison. Scope sets are still provisional. `tests/selfhost/402-literal-dispatch.ax` (19), `tests/diagnostics/611-macro-literal.ax` |
+| a literal identifier declared in the macro's literal list | itself, compared by binding rather than spelling (`MAC-LANG-17`) | Holds, by lexical binding identity. `tests/selfhost/1025-macro-literal-scopes.ax`, `tests/selfhost/1028-macro-syntax-identity.ax` |
 
 In the fourth row, `...` is this page's shorthand for "p1 through pn",
 not the ellipsis operator. That is why that row cites no rule and the
@@ -416,10 +420,32 @@ argument written as a real tab. The parser decodes integers and floats
 on the way in. A string node keeps its lexeme verbatim, because the
 emitter relies on that, so the matcher decodes strings as it compares.
 
-A rule's parameters are its patterns' binders, nested ones included,
-and `AX3020` rejects a repeated one. `((m a (f a)) ...)` binds `a`
-twice, and `expParamIndex` is last-wins, so the first binding would be
-silently discarded. `_` is exempt because it binds nothing.
+A rule's parameters are its patterns' binders, nested ones included.
+A repeated binder **MUST** match equal syntax at every occurrence:
+
+```scheme
+(macro same
+  ((same x x) 1)
+  ((same x y) 0))
+
+(fn (main)
+  (+ (same (+ 1 2) (+ 1 2)) (same 10 1_0)))
+; 2
+```
+
+Identifiers compare by binding, literals by value, and compound forms
+by their ordered children and field labels. Positions and formatting
+do not affect equality. The compiler never evaluates these forms:
+`(+ 1 2)` and `3` are different syntax. Separate lambda parameters
+introduce separate bindings, even when their names agree.
+
+A constraint makes a rule refutable, so a general fallback can follow
+it. Within a repeating pattern, constraints apply separately to each
+element. A name cannot stand at both fixed and repeating depths
+(`AX3020`). `_` binds nothing and imposes no constraint.
+
+Tested by `tests/selfhost/1026-macro-repeated-binders.ax` and
+`tests/diagnostics/1455-macro-repetition-binding.ax`.
 
 **MAC-LANG-16 (H).** Ellipsis repetition `...` **SHALL** be available in
 both patterns and templates, and a template **MUST** use a repeated
@@ -557,7 +583,7 @@ Two facts make the syntax more delicate than a token addition sounds:
   gensym separator. The only free bytes with no lexical meaning are
   `$`, `?`, `@`, `` ` `` and `~`.
 
-**MAC-LANG-17 (H, subset).** A rule list **MAY** declare literal
+**MAC-LANG-17 (H).** A rule list **MAY** declare literal
 identifiers, written `(macro name (literals lits...) rules...)`. A
 literal matches only itself, and is compared by binding, not by
 spelling:
@@ -572,13 +598,18 @@ spelling:
 Here `(simp (+ x 0))` rewrites to `x`, and `(simp (- x 0))` falls
 through to the last rule.
 
-The comparison uses canonical spellings: the module's own declaration,
-the single visible declarer, or the builtin. Spellings that nothing
-binds agree by spelling. So a pattern `+` meaning the Prelude operator
-doesn't match an invocation whose `+` the call site declared itself.
-That shadow veto is what makes this a comparison of bindings rather
-than spellings. A qualified `Pre::+` does match, although the spellings
-differ.
+Each argument identifier carries its lexical scopes and the binding
+selected in its original module. A local binder differs from a
+module declaration or builtin with the same spelling. A qualified
+`Pre::+` and the builtin `+` identify the same binding. Functions,
+macros, constructors, effect operations and extern items have binding
+identities; a constructor's identity includes its owning type.
+Unbound DSL keywords agree by spelling.
+
+Passing syntax through another macro preserves this context. A free
+identifier from a template keeps its definition site, even under a
+caller's local of the same name. A binder supplied through a parameter
+can bind the caller's name (`MAC-HYG-10`).
 
 This matters for a branching macro that dispatches on `else`: it must
 see *the* `else` it means, not any identifier a caller happened to name
@@ -588,12 +619,8 @@ makes its rule refutable. A declared literal that no pattern spells is
 `tests/selfhost/402-literal-dispatch.ax` (19) and
 `tests/diagnostics/611-macro-literal.ax`.
 
-Scope sets would add little on top of this. Renamed heads are spelled
-`name.N` with an unspellable separator, so a renamed head never spells
-a literal by accident. Constructor heads compare by spelling, because
-call-head resolution covers `fn` declarations, which is the operator
-namespace the dispatch needs. `MAC-HYG-9` stays provisional for the
-representation change, and the dispatch doesn't wait on it.
+Tested by `tests/selfhost/1025-macro-literal-scopes.ax` and
+`tests/selfhost/1028-macro-syntax-identity.ax`.
 
 **MAC-LANG-18 (H).** Rules are tried in order, and the first whose
 pattern matches wins. If no rule matches, the diagnostic **MUST** name
@@ -613,8 +640,7 @@ tree: a float pattern holds its bits and a char its codepoint, so
 printing either back would show a spelling nobody wrote.
 `tests/diagnostics/605-macro-no-rule-matches.ax` pins it.
 
-Ordering has one cost. A rule whose every element is a plain binder is
-irrefutable: it matches every invocation of its arity, and starves any
+Ordering has one cost. A rule is irrefutable when every element is a distinct plain binder: it matches every invocation of its arity, and starves any
 later rule of that arity. That is decidable from the patterns alone,
 and it is refused at the macro's own line as `AX3033`,
 `macro-unreachable-rule`. Several rules of one arity are fine when
@@ -736,23 +762,26 @@ is the macro.
 
 **MAC-EXP-6 (H).** Instantiating a macro takes three steps, in order:
 
-1. Expand each argument that the macro will consume.
+1. Retain each argument's binding context. A head-list macro expands
+   compound arguments before substitution; bare names remain syntax.
+   A rule-form macro matches its arguments before expanding them.
 2. Substitute them into the template, renaming every binder the
    template introduces (`MAC-HYG-1`) and resolving every free
    identifier at the definition site (`MAC-HYG-6`).
 3. Expand the result, so a template that invokes another macro expands
    too.
 
-Steps 1 and 3 make expansion a fixpoint.
+Step 3 makes nested expansion a fixpoint.
 
 Step 1 is where expansion time and run time part company, and the
 distinction **MUST** be kept:
 
-- At expansion time, every argument the invocation supplies is
-  expanded exactly once. That includes an argument the template never
-  mentions, and a surplus argument beyond the macro's arity. So a macro
-  invocation inside an unused argument is still expanded, and still
-  counts against `MAC-EXP-9`'s budgets.
+- At expansion time, a head-list macro expands each compound argument
+  it consumes, including one its template drops. Surplus arguments are
+  expanded when applied to the result. Bare names expand where their
+  substituted uses stand. A rule-form macro retains argument syntax
+  for matching and expands the result after substitution. Dropped
+  syntax in that form does not expand.
 - At run time, an argument is evaluated once per occurrence of its
   parameter in the template: twice if it's mentioned twice
   (`MAC-EXP-7`), and not at all if the template drops it. That is the
@@ -1128,7 +1157,8 @@ for a `match` arm's pattern binder alike:
 If the template's `tmp` and `v` captured the caller's, these would
 answer 200 and 8.
 
-**MAC-HYG-2 (H).** Hygiene works by renaming. At each expansion, every
+**MAC-HYG-2 (H).** Scope records select bindings; renamed spellings
+encode the result for later phases. At each expansion, every
 binder the template introduces is renamed, and so is every reference to
 it inside the template. That covers `let` and `let mut` binders,
 `lambda` parameters and `match` arm pattern binders.
@@ -1345,79 +1375,46 @@ mechanism that closed it.
    without the fix refuses the file with the retired `AX3032`. With
    that one term removed, it answers 13 rather than 31.
 
-**MAC-HYG-9 (P).** The mechanism **SHALL** become scope sets. An
-identifier becomes a `(name, scopes)` pair rather than a bare name,
-every expansion introduces a fresh scope, and resolution matches on
-both.
+**MAC-HYG-9 (H).** An identifier **SHALL** carry its name and lexical
+scopes. Every expansion introduces a fresh scope. Resolution selects
+the innermost visible binder, and literal matching compares the
+selected binding rather than the identifier's spelling.
 
-Renaming is a sound implementation of the forward direction and nothing
-more. What still needs scope sets is `MAC-LANG-17`: a literal
-identifier is compared by binding, and comparing bindings needs both
-sides to carry theirs. Read this rule as scoped to that. Two other
-cases turned out not to need them:
+Template binders and `syntax/for` bindings resolve through scope
+records. Ordinary lexical binders introduce fresh scopes too.
+Argument syntax retains its binding identity and originating module
+when another macro receives it. Template free identifiers retain their
+definition-site stamp. Repeated pattern binders use the same identities
+when they compare syntax (`MAC-LANG-15`).
 
-- `MAC-HYG-8`'s first hole, the entry-file macro, only needed one side
-  to carry the fact that it had no local definition scope. One bit on
-  the reference says so, with no change to what an identifier is (see
-  `MAC-HYG-8` item 1).
-- Nested-pattern macros, where one expansion's binder must be visible
-  to another's template, work through textual substitution: the outer
-  `substTpl` renames before the inner invocation expands.
-  `tests/selfhost/1004-macro-nested-shadow.ax` (46) pins it.
+The migration **MUST** preserve every case gated today:
+`tests/selfhost/361-macro-hygiene.ax` (143),
+`tests/selfhost/362-macro-coverage.ax` (57),
+`tests/selfhost/363-macro-shadowing.ax` (3),
+`tests/selfhost/364-macro-definition-site.ax` (157) and
+`tests/selfhost/365-macro-pattern-literal.ax` (95). It **MUST NOT**
+change emitted IR's determinism (`MAC-EXP-12`).
 
-`MAC-LANG-17` still makes that comparison by canonical spelling, with
-the shadow veto, and will until a failing shape says otherwise. Scopes make the binding
-available, not the comparison.
+Scopes are the expander's decision procedure. Renamed spellings remain
+the output encoding that the checker and emitter read:
 
-The migration **MUST** preserve every case gated today. A conforming
-implementation that replaces renaming with scope sets **MUST** keep
-`tests/selfhost/361-macro-hygiene.ax` (143), `362-macro-coverage.ax`
-(57), `363-macro-shadowing.ax` (3), `364-macro-definition-site.ax`
-(157) and `365-macro-pattern-literal.ax` (95) answering exactly those
-values. It **MUST NOT** change the emitted IR's determinism
-(`MAC-EXP-12`).
+- the definition-site stamp in node word 10 means “top level”;
+- the `.N` spelling remains, and diagnostics show its original name;
+- the `fresh` counter assigns spellings in binder push order;
+- node word 12 retains syntax identities and captured lexical binders.
 
-The migration happens inside the expander. Scopes become the decision
-procedure inside substitution, and renamed spellings stay the output
-encoding that everything downstream reads. After expansion, the checker
-resolves by spelling on fully renamed output. That is sound exactly when
-substitution gives each reference its correct binder's spelling, and
-scope resolution decides that at substitution time. Nothing downstream
-needs the pairs:
+A `syntax/for` binding and a template binder are ordered by their
+shared push-order stamps. The inner binding wins. Tested by
+`tests/diagnostics/1009-macro-for-innermost.ax`.
 
-- the def-scope stamp (node word 10) stays the downstream encoding of
-  "top level";
-- the `.N` shape stays, because the checker strips it for display
-  (`emitAX3012` and the others in `MAC-HYG-3a`);
-- the `fresh` counter keeps numbering binder spellings in push order,
-  so the output bytes don't move.
+Nested expansion preserves outer bindings. Tested by
+`tests/selfhost/1004-macro-nested-shadow.ax` and
+`tests/selfhost/1025-macro-literal-scopes.ax`. Declaration forwarding
+preserves the same identities. Tested by
+`tests/selfhost/1027-macro-declaration-bindings.ax`.
 
-The migration has four steps:
-
-- **M1, landed.** Every template binder and `syntax/for` binding has
-  a `(name, scopes)` record, and every instantiation and `syntax/for`
-  element walk introduces a fresh scope (the expander's state words 24
-  to 27).
-- **M2, landed.** Lookup sites resolve through scope records, taking
-  the innermost visible binder, and answer the record's assigned
-  spelling.
-- **M3, landed.** Precedence is innermost-wins. `syntax/for` bindings
-  take part as ordinary inner binders, ordered against template binders
-  by push order. In `tests/diagnostics/1009-macro-for-innermost.ax`, a
-  `syntax/for` binding sits inside a template `let` of the same
-  spelling. The inner binding wins, so the field names `x` and `y`
-  arrive where no variable is bound, and the program draws two
-  `AX3001`.
-- **M4, landed.** The scope records are the expander's only binder
-  table. `AX3075`, the code for a disagreement between them and a
-  second table, is retired, and its number is never reused. Spelling
-  assignment stays on the `fresh` counter at the push sites, so a
-  binder's output spelling depends only on push order. Binders are
-  `(name, scopes)` pairs from push to emission.
-
-The test battery holds the migration to its obligation. The five cases
-above answer the values given, and the emitted IR is deterministic
-(`MAC-EXP-12`).
+The scope records are the only binder table. `AX3075`, the retired
+comparison code from the migration, is never reused.
 
 **MAC-HYG-10 (H).** When a binder position holds a macro
 parameter, the binder takes the argument's name and **MUST NOT** be
@@ -1549,11 +1546,10 @@ turns substitution into pattern-based rewriting. All of it holds:
 - **Repetition**: `MAC-LANG-16`, in all five of its parts: bare name (v1),
   nested (v2), arm and constructor (v3), declaration (v4) and
   constructor pattern (v5).
-- **Literal heads**: `MAC-LANG-17`, which compares by canonical
-  spelling with the shadow veto.
-
-Scope sets (`MAC-HYG-9`) remain provisional as a change of
-representation, and the dispatch doesn't wait on them.
+- **Literal heads**: `MAC-LANG-17`, which compares lexical binding
+  identities preserved across expansion (`MAC-HYG-9`).
+- **Repeated binders**: `MAC-LANG-15`, which constrains equal syntax
+  without evaluating it.
 
 ### 4.3 Compile-time evaluation
 
@@ -2244,7 +2240,7 @@ set, and all but `AX3023` are constructed in `self_host/expand.ax`:
 |---|---|---|
 | `AX3018` | `macro-arity` | an invocation no rule accepts (`MAC-EXP-8`, `MAC-LANG-18`). For the head-list form this is still a count: too few arguments. A longer spine isn't an error in expression position, because the surplus is applied to whatever the macro produced. In declaration position the message names the shapes the rules accept ("no rule of macro `n` matches this invocation; it accepts …"), and an invocation whose count some rule declares still lands here if no rule's shape matches. The slug stays `macro-arity` because `MAC-LANG-18` names the generalisation |
 | `AX3019` | `macro-recursion-limit` | instantiation depth exceeded 128 |
-| `AX3020` | `macro-duplicate-parameter` | two parameters share a name |
+| `AX3020` | `macro-duplicate-parameter` | two head-list parameters share a name, or a rule binder stands at both fixed and repeating depths |
 | `AX3021` | `macro-template-unsupported` | a template form substitution can't handle. Its expression-template arm has no reachable producer, by design (`MAC-CAP-2`). Its reachable producer is a declaration template generating a kind outside the v1 surface, reported at the macro's own line |
 | `AX3022` | `macro-set-target` | a parameter used as a `set` target is given an expression |
 | `AX3023` | `private-name` | a macro its module doesn't export. This is the general visibility code, which reaches macros through `MAC-LANG-9` |
@@ -2814,26 +2810,13 @@ Two rules make this work:
 - `MAC-LANG-18`'s ordering makes the last rule a default rather than an
   ambiguity.
 
-Here is where the table stands. `MAC-LANG-18`'s ordering holds, and the
-seven rules of arity one are accepted. Two of the three pieces it
-needed are in place:
+All seven rules run. Literal heads dispatch by binding, repetition
+rewrites each child, and `(- e e)` requires equal syntax at both
+occurrences. A repeated binder compares structure and bindings; it
+does not claim that two different expressions compute the same value.
 
-- The heads. `+` and `*` in `(+ e 0)` tell rule 1 from rule 3. A
-  `(literals + *)` header reserves them, so dispatch is by binding,
-  with the shadow veto (`MAC-LANG-17`).
-  `tests/selfhost/403-expr-rule-macro.ax` rewrites both.
-- `(f a ...)`, which is `MAC-LANG-16`'s ellipsis: v1, and v2 for the
-  nested shape the last rule's right-hand side needs.
-
-Not yet: `(- e e)`, a repeated binder. `MAC-LANG-15` refuses it with
-`AX3020` rather than reading it as a same-form test. `expParamIndex` is
-last-wins, so allowing it would silently bind the second occurrence.
-There is also no structural form-equality to compare against, and
-`syntax/same` isn't one.
-
-The templates here are *expressions*, which the rule form takes
-(`MAC-LANG-14`). With a `(literals + *)` header, five of its seven
-rules run today, and `(- e e)` is the one that still refuses.
+Tested by `tests/selfhost/403-expr-rule-macro.ax` and
+`tests/selfhost/1026-macro-repeated-binders.ax`.
 
 ### 10.5 A small DSL
 
@@ -2931,9 +2914,9 @@ signature in scope spells them as type variables.
 
 | Area | Holds today | Planned | Refused |
 |---|---|---|---|
-| Language | LANG-1…12, LANG-14 (several rules, each template declarations or one expression with the invocation's position choosing, selected by a pattern match in rule order, with arity kept inside the match as a pre-filter), LANG-15 (all six pattern kinds), LANG-16 (v1–v5: bare-name, nested-pattern, arm/ctor, declaration and ctor-pattern splices), LANG-17 (literal identifiers, canonical-spelling comparison), LANG-18 | — | LANG-13 |
+| Language | LANG-1…12, LANG-14 (several rules, each template declarations or one expression with the invocation's position choosing, selected by a pattern match in rule order, with arity kept inside the match as a pre-filter), LANG-15 (all six pattern kinds), LANG-16 (v1–v5: bare-name, nested-pattern, arm/ctor, declaration and ctor-pattern splices), LANG-17 (literal identifiers compared by binding), LANG-18 | — | LANG-13 |
 | Expansion | EXP-1…17, including module-side invocation | — | — |
-| Hygiene | HYG-1…8 (all four of HYG-8's holes are closed, and so is HYG-3a), HYG-11 | HYG-9 | — |
+| Hygiene | HYG-1…11, including HYG-3a and scope-based literal matching | — | — |
 | Capabilities | CAP-1…4, CAP-6, CAP-7, CAP-8 (`fn`/`::`/`data`/`struct`/`type`/`effect`/invocation/iteration templates; the kind list is closed, and `impl` left it when the construct was removed in 0.6.0), CAP-9 (the deriving clause is refused), CAP-10 (format strings; 10.5's capture is closed as of 0.7.4) | — | CAP-5 (its replacement has landed, and the query table is complete: join in name, reference and argument position, nested to any depth; constructors; fields; same; for, including its parallel form; binders; fold; name; arity; defined; format; formatln) |
 | Safety | SAFE-1…4 | — | SAFE-5 |
 | Integration | INT-1…6 | — | — |
@@ -2959,6 +2942,12 @@ the rule landed.
 
 | Pinned by | Rules |
 |---|---|
+| `tests/selfhost/1025-macro-literal-scopes.ax` (255) | HYG-9, LANG-17: local shadowing, qualified identities and forwarded definition sites |
+| `tests/selfhost/1026-macro-repeated-binders.ax` (255) | LANG-15: equal syntax, refutable constraints and per-element repetition |
+| `tests/selfhost/1027-macro-declaration-bindings.ax` (9) | HYG-9, LANG-15: identities and equality through nested declaration templates |
+| `tests/selfhost/1028-macro-syntax-identity.ax` (255) | LANG-17: constructor and macro bindings, labelled forms and captured lambda identities |
+| `tests/selfhost/1029-macro-imported-literals.ax` (3) | LANG-11, LANG-17: imported macro precedence agrees with literal matching |
+| `tests/diagnostics/1455-macro-repetition-binding.ax` | LANG-2: one name at fixed and repeating depths is AX3020 |
 | `tests/selfhost/360-macro.ax` (45) | LANG-1, EXP-6 (nested invocation), EXP-7 (double evaluation) |
 | `tests/selfhost/361-macro-hygiene.ax` (143) | HYG-1, HYG-2 |
 | `tests/selfhost/362-macro-coverage.ax` (57) | CAP-1 |
@@ -3096,24 +3085,10 @@ rather than the value alone.
 
 ### 11.3 What is left
 
-The Language row of the conformance table holds in full.
-`MAC-LANG-17`, `MAC-LANG-16`'s nested half and `MAC-LANG-14` over
-expression templates have all landed. What remains is narrower:
+The macro language, scope-based hygiene and repeated-binder constraints
+hold in full. Phase boundaries remain: templates cannot generate imports
+or nested macro declarations, and expansion never executes user code.
 
-1. `MAC-HYG-9`, scope sets. Dispatch holds without them, through
-   canonical-spelling comparison with the shadow veto. What they would
-   add is narrow and stated in `MAC-LANG-17`: renamed heads that can
-   never be spelled by accident, and constructor heads compared by
-   spelling. The representation change stays provisional.
-2. A repeated binder read as a same-form test, such as `(- e e)` in
-   §10.4's `simplify` table. `MAC-LANG-15` refuses it as last-wins
-   (`AX3020`).
-3. The one held-but-defective render in §11, `MAC-EXP-8`'s anchor,
-   plus `MAC-EXP-14c`'s spanless nodes, which no invocation-span rule
-   can reach.
-
-Two features cost less than first estimated, and each is recorded where
-it is specified. Imported-name capture needed only each declaration's
-own module, not import edges that the merged declaration list doesn't
-carry (§3.4). The ellipsis needed one implementation of the token set,
-not four, because `...` lexes as an ordinary identifier (§1.5's table).
+Diagnostic limits remain in `MAC-EXP-8`'s surplus-argument anchor and
+`MAC-EXP-14c`'s spanless parser nodes. Further work is tracked in the
+[roadmap](roadmap.md).

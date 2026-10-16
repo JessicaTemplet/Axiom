@@ -1,0 +1,75 @@
+; expect 255
+; Each bit checks a separate binding boundary. A literal never matches
+; a caller's local, and forwarding preserves the original module.
+(import MacroScopeLib)
+
+(macro builtin (literals +)
+  ((builtin (+ a b)) 1)
+  ((builtin other) 0))
+
+(macro keyword (literals otherwise)
+  ((keyword otherwise) 1)
+  ((keyword other) 0))
+
+(macro (pass x) (builtin x))
+
+(macro (ownBuiltin) (builtin (+ 1 2)))
+
+(:: op (-> Int Int))
+(fn (op x)
+  x)
+
+(:: main Int)
+(fn (main)
+  {
+    (let a
+      (if (== (builtin (+ 1 2)) 1)
+        1
+        0))
+    (let b
+      {
+        (let + (lambda (x y) (- x y)))
+        (if (== (builtin (+ 1 2)) 0)
+          2
+          0)
+      })
+    (let c
+      {
+        (let mut otherwise 7)
+        (if (== (keyword otherwise) 0)
+          4
+          0)
+      })
+    (let d
+      ((lambda (+)
+        (if (== (pass (+ 1 2)) 0)
+          8
+          0)
+      )
+        7))
+    (let e
+      (match (Some 7)
+        ((Some otherwise)
+          (if (== (keyword otherwise) 0)
+            16
+            0)
+        )
+        ((None) 0)))
+    (let f
+      (if (== (MacroScopeLib::forward op) 0)
+        32
+        0))
+    (let g
+      (if (== (MacroScopeLib::forward MacroScopeLib::op) 1)
+        64
+        0))
+    (let h
+      {
+        (let + 8)
+        (let op 9)
+        (if (&& (== ownBuiltin 1) (== MacroScopeLib::libraryOp 1))
+          128
+          0)
+      })
+    (+ a (+ b (+ c (+ d (+ e (+ f (+ g h)))))))
+  })

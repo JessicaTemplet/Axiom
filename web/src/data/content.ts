@@ -185,7 +185,7 @@ export const STATUS_SOLID: StatusRow[] = [
 
 export const STATUS_LIMITS: StatusRow[] = [
   { feature: 'Effects', status: 'Enforced; unresolved calls marked', note: 'Constructor allocation contributes Alloc; calls the compiler cannot resolve are marked incomplete.' },
-  { feature: 'Macros', status: 'Partial', note: 'A template cannot generate `import` or a nested `macro`, or test two binders for sameness.' },
+  { feature: 'Macros', status: 'Complete', note: 'Scope-based hygiene, binding-aware literals and repeated-binder constraints. Templates cannot generate `import` or nested `macro` declarations.' },
   { feature: 'Concurrency', status: 'Language form, two lowerings', note: '`parallel`, channels, a mutex and task pools; `taskFold` reclaims each delivered answer under an explicit scalar-only callback contract.' },
   { feature: 'Region syntax', status: 'Checked lexical scopes and inferred escape checks', note: 'Scalar results may leave a region; references stay within its lifetime.' },
   { feature: 'Resource ownership', status: 'Functional', note: 'Files, sockets, terminal modes, channels and mutexes close or free themselves when their last owner lets go.' },
@@ -220,7 +220,7 @@ export const FAQS: Faq[] = [
   {
     q: 'Is Axiom ready for production?',
     a: [
-      'Not for most teams yet. It is 0.x: the core language (types, matching, structs, loops, modules) is complete, the FFI, standard library and editor support are functional, and macros are partial. Every row of the status table names the test behind it.',
+      'Not for most teams yet. It is 0.x: the core language (types, matching, structs, loops, modules) is complete, macros are complete, and the FFI, standard library and editor support are functional. Every row of the status table names the test behind it.',
       'There is no package index and no green threads. What is here is a small language whose compiler you can read and whose claims are tested.',
     ],
     link: { label: 'Implementation status', href: `${DOCS}/status.md` },

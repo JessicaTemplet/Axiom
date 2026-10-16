@@ -1,0 +1,121 @@
+; Independent module parsing in bounded process workers. Results are
+; summaries, not AST handles: a child's arena cannot cross into its parent.
+(import IO)
+(import Sys)
+(import Err)
+(import Str)
+(import Vec)
+(import Fmt)
+(import Mem)
+(import Task)
+(import core)
+(import lexer)
+(import parser)
+
+(:: mix (-> Int Int Int))
+(fn (mix hash value)
+  (* (^ hash value) 1099511628211))
+
+(:: sourceHash (-> String Int))
+(fn (sourceHash src)
+  {
+    (let mut hash 1469598103934665603)
+    (let mut i 0)
+    (while (< i (strLen src))
+      {
+        (set hash (mix hash (strByte src i)))
+        (set i (+ i 1))
+      })
+    hash
+  })
+
+(:: parseFile (-> String Bool String))
+;@axiom:effect(io)
+(fn (parseFile file digest)
+  (match (readFile file)
+    ((Err e) (concat "read-error " (fmtInt e.code)))
+    ((Ok src)
+      {
+        (let tokens (lex src))
+        (let lexError (lexErrDiag tokens src))
+        (if (!= lexError 0)
+          (concat "lex-error " (fmtInt (spanStart (memGetWord lexError 3))))
+          {
+            (let parsed (parseModuleWith tokens (scanAxtags src)))
+            (if (== (memGetWord parsed 0) 0)
+              (concat "parse-error " (fmtInt (memGetWord parsed 2)))
+              {
+                (let decls (memGetWordVec parsed 1))
+                (let mut hash
+                  (if digest
+                    (sourceHash src)
+                    0))
+                (let mut i 0)
+                (while (&& digest (< i (vecLen tokens)))
+                  {
+                    (let token (vecGet tokens i))
+                    (set hash (mix hash (memGetWord token 0)))
+                    (set hash (mix hash (spanStart (tokenSpan token))))
+                    (set hash (mix hash (spanEnd (tokenSpan token))))
+                    (set i (+ i 1))
+                  })
+                (set i 0)
+                (while (&& digest (< i (vecLen decls)))
+                  {
+                    (let decl (vecGet decls i))
+                    (set hash (mix hash (nodeTag decl)))
+                    (if (!= (nodeSpan decl) 0)
+                      {
+                        (set hash (mix hash (spanStart (nodeSpan decl))))
+                        (set hash (mix hash (spanEnd (nodeSpan decl))))
+                      })
+                    (set i (+ i 1))
+                  })
+                (concat "ok "
+                  (concat (fmtInt (vecLen tokens))
+                    (concat " " (concat (fmtInt (vecLen decls)) (concat " " (fmtInt hash))))))
+              })
+          })
+      }
+    )))
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main)
+  {
+    (let width (strToInt (sysArg 1)))
+    (let count (- sysArgc 3))
+    (let digest (strEq (sysArg 2) "verify"))
+    (if (<= width 1)
+      {
+        (let mut i 0)
+        (while (< i count)
+          {
+            (println (parseFile (sysArg (+ i 3)) digest))
+            (set i (+ i 1))
+          })
+        0
+      }
+      {
+        (let results
+          (taskMapWith (lambda (i) (parseFile (sysArg (+ i 3)) digest)) count
+            (taskWithMemory (taskOpts width 256) 536870912)))
+        (let mut i 0)
+        (let mut status 0)
+        (while (< i (vecLen results))
+          {
+            (match (vecGet results i)
+              ((Ok summary) (println summary))
+              ((Err e)
+                {
+                  (println (concat "worker-error " (fmtInt e.code)))
+                  (set status 1)
+                }
+              ))
+            (set i (+ i 1))
+          })
+        status
+      })
+  })

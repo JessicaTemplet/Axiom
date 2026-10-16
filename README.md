@@ -26,14 +26,14 @@ into the C library.
   S-expressions, and the compiler can describe errors and symbols in a
   compact machine-readable form, so tools see the same facts you do.
 - **Read the compiler, in Axiom.** The compiler is written in Axiom:
-  over 136,000 lines of it. A clean checkout rebuilds it from committed LLVM
+  over 137,000 lines of it. A clean checkout rebuilds it from committed LLVM
   IR, and the build stops unless two generations come out
   byte-identical.
 - **Bring Rust along.** Declare Rust functions in an `extern` block,
   and `axiom build --crate` builds and links the crate for you.
 
 Axiom is young. The core language is complete, the standard library,
-FFI and editor support are functional, and macros are partial. There is
+Macros are complete; FFI and editor support are functional. There is
 no package index and no green threads yet. [What's ready today](docs/status.md) lists
 every feature with the test behind it.
 

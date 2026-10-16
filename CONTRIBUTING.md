@@ -210,6 +210,10 @@ only what it declares.
 
 ### The development workflow
 
+Keep `trunk` stable and develop new work on `nightly`. Start from the
+latest trunk, switch to `nightly`, and run the relevant gates there
+before proposing a merge into `trunk`.
+
 1. **Build** once, with
    `./scripts/bootstrap-from-seed.sh --install .axiom-bin`. After that,
    most gates rebuild the compiler under test themselves.
@@ -471,6 +475,7 @@ the authority on which scripts do, so check it rather than this table.
 
 | Script | What it's for |
 |---|---|
+| `bench-frontend.sh` | Compares serial module lexing and parsing with bounded process workers. It checks ordered fingerprints and failure results before timing. Workers return count packets; AST transfer and dependency scheduling are outside the measurement. Use `--jobs 1 2 4 --reps 5`, with `--json report.json` to save samples |
 | `bench-compile.sh` | Prints where a compile spends its time. It's a profile, not an assertion |
 | `run-gates-linux.sh` | Runs the same gates on Linux, in a container, before CI sees them. The local battery is darwin-only, so this catches Linux-only gate defects early. It copies the tree into the container rather than bind-mounting it, because `gate_init` bootstraps into `$repo_root/.axiom-bin` and a Linux binary left there breaks the next darwin run. It asserts nothing, and `run-gates.sh` doesn't call it |
 | `bench-datastructures.sh` | Compares `Vec`, `Map` and `Intern` against their Rust equivalents. `--check` enforces the "within 2×" bound; it's optional because a wall-clock threshold on a shared runner is a flaky test. `--fx` switches the Rust side to a fast hasher, which is the fair comparison against `stdlib/Map.ax`, so `./scripts/bench-datastructures.sh --fx --check` is the bound worth quoting. It prints a ratio only when both sides' work clears launch cost and ten times its jitter, raising the round count until it does. Otherwise it reports INCONCLUSIVE, and `--check` exits 3. Both sides' checksums must equal the closed form, and every hyperfine sample is kept (`BENCH_OUT`) |

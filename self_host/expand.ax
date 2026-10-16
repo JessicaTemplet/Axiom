@@ -853,11 +853,10 @@
 ; ------------------------------------------------------------------
 ; The bound-name stack.
 ;
-; A Vec of Strs used as a stack: pushed on entering a binder, truncated
-; on leaving it. Its only job is to answer "is this name a local?", so
-; that a local outranks a macro of the same name. `typecheck.ax` keeps
-; a richer version of the same thing (`SEnt`); this pass needs the
-; names alone.
+; A stack of ScopeBind records. Each lexical binder introduces a fresh
+; scope, and references resolve to the innermost visible record. Besides
+; keeping local names ahead of macros, the records give literal matching
+; and repeated pattern binders stable binding identities.
 ; ------------------------------------------------------------------
 (pub :: expBound (-> (Vec Int) String Int))
 (pub fn (expBound bs name)
@@ -867,7 +866,7 @@
 (pub fn (expBoundFrom bs name i)
   (if (< i 0)
     0
-    (if (strEq (vecGetStr bs i) name)
+    (if (strEq (memGetWordStr (vecGet bs i) 0) name)
       1
       (expBoundFrom bs name (- i 1)))))
 
@@ -1032,7 +1031,7 @@
     (vecPush (expScTplVec env)
       (as (ScopeBind
             :name name
-            :scopes (as (expScChainCopy env) Int)
+            :scopes (expScChainCopy env)
             :seq (expScNextSeq env)
             :spelling spelling) Int))
     0
@@ -1319,9 +1318,210 @@
 ; push-order stamp from the same counter for-bindings draw from.
 (pub struct ScopeBind
   (name : String)
-  (scopes : Int)
+  (scopes : (Vec Int))
   (seq : Int)
   (spelling : String))
+
+; An identifier keeps its original binding across substitution. Scopes
+; describe lexical visibility; key identifies the selected binding, or
+; an unbound spelling. No source positions take part in the comparison.
+(pub struct SyntaxIdentity
+  (name : String)
+  (scopes : (Vec Int))
+  (key : String)
+  (module : Int))
+
+(pub :: expPushLocal (-> (Vec Int) Int String Int))
+(pub fn (expPushLocal bs env name)
+  {
+    (let scopes
+      (if (== (vecLen bs) 0)
+        vecNew
+        (expScChainCopyIn (memGetWordVec (vecGet bs (- (vecLen bs) 1)) 1) vecNew 0)))
+    (vecPush scopes (expScNextId env))
+    (vecPush bs
+      (as (ScopeBind :name name :scopes scopes :seq (expScNextSeq env) :spelling name) Int))
+    0
+  })
+
+(pub :: expLocalBinding (-> (Vec Int) String Int Int))
+(pub fn (expLocalBinding bs name i)
+  (if (< i 0)
+    0
+    (if (strEq (memGetWordStr (vecGet bs i) 0) name)
+      (vecGet bs i)
+      (expLocalBinding bs name (- i 1)))))
+
+; Copy metadata as well as children. Argument syntax may carry field
+; labels, integer widths and definition-site stamps already.
+(pub :: expSyntaxRebuild (-> Int a b c Int))
+(pub fn (expSyntaxRebuild e a b c)
+  {
+    (let n (mkNodeAt (nodeTag e) a b c (nodeSpan e)))
+    (let mut i 5)
+    (while (< i 13)
+      {
+        (memSetWord n i (memGetWord e i))
+        (set i (+ i 1))
+      })
+    n
+  })
+
+(pub :: expSyntaxKey (-> Int (Vec Int) Int String))
+(pub fn (expSyntaxKey e decls site)
+  (if (!= (nodeSyntaxIdentity e) 0)
+    (memGetWordStr (nodeSyntaxIdentity e) 2)
+    (expCanonKey decls
+      (if (== (nodeDefScope e) 1)
+        (nodeModule e)
+        site)
+      (nodeAName e))))
+
+(pub :: expCaptureVar (-> Int Int (Vec Int) Int))
+(pub fn (expCaptureVar e env bs)
+  {
+    (let local
+      (if (== (nodeDefScope e) 1)
+        0
+        (expLocalBinding bs (nodeAName e) (- (vecLen bs) 1))))
+    (let prior (nodeSyntaxIdentity e))
+    (let origin
+      (if (== (nodeDefScope e) 1)
+        (nodeModule e)
+        (if (== prior 0)
+          (memGetWord env 9)
+          (memGetWord prior 3))))
+    (let key
+      (if (!= local 0)
+        (concat "L:" (expFmtInt (memGetWord local 2)))
+        (if (&& (!= prior 0) (strStartsWith (memGetWordStr prior 2) "L:"))
+          (memGetWordStr prior 2)
+          (expCanonKey (expDeclsVec env) origin (nodeAName e)))))
+    (let n (expSyntaxRebuild e (nodeA e) 0 0))
+    (memSetWord n 12
+      (as (SyntaxIdentity
+            :name (nodeAName e)
+            :scopes
+              (if (== local 0)
+                (if (== prior 0)
+                  vecNew
+                  (memGetWordVec prior 1))
+                (memGetWordVec local 1))
+            :key key
+            :module origin) Int))
+    n
+  })
+
+; Snapshot syntax without invoking macros or running queries. Nested
+; lexical forms get their own scopes, so a name inside an argument has
+; the same binding whether a rule inspects it now or forwards it later.
+(pub :: expCaptureSyntax (-> Int Int (Vec Int) Int))
+(pub fn (expCaptureSyntax e env bs)
+  (if (== e 0)
+    0
+    {
+      (let tag (nodeTag e))
+      (if (== tag TAG_E_VAR)
+        (expCaptureVar e env bs)
+        (if (|| (== tag TAG_E_LET) (== tag TAG_E_LETM))
+          {
+            (let val (expCaptureSyntax (nodeB e) env bs))
+            (let mark (vecLen bs))
+            (expEnterSyntaxBindings e env bs)
+            (let body (expCaptureSyntax (nodeC e) env bs))
+            (let n (expSaveSyntaxBindings (expSyntaxRebuild e (nodeA e) val body) bs mark))
+            (expTrunc bs mark)
+            n
+          }
+          (if (== tag TAG_E_LAM)
+            {
+              (let mark (vecLen bs))
+              (expEnterSyntaxBindings e env bs)
+              (let body (expCaptureSyntax (nodeB e) env bs))
+              (let n (expSaveSyntaxBindings (expSyntaxRebuild e (nodeA e) body 0) bs mark))
+              (expTrunc bs mark)
+              n
+            }
+            (if (== tag TAG_E_BEGIN)
+              (expSyntaxRebuild e (expCaptureVec (nodeAVec e) env bs) 0 0)
+              (if (== tag TAG_E_WHILE)
+                (expSyntaxRebuild e (expCaptureSyntax (nodeA e) env bs)
+                  (expCaptureVec (nodeBVec e) env bs) 0)
+                (if (== tag TAG_E_MATCH)
+                  (expSyntaxRebuild e (expCaptureSyntax (nodeA e) env bs)
+                    (expCaptureVec (nodeBVec e) env bs) 0)
+                  (if (== tag TAG_M_ARM)
+                    {
+                      (let mark (vecLen bs))
+                      (expEnterSyntaxBindings e env bs)
+                      (let body (expCaptureSyntax (nodeB e) env bs))
+                      (let n (expSaveSyntaxBindings (expSyntaxRebuild e (nodeA e) body 0) bs mark))
+                      (expTrunc bs mark)
+                      n
+                    }
+                    (if (|| (== tag TAG_E_APP) (== tag TAG_E_IF))
+                      (expSyntaxRebuild e (expCaptureSyntax (nodeA e) env bs)
+                        (expCaptureSyntax (nodeB e) env bs) (expCaptureSyntax (nodeC e) env bs))
+                      (if (|| (== tag TAG_E_SET) (== tag TAG_E_REGION))
+                        (expSyntaxRebuild e (nodeA e) (expCaptureSyntax (nodeB e) env bs) (nodeC e))
+                        (if (|| (== tag TAG_E_FIELD) (== tag TAG_E_TRY))
+                          (expSyntaxRebuild e (expCaptureSyntax (nodeA e) env bs) (nodeB e)
+                            (nodeC e))
+                          (if (|| (== tag TAG_E_SETF) (== tag TAG_E_HANDLE))
+                            (expSyntaxRebuild e (expCaptureSyntax (nodeA e) env bs) (nodeB e)
+                              (expCaptureSyntax (nodeC e) env bs))
+                            e)))))))))))
+    }))
+
+(pub :: expCaptureVec (-> (Vec Int) Int (Vec Int) (Vec Int)))
+(pub fn (expCaptureVec xs env bs)
+  {
+    (let acc vecNew)
+    (let mut i 0)
+    (while (< i (vecLen xs))
+      {
+        (vecPush acc (expCaptureSyntax (vecGet xs i) env bs))
+        (set i (+ i 1))
+      })
+    acc
+  })
+
+; Reusing captured syntax reuses its own binders. Two substitutions of
+; one lambda therefore name one parameter binding; two separately
+; written lambdas introduce different bindings. Caller-supplied names
+; can still bind free caller syntax when the output is walked.
+(pub :: expEnterSyntaxBindings (-> Int Int (Vec Int) Int))
+(pub fn (expEnterSyntaxBindings e env bs)
+  (if (!= (nodeSyntaxIdentity e) 0)
+    {
+      (let saved (memGetWordVec e 12))
+      (let mut i 0)
+      (while (< i (vecLen saved))
+        {
+          (vecPush bs (vecGet saved i))
+          (set i (+ i 1))
+        })
+      0
+    }
+    (if (== (nodeTag e) TAG_E_LAM)
+      (expPushNames (nodeAVec e) bs env 0)
+      (if (== (nodeTag e) TAG_M_ARM)
+        (expPatBinders (nodeA e) bs env)
+        (expPushLocal bs env (nodeAName e))))))
+
+(pub :: expSaveSyntaxBindings (-> Int (Vec Int) Int Int))
+(pub fn (expSaveSyntaxBindings e bs mark)
+  {
+    (let saved vecNew)
+    (let mut i mark)
+    (while (< i (vecLen bs))
+      {
+        (vecPush saved (vecGet bs i))
+        (set i (+ i 1))
+      })
+    (memSetWord e 12 saved)
+    e
+  })
 
 (pub :: expForStack (-> Int Int))
 (pub fn (expForStack env)
@@ -4469,12 +4669,12 @@
                   (let val (expandExpr (nodeB e) env bs))
                   (let mark (vecLen bs))
                   {
-                    (vecPush bs (nodeA e))
+                    (expEnterSyntaxBindings e env bs)
                     {
                       (let body (expandExpr (nodeC e) env bs))
                       {
                         (expTrunc bs mark)
-                        (mkNodeAt tag (nodeA e) val body sp)
+                        (expSyntaxRebuild e (nodeA e) val body)
                       }
                     }
                   }
@@ -4483,12 +4683,12 @@
                   {
                     (let mark (vecLen bs))
                     {
-                      (expPushNames (nodeAVec e) bs 0)
+                      (expEnterSyntaxBindings e env bs)
                       {
                         (let body (qmBody env (expandExpr (nodeB e) env bs)))
                         {
                           (expTrunc bs mark)
-                          (mkNodeAt TAG_E_LAM (nodeA e) body 0 sp)
+                          (expSyntaxRebuild e (nodeA e) body 0)
                         }
                       }
                     }
@@ -4524,13 +4724,13 @@
                                   e))))))))))))))
     }))
 
-(pub :: expPushNames (-> (Vec Int) (Vec Int) Int Int))
-(pub fn (expPushNames ns bs i)
+(pub :: expPushNames (-> (Vec Int) (Vec Int) Int Int Int))
+(pub fn (expPushNames ns bs env i)
   (if (>= i (vecLen ns))
     0
     {
-      (vecPush bs (vecGet ns i))
-      (expPushNames ns bs (+ i 1))
+      (expPushLocal bs env (vecGetStr ns i))
+      (expPushNames ns bs env (+ i 1))
     }))
 
 (pub :: expandVec (-> (Vec Int) Int (Vec Int) (Vec Int)))
@@ -4591,54 +4791,56 @@
           {
             (let mark (vecLen bs))
             {
-              (expPatBinders (nodeA arm) bs)
+              (expEnterSyntaxBindings arm env bs)
               {
                 (let body (expandExpr (nodeB arm) env bs))
                 {
                   (expTrunc bs mark)
-                  (expandArmsIn arms env bs
-                    (vecPush acc (mkNodeAt TAG_M_ARM (nodeA arm) body 0 (nodeSpan arm))) (+ i 1))
+                  (expandArmsIn arms env bs (vecPush acc (expSyntaxRebuild arm (nodeA arm) body 0))
+                    (+ i 1))
                 }
               }
             }
           }))
     }))
 
-(pub :: expPatBinders (-> Int (Vec Int) Int))
-(pub fn (expPatBinders p bs)
+(pub :: expPatBinders (-> Int (Vec Int) Int Int))
+(pub fn (expPatBinders p bs env)
   (if (== p 0)
     0
     {
       (let tag (nodeTag p))
       (if (== tag TAG_E_VAR)
         {
-          (vecPush bs (nodeA p))
+          (if (&& (! (strEq (nodeAName p) "_"))
+                (&& (! (strEq (nodeAName p) "true")) (! (strEq (nodeAName p) "false"))))
+            (expPushLocal bs env (nodeAName p)))
           0
         }
         (if (== tag TAG_E_APP)
-          (expPatBindersSpine p bs)
+          (expPatBindersSpine p bs env)
           (if (== tag TAG_P_CONNAMED)
-            (expPatBindersVec (nodeCVec p) bs 0)
+            (expPatBindersVec (nodeCVec p) bs env 0)
             0)))
     }))
 
-(pub :: expPatBindersSpine (-> Int (Vec Int) Int))
-(pub fn (expPatBindersSpine p bs)
+(pub :: expPatBindersSpine (-> Int (Vec Int) Int Int))
+(pub fn (expPatBindersSpine p bs env)
   (if (== (nodeTag p) TAG_E_APP)
     {
-      (expPatBindersSpine (nodeA p) bs)
-      (expPatBinders (nodeB p) bs)
+      (expPatBindersSpine (nodeA p) bs env)
+      (expPatBinders (nodeB p) bs env)
       0
     }
     0))
 
-(pub :: expPatBindersVec (-> (Vec Int) (Vec Int) Int Int))
-(pub fn (expPatBindersVec ps bs i)
+(pub :: expPatBindersVec (-> (Vec Int) (Vec Int) Int Int Int))
+(pub fn (expPatBindersVec ps bs env i)
   (if (>= i (vecLen ps))
     0
     {
-      (expPatBinders (vecGet ps i) bs)
-      (expPatBindersVec ps bs (+ i 1))
+      (expPatBinders (vecGet ps i) bs env)
+      (expPatBindersVec ps bs env (+ i 1))
     }))
 
 ; ------------------------------------------------------------------
@@ -6411,7 +6613,7 @@
   (if (expMacHasExprRule mac)
     {
       (let m
-        (expRuleForForms (memGetWordVec mac 9) args 0
+        (expRuleForForms (memGetWordVec mac 9) (expCaptureVec args env bs) 0
           (expMatchCtx (expDeclsVec env) (memGetWord env 9) (nodeModule mac))))
       (if (== m 0)
         {
@@ -6486,8 +6688,8 @@
     (takeArgsIn args n env bs
       (vecPush acc
         (if (== (nodeTag (vecGet args i)) TAG_E_VAR)
-          (vecGet args i)
-          (expandExpr (vecGet args i) env bs)))
+          (expCaptureSyntax (vecGet args i) env bs)
+          (expandExpr (expCaptureSyntax (vecGet args i) env bs) env bs)))
       (+ i 1))))
 
 (pub :: applyRest (-> Int (Vec Int) Int Int (Vec Int) Int))
@@ -7310,7 +7512,7 @@
       {
         (let bs vecNew)
         {
-          (expPushNames (nodeBVec d) bs 0)
+          (expPushNames (nodeBVec d) bs env 0)
           (memSetWord d 3 (qmBody env (expandExpr (nodeC d) env bs)))
           0
         }
@@ -7374,9 +7576,9 @@
       (expCheckMacros env (+ i 1))
     }))
 
-; Every rule's parameters, not only the first's - `expCheckDupParams`
-; reads node B, which is rule zero's, and a duplicate in a later rule
-; is the same silent wrong answer at the same cost (MAC-LANG-2).
+; A binder may constrain several forms at one repetition depth. A name
+; shared between the fixed prefix and the repeating pattern would mean
+; both one form and a sequence, so it remains AX3020.
 (pub :: expCheckRuleParams (-> Int Int Int Int))
 (pub fn (expCheckRuleParams mac env i)
   {
@@ -7385,15 +7587,50 @@
       0
       (if (>= i (vecLen rules))
         0
-        ; Slot 0 stops at the TOP LEVEL, so once a pattern can
-        ; nest (MAC-LANG-15) it is no longer the list of what a
-        ; rule binds: `((m a (f a)) ...)` binds `a` twice and
-        ; slot 0 sees `a` and one marker. The binders are what
-        ; the check is about, so the check walks the patterns.
         {
-          (expCheckDupParamsIn mac (expRuleBinders (expRulePats (vecGet rules i)) 0 vecNew) env 0)
+          (let r (vecGet rules i))
+          (let k (expRepIndex r))
+          (if (>= k 0)
+            {
+              (let fixed vecNew)
+              (let mut j 0)
+              (while (< j k)
+                {
+                  (expRuleBindersOf (vecGet (expRulePats r) j) fixed)
+                  (set j (+ j 1))
+                })
+              (let ns (expUniqueNames fixed))
+              (let reps (expUniqueNames (expRuleBindersOf (vecGet (expRulePats r) k) vecNew)))
+              (let mut n 0)
+              (while (< n (vecLen reps))
+                {
+                  (if (>= (expParamIndex ns (vecGetStr reps n)) 0)
+                    (expEmit env
+                      (mkDiagNote SEV_ERROR "AX3020" "macro-duplicate-parameter" (nodeSpan mac)
+                        (concat
+                          (concat (concat "macro `" (nodeAName mac)) "` binds the parameter `")
+                          (concat (vecGetStr reps n) "` at two repetition depths"))
+                        0 0 "give the fixed and repeated bindings different names"
+                        "a pattern binder may constrain several forms at one depth; one form and a sequence need separate names")))
+                  (set n (+ n 1))
+                })
+            })
           (expCheckRuleParams mac env (+ i 1))
         }))
+  })
+
+(pub :: expUniqueNames (-> (Vec Int) (Vec Int)))
+(pub fn (expUniqueNames ns)
+  {
+    (let out vecNew)
+    (let mut i 0)
+    (while (< i (vecLen ns))
+      {
+        (if (< (expParamIndex out (vecGetStr ns i)) 0)
+          (vecPush out (vecGet ns i)))
+        (set i (+ i 1))
+      })
+    out
   })
 
 ; AN UNREACHABLE RULE is refused at the macro's own line.
@@ -7709,16 +7946,11 @@
 ; untouched: a literal is still one `E_VAR` node in exactly the
 ; position its spelling stood.
 ;
-; The comparison is canonical spellings, via `expCanonKey`, not raw
-; ones: a pattern `+` meaning the Prelude operator must not match an
-; invocation whose `+` the call site defined itself, and a qualified
-; `Pre::+` must match it although the spellings differ. Two
-; spellings neither side declares match by spelling - the DSL-keyword
-; case, where there is no binding to disagree on. What this is NOT
-; is scope sets (MAC-HYG-9, still provisional): names introduced by
-; renaming carry no scope to compare, but a renamed head spells
-; `name.N` with an unspellable separator, so one never spells a
-; literal by accident.
+; Each argument identifier carries its lexical scopes and selected
+; binding. Captured caller syntax retains its module when forwarded;
+; template free identifiers retain their definition-site stamp. Global
+; identities include functions, macros, constructors, effects and extern
+; items. Unbound DSL keywords agree by spelling.
 ; ------------------------------------------------------------------
 ; A builtin operator spelling: the eighteen primitives the checker
 ; registers for every program (typecheck.ax `regFn`), which resolve
@@ -7782,41 +8014,102 @@
 ; and `+` are one binding although the spellings differ, which is
 ; the case the key exists to catch.
 (pub :: expCanonKey (-> (Vec Int) Int String String))
-;@axiom:effect(unsafe)
 (pub fn (expCanonKey decls modW name)
   {
-    (let qm (expModOf name))
-    (if (!= (as qm Int) 0)
-      (if (== (expDeclNamed decls name 0) 1)
-        (concat "D:" name)
-        (if (== (expBuiltinOp (bareOf name)) 1)
-          (concat "D:builtin:" (bareOf name))
-          (concat "U:" name)))
-      (if (== modW 0)
-        (if (== (expDeclNamed decls name 0) 1)
-          (concat "D:" name)
-          (if (== (expBuiltinOp name) 1)
-            (concat "D:builtin:" name)
-            {
-              (let u (expUniqueModuleName decls name))
-              (if (strEq u name)
-                (concat "U:" name)
-                (concat "D:" u))
-            }))
-        {
-          (let q (concat (concat (as modW String) "$") name))
-          (if (== (expDeclNamed decls q 0) 1)
-            (concat "D:" q)
-            (if (== (expBuiltinOp name) 1)
-              (concat "D:builtin:" name)
-              {
-                (let u (expUniqueModuleName decls name))
-                (if (strEq u name)
-                  (concat "U:" name)
-                  (concat "D:" u))
-              }))
-        }))
+    (let qual (expModOf name))
+    (let bare (bareOf name))
+    (let own
+      (expBindingIn decls bare
+        (if (== (as qual Int) 0)
+          modW
+          (as qual Int))
+        0 0 ""))
+    (let imported
+      (if (== (as qual Int) 0)
+        (expBindingIn decls bare modW 1 0 "")
+        ""))
+    (if (! (strEq own ""))
+      own
+      (if (strStartsWith imported "M:")
+        imported
+        (if (== (expBuiltinOp bare) 1)
+          (concat "D:builtin:" bare)
+          (if (!= (as qual Int) 0)
+            (concat "U:" name)
+            (if (strEq imported "")
+              (concat "U:" name)
+              imported)))))
   })
+
+; Exact module lookup precedes visible imports. Signatures and bodies
+; share one key; constructors include their owning type, so two modules'
+; homonymous constructors remain different bindings.
+(pub :: expBindingIn (-> (Vec Int) String Int Int Int String String))
+;@axiom:effect(unsafe)
+(pub fn (expBindingIn decls name modW imports i found)
+  (if (>= i (vecLen decls))
+    found
+    {
+      (let d (vecGet decls i))
+      (let eligible
+        (if (== imports 0)
+          (expSameMod (nodeModuleName d) (as modW String))
+          (if (&& (!= (nodeModule d) 0) (== (nodeVis d) 1))
+            1
+            0)))
+      (let key
+        (if (== eligible 1)
+          (expDeclBindingKey d name)
+          ""))
+      (if (|| (strEq key "")
+            (|| (&& (strStartsWith found "D:") (strStartsWith key "C:"))
+              (&& (strStartsWith found "M:") (! (strStartsWith key "M:")))))
+        (expBindingIn decls name modW imports (+ i 1) found)
+        (if (|| (strStartsWith key "M:")
+              (|| (strEq found "")
+                (|| (strEq found key) (&& (strStartsWith key "D:") (strStartsWith found "C:")))))
+          (expBindingIn decls name modW imports (+ i 1) key)
+          (concat "A:" name)))
+    }))
+
+(pub :: expBindingName (-> Int String String))
+(pub fn (expBindingName d name)
+  (if (== (nodeModule d) 0)
+    name
+    (concat (concat (nodeModuleName d) "$") name)))
+
+(pub :: expDeclBindingKey (-> Int String String))
+(pub fn (expDeclBindingKey d name)
+  {
+    (let tag (nodeTag d))
+    (if (|| (== tag TAG_D_FN) (|| (== tag TAG_D_SIG) (== tag TAG_D_MACRO)))
+      (if (strEq (bareOf (nodeAName d)) name)
+        (concat
+          (if (== tag TAG_D_MACRO)
+            "M:"
+            "D:")
+          (expBindingName d name))
+        "")
+      (if (== tag TAG_D_STRUCT)
+        (if (strEq (bareOf (nodeAName d)) name)
+          (concat "C:" (expBindingName d name))
+          "")
+        (if (== tag TAG_D_DATA)
+          (expCtorBindingKey (nodeBVec d) d name 0)
+          (if (|| (== tag TAG_D_EFFECT) (== tag TAG_D_EXTERN))
+            (if (>= (expParamIndex (nodeBVec d) name) 0)
+              (concat "D:" (expBindingName d name))
+              "")
+            ""))))
+  })
+
+(pub :: expCtorBindingKey (-> (Vec Int) Int String Int String))
+(pub fn (expCtorBindingKey cs d name i)
+  (if (>= i (vecLen cs))
+    ""
+    (if (strEq (nodeAName (vecGet cs i)) name)
+      (concat (concat "C:" (expBindingName d (bareOf (nodeAName d)))) (concat ":" name))
+      (expCtorBindingKey cs d name (+ i 1)))))
 
 ; The match context rule selection threads: the merged declaration
 ; list both canonicalizations read, and the invocation-site and
@@ -7856,10 +8149,174 @@
 (pub fn (expMatchLiteral nm a lctx)
   (if (!= (nodeTag a) TAG_E_VAR)
     0
-    (if (strEq (expCanonKey (as (vecGet lctx 0) (Vec Int)) (vecGet lctx 1) (nodeAName a))
-          (expCanonKey (as (vecGet lctx 0) (Vec Int)) (vecGet lctx 2) nm))
+    (if (&&
+          (! (strStartsWith (expSyntaxKey a (as (vecGet lctx 0) (Vec Int)) (vecGet lctx 1)) "A:"))
+          (strEq (expSyntaxKey a (as (vecGet lctx 0) (Vec Int)) (vecGet lctx 1))
+            (expCanonKey (as (vecGet lctx 0) (Vec Int)) (vecGet lctx 2) nm)))
       1
       0)))
+
+; Repeated pattern binders constrain syntax instead of discarding the
+; first value. Identifiers compare their captured bindings, literals
+; their values, and compound forms their ordered children and labels.
+(pub :: expSyntaxSame (-> Int Int Int))
+(pub fn (expSyntaxSame a b)
+  (if (== a b)
+    1
+    (if (|| (== a 0) (== b 0))
+      0
+      (if (!= (nodeTag a) (nodeTag b))
+        0
+        (if (== (nodeTag a) TAG_E_VAR)
+          (if (strEq (expSyntaxKey a vecNew 0) (expSyntaxKey b vecNew 0))
+            1
+            0)
+          (if (== (nodeTag a) TAG_E_STR)
+            (expStrLitEq (nodeAName a) (nodeAName b))
+            (if (|| (== (expSyntaxSlotKind (nodeTag a) 1) 0) (== (expSyntaxSlotsSame a b 1) 0))
+              0
+              (expSyntaxStringsSame (nodeFieldNames a) (nodeFieldNames b)))))))))
+
+; Slot kinds: 0 is an unused word, 1 a scalar, 2 a name, 3 a node,
+; 4 a node vector and 5 a name vector. Positions and checker metadata
+; do not change syntax equality.
+(pub :: expSyntaxSlotKind (-> Int Int Int))
+(pub fn (expSyntaxSlotKind tag slot)
+  (if (|| (== tag TAG_E_INT) (|| (== tag TAG_E_FLT) (== tag TAG_E_CHAR)))
+    (if (|| (== slot 1) (&& (== tag TAG_E_INT) (== slot 2)))
+      1
+      0)
+    (if (|| (== tag TAG_E_APP) (|| (== tag TAG_E_IF) (== tag TAG_M_ARM)))
+      (if (&& (== slot 3) (!= tag TAG_E_IF))
+        0
+        3)
+      (if (|| (== tag TAG_E_LET) (== tag TAG_E_LETM))
+        (if (== slot 1)
+          2
+          3)
+        (if (== tag TAG_E_LAM)
+          (if (== slot 1)
+            5
+            (if (== slot 2)
+              3
+              0))
+          (if (== tag TAG_E_BEGIN)
+            (if (== slot 1)
+              4
+              0)
+            (if (|| (== tag TAG_E_WHILE) (== tag TAG_E_MATCH))
+              (if (== slot 1)
+                3
+                (if (== slot 2)
+                  4
+                  0))
+              (if (|| (== tag TAG_E_SET) (== tag TAG_E_REGION))
+                (if (== slot 1)
+                  2
+                  (if (== slot 2)
+                    3
+                    0))
+                (if (|| (== tag TAG_E_FIELD) (== tag TAG_E_SETF))
+                  (if (== slot 2)
+                    2
+                    (if (&& (== tag TAG_E_FIELD) (== slot 3))
+                      0
+                      3))
+                  (if (== tag TAG_E_TRY)
+                    (if (== slot 1)
+                      3
+                      0)
+                    (if (== tag TAG_E_HANDLE)
+                      (if (== slot 2)
+                        5
+                        3)
+                      (if (== tag TAG_P_CON0)
+                        (if (== slot 1)
+                          2
+                          0)
+                        (if (== tag TAG_P_CONNAMED)
+                          (if (== slot 1)
+                            2
+                            (if (== slot 2)
+                              5
+                              4))
+                          0)))))))))))))
+
+(pub :: expSyntaxSlotsSame (-> Int Int Int Int))
+(pub fn (expSyntaxSlotsSame a b slot)
+  (if (> slot 3)
+    1
+    {
+      (let kind (expSyntaxSlotKind (nodeTag a) slot))
+      (let av (memGetWord a slot))
+      (let bv (memGetWord b slot))
+      (let same
+        (if (== kind 0)
+          1
+          (if (== kind 1)
+            (if (== av bv)
+              1
+              0)
+            (if (== kind 2)
+              (if (strEq (memGetWordStr a slot) (memGetWordStr b slot))
+                1
+                0)
+              (if (== kind 3)
+                (expSyntaxSame av bv)
+                (if (== kind 4)
+                  (expSyntaxVecSame av bv)
+                  (expSyntaxStringsSame av bv)))))))
+      (if (== same 0)
+        0
+        (expSyntaxSlotsSame a b (+ slot 1)))
+    }))
+
+(pub :: expSyntaxVecSame (-> Int Int Int))
+;@axiom:effect(unsafe)
+(pub fn (expSyntaxVecSame a b)
+  (if (== a b)
+    1
+    (if (|| (== a 0) (== b 0))
+      0
+      {
+        (let av (as a (Vec Int)))
+        (let bv (as b (Vec Int)))
+        (let mut i 0)
+        (let mut same
+          (if (== (vecLen av) (vecLen bv))
+            1
+            0))
+        (while (&& (== same 1) (< i (vecLen av)))
+          {
+            (set same (expSyntaxSame (vecGet av i) (vecGet bv i)))
+            (set i (+ i 1))
+          })
+        same
+      })))
+
+(pub :: expSyntaxStringsSame (-> Int Int Int))
+;@axiom:effect(unsafe)
+(pub fn (expSyntaxStringsSame a b)
+  (if (== a b)
+    1
+    (if (|| (== a 0) (== b 0))
+      0
+      {
+        (let av (as a (Vec String)))
+        (let bv (as b (Vec String)))
+        (let mut i 0)
+        (let mut same
+          (if (== (vecLen av) (vecLen bv))
+            1
+            0))
+        (while (&& (== same 1) (< i (vecLen av)))
+          {
+            (if (! (strEq (vecGetStr av i) (vecGetStr bv i)))
+              (set same 0))
+            (set i (+ i 1))
+          })
+        same
+      })))
 
 ; ------------------------------------------------------------------
 ; MATCHING (macro-system.md MAC-LANG-15).
@@ -7900,9 +8357,14 @@
         (if (strEq (nodeAName p) "_")
           1
           {
-            (vecPush names (nodeA p))
-            (vecPush vals a)
-            1
+            (let prior (expParamIndex names (nodeAName p)))
+            (if (>= prior 0)
+              (expSyntaxSame (vecGet vals prior) a)
+              {
+                (vecPush names (nodeA p))
+                (vecPush vals a)
+                1
+              })
           }))
       (if (== pt TAG_E_INT)
         (if (&& (== (nodeTag a) TAG_E_INT) (== (as (nodeA a) Int) (as (nodeA p) Int)))
@@ -8123,7 +8585,7 @@
 (pub :: expMatchNestTail (-> Int (Vec Int) Int (Vec Int) (Vec Int) Int))
 (pub fn (expMatchNestTail pat args i seqs lctx)
   {
-    (let binders (expRuleBindersOf pat vecNew))
+    (let binders (expUniqueNames (expRuleBindersOf pat vecNew)))
     {
       (let accs (expFreshAccs binders 0 vecNew))
       (if (== (expMatchNestEach pat args i binders accs lctx) 0)
@@ -8222,13 +8684,20 @@
         (expSeqLookupFrom seqs name (+ i 1)))
     }))
 
-; Is every top-level element of this rule a BINDER? Such a rule
+; Is every top-level element of this rule a distinct BINDER? Such a rule
 ; matches every invocation of its arity, so any later rule of that
 ; arity is unreachable - which is the narrowed form of the refusal
 ; `MAC-LANG-14` shipped when arity was the whole selector.
 (pub :: expRuleIrrefutable (-> (Vec Int) Int))
 (pub fn (expRuleIrrefutable r)
-  (expPatsIrrefutable (expRulePats r) 0))
+  (if (== (expPatsIrrefutable (expRulePats r) 0) 0)
+    0
+    {
+      (let ns (expRuleBinders (expRulePats r) 0 vecNew))
+      (if (== (vecLen ns) (vecLen (expUniqueNames ns)))
+        1
+        0)
+    }))
 
 (pub :: expPatsIrrefutable (-> (Vec Int) Int Int))
 (pub fn (expPatsIrrefutable ps i)
@@ -8268,11 +8737,9 @@
     acc
     (expShapeElems spells (+ i 1) (concat (concat acc " ") (vecGetStr spells i)))))
 
-; Every BINDER a rule's patterns introduce, nested ones included. The
-; duplicate check runs over this rather than over slot 0, because slot
-; 0 stops at the top level and a repeat can be nested: `((m a (f a))
-; ...)` binds `a` twice, and `expParamIndex` is last-wins, so the
-; first would be silently discarded.
+; Every binder occurrence, including constraints and nested patterns.
+; Repetition deduplicates this list to create one sequence per name;
+; the reachability check counts duplicates as equality constraints.
 ;
 ; Not `expPatBinders`, which walks a MATCH ARM's pattern and therefore
 ; skips the spine HEAD - correct there, where the head is a
@@ -8735,8 +9202,8 @@
                   "an expression template is one expression; a declaration position needs declarations (macro-system.md MAC-CAP-8)")
                 {
                   (let m
-                    (expRuleForForms (memGetWordVec mac 9) (nodeBVec d) 0
-                      (expMatchCtx decls (nodeModule d) (nodeModule mac))))
+                    (expRuleForForms (memGetWordVec mac 9) (expCaptureVec (nodeBVec d) env vecNew)
+                      0 (expMatchCtx decls (nodeModule d) (nodeModule mac))))
                   (if (== m 0)
                     {
                       (expNoRuleDiag env (expSrcSpelling (nodeAName d))

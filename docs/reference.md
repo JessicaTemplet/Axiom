@@ -1235,6 +1235,23 @@ macro picks which:
 10
 ```
 
+A repeated pattern binder constrains equal syntax:
+
+```scheme
+(macro same
+  ((same x x) 1)
+  ((same x y) 0))
+
+(fn (main)
+  (same (+ 1 2) (+ 1 2)))
+; 1
+```
+
+Identifiers compare by binding, literals by value, and compound forms
+by their structure. Literal identifiers declared with `(literals ...)`
+respect local shadowing and retain their original module when forwarded.
+These comparisons never evaluate an argument.
+
 Macros can generate declarations and inspect syntactic type
 information. They do not execute arbitrary source code during
 compilation. `Pre` supplies two derivers, `deriveEq` and

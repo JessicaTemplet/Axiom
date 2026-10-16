@@ -105,7 +105,8 @@ integrator would still need.
 | Legacy CLI and syntax removed: `axiom FILE`, expression `fn`, keyword struct construction, format aliases | Done | `compat/BREAKING` |
 | The precondition tag removed; contracts are `pre` and `post` | Done | `AX3095` |
 | Macro hygiene has one implementation | Done | `MAC-HYG-10` |
-| Literal identifiers in macro patterns compare by binding, not spelling | Planned | `MAC-HYG-9`, `MAC-LANG-14a` |
+| Literal identifiers in macro patterns compare by binding, not spelling | Done | `MAC-HYG-9`, `tests/selfhost/1025-macro-literal-scopes.ax` |
+| Repeated macro pattern binders constrain equal syntax at one repetition depth | Done | `MAC-LANG-15`, `tests/selfhost/1026-macro-repeated-binders.ax` |
 | `macro` and `emacro` become one form: a rule's template is declarations or one expression, and the invocation's position picks | Done | `MAC-LANG-14`, `tests/stdlib/930-macro-both-positions.ax` |
 | Errors propagate with a postfix `?` | Done | `ERR-SUGAR-4`, `tests/stdlib/847-propagate.ax`, `tests/diagnostics/1300-propagate-position.ax` |
 | A unit type with a value, `()`, so an `if` without an else, a dropped branch and a procedure need no filler `0` | Done | `tests/stdlib/890-unit-and-if.ax`, `tests/stdlib/892-dropped-branches.ax` |
@@ -198,6 +199,7 @@ including pattern matching, remain work to do.
 | Semantic tokens support range and delta requests | Done |
 | The language server answers inside macro invocations | Not started |
 | Packages can pin a version | Not started |
+| Independent module lexing and parsing in bounded workers | Prototype | `scripts/bench-frontend.sh`; AST transfer and deterministic dependency scheduling remain |
 | A published performance profile | Not started |
 
 The editor comparison follows rust-analyzer's

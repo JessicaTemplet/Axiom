@@ -42,7 +42,9 @@ fail() { echo "FAIL: $*"; failed=$((failed + 1)); }
 # 370-pre-import.ax now exercises its two remaining derivers, adding
 # `eqTone` and `arityPair`. The remaining population stays at 132,
 # and no editor request targeting a generated name was added.
-WANT_POPULATION=134
+# Four generated functions in 1027-macro-declaration-bindings.ax exercise
+# binding identity through nested declaration macros. Editor demand is unchanged.
+WANT_POPULATION=138
 WANT_DEMAND=4
 
 echo "== population: every #generated= row over the corpus =="
