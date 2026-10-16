@@ -2598,11 +2598,14 @@
       (strSlice s 1 (- (strLen s) 2))
       s)))
 
-; `(type Name [tyvars] = Type)`. The name span, the tyvars, and the
-; target's STRUCTURE all survive - `symbols` renders the target in the
-; checker's notation. Any shape this does not recognise falls back to
-; the old skip, so acceptance is unchanged: only well-formed aliases
-; gain a node.
+; `(type Name [tyvars] Type)`, uniform with every other declaration:
+; no assignment operator stands between a name and what it names. The
+; `=` spelling is still read while the tree migrates to the uniform
+; form, and the formatter already prints that form. The name span,
+; the tyvars, and the target's STRUCTURE all survive - `symbols`
+; renders the target in the checker's notation. Any shape this does
+; not recognise falls back to the old skip, so acceptance is
+; unchanged: only well-formed aliases gain a node.
 (pub :: parseAliasDecl (-> Ints Int Int Int))
 (pub fn (parseAliasDecl tokens pos origPos)
   ; `(` as well as an identifier, because the name may be a
@@ -2619,9 +2622,8 @@
       (if (== (memGetWord nr 0) 0)
         (pErr origPos)
         ; NOT `collectTyParams`: its bare-run test is merely
-        ; "does not start uppercase", and `=` lexes as an ident
-        ; here, so the alias's own `=` was swallowed as a tyvar
-        ; and every alias fell back to the inert skip. A tyvar
+        ; "does not start uppercase", so a stray `=` lexes as an
+        ; ident here and would be swallowed as a tyvar. A tyvar
         ; must start with a lowercase LETTER.
         {
           (let name (memGetWordStr nr 1))
@@ -2629,10 +2631,14 @@
           (let tvs vecNew)
           {
             (let afterTvs (aliasTyvarsEnd tokens (memGetWord nr 2) tvs))
-            (if (&& (peekIs tokens afterTvs TK_IDENT)
-                  (strEq (tokenLexeme (vecGet tokens afterTvs)) "="))
+            {
+              (let targetPos
+                (if (&& (peekIs tokens afterTvs TK_IDENT)
+                      (strEq (tokenLexeme (vecGet tokens afterTvs)) "="))
+                  (advance afterTvs)
+                  afterTvs))
               {
-                (let tr (parseType tokens (advance afterTvs)))
+                (let tr (parseType tokens targetPos))
                 (if (== (memGetWord tr 0) 0)
                   (pErr origPos)
                   (if (peekIs tokens (memGetWord tr 2) TK_RPAREN)
@@ -2640,7 +2646,7 @@
                       (advance (memGetWord tr 2)))
                     (pErr origPos)))
               }
-              (pErr origPos))
+            }
           }
         })
     }
@@ -2723,8 +2729,8 @@
       })
   })
 
-; Type parameters between an alias's name and its `=`: a paren list,
-; or a bare run of idents that start with a lowercase LETTER.
+; Type parameters between an alias's name and its target: a paren
+; list, or a bare run of idents that start with a lowercase LETTER.
 (pub :: aliasTyvarsEnd (-> Ints Int Strings Int))
 (pub fn (aliasTyvarsEnd tokens pos tvs)
   (if (peekIs tokens pos TK_LPAREN)
