@@ -23,4 +23,4 @@ for arg in "$@"; do
   esac
 done
 python3 scripts/lib/bench-frontend.py --probe "$work/frontend-probe" \
-  --transfer-probe "$work/transfer-probe" "${graph_args[@]}" "$@"
+  --transfer-probe "$work/transfer-probe" ${graph_args[@]+"${graph_args[@]}"} "$@"
