@@ -22,7 +22,7 @@ confidence you would have in Rust or Ada.
 - **The surface is stable.** At 1.0 the compatibility rules become
   enforceable (`COMPAT-6`), and every break before then has a row in
   `compat/BREAKING`.
-- **Trunk is green** on linux-aarch64 and darwin-aarch64, with a
+- **The `stable` branch is green** on linux-aarch64 and darwin-aarch64, with a
   reproducible toolchain record.
 
 Qualification against a safety standard is not part of 1.0. The

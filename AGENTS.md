@@ -5,3 +5,9 @@ documentation style guide in
 [`.claude/skills/docs-style/SKILL.md`](.claude/skills/docs-style/SKILL.md).
 Read both before editing anything, and the style guide before editing
 any Markdown page.
+
+Keep `stable` ready to release. Develop new work on `nightly`, including
+compiler, library, tooling and documentation changes. Commit and push
+progress to `origin/nightly` as you work, and use GitHub CI for full
+validation. Run the relevant checks before proposing a merge into
+`stable`.

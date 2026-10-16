@@ -254,7 +254,7 @@ it would refuse releases we intend to make.
 [Cutting a release](../CONTRIBUTING.md#cutting-a-release) in
 CONTRIBUTING.md is the full procedure. Compatibility adds step 3:
 
-1. Land the work on `trunk` and let CI go green.
+1. Land the work on `stable` and let CI go green.
 2. Run `scripts/bump-version.sh <X.Y.Z>`.
 3. Generate the new baseline and commit it beside the old ones:
 

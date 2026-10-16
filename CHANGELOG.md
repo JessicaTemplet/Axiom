@@ -16,6 +16,10 @@ its changelog too.
 
 ## Unreleased
 
+- Rename `trunk` to `stable` as the default release branch. Development
+  stays on `nightly`. CI, website deployment and install links follow
+  the new name. Tested by `tests/ci/gate-cache.py`.
+
 ## 0.7.9 — 2026-10-15
 
 This release adds explicit numeric conversions and fixed-width integers,

@@ -2,7 +2,7 @@
 
 ![GitHub CI](https://github.com/chrispaig3/Axiom/actions/workflows/ci.yml/badge.svg)
 
-<img width="1600" height="900" alt="Axiom — High-level thinking. Native-level control. Electric lime symbol and warm white wordmark on graphite." src="https://raw.githubusercontent.com/chrispaig3/Axiom/trunk/assets/logo/Axiom_Logo.png" />
+<img width="1600" height="900" alt="Axiom — High-level thinking. Native-level control. Electric lime symbol and warm white wordmark on graphite." src="https://raw.githubusercontent.com/chrispaig3/Axiom/stable/assets/logo/Axiom_Logo.png" />
 
 **The functional systems language.** 
 
@@ -54,7 +54,7 @@ sudo apt-get install -y llvm clang
 Then install the compiler:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chrispaig3/axiom/trunk/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chrispaig3/axiom/stable/scripts/install.sh | bash
 export PATH="$HOME/.axiom/bin:$PATH"
 ```
 

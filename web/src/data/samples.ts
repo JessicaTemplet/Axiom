@@ -76,7 +76,7 @@ export interface Program {
   docs?: { label: string; href: string }
 }
 
-const LIB = 'https://github.com/chrispaig3/Axiom/blob/trunk/'
+const LIB = 'https://github.com/chrispaig3/Axiom/blob/stable/'
 const REF = `${LIB}docs/reference.md`
 
 /** The shell command that produced a program's output. */
