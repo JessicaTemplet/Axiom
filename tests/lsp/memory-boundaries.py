@@ -90,7 +90,7 @@ def run(compiler):
     with tempfile.TemporaryDirectory(prefix="axiom-memory-boundaries-") as directory:
         root = Path(directory)
         source = """(struct Packet (text : String))
-(type Message = Packet)
+(type Message Packet)
 (:: readRaw (-> Int String))
 (fn (readRaw address)
   { (let item (as address Message))

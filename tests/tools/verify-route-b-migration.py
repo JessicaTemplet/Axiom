@@ -97,7 +97,7 @@ class MigrationTests(unittest.TestCase):
         before = '''(struct Point (x : Int) (y : Int))
 (data Sum (Pair { x : Int, y : Int }))
 (:: f (-> Point (Vec Point) Sum))
-(type Points = (Vec Point))
+(type Points (Vec Point))
 (fn (f p xs) (match p ((Point x y) (Pair x y))))
 '''
         self.assertEqual(self.migrate(before), before)

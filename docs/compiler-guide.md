@@ -92,7 +92,7 @@ See the [memory model](memory-model.md) and
 
 | Declaration | Effect |
 |---|---|
-| `(type Name = String)` | An alias; `Name` and `String` are interchangeable |
+| `(type Name String)` | An alias; `Name` and `String` are interchangeable |
 | `(subtype Percent is Int range 0..101)` | A distinct integer type; narrowing checks the range at run time |
 | A `struct` or `data` wrapper | A nominal type with its own fields or constructors |
 | A sealed struct | A wrapper whose constructor and fields stay private to its module |

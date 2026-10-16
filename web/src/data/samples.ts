@@ -344,7 +344,7 @@ AX-1044  delivered        -`,
     title: "Choose each number's representation",
     lede: "Fixed-width integers keep their precision. `as` makes conversions explicit, `type` gives an existing type a useful name, and `|>` reads a sequence of calls from left to right.",
     points: [
-      { at: "(type Cents = Int32)", text: "An alias is another name for its underlying type; it adds no conversion or new type." },
+      { at: "(type Cents Int32)", text: "An alias is another name for its underlying type; it adds no conversion or new type." },
       { at: "(quantity : Quantity)", text: "This struct field uses UInt16's two bytes. Calls and container elements still use one machine word." },
       { at: "(* (as order.quantity Int32) order.unitPrice)", text: "Both operands must be Int32. The widening conversion is written explicitly." },
       { at: "(let amount (|> order total dollars))", text: "Each stage receives the previous result once. These unary stages are ordinary function calls." },
@@ -353,9 +353,9 @@ AX-1044  delivered        -`,
     output: "total: 37.50",
     code: `(import IO)
 
-(type Quantity = UInt16)
+(type Quantity UInt16)
 
-(type Cents = Int32)
+(type Cents Int32)
 
 (struct Order
   (quantity : Quantity)

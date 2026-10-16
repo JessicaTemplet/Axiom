@@ -690,9 +690,9 @@ See [Regions](#regions) and the [memory model](memory-model.md).
 ## Type aliases
 
 ```scheme
-(type Name = String)
-(type Items a = (Vec a))
-(type Mapping a b = (-> a b))
+(type Name String)
+(type Items a (Vec a))
+(type Mapping a b (-> a b))
 
 (:: apply (-> (Mapping a b) a b))
 (fn (apply f x) (f x))
@@ -703,7 +703,7 @@ See [Regions](#regions) and the [memory model](memory-model.md).
 An alias gives an existing type another name; it creates no wrapper
 or separate identity.
 
-Declare each lowercase parameter once, before `=`, and supply exactly
+Declare each lowercase parameter once, before the target, and supply exactly
 that many arguments at each use. Every variable in the target must be
 one of those parameters, and every alias parameter must appear in the
 target. Parameters substitute simultaneously, so a

@@ -114,7 +114,7 @@ def apply_delta(data, response):
 def structured_tokens(compiler):
     """Bucket lookups keep their owners across semantic requests and edits."""
     source = """(struct Point (x : UInt8) (y : UInt8))
-(type Count = UInt8)
+(type Count UInt8)
 (:: main Int)
 (fn (main)
   {

@@ -16,6 +16,18 @@ its changelog too.
 
 ## Unreleased
 
+- Type aliases no longer take `=`: write `(type Items a (Vec a))`.
+  The form `(type Items a = (Vec a))` is refused with `AX2003`, so a
+  declaration never carries an assignment operator. Tested by
+  `tests/selfhost/973-type-alias.ax` and
+  `tests/diagnostics/428-alias-eq-refused.axbad`.
+
+- Batch frontend parsing into balanced worker batches and name the
+  pipeline's composite types (`Decls`, `Units`, `Names`, `Ints`) in
+  signatures across the compiler. `AXIOM_TIME_PHASES=1` prints one
+  timing line per pipeline stage. Tested by
+  `tests/frontend/parallel/verify.py`.
+
 - Compact frontend syntax packets by omitting zero fields and packing
   source spans into one word. Reconstructed strings share the parent's
   packet buffer, and vectors allocate their final capacity directly.

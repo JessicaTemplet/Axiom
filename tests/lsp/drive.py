@@ -1477,7 +1477,7 @@ NAV_MAIN = """(import RefHelper)
 ; it too: two of the type positions a rename of it has to reach.
 (pub struct Box (top : Shape) (n : Int))
 
-(pub type Shapes = (Vec Shape))
+(pub type Shapes (Vec Shape))
 
 ; Two parameters; the second is shadowed by a `let` whose value
 ; still reads the parameter, because a `let` is not recursive.
@@ -3048,7 +3048,7 @@ TH_TYPES = """(import ThHelper)
 
 (pub struct Box (top : Shape) (n : Int))
 
-(pub type Shapes = (Vec Shape))
+(pub type Shapes (Vec Shape))
 
 ; Two subtypes, one bounded both sides.
 (pub subtype Positive is Int range 1 .. 10)
@@ -5503,7 +5503,7 @@ HL = r"""(import RefHelper)
 
 (pub struct Box (top : Shape) (mut n : Int))
 
-(pub type Shapes = (Vec Shape))
+(pub type Shapes (Vec Shape))
 
 (pub subtype Small is Int range 0..10)
 

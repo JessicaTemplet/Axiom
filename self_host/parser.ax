@@ -2599,13 +2599,13 @@
       s)))
 
 ; `(type Name [tyvars] Type)`, uniform with every other declaration:
-; no assignment operator stands between a name and what it names. The
-; `=` spelling is still read while the tree migrates to the uniform
-; form, and the formatter already prints that form. The name span,
-; the tyvars, and the target's STRUCTURE all survive - `symbols`
-; renders the target in the checker's notation. Any shape this does
-; not recognise falls back to the old skip, so acceptance is
-; unchanged: only well-formed aliases gain a node.
+; no assignment operator stands between a name and what it names.
+; The `=` spelling is refused here (the formatter still reads it and
+; prints the uniform form). The name span, the tyvars, and the
+; target's STRUCTURE all survive - `symbols` renders the target in
+; the checker's notation. Any shape this does not recognise falls
+; back to the old skip, so acceptance is unchanged: only
+; well-formed aliases gain a node.
 (pub :: parseAliasDecl (-> Ints Int Int Int))
 (pub fn (parseAliasDecl tokens pos origPos)
   ; `(` as well as an identifier, because the name may be a
@@ -2631,22 +2631,18 @@
           (let tvs vecNew)
           {
             (let afterTvs (aliasTyvarsEnd tokens (memGetWord nr 2) tvs))
-            {
-              (let targetPos
-                (if (&& (peekIs tokens afterTvs TK_IDENT)
-                      (strEq (tokenLexeme (vecGet tokens afterTvs)) "="))
-                  (advance afterTvs)
-                  afterTvs))
+            (if (&& (peekIs tokens afterTvs TK_IDENT)
+                  (strEq (tokenLexeme (vecGet tokens afterTvs)) "="))
+              (pErr origPos)
               {
-                (let tr (parseType tokens targetPos))
+                (let tr (parseType tokens afterTvs))
                 (if (== (memGetWord tr 0) 0)
                   (pErr origPos)
                   (if (peekIs tokens (memGetWord tr 2) TK_RPAREN)
                     (pOk (mkNodeAt TAG_D_ALIAS name (memGetWord tr 1) tvs nameSpan)
                       (advance (memGetWord tr 2)))
                     (pErr origPos)))
-              }
-            }
+              })
           }
         })
     }

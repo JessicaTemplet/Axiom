@@ -475,7 +475,7 @@ def sentinel_return_type(ty):
 # rule is what lands and the position rule stays as it is, named here
 # so the next reader does not re-derive the same wrong fix.
 #
-# A `(type Port = Int)` alias WOULD escape this, since an alias is
+# A `(type Port Int)` alias WOULD escape this, since an alias is
 # expanded before checking while the declaration still says `Port`.
 # There are none - measured 2026-09-03, zero `(type ...)` declarations
 # in `stdlib/` - and this paragraph is what the first one has to read.
