@@ -129,6 +129,7 @@ if (!noalt) console.log(`ok   all ${imgs.length} images carry an alt attribute`)
     ['(as 1 UInt8)', [['as', 'keyword.modifier'], ['UInt8', 'type.builtin']]],
     ['(as value (Vec Count))', [['Vec', 'type'], ['Count', 'type']]],
     ['(type Byte = UInt8)', [['Byte', 'type.definition'], ['UInt8', 'type.builtin']]],
+    ['(|> order total dollars)', [['|>', 'operator']]],
     ['(let mut count (as 1 UInt32))', [['mut', 'keyword.modifier'], ['count', 'variable'], ['UInt32', 'type.builtin']]],
     ['(Point :x 1 :y 2)', [['Point', 'constructor'], [':x', 'variable.member'], [':y', 'variable.member']]],
     ['(cast Int value)', [['cast', 'error']]],

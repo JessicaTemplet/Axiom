@@ -40,6 +40,7 @@ export type Capture =
   | 'keyword.conditional'
   | 'keyword.modifier'
   | 'module'
+  | 'operator'
   | 'variable'
   | 'variable.parameter'
   | 'variable.member'
@@ -327,6 +328,7 @@ function classifyAtom(text: string, frame: Frame, parent: Frame | undefined): Ca
 
   // --- keywords, in head position only ---------------------------------
   if (head) {
+    if (text === '|>') return 'operator'
     if (KEYWORD_FUNCTION.has(text)) return 'keyword.function'
     if (KEYWORD_TYPE.has(text)) return 'keyword.type'
     if (KEYWORD_CONDITIONAL.has(text)) return 'keyword.conditional'

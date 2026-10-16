@@ -279,14 +279,14 @@ export const TOUR: Program[] = [
       { at: "(InTransit { carrier : String, days : Int })", text: "A constructor can carry named fields." },
       { at: "(:: alert (-> Parcel (Option String)))", text: "`alert` returns `Option String`, because some parcels need no action." },
       { at: "(let a (optUnwrapOr (alert p) \"-\"))", text: "`optUnwrapOr` supplies the default where there is no value." },
-      { at: "(println \"{id:<9}{s:<22}{a}\")", text: "`{id:<9}` pads to nine columns. Format strings are compiled, not interpreted at run time." },
+      { at: "(println \"{id:<9}{s:<17}{a}\")", text: "One row function aligns the header and data. `{id:<9}` pads to nine columns; the status column leaves two spaces after its longest value." },
     ],
     docs: { label: "Pattern matching", href: `${REF}#pattern-matching` },
-    output: `parcel   status                action
-AX-1041  packing               not shipped yet
-AX-1042  DHL, 2 days out       -
-AX-1043  held at customs       call about customs
-AX-1044  delivered             -`,
+    output: `parcel   status           action
+AX-1041  packing          not shipped yet
+AX-1042  DHL, 2 days out  -
+AX-1043  held at customs  call about customs
+AX-1044  delivered        -`,
     code: `(import IO)
 (import Err)
 
@@ -312,24 +312,70 @@ AX-1044  delivered             -`,
     ((Held why) (Some (format "call about {why}")))
     ((Delivered) None)))
 
-(:: row (-> String Parcel Int))
+(:: printRow (-> String String String ()))
+;@axiom:effect(io)
+(fn (printRow id s a)
+  (println "{id:<9}{s:<17}{a}"))
+
+(:: row (-> String Parcel ()))
 ;@axiom:effect(io)
 (fn (row id p)
   {
     (let s (status p))
     (let a (optUnwrapOr (alert p) "-"))
-    (println "{id:<9}{s:<22}{a}")
+    (printRow id s a)
   })
 
 (:: main ())
 ;@axiom:effect(io)
 (fn (main)
   {
-    (println "parcel   status                action")
+    (printRow "parcel" "status" "action")
     (row "AX-1041" Ordered)
     (row "AX-1042" (InTransit "DHL" 2))
     (row "AX-1043" (Held "customs"))
     (row "AX-1044" Delivered)
+  })`,
+  },
+  {
+    id: "numbers",
+    file: "order.ax",
+    tab: "Numbers & types",
+    title: "Choose each number's representation",
+    lede: "Fixed-width integers keep their precision. `as` makes conversions explicit, `type` gives an existing type a useful name, and `|>` reads a sequence of calls from left to right.",
+    points: [
+      { at: "(type Cents = Int32)", text: "An alias is another name for its underlying type; it adds no conversion or new type." },
+      { at: "(quantity : Quantity)", text: "This struct field uses UInt16's two bytes. Calls and container elements still use one machine word." },
+      { at: "(* (as order.quantity Int32) order.unitPrice)", text: "Both operands must be Int32. The widening conversion is written explicitly." },
+      { at: "(let amount (|> order total dollars))", text: "Each stage receives the previous result once. These unary stages are ordinary function calls." },
+    ],
+    docs: { label: "Fixed-width integers", href: `${REF}#fixed-width-integers` },
+    output: "total: 37.50",
+    code: `(import IO)
+
+(type Quantity = UInt16)
+
+(type Cents = Int32)
+
+(struct Order
+  (quantity : Quantity)
+  (unitPrice : Cents))
+
+(:: total (-> Order Cents))
+(fn (total order)
+  (* (as order.quantity Int32) order.unitPrice))
+
+(:: dollars (-> Cents Float))
+(fn (dollars cents)
+  (/ (as cents Float) 100.0))
+
+(:: main ())
+;@axiom:effect(io)
+(fn (main)
+  {
+    (let order (Order :quantity (as 3 Quantity) :unitPrice (as 1250 Cents)))
+    (let amount (|> order total dollars))
+    (println "total: {amount:.2}")
   })`,
   },
   {

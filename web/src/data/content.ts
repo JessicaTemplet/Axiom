@@ -73,6 +73,30 @@ export const PILLARS: Pillar[] = [
   },
 ]
 
+/** The reference's RECAP overview, with its current limits stated below it. */
+export const RECAP_PARTS = [
+  {
+    letter: 'R', term: 'Region-scoped',
+    text: 'Choose an allocation lifetime with `region`. The compiler checks visible reference escapes.',
+  },
+  {
+    letter: 'E', term: 'Effect-checked',
+    text: '`Alloc`, `Mut` and `Unsafe` describe memory operations and participate in effect checks and restrictions.',
+  },
+  {
+    letter: 'C', term: 'Counted',
+    text: 'When the final share ends, owned fields are released and eligible small blocks become reusable.',
+  },
+  {
+    letter: 'A', term: 'Arena-hybrid',
+    text: 'Region resets reclaim their allocation extent, including cycles within it. Counting also works inside regions.',
+  },
+  {
+    letter: 'P', term: 'Predictable reclamation',
+    text: 'Ownership events and reset boundaries define reclamation points, without a constant-time guarantee.',
+  },
+]
+
 /* ------------------------------------------------------------------ *
  * The comparison. A design comparison, not a benchmark, and nothing
  * here scores anybody.
@@ -98,7 +122,7 @@ export interface CompareRow {
 export const COMPARE: CompareRow[] = [
   {
     k: 'Memory',
-    axiom: 'Bump allocation, reference counting, and regions when you choose the moment. No tracing collector, no borrow checker.',
+    axiom: 'RECAP: reference counting and checked regions over arenas. No tracing collector, no borrow checker.',
     rust: 'Ownership and borrowing',
     go: 'Tracing GC',
     haskell: 'Tracing GC',
@@ -148,7 +172,7 @@ export interface StatusRow {
 }
 
 export const STATUS_SOLID: StatusRow[] = [
-  { feature: 'Functions & types', status: 'Complete', note: 'Curried signatures, checked generics, aliases and explicit numeric conversions.' },
+  { feature: 'Functions & types', status: 'Complete', note: 'Curried calls, checked generics, aliases, fixed-width integers and explicit `as` conversions.' },
   { feature: 'ADTs / data types', status: 'Complete', note: 'Sums with positional or named fields.' },
   { feature: 'Pattern matching (`match`)', status: 'Complete', note: 'Nested, exhaustive, checked in every function.' },
   { feature: 'Structs', status: 'Complete', note: 'Named construction, per-field `mut`, generic parameters, automatic rendering.' },
@@ -200,6 +224,21 @@ export const FAQS: Faq[] = [
       'There is no package index and no green threads. What is here is a small language whose compiler you can read and whose claims are tested.',
     ],
     link: { label: 'Implementation status', href: `${DOCS}/status.md` },
+  },
+  {
+    q: 'Do numbers convert automatically?',
+    a: [
+      'No. Numeric operands must have the same type, and integer literals start as `Int`. Write `(as value Type)` to widen, narrow or convert to `Float`. Integer addition, subtraction and multiplication wrap at their declared width; narrowing retains the low destination bits.',
+      '`type` gives an existing type another name. An alias does not create a distinct type or permit mixed arithmetic. A pipeline such as `(|> order total dollars)` passes each result through ordinary, checked calls.',
+    ],
+    link: { label: 'Numbers, conversions and aliases', href: `${REF}#fixed-width-integers` },
+  },
+  {
+    q: 'Where do imports and local bindings go?',
+    a: [
+      'Imports form a module header before every other declaration. Inside `{ ... }`, `(let name value)` binds a value for the rest of the block. Add `mut` when assigning that binding with `set`.',
+    ],
+    link: { label: 'Modules and imports', href: `${REF}#modules-and-imports` },
   },
   {
     q: 'Does it have a garbage collector?',
