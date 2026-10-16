@@ -313,15 +313,16 @@ about it. AX2001 is the same refusal with an EXPECTATION attached -
 when the grammar at that point has no single expected token to name.
 There is one construction site for it in the parser, and the
 diagnostics corpus draws it with one shape, a `type` alias written
-without its `=`:
+with an `=`:
 
-    (type Count Int)
+    (type Count = Int)
 
     (:: main ())
 
     (fn (main) ())
 
-The alias form is `(type Count = Int)`. The span is the keyword the
+The alias form is `(type Count Int)`, with no operator between the
+name and the type it names, like every other declaration. The span is the keyword the
 form opened with, which is the parser's way of saying that the whole
 form is what it could not read.
 
@@ -1033,24 +1034,24 @@ expander can evaluate to stop. For either, write the recursion as a
 function and let the macro expand to a call.
 
 ### explain AX3020
-AX3020 - a macro declares the same parameter twice
+AX3020 - ambiguous macro parameter
 
-Two parameters of this macro share a name, so a reference to that name
-in the template has no single meaning. The expander resolves it to the
-LAST argument, which means the earlier ones are accepted, evaluated in
-source order, and then discarded - measured: `(macro (dup a a) (+ a a))`
-invoked as `(dup 10 20)` answered 40.
+A head-list macro must give each parameter a distinct name:
 
-Since MAC-LANG-15 a rule-form macro's parameters are PATTERNS, so
-the binders this counts are every binder the patterns introduce,
-nested ones included: `((m a (f a)) ...)` binds `a` twice and is
-this code. `_` is exempt - it binds nothing, so several of them in
-one rule are legal.
+    (macro (sum a b) (+ a b))
 
-A rule that can never MATCH is a different thing and a different
-code (AX3033). This one used to cover both.
+A repeated binder in a rule pattern instead constrains syntax.
+`((same x x) 1)` matches two equal forms: identifiers compare by
+binding, literals by value, and compound forms by their structure.
+It never evaluates the forms.
 
-Give each parameter a distinct name.
+A rule cannot give one name both a fixed binding and a repeated
+binding, as in `(m x x ...)`: one form and a sequence need different
+names. Repetition may contain equality constraints, as in
+`(m (x x) ...)`, checked separately for each element.
+
+An unreachable rule is AX3033. A constraint makes a rule refutable,
+so a general fallback rule may follow it.
 
 ### explain AX3021
 AX3021 - a macro template contains a form the expander cannot substitute into
@@ -1391,7 +1392,7 @@ to run, and this code refuses it at the macro's own line rather than
 letting it sit there looking live.
 
 A rule is unreachable when an EARLIER rule of the same arity is
-IRREFUTABLE - every one of its elements is a plain binder, so it
+IRREFUTABLE - every element is a distinct plain binder, so it
 matches every invocation of that arity and consumes them all.
 
     (macro defU ((defU T)      ; matches any one argument
@@ -2981,7 +2982,7 @@ AX3124 - wrong number of type arguments
 
 A parameterised type takes exactly its declared number of type arguments:
 
-    (type Items a = (Vec a))
+    (type Items a (Vec a))
     (:: good (Items Int))
     (:: missing Items)             ; refused
     (:: extra (Items Int Float))   ; refused
@@ -2993,7 +2994,7 @@ AX3125 - invalid, repeated, undeclared or unused type parameter
 
 Declare every type parameter once, using a lowercase name:
 
-    (type Mapping a b = (-> a b))
+    (type Mapping a b (-> a b))
 
 Every type variable in an alias target or a data or struct field must be one of its declared parameters. A repeated name makes substitution ambiguous; an undeclared variable would let the target depend on a type the alias's arguments never choose. Rename the repeated parameter or add the missing one. An alias parameter must appear in its target; remove parameters the target does not use.
 
@@ -3002,11 +3003,11 @@ AX3126 - a type alias expands recursively
 
 An alias must expand to a finite existing type. Direct and indirect recursion are rejected, including in unused declarations:
 
-    (type Loop a = (Option (Loop a)))   ; refused
-    (type First = Second)
-    (type Second = First)              ; refused
+    (type Loop a (Option (Loop a)))   ; refused
+    (type First Second)
+    (type Second First)              ; refused
 
-Use `data` or `struct` for a recursive type. A finite nested use such as `(Identity (Identity Int))` is valid when `(type Identity a = a)`.
+Use `data` or `struct` for a recursive type. A finite nested use such as `(Identity (Identity Int))` is valid when `(type Identity (a) a)`.
 
 ### explain AX3127
 AX3127 - malformed pipeline stage
