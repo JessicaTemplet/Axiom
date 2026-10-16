@@ -210,9 +210,9 @@ only what it declares.
 
 ### The development workflow
 
-Keep `trunk` stable and develop new work on `nightly`. Start from the
-latest trunk, switch to `nightly`, and run the relevant gates there
-before proposing a merge into `trunk`.
+Keep `stable` ready to release and develop new work on `nightly`.
+Start from the latest stable code, switch to `nightly`, and run the
+relevant gates there before proposing a merge into `stable`.
 
 1. **Build** once, with
    `./scripts/bootstrap-from-seed.sh --install .axiom-bin`. After that,
@@ -300,7 +300,7 @@ the whole tree, and compiler source changes invalidate every cached gate.
 Passing gates are saved even when another gate fails. Failed gates run again;
 the job summary names each reused pass and its original run. Bootstrap,
 seed provenance, reproducibility and cache audits run fresh. Pull requests
-can read the cache; only pushes to trunk save results.
+can read the cache; only pushes to stable save results.
 
 Local gate commands always run fresh. To bypass reuse when invoking
 `scripts/ci-gate.py`, set `AXIOM_CI_FRESH=1`. Tested by
@@ -487,8 +487,9 @@ the authority on which scripts do, so check it rather than this table.
 
 ## CI/CD
 
-Every push to `trunk` and every pull request runs
-`.github/workflows/ci.yml`. `trunk` is this repository's only branch.
+Every push to `stable` or `nightly`, and every pull request, runs
+`.github/workflows/ci.yml`. Development lands on `nightly`; validated
+changes merge into `stable`.
 A change that touches only `web/` skips it, because the website has its
 own workflow, `pages.yml`.
 
@@ -574,7 +575,7 @@ read-only.
 `ci.yml` doesn't run on tags, and nothing enforces the steps below, so
 they're up to whoever cuts the release:
 
-1. **Land the release commit on `trunk` and let CI go green.** A tag
+1. **Land the release commit on `stable` and let CI go green.** A tag
    points at a commit, and the gates run on the push, not on the tag.
    Tagging a commit whose CI is red or still running publishes a
    compiler nothing checked.
@@ -850,8 +851,7 @@ When you change the compiler:
 
 ### Submitting a PR
 
-1. **Fork the repository** and create a branch from `trunk`, this
-   repository's only branch.
+1. **Fork the repository** and create a branch from `nightly`.
 2. **Make your changes**, focused on a single concern.
 3. **Run the gates** locally before you submit. There's no single
    command, so run the ones your change could affect, and always run
@@ -956,7 +956,7 @@ targets separately.
 
 ## Releases and support
 
-Publish a version tag only after the trunk CI run for that commit is
+Publish a version tag only after the stable CI run for that commit is
 green. Record a defect with a reproducer and a regression before
 closing it. [SECURITY.md](SECURITY.md) defines the supported release,
 response window and private vulnerability channel. Earlier release

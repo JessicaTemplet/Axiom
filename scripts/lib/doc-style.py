@@ -329,8 +329,9 @@ def inbound_anchors(dest):
                 continue
             for m in pat.finditer(text):
                 full = m.group(1) + name
-                if 'blob/trunk/' in full:
-                    cand = full.split('blob/trunk/', 1)[1]
+                branch_link = re.search(r'/blob/(?:stable|nightly|trunk)/(.+)', full)
+                if branch_link:
+                    cand = branch_link.group(1)
                 elif full.startswith('${DOCS}/'):
                     cand = 'docs/' + full[len('${DOCS}/'):]
                 elif full.startswith('${BLOB}/'):

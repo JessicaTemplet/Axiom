@@ -3032,7 +3032,7 @@ scripts/check-diagnostics.sh 99      # 990-993 among them, the refusals
 
 The "before" column below comes from an ablation: a compiler built from
 the commit before expansion moved ahead of the checker. Built that way,
-each case gives the "before" answer. Built from trunk, it gives the
+each case gives the "before" answer. Built from this source, it gives the
 "after" answer. That difference is what makes each fixture a
 measurement rather than a regression guard.
 

@@ -1,12 +1,12 @@
 export const VERSION = '0.7.9'
 export const REPO = 'https://github.com/chrispaig3/Axiom'
-export const DOCS = `${REPO}/blob/trunk/docs`
-export const BLOB = `${REPO}/blob/trunk`
+export const DOCS = `${REPO}/blob/stable/docs`
+export const BLOB = `${REPO}/blob/stable`
 export const RELEASES = `${REPO}/releases`
 
 /** README.md, "Install". */
 export const INSTALL_CMD =
-  'curl -fsSL https://raw.githubusercontent.com/chrispaig3/axiom/trunk/scripts/install.sh | bash'
+  'curl -fsSL https://raw.githubusercontent.com/chrispaig3/axiom/stable/scripts/install.sh | bash'
 
 export const PATH_CMD = 'export PATH="$HOME/.axiom/bin:$PATH"'
 

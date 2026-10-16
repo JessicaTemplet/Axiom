@@ -118,8 +118,8 @@ try:
         record.write_text(json.dumps(base_proof))
         action = (repo / '.github/actions/gate-cache/action.yml').read_text()
         expect("!cancelled() && inputs.mode == 'save'" in action and
-               "github.event_name == 'push' && github.ref == 'refs/heads/trunk'" in action,
-               'failed jobs must save completed passes, with writes restricted to trunk pushes')
+               "github.event_name == 'push' && github.ref == 'refs/heads/stable'" in action,
+               'failed jobs must save completed passes, with writes restricted to stable pushes')
         ci.ALWAYS_RUN.add(gate.name)
         expect(run() == 0 and run() == 0 and count() == 19, 'always-run audits must not reuse passes')
         ci.ALWAYS_RUN.remove(gate.name)

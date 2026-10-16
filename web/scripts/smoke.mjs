@@ -205,7 +205,7 @@ if (!noalt) console.log(`ok   all ${imgs.length} images carry an alt attribute`)
 // deleted (README#implementation-status after the status table moved
 // to docs/status.md on 2026-09-03; stdlib/Job.ax after 0.7.5 deleted
 // it) and nothing noticed, because a link is a claim with no check on
-// it. Now every `blob/trunk/<path>` link must name a file in the tree,
+// it. Now every `blob/stable/<path>` link must name a file in the tree,
 // and a `#fragment` on a markdown target must match one of that file's
 // headings under GitHub's slug rules.
 const repoRoot = new URL('../../', import.meta.url).pathname
@@ -239,7 +239,7 @@ for (const href of new Set(
     (m) => m[1],
   ),
 )) {
-  const m = /^https:\/\/github\.com\/chrispaig3\/Axiom(?:\/blob\/trunk\/([^#]+))?(?:#(.+))?$/.exec(
+  const m = /^https:\/\/github\.com\/chrispaig3\/Axiom(?:\/blob\/stable\/([^#]+))?(?:#(.+))?$/.exec(
     href,
   )
   if (!m) continue

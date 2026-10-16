@@ -16,6 +16,10 @@ its changelog too.
 
 ## Unreleased
 
+- Rename `trunk` to `stable` as the default release branch. Development
+  stays on `nightly`. CI, website deployment and install links follow
+  the new name. Tested by `tests/ci/gate-cache.py`.
+
 - Add a native frontend concurrency experiment. `scripts/bench-frontend.sh`
   compares serial module reading, lexing, annotation scanning and parsing
   with bounded process workers. It verifies ordered fingerprints and
