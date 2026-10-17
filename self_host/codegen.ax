@@ -727,7 +727,8 @@
   (stash : Int)
   (ret : Int)
   (consume : Int)
-  (transfer : Int))
+  (transfer : Int)
+  (callers : Int))
 
 ; Word 10 of an FSig: 1 when the declaration carries
 ; `;@axiom:result(owned)` (MM-LIFE-2n), so a call's type-variable
@@ -743,6 +744,12 @@
       (memGetWord e 10))
   })
 
+; Word 11 of an FSig: how many distinct declarations the caller
+; index (`callersIdxBuildCg`) found naming this function at a call
+; head or a tail reference. Written once when the index is built
+; for the worklists below; 0 until then, and 0 for a signature the
+; index never resolved to. `cgMarkCallers` reads it as the fast
+; answer to "nobody calls this" before it touches the index rows.
 ; Mark every FSig whose `::` or `fn` carries `result(owned)`.
 (pub :: markTransferSigs (-> Ints Ints Int Int))
 (pub fn (markTransferSigs decls sigs i)
@@ -782,7 +789,8 @@
                   :stash 0
                   :ret 0
                   :consume 0
-                  :transfer 0) Int))
+                  :transfer 0
+                  :callers 0) Int))
           ; an `extern` item is a signed global under its LINKER
           ; SYMBOL (what `mangledForCg` answers for its name), with
           ; the masks the boundary contract gives it: a Rust shim
@@ -821,7 +829,8 @@
                     :stash 0
                     :ret 0
                     :consume 0
-                    :transfer 0) Int)))
+                    :transfer 0
+                    :callers 0) Int)))
           (scanExternSigs items sigs (+ i 1))
         }
       })))
@@ -1291,50 +1300,349 @@
 ; narrower than the old rule's "everything not bound to a direct
 ; construction".
 ; ------------------------------------------------------------------
+; ------------------------------------------------------------------
+; THE CALLER INDEX, AND THE WORKLISTS IT FEEDS. The two fixpoints
+; below (`inferOwnership`, `inferFlows`) used to re-walk every
+; declaration on every round: a self-compile's flow rounds cost
+; seconds of the emit phase walking functions whose summaries the
+; previous round could not have moved. Rounds after the first now
+; walk only the callers of functions whose summary changed - the
+; shape `rgnWork` runs in the checker over `callersIdxBuild`.
+;
+; The index answers, per signature, which declarations name it at a
+; call head or a tail reference: the only two places the walks read
+; another function's summary (`fnStashMask`, `fnConsumeMask`,
+; `callRetMask`, `fnResultOwned`). It is keyed by the intern id the
+; signature index (words 37/38) already assigns each name, so a row
+; is found with the same lookup `findFSigCg` makes. Rows hold each
+; calling declaration once, however many call sites it carries, and
+; the count is recorded on the signature itself (word 11). A call
+; through a local, a parameter or a computed head reads no summary -
+; the walks park every argument there - so it records no edge, and a
+; name shadowed by a local records one anyway: a spare edge costs a
+; re-walk, a missing one would cost the fixpoint, and the final
+; full pass below is what keeps that trade honest.
+; ------------------------------------------------------------------
+; Every declaration index, ascending: a worklist's first frontier,
+; because round one reported only THAT something moved, not what.
+(pub :: cgAllIndexes (-> Int Ints))
+(pub fn (cgAllIndexes n)
+  {
+    (let v vecNew)
+    (let mut i 0)
+    {
+      (while (< i n)
+        {
+          (vecPush v i)
+          (set i (+ i 1))
+        })
+      v
+    }
+  })
+
+(pub :: cgFlagsNew (-> Int Ints))
+(pub fn (cgFlagsNew n)
+  {
+    (let v vecNew)
+    (let mut i 0)
+    {
+      (while (< i n)
+        {
+          (vecPush v 0)
+          (set i (+ i 1))
+        })
+      v
+    }
+  })
+
+; The marks this round set, put back to 0 so the next round starts
+; on an all-zero vector without walking every declaration to find
+; the entries to clear.
+(pub :: cgClearMarks (-> Ints Ints Int Int))
+(pub fn (cgClearMarks marks idxs i)
+  (if (>= i (vecLen idxs))
+    0
+    {
+      (vecSet marks (vecGet idxs i) 0)
+      (cgClearMarks marks idxs (+ i 1))
+    }))
+
+(pub :: cgInVec (-> Ints Int Int Int))
+(pub fn (cgInVec v x i)
+  (if (>= i (vecLen v))
+    0
+    (if (== (vecGet v i) x)
+      1
+      (cgInVec v x (+ i 1)))))
+
+; `x` appended to `v` when it is not already there; answers 1 when
+; it appended. A caller is woken once per round however many call
+; sites to the changed function its body carries.
+(pub :: cgPushUnique (-> Ints Int Int))
+(pub fn (cgPushUnique v x)
+  (if (== (cgInVec v x 0) 1)
+    0
+    {
+      (vecPush v x)
+      1
+    }))
+
+; Insert `x` into an ascending list, in place. A round's frontier
+; is the callers of what moved in it - small - so an insertion is
+; the right shape and a sort at the end would be the wrong one.
+(pub :: cgPushSorted (-> Ints Int Int))
+(pub fn (cgPushSorted v x)
+  {
+    (let mut i (vecLen v))
+    {
+      (vecPush v x)
+      (while (if (> i 0)
+        (> (vecGet v (- i 1)) x)
+        false)
+        {
+          (vecSet v i (vecGet v (- i 1)))
+          (set i (- i 1))
+        })
+      (vecSet v i x)
+      0
+    }
+  })
+
+(pub :: cgMarkEach (-> Ints Ints Ints Int Int))
+(pub fn (cgMarkEach marks next idxs i)
+  (if (>= i (vecLen idxs))
+    0
+    {
+      {
+        (let x (vecGet idxs i))
+        (if (! (== (vecGet marks x) 1))
+          {
+            (vecSet marks x 1)
+            (cgPushSorted next x)
+          })
+      }
+      (cgMarkEach marks next idxs (+ i 1))
+    }))
+
+; The intern id the signature for `name` sits under in words 37/38,
+; or -1 when no signature carries it: `findFSigCg`'s lookup, keeping
+; the id.
+(pub :: fsigIdCg (-> Int String Int))
+(pub fn (fsigIdCg cg name)
+  (match (internFind (memGetWord cg 37) (declSpellingOf name))
+    ((Some id) id)
+    ((None) (- 0 1))))
+
+; One edge: declaration `who` names `name`, which the module word
+; (set by the caller, as the passes set it) resolves to a signature.
+(pub :: callEdgeCg (-> Int String Int Ints Int))
+(pub fn (callEdgeCg cg name who rows)
+  {
+    (let id (fsigIdCg cg (mangledForCg cg name)))
+    (if (< id 0)
+      0
+      (cgPushUnique (vecGetVec rows id) who))
+  })
+
+; Every call head and tail reference under `e`, by the child
+; enumeration the slot walks already trust (`slotPart`). A tag that
+; enumeration does not know is not descended into; the walks read
+; no summary under one either, and the worklists' final full pass
+; verifies the frontier regardless.
+(pub :: collectCallsCg (-> Int Int Int Ints Int))
+(pub fn (collectCallsCg cg e who rows)
+  (if (== e 0)
+    0
+    {
+      (if (== (nodeTag e) TAG_E_VAR)
+        (callEdgeCg cg (nodeAName e) who rows)
+        0)
+      (let n (slotPartCount e))
+      (if (< n 0)
+        0
+        (collectPartsCg cg e who rows n 0))
+    }))
+
+(pub :: collectPartsCg (-> Int Int Int Ints Int Int Int))
+(pub fn (collectPartsCg cg e who rows n i)
+  (if (>= i n)
+    0
+    {
+      (collectCallsCg cg (slotPart e i) who rows)
+      (collectPartsCg cg e who rows n (+ i 1))
+    }))
+
+; The index itself: one caller row per signature the name index
+; knows, built by one walk of every function body, with each
+; declaration's module word set as the passes set it - a bare
+; reference resolves in the module that wrote it. Each signature's
+; row length is recorded on the signature (word 11) as the count
+; is settled.
+(pub :: callersIdxBuildCg (-> Int Ints Ints))
+(pub fn (callersIdxBuildCg cg decls)
+  {
+    (let byId (memGetWordVec cg 38))
+    (let rows vecNew)
+    (let savedMod (memGetWord cg 34))
+    {
+      {
+        (let mut i 0)
+        (while (< i (vecLen byId))
+          {
+            (vecPush rows (as vecNew Int))
+            (set i (+ i 1))
+          })
+      }
+      {
+        (let mut j 0)
+        (while (< j (vecLen decls))
+          {
+            {
+              (let d (vecGet decls j))
+              (if (== (nodeTag d) TAG_D_FN)
+                {
+                  (memSetWord cg 34 (nodeModule d))
+                  (collectCallsCg cg (nodeC d) j rows)
+                }
+                0)
+            }
+            (set j (+ j 1))
+          })
+      }
+      (memSetWord cg 34 savedMod)
+      {
+        (let mut k 0)
+        (while (< k (vecLen byId))
+          {
+            (memSetWord (vecGet byId k) 11 (vecLen (vecGetVec rows k)))
+            (set k (+ k 1))
+          })
+      }
+      rows
+    }
+  })
+
+; The callers of the function declaration `d` declares, added to
+; the next frontier. A declaration with no signature, or one the
+; index counts no callers for, wakes nobody.
+(pub :: cgMarkCallers (-> Int Ints Ints Ints Int Int))
+(pub fn (cgMarkCallers cg rows marks next d)
+  {
+    (let e (findFSigCg cg (nodeAName d)))
+    (if (|| (== e 0) (== (memGetWord e 11) 0))
+      0
+      {
+        (let id (fsigIdCg cg (nodeAName d)))
+        (if (< id 0)
+          0
+          (cgMarkEach marks next (vecGetVec rows id) 0))
+      })
+  })
+
 (pub :: inferOwnership (-> Int Ints Int))
 (pub fn (inferOwnership cg decls)
-  (if (== (inferOwnershipPass cg decls 0 0) 0)
-    {
-      (memSetWord cg 34 0)
-      (memSetWord cg 36 0)
-    }
-    (inferOwnership cg decls)))
+  {
+    (inferOwnershipRounds cg decls)
+    (memSetWord cg 34 0)
+    (memSetWord cg 36 0)
+  })
 
-; One pass: recompute every signed function; answer 1 if any flag
-; moved (always 1 -> 0, so the loop terminates).
+; The rounds: one full pass, then worklist rounds over the caller
+; index when the name index exists (the emit path builds it before
+; either fixpoint runs). Without one - a partial path - the old
+; full-pass rounds run unchanged. The flags only ever move 1 -> 0,
+; so both shapes terminate.
+(pub :: inferOwnershipRounds (-> Int Ints Int))
+(pub fn (inferOwnershipRounds cg decls)
+  (if (== (inferOwnershipPass cg decls 0 0) 0)
+    0
+    (if (== (memGetWord cg 37) 0)
+      (inferOwnershipRounds cg decls)
+      (inferOwnershipWork cg decls (callersIdxBuildCg cg decls) (cgAllIndexes (vecLen decls))
+        (cgFlagsNew (vecLen decls))))))
+
+; Worklist rounds: each walks the previous round's frontier. A
+; quiet frontier is verified by one full pass before convergence
+; is claimed, and a change there restarts with a full frontier
+; rather than trusting the index to have seen every edge.
+(pub :: inferOwnershipWork (-> Int Ints Ints Ints Ints Int))
+(pub fn (inferOwnershipWork cg decls rows work marks)
+  {
+    (let next vecNew)
+    (if (== (inferOwnershipDirty cg decls rows work marks next) 0)
+      (if (== (inferOwnershipPass cg decls 0 0) 0)
+        0
+        (inferOwnershipWork cg decls rows (cgAllIndexes (vecLen decls)) marks))
+      {
+        (cgClearMarks marks next 0)
+        (inferOwnershipWork cg decls rows next marks)
+      })
+  })
+
+; One worklist pass over `work`: walk each, and collect the callers
+; of every function whose flag fell into `next`. Answers 1 when
+; anything fell. The frontier is visited from its last element, for
+; the reason `rgnDirtyPass` states.
+(pub :: inferOwnershipDirty (-> Int Ints Ints Ints Ints Ints Int))
+(pub fn (inferOwnershipDirty cg decls rows work marks next)
+  {
+    (let mut j (- (vecLen work) 1))
+    (let mut changed 0)
+    {
+      (while (>= j 0)
+        {
+          (let d (vecGet decls (vecGet work j)))
+          {
+            (if (!= (inferOwnershipOne cg d) 0)
+              {
+                (cgMarkCallers cg rows marks next d)
+                (set changed 1)
+              })
+            (set j (- j 1))
+          }
+        })
+      changed
+    }
+  })
+
+; One declaration's ownership walk; answers 1 when its flag fell.
+; The body's bare references resolve in the module that wrote it -
+; a private sibling has no bare-map entry and is reachable only as
+; `Mod$name` (`emitModuleTail` sets the same word for the same
+; reason).
+(pub :: inferOwnershipOne (-> Int Int Int))
+(pub fn (inferOwnershipOne cg d)
+  (if (!= (nodeTag d) TAG_D_FN)
+    0
+    {
+      (let _m (memSetWord cg 34 (nodeModule d)))
+      (let _d (memSetWord cg 36 d))
+      (let e (findFSigCg cg (nodeAName d)))
+      (if (|| (== e 0) (== (memGetWord e 5) 0))
+        0
+        (if (==
+              {
+                (let _a (memSetWord e 6 (vecLen (nodeBVec d))))
+                (tailOwned cg (nodeC d) (nodeBVec d) vecNew)
+              }
+              1)
+          0
+          {
+            (memSetWord e 5 0)
+            1
+          }))
+    }))
+
+; One full pass: recompute every signed function; answer 1 if any
+; flag moved (always 1 -> 0, so the loop terminates). Kept whole as
+; the worklist's first round and its verification pass.
 (pub :: inferOwnershipPass (-> Int Ints Int Int Int))
 (pub fn (inferOwnershipPass cg decls i changed)
   (if (>= i (vecLen decls))
     changed
-    {
-      (let d (vecGet decls i))
-      (if (!= (nodeTag d) TAG_D_FN)
-        (inferOwnershipPass cg decls (+ i 1) changed)
-        ; the body's bare references resolve in the module that
-        ; wrote it - a private sibling has no bare-map entry and
-        ; is reachable only as `Mod$name` (`emitModuleTail` sets
-        ; the same word for the same reason)
-        {
-          (let _m (memSetWord cg 34 (nodeModule d)))
-          (let _d (memSetWord cg 36 d))
-          (let e (findFSigCg cg (nodeAName d)))
-          (if (== e 0)
-            (inferOwnershipPass cg decls (+ i 1) changed)
-            (if (== (memGetWord e 5) 0)
-              (inferOwnershipPass cg decls (+ i 1) changed)
-              (if (==
-                    {
-                      (let _a (memSetWord e 6 (vecLen (nodeBVec d))))
-                      (tailOwned cg (nodeC d) (nodeBVec d) vecNew)
-                    }
-                    1)
-                (inferOwnershipPass cg decls (+ i 1) changed)
-                {
-                  (memSetWord e 5 0)
-                  (inferOwnershipPass cg decls (+ i 1) 1)
-                })))
-        })
-    }))
+    (if (== (inferOwnershipOne cg (vecGet decls i)) 1)
+      (inferOwnershipPass cg decls (+ i 1) 1)
+      (inferOwnershipPass cg decls (+ i 1) changed))))
 
 ; The ownership of the named global's result under the current
 ; assumption: 0 when it has no signature, which is also what a local,
@@ -1671,76 +1979,141 @@
 ; ------------------------------------------------------------------
 (pub :: inferFlows (-> Int Ints Int))
 (pub fn (inferFlows cg decls)
-  (if (== (inferFlowsPass cg decls 0 0) 0)
-    {
-      (memSetWord cg 34 0)
-      (memSetWord cg 36 0)
-    }
-    (inferFlows cg decls)))
+  {
+    (inferFlowsRounds cg decls)
+    (memSetWord cg 34 0)
+    (memSetWord cg 36 0)
+  })
 
+; The rounds: one full pass, then worklist rounds over the caller
+; index when the name index exists. Without one - a partial path -
+; the old full-pass rounds run unchanged. The masks only ever gain
+; bits, so both shapes terminate at the same fixpoint.
+(pub :: inferFlowsRounds (-> Int Ints Int))
+(pub fn (inferFlowsRounds cg decls)
+  (if (== (inferFlowsPass cg decls 0 0) 0)
+    0
+    (if (== (memGetWord cg 37) 0)
+      (inferFlowsRounds cg decls)
+      (inferFlowsWork cg decls (callersIdxBuildCg cg decls) (cgAllIndexes (vecLen decls))
+        (cgFlagsNew (vecLen decls))))))
+
+; Worklist rounds: each walks the previous round's frontier. A
+; quiet frontier is verified by one full pass before convergence
+; is claimed, and a change there restarts with a full frontier
+; rather than trusting the index to have seen every edge.
+(pub :: inferFlowsWork (-> Int Ints Ints Ints Ints Int))
+(pub fn (inferFlowsWork cg decls rows work marks)
+  {
+    (let next vecNew)
+    (if (== (inferFlowsDirty cg decls rows work marks next) 0)
+      (if (== (inferFlowsPass cg decls 0 0) 0)
+        0
+        (inferFlowsWork cg decls rows (cgAllIndexes (vecLen decls)) marks))
+      {
+        (cgClearMarks marks next 0)
+        (inferFlowsWork cg decls rows next marks)
+      })
+  })
+
+; One worklist pass over `work`: walk each, and collect the callers
+; of every function whose masks grew into `next`. Answers 1 when
+; anything grew. The frontier is visited from its last element, for
+; the reason `rgnDirtyPass` states.
+(pub :: inferFlowsDirty (-> Int Ints Ints Ints Ints Ints Int))
+(pub fn (inferFlowsDirty cg decls rows work marks next)
+  {
+    (let mut j (- (vecLen work) 1))
+    (let mut changed 0)
+    {
+      (while (>= j 0)
+        {
+          (let d (vecGet decls (vecGet work j)))
+          {
+            (if (!= (inferFlowsOne cg d) 0)
+              {
+                (cgMarkCallers cg rows marks next d)
+                (set changed 1)
+              })
+            (set j (- j 1))
+          }
+        })
+      changed
+    }
+  })
+
+; One declaration's flow walk; answers 1 when any of its masks
+; grew. Split out of `inferFlowsPass` so the worklist rounds walk
+; single declarations, as `rgnWalkOne` does for the region facts.
+(pub :: inferFlowsOne (-> Int Int Int))
+(pub fn (inferFlowsOne cg d)
+  (if (!= (nodeTag d) TAG_D_FN)
+    0
+    {
+      (let _m (memSetWord cg 34 (nodeModule d)))
+      (let _d (memSetWord cg 36 d))
+      (let e (findFSigCg cg (nodeAName d)))
+      (if (== e 0)
+        0
+        {
+          (let cell regionNew)
+          {
+            ; the two walks below see one set of summaries - they
+            ; are written after both - so `mutFlag` may keep its
+            ; answers across them rather than per call
+            (mutMemoOpen cg)
+            (flowStashes cg (nodeC d) (nodeBVec d) vecNew cell)
+            ; MM-LIFE-2g's own stores: a parameter the body
+            ; handed to `__retainref` is COUNTED before it
+            ; is parked - when it arrived typed. `__retain`
+            ; counts the word it is given whatever its form.
+            ; A summary's word half always contains its
+            ; arrival half: what parks a typed reference
+            ; uncounted parks a word too. The count pairs
+            ; with the stash only on the paths it runs on:
+            ; `regionNet` nets each branch's stashes against
+            ; the counts of that branch and its enclosing
+            ; regions, never a sibling's.
+            ; what the open region consumed, net of its counts,
+            ; widened to the word half like the stash summary:
+            ; a parameter released on any path is consumed on
+            ; every path the caller can reason about
+            {
+              (let st0 (| (regionNet cell) (tyvarSlotsMask cg e d)))
+              {
+                (let st (| (memGetWord e 7) (| st0 (arrivalToWord st0))))
+                (let rt
+                  (if (== (fsigResultIsWord cg e) 1)
+                    0
+                    (| (memGetWord e 8) (flowMask cg (nodeC d) (nodeBVec d) vecNew))))
+                (let _z (mutMemoClose cg))
+                (let co0 (& (memGetWord cell 3) (^ (memGetWord cell 1) (- 0 1))))
+                (let co (| (memGetWord e 9) (| co0 (arrivalToWord co0))))
+                (if (&& (== st (memGetWord e 7))
+                      (&& (== rt (memGetWord e 8)) (== co (memGetWord e 9))))
+                  0
+                  {
+                    (memSetWord e 7 st)
+                    (memSetWord e 8 rt)
+                    (memSetWord e 9 co)
+                    1
+                  })
+              }
+            }
+          }
+        })
+    }))
+
+; One full pass: recompute every signed function; answer 1 if any
+; mask grew. Kept whole as the worklist's first round and its
+; verification pass.
 (pub :: inferFlowsPass (-> Int Ints Int Int Int))
 (pub fn (inferFlowsPass cg decls i changed)
   (if (>= i (vecLen decls))
     changed
-    {
-      (let d (vecGet decls i))
-      (if (!= (nodeTag d) TAG_D_FN)
-        (inferFlowsPass cg decls (+ i 1) changed)
-        {
-          (let _m (memSetWord cg 34 (nodeModule d)))
-          (let _d (memSetWord cg 36 d))
-          (let e (findFSigCg cg (nodeAName d)))
-          (if (== e 0)
-            (inferFlowsPass cg decls (+ i 1) changed)
-            {
-              (let cell regionNew)
-              {
-                ; the two walks below see one set of summaries - they
-                ; are written after both - so `mutFlag` may keep its
-                ; answers across them rather than per call
-                (mutMemoOpen cg)
-                (flowStashes cg (nodeC d) (nodeBVec d) vecNew cell)
-                ; MM-LIFE-2g's own stores: a parameter the body
-                ; handed to `__retainref` is COUNTED before it
-                ; is parked - when it arrived typed. `__retain`
-                ; counts the word it is given whatever its form.
-                ; A summary's word half always contains its
-                ; arrival half: what parks a typed reference
-                ; uncounted parks a word too. The count pairs
-                ; with the stash only on the paths it runs on:
-                ; `regionNet` nets each branch's stashes against
-                ; the counts of that branch and its enclosing
-                ; regions, never a sibling's.
-                ; what the open region consumed, net of its counts,
-                ; widened to the word half like the stash summary:
-                ; a parameter released on any path is consumed on
-                ; every path the caller can reason about
-                {
-                  (let st0 (| (regionNet cell) (tyvarSlotsMask cg e d)))
-                  {
-                    (let st (| (memGetWord e 7) (| st0 (arrivalToWord st0))))
-                    (let rt
-                      (if (== (fsigResultIsWord cg e) 1)
-                        0
-                        (| (memGetWord e 8) (flowMask cg (nodeC d) (nodeBVec d) vecNew))))
-                    (let _z (mutMemoClose cg))
-                    (let co0 (& (memGetWord cell 3) (^ (memGetWord cell 1) (- 0 1))))
-                    (let co (| (memGetWord e 9) (| co0 (arrivalToWord co0))))
-                    (if (&& (== st (memGetWord e 7))
-                          (&& (== rt (memGetWord e 8)) (== co (memGetWord e 9))))
-                      (inferFlowsPass cg decls (+ i 1) changed)
-                      {
-                        (memSetWord e 7 st)
-                        (memSetWord e 8 rt)
-                        (memSetWord e 9 co)
-                        (inferFlowsPass cg decls (+ i 1) 1)
-                      })
-                  }
-                }
-              }
-            })
-        })
-    }))
+    (if (== (inferFlowsOne cg (vecGet decls i)) 1)
+      (inferFlowsPass cg decls (+ i 1) 1)
+      (inferFlowsPass cg decls (+ i 1) changed))))
 
 ; A function whose declared result is a WORD STRUCT answers nothing the
 ; caller must keep alive. A word struct is one word that takes no share
@@ -7940,8 +8313,9 @@
   {
     (let text (sysEnv "AXIOM_FRONTEND_JOBS"))
     (let width (strToInt text))
-    (if (&& (!= sysForkNum 0)
-          (&& (&& (>= width 2) (<= width 8)) (strEq text (fmtInt width)))) width 1)
+    (if (&& (!= sysForkNum 0) (&& (&& (>= width 2) (<= width 8)) (strEq text (fmtInt width))))
+      width
+      1)
   })
 
 (pub :: frontCached (-> FrontCache String (Option FrontModule)))
@@ -7975,7 +8349,8 @@
       ((Ok source)
         (match (frontParse source)
           ((None) "")
-          ((Some parsed) (frontEncode parsed)))))
+          ((Some parsed) (frontEncode parsed)))
+      ))
   })
 
 ; Prefetch only siblings, then let the existing depth-first traversal
@@ -8025,9 +8400,13 @@
                   ((Some parsed)
                     {
                       (vecPush cache.modules
-                        (FrontModule :name (vecGetStr names i) :path (vecGetStr paths i) :parsed parsed))
+                        (FrontModule
+                          :name (vecGetStr names i)
+                          :path (vecGetStr paths i)
+                          :parsed parsed))
                       0
-                    }))
+                    }
+                  ))
                 (set i (+ i 1))
               })
           })
@@ -8055,7 +8434,8 @@
           (let parsed module.parsed)
           (vecPush units (as (CUnit2 :file module.path :src parsed.source :name name) Int))
           parsed.decls
-        }))))
+        })
+    )))
 
 (pub :: parseModuleOrDieUnitSerial (-> String Int String Ints String Int Ints))
 ;@axiom:effect(io)
@@ -8451,7 +8831,8 @@
             (while (< i (vecLen pending))
               {
                 (let node (vecGet pending i))
-                (if (== (nodeTag node) TAG_D_IMPORT) (vecPush scheduled (nodeAName node)))
+                (if (== (nodeTag node) TAG_D_IMPORT)
+                  (vecPush scheduled (nodeAName node)))
                 (set i (+ i 1))
               })
             (let next vecNew)
@@ -8464,7 +8845,8 @@
                 (while (< j (vecLen parsed.decls))
                   {
                     (let node (vecGet parsed.decls j))
-                    (if (== (nodeTag node) TAG_D_IMPORT) (vecPush next node))
+                    (if (== (nodeTag node) TAG_D_IMPORT)
+                      (vecPush next node))
                     (set j (+ j 1))
                   })
                 (set i (+ i 1))
@@ -8494,12 +8876,14 @@
 ; place and returns the same handle, so both stay stable across the whole
 ; traversal and siblings observe each other's additions.
 (pub :: resolveDecls
-  (-> Ints Ints Strings Int String Int Strings Strings Ints
-    Strings Int String Ints FrontCache Ints))
+  (-> Ints Ints Strings Int String Int Strings Strings Ints Strings Int String Ints FrontCache
+    Ints))
 ;@axiom:effect(io)
-(pub fn (resolveDecls decls acc seen i modName idx bares fulls mods filter tcode entryDir units cache)
+(pub fn (resolveDecls decls acc seen i modName idx bares fulls mods filter tcode entryDir units
+          cache)
   (resolveDeclsPhase decls
-    (resolveDeclsPhase decls acc seen i modName idx bares fulls mods filter tcode entryDir units 0 cache)
+    (resolveDeclsPhase decls acc seen i modName idx bares fulls mods filter tcode entryDir units 0
+      cache)
     seen i modName idx bares fulls mods filter tcode entryDir units 1 cache))
 
 ; Two passes: stage0 partitions a module's imports into
@@ -8515,8 +8899,8 @@
 ; imported module resolving BOTH its phases depth-first), phase 1 only
 ; the module's own declarations.
 (pub :: resolveDeclsPhase
-  (-> Ints Ints Strings Int String Int Strings Strings Ints
-    Strings Int String Ints Int FrontCache Ints))
+  (-> Ints Ints Strings Int String Int Strings Strings Ints Strings Int String Ints Int FrontCache
+    Ints))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (resolveDeclsPhase decls acc seen i modName idx bares fulls mods filter tcode entryDir
@@ -8554,7 +8938,8 @@
                 ; exist yet when the filter is applied here
                 ; (MAC-EXP-16).
                 {
-                  (let modDecls (parseModuleOrDieUnit name tcode entryDir units modName first cache))
+                  (let modDecls
+                    (parseModuleOrDieUnit name tcode entryDir units modName first cache))
                   (let subFilter
                     {
                       (let ns (nodeBVec first))
@@ -8569,7 +8954,8 @@
                     (resolveDeclsPhase decls
                       (resolveDecls modDecls acc seen 0 name idx bares fulls mods subFilter tcode
                         entryDir units cache)
-                      seen (+ i 1) modName idx bares fulls mods filter tcode entryDir units phase cache)
+                      seen (+ i 1) modName idx bares fulls mods filter tcode entryDir units phase
+                      cache)
                   }
                 }
               })
@@ -8634,8 +9020,7 @@
 ; applies it to macro-made declarations that did not exist while
 ; either import ran (MAC-EXP-16) - the recorded answer has to cover
 ; every list, not the first one.
-(pub :: resolveRepeatImport
-  (-> String Int Int Strings Strings Ints Ints Ints))
+(pub :: resolveRepeatImport (-> String Int Int Strings Strings Ints Ints Ints))
 ;@axiom:effect(unsafe)
 (pub fn (resolveRepeatImport mod imp idx bares fulls mods acc)
   {
@@ -8719,8 +9104,7 @@
 ; keeps a name it defined itself. Every other declaration kind needs
 ; only the flip. Foreign items widen individually and acquire a bare
 ; mapping only when the module exports that item.
-(pub :: repeatExportNew
-  (-> Ints String Strings Int Strings Strings Int Ints))
+(pub :: repeatExportNew (-> Ints String Strings Int Strings Strings Int Ints))
 (pub fn (repeatExportNew acc mod delta idx bares fulls i)
   (if (>= i (vecLen acc))
     acc
@@ -13960,8 +14344,7 @@
       }
     }))
 
-(pub :: resolveModMarks
-  (-> Ints Int String String String Int Ints Ints Ints Ints Int))
+(pub :: resolveModMarks (-> Ints Int String String String Int Ints Ints Ints Ints Int))
 ;@axiom:effect(unsafe)
 (pub fn (resolveModMarks marks i modname text path ix rows files addrFns addrLbls)
   (if (>= i (vecLen marks))
@@ -15501,9 +15884,10 @@
 ; checker needs `allDecls` too, and resolving twice would read every
 ; module from disk twice.
 (pub :: emitResolved (-> Ints Strings Strings Int String))
-;@axiom:effect(io)
+
 ; Sub-phase timing for AXIOM_TIME_PHASES=1, matching main's phase
 ; lines: one `phase emit/<pass> <ms>` line per stage on stderr.
+;@axiom:effect(io)
 (:: emitPhaseNow Int)
 ;@axiom:effect(io)
 (fn (emitPhaseNow)
@@ -15519,7 +15903,8 @@
     {
       (if (strEq (sysEnv "AXIOM_TIME_PHASES") "1")
         (writeStr stderr
-          (concat "phase " (concat name (concat " " (concat (fmtInt (/ (- now start) 1000)) " ms\n"))))))
+          (concat "phase "
+            (concat name (concat " " (concat (fmtInt (/ (- now start) 1000)) " ms\n"))))))
       now
     }
   })
