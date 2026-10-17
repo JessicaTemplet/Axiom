@@ -16,6 +16,14 @@ its changelog too.
 
 ## Unreleased
 
+- Codegen ownership and flow facts now converge as a worklist:
+  after one full pass, rounds re-walk only the callers of functions
+  whose summaries moved, over a caller index whose counts ride on
+  each signature. A quiet frontier is verified by a full pass.
+  Emitting `self_host/main.ax` takes 4.0s in the emit phase, down
+  from 4.9s, and the emitted IR is byte-identical. Tested by the
+  stage2/stage3 fixpoint in `scripts/bootstrap-from-seed.sh`.
+
 - Large builds assemble as parallel codegen units: the optimised
   module is split with `llvm-split` and the parts are assembled by
   concurrent `llc` processes before one link. `AXIOM_CODEGEN_JOBS`
