@@ -2454,6 +2454,298 @@
           "check the `(symbol \"...\")` clause against the crate, and check that `--link-lib`/`--link-search` name the archive defining it; this is refused here rather than in `opt` or `cc` because a linker error about generated code cannot point at the declaration that caused it"))
     }))
 
+; ------------------------------------------------------------------
+; Codegen units: for a large module, the IR is optimised whole,
+; then `llvm-split` partitions it and `llc` assembles the parts
+; concurrently, and a single `cc` links the objects - the shape of
+; rustc's codegen units, at the toolchain level. Optimising first
+; keeps inlining whole-module (measured: splitting first made the
+; built compiler 85% slower at checking its own source).
+; AXIOM_CODEGEN_JOBS names
+; the part count: unset means 4, 1 or 0 means the serial path, and
+; anything unparsable means 4. Only the plain hosted link is
+; eligible; Windows, baremetal, staticlib and obfuscated builds keep
+; the serial path, as does any module of 4 MiB or less. A missing
+; `llvm-split` also falls back, silently: the serial path is always
+; available and always correct.
+; ------------------------------------------------------------------
+(:: cgJobsParse (-> String Int Int Int))
+(fn (cgJobsParse s i acc)
+  (if (>= i (strLen s))
+    acc
+    {
+      (let c (strByte s i))
+      (if (|| (< c 48) (> c 57))
+        -1
+        (cgJobsParse s (+ i 1) (+ (* acc 10) (- c 48))))
+    }))
+
+(:: cgJobs Int)
+;@axiom:effect(io)
+(fn (cgJobs)
+  {
+    (let text (sysEnv "AXIOM_CODEGEN_JOBS"))
+    (if (== (strLen text) 0)
+      4
+      {
+        (let n (cgJobsParse text 0 0))
+        (if (< n 0)
+          4
+          n)
+      })
+  })
+
+(:: splitPartPath (-> String Int String))
+(fn (splitPartPath stem i)
+  (concat stem (concat ".part" (fmtIntStr i))))
+
+; Resolve `tool` on PATH, answering "" when it is not there: the
+; spawn primitives take a path, and the search is `sysRunPath`'s.
+(:: resolveTool (-> String String))
+;@axiom:effect(io)
+(fn (resolveTool name)
+  (if (isSome (strFind name "/" 0))
+    name
+    (resolveToolIn name (sysEnv "PATH") 0)))
+
+(:: resolveToolIn (-> String String Int String))
+;@axiom:effect(io)
+(fn (resolveToolIn name path from)
+  (if (>= from (strLen path))
+    ""
+    {
+      (let colon (strFind path ":" from))
+      (let end (match colon ((None) (strLen path)) ((Some c) c)))
+      {
+        (let dir (strSlice path from (- end from)))
+        (let cand
+          (if (== (strLen dir) 0)
+            name
+            (concat dir (concat "/" name))))
+        (if (fileExists cand)
+          cand
+          (resolveToolIn name path (+ end 1)))
+      }
+    }))
+
+; Spawn `tool` with `args`, answering the pid, or -1 when it could
+; not be started. The argv buffer is `runTool`'s shape.
+(:: spawnTool (-> String Ints Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+(fn (spawnTool tool args)
+  {
+    (let path (resolveTool tool))
+    (if (== (strLen path) 0)
+      -1
+      {
+        (let n (vecLen args))
+        {
+          (let v (memAlloc (* (+ n 2) 8)))
+          {
+            (memSetWord v 0 (strCStr (strDup path)))
+            (fillArgv v args 0 n)
+            (memSetWord v (+ n 1) 0)
+            (match (sysSpawn (strCStr (strDup path)) v sysEnvp)
+              ((Err e) -1)
+              ((Ok pid) pid))
+          }
+        }
+      })
+  })
+
+; Wait for `pid`, answering its exit code (128+signal when killed).
+(:: waitTool (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (waitTool pid)
+  (match (sysWaitPid pid)
+    ((Err e) -1)
+    ((Ok st)
+      (if (!= (sysTermSignal st) 0)
+        (+ 128 (sysTermSignal st))
+        (sysExitCode st)))))
+
+; Spawn llc for parts i..jobs-1, recording each pid in `pids`. The
+; module was already optimised whole (see buildSplit), so a part is
+; only assembled here - inlining decisions stay whole-module, and
+; the objects a split build links answer exactly what the serial
+; path's optimiser produced.
+(:: spawnPhase (-> String Int Int Int Ints Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+(fn (spawnPhase stem lvl i jobs pids)
+  (if (>= i jobs)
+    0
+    {
+      (let part (splitPartPath stem i))
+      {
+        (vecPush pids
+          (spawnTool "llc"
+            (vecOf6 part "-filetype=obj" "-o" (concat part ".o")
+              (concat "-O" (fmtIntStr lvl)) llcRelocArg)))
+        (spawnPhase stem lvl (+ i 1) jobs pids)
+      }
+    }))
+
+; Wait for every pid; answers the first failing part index, or -1.
+; A pid of -1 (never started) is settled by the caller's phase rule.
+(:: waitPhase (-> Ints Int Int Int))
+;@axiom:effect(io)
+;@axiom:effect(block)
+(fn (waitPhase pids i jobs)
+  (if (>= i jobs)
+    -1
+    {
+      (let pid (vecGet pids i))
+      (if (< pid 0)
+        (waitPhase pids (+ i 1) jobs)
+        (if (!= (waitTool pid) 0)
+          i
+          (waitPhase pids (+ i 1) jobs)))
+    }))
+
+(:: vecOf5 (-> String String String String String Ints))
+(fn (vecOf5 a b c d e)
+  {
+    (let v vecNew)
+    {
+      (vecPush v (as a Int))
+      (vecPush v (as b Int))
+      (vecPush v (as c Int))
+      (vecPush v (as d Int))
+      (vecPush v (as e Int))
+      v
+    }
+  })
+
+(:: vecOf6 (-> String String String String String String Ints))
+(fn (vecOf6 a b c d e f)
+  {
+    (let v vecNew)
+    {
+      (vecPush v (as a Int))
+      (vecPush v (as b Int))
+      (vecPush v (as c Int))
+      (vecPush v (as d Int))
+      (vecPush v (as e Int))
+      (vecPush v (as f Int))
+      v
+    }
+  })
+
+(:: splitCleanup (-> String Int Int Int))
+;@axiom:effect(io)
+(fn (splitCleanup stem jobs i)
+  (if (>= i jobs)
+    0
+    {
+      (let part (splitPartPath stem i))
+      {
+        (unwrapOr (removeFile part) 0)
+        (unwrapOr (removeFile (concat part ".opt")) 0)
+        (unwrapOr (removeFile (concat part ".o")) 0)
+        (unwrapOr (removeFile (concat part ".llc-err")) 0)
+        (splitCleanup stem jobs (+ i 1))
+      }
+    }))
+
+(:: splitLinkArgs (-> String Int Int Ints Ints))
+(fn (splitLinkArgs stem jobs i acc)
+  (if (>= i jobs)
+    acc
+    {
+      (vecPush acc (as (concat (splitPartPath stem i) ".o") Int))
+      (splitLinkArgs stem jobs (+ i 1) acc)
+    }))
+
+; Split the already-optimised module, assemble the parts in
+; parallel, then link. Answers 0 on success, 1 on a reported
+; failure, and -1 when `llvm-split` is not on PATH (the caller then
+; takes the serial path). Optimising before the split keeps every
+; inlining decision whole-module: the objects answer what the
+; serial path's optimiser produced, only assembled concurrently.
+(pub :: buildSplit (-> String String String String Int Ints Int))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (buildSplit ir llPath stem outPath optLevel linkArgs)
+  {
+    (let jobs (cgJobs))
+    (let lvl
+      (if (> optLevel 3)
+        3
+        (if (< optLevel 0)
+          0
+          optLevel)))
+    {
+      (let sargs
+        {
+          (let v vecNew)
+          {
+            (vecPush v (as (concat "-j=" (fmtInt jobs)) Int))
+            (vecPush v (as "-o" Int))
+            (vecPush v (as (concat stem ".part") Int))
+            (vecPush v (as llPath Int))
+            v
+          }
+        })
+      {
+        (let splitRc (runTool "llvm-split" sargs))
+        (if (< splitRc 0)
+          -1
+          (if (!= splitRc 0)
+            {
+              (splitCleanup stem jobs 0)
+              (toolFailDiag "llvm-split failed"
+                "`llvm-split` partitions the module for parallel code generation; it ships with LLVM - or set AXIOM_CODEGEN_JOBS=1 for the serial path")
+            }
+            {
+              (let llcPids vecNew)
+              {
+                (spawnPhase stem lvl 0 jobs llcPids)
+                (let badLlc (waitPhase llcPids 0 jobs))
+                (if (!= badLlc -1)
+                  {
+                    (let report
+                      (toolFailDiag "llc failed"
+                        "one of the split parts was rejected by `llc`; set AXIOM_CODEGEN_JOBS=1 for the serial path"))
+                    {
+                      (splitCleanup stem jobs 0)
+                      report
+                    }
+                  }
+                  {
+                    (let ccArgs
+                      {
+                        (let v (splitLinkArgs stem jobs 0 vecNew))
+                        {
+                          (appendLinkArgs v linkArgs 0)
+                          (vecPush v (as "-o" Int))
+                          (vecPush v (as outPath Int))
+                          v
+                        }
+                      })
+                    {
+                      (let rc2 (runTool "cc" ccArgs))
+                      {
+                        (splitCleanup stem jobs 0)
+                        (if (!= rc2 0)
+                          (toolFailDiag
+                            (if (< rc2 0)
+                              "could not run `cc`"
+                              "cc failed")
+                            "a C compiler drives the link step; put `cc` on PATH")
+                          0)
+                      }
+                    }
+                  })
+              }
+            }))
+      }
+    }
+  })
+
 ; Write `ir` beside `outPath`, drive the toolchain, and clean up.
 ;
 ; Intermediates are removed on the FAILURE paths too, which is stage0's
@@ -2503,17 +2795,36 @@
                     "`opt` is optional - a PATH without it warns and builds - so this is a failure of the one that is installed")
                 }
                 {
-                  (let rc
-                    (assembleAndLink ir toAssemble objPath exePath optLevel linkArgs winTarget
-                      isBaremetal))
-                  {
-                    (unwrapOr (removeFile objPath) 0)
-                    (if (!= (strCmp toAssemble llPath) 0)
-                      (unwrapOr (removeFile optPath) 0))
-                    (if (== keepLl 0)
-                      (unwrapOr (removeFile llPath) 0))
-                    rc
-                  }
+                  (let splitRc
+                    (if (&& (> (cgJobs) 1)
+                          (&& (> (strLen ir) 4194304)
+                            (&& (== (strLen winTarget) 0)
+                              (&& (! isBaremetal)
+                                (&& (! cgStaticlib)
+                                  (! (hasFlagAnywhere subcommandName "--obfuscate")))))))
+                      (buildSplit ir toAssemble (concat outPath ".split") exePath optLevel linkArgs)
+                      -1))
+                  (if (!= splitRc -1)
+                    {
+                      (if (!= (strCmp toAssemble llPath) 0)
+                        (unwrapOr (removeFile optPath) 0))
+                      (if (== keepLl 0)
+                        (unwrapOr (removeFile llPath) 0))
+                      splitRc
+                    }
+                    {
+                      (let rc
+                        (assembleAndLink ir toAssemble objPath exePath optLevel linkArgs winTarget
+                          isBaremetal))
+                      {
+                        (unwrapOr (removeFile objPath) 0)
+                        (if (!= (strCmp toAssemble llPath) 0)
+                          (unwrapOr (removeFile optPath) 0))
+                        (if (== keepLl 0)
+                          (unwrapOr (removeFile llPath) 0))
+                        rc
+                      }
+                    })
                 })
             })
         }
