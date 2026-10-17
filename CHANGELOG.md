@@ -16,6 +16,13 @@ its changelog too.
 
 ## Unreleased
 
+- Large builds assemble as parallel codegen units: the optimised
+  module is split with `llvm-split` and the parts are assembled by
+  concurrent `llc` processes before one link. `AXIOM_CODEGEN_JOBS`
+  names the part count (default 4; 1 restores the serial path).
+  A self-build takes 26.8s, down from 29.7s, and the stage2/stage3
+  fixpoint still holds byte for byte.
+
 - Emitted refcounting inlines its fast paths: `axiom_retain` always
   inlines, and `axiom_release` inlines the decrement for counts
   above one, taking the full drain only on the last share.
