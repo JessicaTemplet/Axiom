@@ -11880,7 +11880,7 @@
     ; touches nothing. Decoding is the same subtraction, so the pop in
     ; `axiom_alloc`, the dead-list drain and the two filing stores are
     ; the only sites that know (`tests/stdlib/521-release-filed.ax`).
-    (emitLine cg "define void @axiom_retain(i64 %h) #0 {")
+    (emitLine cg "define void @axiom_retain(i64 %h) #1 {")
     (emitLine cg "entry:")
     (emitLine cg "  %imm = icmp slt i64 %h, 4096")
     (emitLine cg "  br i1 %imm, label %done, label %chk")
@@ -11939,7 +11939,7 @@
     ; and then the machine stack. The dead list costs one word the
     ; block already owns.
     (emitResourceRuntime cg)
-    (emitLine cg "define void @axiom_release(i64 %h0) #0 {")
+    (emitLine cg "define void @axiom_release_full(i64 %h0) #0 {")
     (emitLine cg "start:")
     (emitLine cg "  %dead = alloca i64")
     (emitLine cg "  %cur = alloca i64")
@@ -12160,6 +12160,37 @@
     (emitLine cg "  store i64 %pwm, ptr %wm")
     (emitLine cg "  store i64 %pflg, ptr %warr")
     (emitLine cg "  br label %walk")
+    (emitLine cg "done:")
+    (emitLine cg "  ret void")
+    (emitLine cg "}")
+    (emitLine cg "")
+    ; The fast path every release call site inlines (attributes #1):
+    ; an immediate, a static or a block whose count is above one
+    ; needs no drain - decrement and return. The last share, and
+    ; every other shape, takes the full path above.
+    (emitLine cg "define void @axiom_release(i64 %h0) #1 {")
+    (emitLine cg "entry:")
+    (emitLine cg "  %imm = icmp slt i64 %h0, 4096")
+    (emitLine cg "  br i1 %imm, label %done, label %chk")
+    (emitLine cg "chk:")
+    (emitLine cg "  %hoff = add i64 %h0, -16")
+    (emitLine cg "  %cp = inttoptr i64 %hoff to ptr")
+    (emitLine cg "  %c = load i64, ptr %cp")
+    (emitLine cg "  %stat = icmp slt i64 %c, 0")
+    (emitLine cg "  br i1 %stat, label %done, label %cnt")
+    (emitLine cg "cnt:")
+    (emitLine cg "  %zero = icmp eq i64 %c, 0")
+    (emitLine cg "  br i1 %zero, label %done, label %onechk")
+    (emitLine cg "onechk:")
+    (emitLine cg "  %one = icmp eq i64 %c, 1")
+    (emitLine cg "  br i1 %one, label %full, label %dec")
+    (emitLine cg "dec:")
+    (emitLine cg "  %c1 = add i64 %c, -1")
+    (emitLine cg "  store i64 %c1, ptr %cp")
+    (emitLine cg "  br label %done")
+    (emitLine cg "full:")
+    (emitLine cg "  call void @axiom_release_full(i64 %h0)")
+    (emitLine cg "  br label %done")
     (emitLine cg "done:")
     (emitLine cg "  ret void")
     (emitLine cg "}")
@@ -15471,6 +15502,29 @@
 ; module from disk twice.
 (pub :: emitResolved (-> Ints Strings Strings Int String))
 ;@axiom:effect(io)
+; Sub-phase timing for AXIOM_TIME_PHASES=1, matching main's phase
+; lines: one `phase emit/<pass> <ms>` line per stage on stderr.
+(:: emitPhaseNow Int)
+;@axiom:effect(io)
+(fn (emitPhaseNow)
+  (match (sysNowMonotonic (memAlloc 16))
+    ((Ok us) us)
+    ((Err e) 0)))
+
+(:: emitPhaseTick (-> String Int Int))
+;@axiom:effect(io)
+(fn (emitPhaseTick name start)
+  {
+    (let now (emitPhaseNow))
+    {
+      (if (strEq (sysEnv "AXIOM_TIME_PHASES") "1")
+        (writeStr stderr
+          (concat "phase " (concat name (concat " " (concat (fmtInt (/ (- now start) 1000)) " ms\n"))))))
+      now
+    }
+  })
+
+;@axiom:effect(io)
 (pub fn (emitResolved allDecls bares fulls tcode)
   (emitResolvedMode allDecls bares fulls tcode false))
 
@@ -15484,6 +15538,7 @@
   ; function is emitted.
   {
     (let cg newCG)
+    (let emitT0 (emitPhaseNow))
     {
       (let _mode
         (pairSetSlot cg 16
@@ -15512,8 +15567,10 @@
             (let _idx (buildNameIndexes cg0b))
             {
               (let _own (inferOwnership cg0b allDecls))
+              (let emitTO (emitPhaseTick "emit/scan+index+ownership" emitT0))
               {
                 (let _flow (inferFlows cg0b allDecls))
+                (let emitT1 (emitPhaseTick "emit/flows" emitTO))
                 {
                   (let ttHeader (concat "target triple = \"" (concat (targetTriple tcode) "\"")))
                   {
@@ -15524,7 +15581,13 @@
                         (let cg3 (emitAllocator cg2))
                         {
                           (let cg4 (emitLine cg3 ""))
-                          (emitModuleTail allDecls cg4 0)
+                          {
+                            (let ir (emitModuleTail allDecls cg4 0))
+                            {
+                              (emitPhaseTick "emit/bodies" emitT1)
+                              ir
+                            }
+                          }
                         }
                       }
                     }
@@ -15602,8 +15665,10 @@
               (runtimeDeclaredSyms (memGetWord nextCg 26)))))
         (renderCG
           (emitAsmFiles
-            (emitLine (emitBacktrace tailCg (symtabNames (memGetWordVec tailCg 0)))
-              (attrGroupZero (memGetWord tailCg 26)))))
+            (emitLine
+              (emitLine (emitBacktrace tailCg (symtabNames (memGetWordVec tailCg 0)))
+                (attrGroupZero (memGetWord tailCg 26)))
+              "attributes #1 = { alwaysinline }")))
       }
       (emitModuleTail decls nextCg (+ i 1)))
   })
