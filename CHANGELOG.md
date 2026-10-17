@@ -16,6 +16,14 @@ its changelog too.
 
 ## Unreleased
 
+- Emitted refcounting inlines its fast paths: `axiom_retain` always
+  inlines, and `axiom_release` inlines the decrement for counts
+  above one, taking the full drain only on the last share.
+  `vecPush` splits its deciding cases into `vecPushSlow`, leaving an
+  inlinable fast path. `Vec` now runs within 1.75x of Rust in
+  `scripts/bench-datastructures.sh --check`, and checking
+  `self_host/main.ax` takes 8.5s, down from 9.9s on the old runtime.
+
 - Region escape facts now converge as a worklist: rounds after the
   first re-walk only callers of functions whose facts grew, with a
   final full pass verifying a quiet frontier. Checking
