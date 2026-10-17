@@ -456,29 +456,45 @@
 (pub :: vecPush (-> (Vec a) a (Vec a)))
 (pub fn (vecPush v x)
   {
-    (let len (vecLen v))
     (let counted (__retainref x))
     (let h (as v Int))
-    {
-      (let kind (memGetWord h 3))
+    (let kind (memGetWord h 3))
+    (let len (vecLen v))
+    (if (&& (!= kind 0)
+          (&& (|| (== kind 2) (== counted 1)) (< len (vecCap v))))
       {
-        (vecReserve v (+ len 1))
-        (if (== kind 0)
-          (if (== counted 1)
-            {
-              (memMarkArray (vecData v) (vecCap v))
-              (memSetWord h 3 1)
-            }
-            (memSetWord h 3 2))
-          (if (&& (== kind 1) (== counted 0))
-            {
-              (memMarkLeaf (vecData v))
-              (memSetWord h 3 2)
-            }))
         (memSetWord (vecData v) len (as x Int))
         (memSetWord h 0 (+ len 1))
         v
       }
+      (vecPushSlow v x counted kind len))
+  })
+
+; The deciding pushes: the first element (which fixes the kind), an
+; element whose counted-ness disagrees with the kind, and any push
+; that must grow. Everything else is the fast path above, small
+; enough for the optimiser to inline into its callers.
+(:: vecPushSlow (-> (Vec a) a Int Int Int (Vec a)))
+(fn (vecPushSlow v x counted kind len)
+  {
+    (let h (as v Int))
+    {
+      (vecReserve v (+ len 1))
+      (if (== kind 0)
+        (if (== counted 1)
+          {
+            (memMarkArray (vecData v) (vecCap v))
+            (memSetWord h 3 1)
+          }
+          (memSetWord h 3 2))
+        (if (&& (== kind 1) (== counted 0))
+          {
+            (memMarkLeaf (vecData v))
+            (memSetWord h 3 2)
+          }))
+      (memSetWord (vecData v) len (as x Int))
+      (memSetWord h 0 (+ len 1))
+      v
     }
   })
 
