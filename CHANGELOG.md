@@ -16,6 +16,12 @@ its changelog too.
 
 ## Unreleased
 
+- Region escape facts now converge as a worklist: rounds after the
+  first re-walk only callers of functions whose facts grew, with a
+  final full pass verifying a quiet frontier. Checking
+  `self_host/main.ax` takes 9.8s, down from 14.0s. Tested by
+  `scripts/check-region-escape.sh`.
+
 - Type aliases no longer take `=`: write `(type Items a (Vec a))`.
   The form `(type Items a = (Vec a))` is refused with `AX2003`, so a
   declaration never carries an assignment operator. Tested by
