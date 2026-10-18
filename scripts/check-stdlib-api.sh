@@ -363,10 +363,10 @@ cat > "$work/ApiLayout.ax" <<'SIGNATURES'
 (pub fn (layoutInt) 42)
 
 ;; A concrete alias stays visible.
-(pub type LayoutNumber = Int)
+(pub type LayoutNumber Int)
 
 ;; Generic parameters stay in declaration order.
-(pub type LayoutItems a =
+(pub type LayoutItems a
   (Vec ; a comment containing )) is not a delimiter
     a))
 SIGNATURES
@@ -390,8 +390,8 @@ expected = {
     'layoutInt': 'Int',
 }
 aliases = {
-    'LayoutNumber': '(type LayoutNumber = Int)',
-    'LayoutItems': '(type LayoutItems a = (Vec a))',
+    'LayoutNumber': '(type LayoutNumber Int)',
+    'LayoutItems': '(type LayoutItems a (Vec a))',
 }
 assert set(rows) == set(expected) | set(aliases), rows
 for name, declaration in aliases.items():

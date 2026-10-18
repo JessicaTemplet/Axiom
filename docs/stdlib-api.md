@@ -291,12 +291,12 @@ Axqlite.AxqlMacro - AXQL statements written as Axiom forms.
 | `axqlPutParam` | value | `(-> QueryBuilder Value Int)` | `Alloc,Mut` |  | Append a parameter: `?` in the text, `v` in the parameters. |
 | `axqlFinish` | value | `(-> QueryBuilder Query)` | `Alloc,Mut` |  | The finished query. |
 | `axqlQuoteName` | value | `(-> String String)` | `Alloc,Mut` |  | `name` as AXQL writes a name: bare when it can be, else in double quotes with each `"` inside doubled. |
-| `RowId` | type | `(type RowId = Int)` |  |  | A field that is its table's INTEGER PRIMARY KEY, the rowid. |
-| `Bytes` | type | `(type Bytes = String)` |  |  | A field holding a BLOB's bytes. |
-| `OptInt` | type | `(type OptInt = (Option Int))` |  |  | An INTEGER column that may be NULL: `None` is NULL. |
-| `OptFloat` | type | `(type OptFloat = (Option Float))` |  |  | A REAL column that may be NULL. |
-| `OptString` | type | `(type OptString = (Option String))` |  |  | A TEXT column that may be NULL. |
-| `OptBytes` | type | `(type OptBytes = (Option String))` |  |  | A BLOB column that may be NULL. |
+| `RowId` | type | `(type RowId Int)` |  |  | A field that is its table's INTEGER PRIMARY KEY, the rowid. |
+| `Bytes` | type | `(type Bytes String)` |  |  | A field holding a BLOB's bytes. |
+| `OptInt` | type | `(type OptInt (Option Int))` |  |  | An INTEGER column that may be NULL: `None` is NULL. |
+| `OptFloat` | type | `(type OptFloat (Option Float))` |  |  | A REAL column that may be NULL. |
+| `OptString` | type | `(type OptString (Option String))` |  |  | A TEXT column that may be NULL. |
+| `OptBytes` | type | `(type OptBytes (Option String))` |  |  | A BLOB column that may be NULL. |
 | `axqlAddParam` | value | `(-> QueryBuilder Value Int)` | `Alloc,Mut` |  | Append a parameter's value with no `?`, for a statement whose text already holds its marks. |
 | `axqlOptIntValue` | value | `(-> (Option Int) Value)` | `Alloc` |  | An optional INTEGER as a parameter: `None` is NULL. |
 | `axqlOptFloatValue` | value | `(-> (Option Float) Value)` | `Alloc` |  | An optional REAL as a parameter. |
