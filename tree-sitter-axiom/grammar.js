@@ -114,6 +114,7 @@ module.exports = grammar({
     // that; this declares the ambiguity the precedence then settles,
     // the same shape `(struct Point (x))` already carries two rules up.
     [$.type_parameters, $.data_constructor],
+    [$.alias_type_parameters],
     // `(handle body (foo) handler)`: is `(foo)` a one-element custom effect
     // list, or is it an application that serves as the handler? Nothing in
     // the form settles it, and the language itself is ambiguous here -
@@ -490,7 +491,7 @@ module.exports = grammar({
       '(', optional(field('visibility', 'pub')), 'type',
       field('name', choice($.identifier, $.syntax_join_name)),
       optional(field('type_parameters', alias($.alias_type_parameters, $.type_parameters))),
-      '=',
+      optional('='),
       field('target', $._type),
       ')',
     ),
