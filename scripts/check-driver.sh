@@ -1305,6 +1305,15 @@ if command -v lld-link > /dev/null 2>&1 && command -v llvm-dlltool > /dev/null 2
     bad "no kernel32.lib and no llvm-dlltool (rc=$rc, first line: $(head -1 wnodll.log))"
   fi
 
+  # The image reserves the 8 MB stack POSIX gives a main thread.
+  if command -v llvm-readobj >/dev/null; then
+    if llvm-readobj --file-headers whello.exe | grep -q 'SizeOfStackReserve: 8388608'; then
+      ok "a Windows executable reserves an 8 MB stack"
+    else
+      bad "a Windows executable's stack reserve: $(llvm-readobj --file-headers whello.exe | grep SizeOfStackReserve)"
+    fi
+  fi
+
   # A PATH with no lld-link on it: blamed by name, exit 4.
   mkdir -p fake-nolld
   for t in llc opt; do ln -sf "$(command -v $t)" "fake-nolld/$t"; done
