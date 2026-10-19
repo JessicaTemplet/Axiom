@@ -16,6 +16,10 @@ its changelog too.
 
 ## Unreleased
 
+- Region analysis visits declarations with a loop, so its stack use
+  stays independent of the number of declarations. Tested by
+  `scripts/check-stack-depth.sh`.
+
 - Bare nullary constructors in patterns test their constructor. Match
   arms covered by an earlier arm report `AX3134`. Duplicate constructor
   names and empty literal subtype ranges are refused. Extra function
