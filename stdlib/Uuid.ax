@@ -1,0 +1,430 @@
+;;! Uuid - universally unique identifiers, RFC 9562 versions 4 and 7.
+;;!
+;;!     (uuidV4)                          ; (Ok <random uuid>)
+;;!     (uuidV7)                          ; (Ok <time-ordered uuid>)
+;;!     (uuidToString u)                  ; "xxxxxxxx-xxxx-7xxx-yxxx-xxxxxxxxxxxx"
+;;!     (uuidParse "550e8400-e29b-41d4-a716-446655440000")  ; (Ok u)
+;;!     (uuidV4Seeded 42)                 ; one fixed uuid, every run
+;
+; A `Uuid` is 16 bytes held as two words. The type is sealed: only
+; this module makes one, so every value a caller holds has the shape
+; this module gave it. Read one back with `uuidBytes` (the 16 bytes,
+; most significant first) and `uuidToString` (the 36-character text
+; form); make one from those with `uuidFromBytes` and `uuidParse`.
+;
+; Randomness is never global. `uuidV4` and `uuidV7` draw from the
+; kernel through `Crypto.Random` and answer its `Err` unchanged in
+; kind: a target with no entropy source gets an error, never a clock
+; or counter substitute. A caller with its own source - a test, a
+; seeded generator, another runtime - injects it instead:
+; `uuidV4FromBytes` and `uuidV7FromBytes` stamp the version and
+; variant bits onto 16 bytes the caller supplies, and
+; `uuidV4Seeded` / `uuidV7Seeded` expand one `Int` seed, so a test
+; names a seed and gets the same uuid on every run and every target.
+; Nothing here keeps state between calls.
+;
+; Version 7 carries a 48-bit Unix millisecond timestamp in its first
+; six bytes, so values sort by creation time as unsigned byte strings
+; (`uuidCompare`). `uuidTimestampMs` reads it back. The clock is the
+; realtime clock (`Sys.sysNowRealtimeNanos`): it can step, so two v7
+; values made around a step may sort against their creation order.
+; Within one millisecond the remaining bits are random, not a
+; counter, so same-millisecond values do not sort among themselves.
+;
+; Text is the canonical form only: 32 lower-case hex digits in five
+; groups joined by hyphens, 36 characters. `uuidParse` accepts upper
+; case too and refuses everything else, including the 32-digit form
+; with no hyphens and the braced form.
+(import Mem)
+(import Str)
+(import Err)
+(import Sys)
+(import Crypto.Ct)
+(import Crypto.Bytes)
+(import Crypto.Random)
+(import Fmt)
+
+; ------------------------------------------------------------------
+; Errors. 1500-1599 is this module's range, clear of the errno range
+; and of the ranges `Err` names for the other modules.
+; ------------------------------------------------------------------
+;; Text that is not a canonical uuid, or bytes that are not 16 long.
+(pub :: uuidInvalidFormat Int)
+(pub fn (uuidInvalidFormat)
+  1501)
+
+;; This target has no realtime clock, or reading it failed, so a
+;; version 7 uuid cannot be stamped.
+(pub :: uuidClockUnavailable Int)
+(pub fn (uuidClockUnavailable)
+  1502)
+
+; An `Err` carrying one of the codes above, with a message and the
+; name of the function that raised it as context.
+(:: uuidErr (-> Int String String (Result a Error)))
+(fn (uuidErr code message where)
+  (Err (errContextOf (mkError code message) where)))
+
+; ------------------------------------------------------------------
+; The type. `hi` is bytes 0 to 7 and `lo` bytes 8 to 15, each read
+; big-endian, so the text form is `hi` then `lo` in hex.
+; ------------------------------------------------------------------
+;; A universally unique identifier. Make one with `uuidV4`, `uuidV7`,
+;; `uuidParse`, `uuidFromBytes` or a seeded constructor, and the all
+;; zero value with `uuidNil`.
+(pub struct Uuid sealed
+  (hi : Int)
+  (lo : Int))
+
+;; The all-zero uuid.
+(pub :: uuidNil Uuid)
+(pub fn (uuidNil)
+  (Uuid :hi 0 :lo 0))
+
+;; Whether `u` is the all-zero uuid.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: uuidIsNil (-> Uuid Bool))
+(pub fn (uuidIsNil u)
+  (&& (== u.hi 0) (== u.lo 0)))
+
+;; The version field: 4 or 7 for a value this module generated, 0 for
+;; `uuidNil`, and whatever a parsed or injected value carries.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: uuidVersion (-> Uuid Int))
+(pub fn (uuidVersion u)
+  (& (>> (& u.hi 65535) 12) 15))
+
+;; -1, 0 or 1 as `a` sorts before, equal to or after `b`, comparing
+;; the 16 bytes as one unsigned number. Version 7 values sort by
+;; timestamp under this order.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: uuidCompare (-> Uuid Uuid Int))
+(pub fn (uuidCompare a b)
+  {
+    (let ah (^ a.hi intMin))
+    (let bh (^ b.hi intMin))
+    (if (!= ah bh)
+      (if (< ah bh)
+        -1
+        1)
+      {
+        (let al (^ a.lo intMin))
+        (let bl (^ b.lo intMin))
+        (if (== al bl)
+          0
+          (if (< al bl)
+            -1
+            1))
+      })
+  })
+
+;; Whether `a` and `b` are the same uuid.
+;@axiom:restrict(no-io,no-alloc,no-foreign)
+(pub :: uuidEq (-> Uuid Uuid Bool))
+(pub fn (uuidEq a b)
+  (&& (== a.hi b.hi) (== a.lo b.lo)))
+
+;; The Unix millisecond timestamp of a version 7 uuid, as
+;; `(Some ms)`. Any other version answers `None`.
+(pub :: uuidTimestampMs (-> Uuid (Option Int)))
+;@axiom:effect(unsafe)
+(pub fn (uuidTimestampMs u)
+  (if (== (uuidVersion u) 7)
+    {
+      (let b (uuidBytes u))
+      (let p (strData b))
+      (let mut ms 0)
+      {
+        (for i in 0..6
+          (set ms (| (<< ms 8) (__load8 p i))))
+        (Some ms)
+      }
+    }
+    None))
+
+; ------------------------------------------------------------------
+; Bytes. A uuid's bytes are a 16-byte `String`, most significant
+; first: the order `uuidToString` prints and `uuidParse` reads.
+; ------------------------------------------------------------------
+;; The 16 bytes of `u`, most significant first.
+(pub :: uuidBytes (-> Uuid String))
+;@axiom:effect(unsafe)
+(pub fn (uuidBytes u)
+  {
+    (let s (bytesNew 16))
+    (let p (strData s))
+    {
+      (for i in 0..8
+        (__store8 p i (& (>> u.hi (* 8 (- 7 i))) 255)))
+      (for i in 0..8
+        (__store8 p (+ 8 i) (& (>> u.lo (* 8 (- 7 i))) 255)))
+      s
+    }
+  })
+
+;; The uuid whose bytes are `b`, or `Err` (`uuidInvalidFormat`) when
+;; `b` is not 16 bytes. The bytes are taken as they are: no version
+;; or variant bits are set, so `uuidFromBytes (uuidBytes u)` is `u`
+;; for every `u`. Use `uuidV4FromBytes` or `uuidV7FromBytes` to stamp
+;; a version onto bytes from another source.
+(pub :: uuidFromBytes (-> String (Result Uuid Error)))
+(pub fn (uuidFromBytes b)
+  (if (!= (strLen b) 16)
+    (uuidErr uuidInvalidFormat "a uuid is 16 bytes" "uuidFromBytes")
+    (Ok (Uuid :hi (ld64be (strData b) 0) :lo (ld64be (strData b) 8)))))
+
+; Stamp version `ver` and the RFC 9562 variant onto the 16 bytes at
+; `p`, in place. Answers 0.
+(:: stampVersion (-> Int Int Int Int))
+;@axiom:effect(unsafe)
+(fn (stampVersion p off ver)
+  {
+    (__store8 p (+ off 6) (| (& (__load8 p (+ off 6)) 15) (<< ver 4)))
+    (__store8 p (+ off 8) (| (& (__load8 p (+ off 8)) 63) 128))
+    0
+  })
+
+;; A version 4 uuid over 16 bytes the caller supplies - its own
+;; randomness, a recording, a test vector. Only the version and
+;; variant bits change. `Err` when `b` is not 16 bytes.
+(pub :: uuidV4FromBytes (-> String (Result Uuid Error)))
+(pub fn (uuidV4FromBytes b)
+  (if (!= (strLen b) 16)
+    (uuidErr uuidInvalidFormat "a uuid is 16 bytes" "uuidV4FromBytes")
+    {
+      (let s (strDup b))
+      {
+        (stampVersion (strData s) 0 4)
+        (uuidFromBytes s)
+      }
+    }))
+
+;; A version 7 uuid for Unix millisecond `ms` over bytes the caller
+;; supplies. The timestamp replaces the first six bytes and the
+;; version and variant bits are stamped; the rest is the caller's.
+;; `ms` is taken modulo 2^48. `Err` when `b` is not 16 bytes.
+(pub :: uuidV7FromBytes (-> Int String (Result Uuid Error)))
+;@axiom:effect(unsafe)
+(pub fn (uuidV7FromBytes ms b)
+  (if (!= (strLen b) 16)
+    (uuidErr uuidInvalidFormat "a uuid is 16 bytes" "uuidV7FromBytes")
+    {
+      (let s (strDup b))
+      (let p (strData s))
+      {
+        (for i in 0..6
+          (__store8 p i (& (>> ms (* 8 (- 5 i))) 255)))
+        (stampVersion p 0 7)
+        (uuidFromBytes s)
+      }
+    }))
+
+; ------------------------------------------------------------------
+; Text. The canonical form is 36 characters: five hex groups of
+; 8, 4, 4, 4 and 12 digits joined by hyphens.
+; ------------------------------------------------------------------
+; The lower-case hex digit for a 4-bit value.
+(:: hexDigit (-> Int Int))
+(fn (hexDigit v)
+  (if (< v 10)
+    (+ 48 v)
+    (+ 87 v)))
+
+;; `u` in canonical text form, lower case:
+;; "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".
+(pub :: uuidToString (-> Uuid String))
+;@axiom:effect(unsafe)
+(pub fn (uuidToString u)
+  {
+    (let b (uuidBytes u))
+    (let bp (strData b))
+    (let out (bytesNew 36))
+    (let q (strData out))
+    {
+      (for i in 0..16
+        {
+          (let pos
+            (+ (* 2 i)
+              (if (< i 4)
+                0
+                (if (< i 6)
+                  1
+                  (if (< i 8)
+                    2
+                    (if (< i 10)
+                      3
+                      4))))))
+          (let byte (__load8 bp i))
+          {
+            (__store8 q pos (hexDigit (>> byte 4)))
+            (__store8 q (+ pos 1) (hexDigit (& byte 15)))
+          }
+        })
+      (__store8 q 8 45)
+      (__store8 q 13 45)
+      (__store8 q 18 45)
+      (__store8 q 23 45)
+      out
+    }
+  })
+
+; The hyphen positions in the canonical form.
+(:: isHyphenPos (-> Int Bool))
+(fn (isHyphenPos i)
+  (|| (|| (== i 8) (== i 13)) (|| (== i 18) (== i 23))))
+
+;; The uuid a canonical text form names, or `Err`
+;; (`uuidInvalidFormat`). Upper-case hex is accepted; the hyphenless
+;; 32-digit form and the braced form are not.
+(pub :: uuidParse (-> String (Result Uuid Error)))
+;@axiom:effect(unsafe)
+(pub fn (uuidParse s)
+  (if (!= (strLen s) 36)
+    (uuidErr uuidInvalidFormat "a uuid is 36 characters with hyphens" "uuidParse")
+    {
+      (let out (bytesNew 16))
+      (let q (strData out))
+      (let mut bad 0)
+      (let mut n 0)
+      {
+        (for i in 0..36
+          {
+            (let c (strByte s i))
+            (if (isHyphenPos i)
+              (if (!= c 45)
+                (set bad 1))
+              (match (strHexVal c)
+                ((Some v)
+                  {
+                    (if (== (% n 2) 0)
+                      (__store8 q (/ n 2) (<< v 4))
+                      (__store8 q (/ n 2) (| (__load8 q (/ n 2)) v)))
+                    (set n (+ n 1))
+                  }
+                )
+                ((None)
+                  (set bad 1)
+                )))
+          })
+        (if (== bad 1)
+          (uuidErr uuidInvalidFormat
+            "expected hex digits and hyphens as xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" "uuidParse")
+          (uuidFromBytes out))
+      }
+    }))
+
+; ------------------------------------------------------------------
+; Seeded generation. A Lehmer generator modulo 2^31 - 1 expands one
+; seed into 16 bytes. Every intermediate stays positive and below
+; 2^62, so the sequence is the same on every target.
+; ------------------------------------------------------------------
+(:: lcgNext (-> Int Int))
+(fn (lcgNext x)
+  (% (* x 48271) 2147483647))
+
+; The 16 bytes a seed expands to.
+(:: seededBytes (-> Int String))
+;@axiom:effect(unsafe)
+(fn (seededBytes seed)
+  {
+    (let r (% seed 2147483647))
+    (let mut state
+      (+
+        (if (< r 0)
+          (+ r 2147483647)
+          r)
+        1))
+    (let s (bytesNew 16))
+    (let p (strData s))
+    {
+      (if (== state 2147483647)
+        (set state 1))
+      (for i in 0..16
+        {
+          (set state (lcgNext state))
+          (__store8 p i (& state 255))
+        })
+      s
+    }
+  })
+
+;; The version 4 uuid a seed names: the same seed gives the same
+;; uuid on every run and target, which is what a test wants. A seed
+;; is not entropy - reach for `uuidV4` outside tests.
+(pub :: uuidV4Seeded (-> Int Uuid))
+(pub fn (uuidV4Seeded seed)
+  (match (uuidV4FromBytes (seededBytes seed))
+    ((Ok u) u)
+    ((Err e) uuidNil)))
+
+;; The version 7 uuid a seed names, stamped with Unix millisecond
+;; `ms`. Deterministic, like `uuidV4Seeded`.
+(pub :: uuidV7Seeded (-> Int Int Uuid))
+(pub fn (uuidV7Seeded seed ms)
+  (match (uuidV7FromBytes ms (seededBytes seed))
+    ((Ok u) u)
+    ((Err e) uuidNil)))
+
+; ------------------------------------------------------------------
+; Generated uuids. Both draw 16 bytes from the kernel through
+; `Crypto.Random.randomFill`; its `Err` - no entropy source, or the
+; call failed - passes through rather than being replaced.
+; ------------------------------------------------------------------
+; Unix milliseconds now, from the realtime clock, or the clock's
+; `Err` recoded as `uuidClockUnavailable`.
+(:: uuidNowMs (Result Int Error))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (uuidNowMs)
+  {
+    (let buf (memAlloc 16))
+    {
+      (__retain buf)
+      {
+        (let r
+          (match (sysNowRealtimeNanos buf)
+            ((Ok ns) (Ok (/ ns 1000000)))
+            ((Err e)
+              (uuidErr uuidClockUnavailable
+                (if (== (errCode e) 78)
+                  "this target has no realtime clock"
+                  (concat "the realtime clock failed with errno " (fmtInt (errCode e))))
+                "uuidV7")
+            )))
+        {
+          (__release buf)
+          r
+        }
+      }
+    }
+  })
+
+;; A random version 4 uuid, from the kernel's entropy source.
+(pub :: uuidV4 (Result Uuid Error))
+;@axiom:effect(io)
+;@axiom:effect(entropy)
+(pub fn (uuidV4)
+  {
+    (let s (bytesNew 16))
+    (match (randomFill (strData s) 16)
+      ((Ok _) (uuidV4FromBytes s))
+      ((Err e) (Err e)))
+  })
+
+;; A time-ordered version 7 uuid: the realtime clock's millisecond,
+;; with random bits below it. Two made in the same millisecond differ
+;; but do not sort in creation order.
+(pub :: uuidV7 (Result Uuid Error))
+;@axiom:effect(io)
+;@axiom:effect(entropy)
+(pub fn (uuidV7)
+  (match uuidNowMs
+    ((Ok ms)
+      {
+        (let s (bytesNew 16))
+        (match (randomFill (strData s) 16)
+          ((Ok _) (uuidV7FromBytes ms s))
+          ((Err e) (Err e)))
+      }
+    )
+    ((Err e) (Err e))))
