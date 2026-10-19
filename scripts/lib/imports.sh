@@ -62,7 +62,10 @@ unpermitted_imports() {
 }
 
 # Every symbol an IR module declares: its import surface before it is
-# linked, `dllimport` or not.
+# linked, `dllimport` or not. The intrinsics the driver grounds in the
+# backend (`backendGroundedSym` in self_host/driver.ax) are left out:
+# the saturating conversions, and the `llvm.trap` that ends the
+# recovery abort on windows-x86_64. Neither is an import.
 declares_of() {
-  grep -oE '^declare [^@]*@[A-Za-z_][A-Za-z0-9_$.]*\(' "$1" | sed -E 's/^declare [^@]*@//; s/\($//' | grep -vE '^llvm\.fpto[su]i\.sat\.i(8|16|32|64)\.f64$' | LC_ALL=C sort -u || true
+  grep -oE '^declare [^@]*@[A-Za-z_][A-Za-z0-9_$.]*\(' "$1" | sed -E 's/^declare [^@]*@//; s/\($//' | grep -vE '^llvm\.(fpto[su]i\.sat\.i(8|16|32|64)\.f64|trap)$' | LC_ALL=C sort -u || true
 }
