@@ -30568,48 +30568,57 @@
 
 ; ---- calls ----
 (pub :: rgnApp (-> Int ASTNode Int))
+; The source tree stays owned by the checker. Both helpers return an
+; owned scratch share, and the walk answers only an Int. Raw span metadata
+; makes escape analysis conservatively keep these owners, so balance the
+; temporary argument vector and head after the walk has finished.
+;@axiom:effect(unsafe)
 (pub fn (rgnApp rc e)
   {
     (let head (spineHead e))
     (let args (spineArgVec e vecNew))
     (let tc (rgnTc rc))
-    (if (!= (nodeTag head) TAG_E_VAR)
-      (rgnUnknownCall rc args (spanOf e) (rgnExpr rc head))
-      {
-        (let n (nodeAName head))
-        (if (>= (rgnEnvFind rc n) 0)
-          (if (== (rgnScopedParam rc head) 1)
-            {
-              (let v (rgnUnknownCall rc args (spanOf e) 0))
-              (if (== (rgTyScalar tc (rgnCheckedTy e)) 1)
-                0
-                v)
-            }
-            (rgnUnknownCall rc args (spanOf e) (rgnExpr rc head)))
-          (if (&& (strEq n "__axiom_recover") (== (vecLen args) 2))
-            (rgnRecoverForm rc args (spanOf e))
-            (if (== (isCastLike n) 1)
-              (rgnLastArg rc args)
-              (if (! (== (findCtor tc n) 0))
-                (| (memGetWord rc 7) (rgnArgsUnion rc args 0 0))
-                (if (! (== (findStructIfConstruct tc n) 0))
+    (let result
+      (if (!= (nodeTag head) TAG_E_VAR)
+        (rgnUnknownCall rc args (spanOf e) (rgnExpr rc head))
+        {
+          (let n (nodeAName head))
+          (if (>= (rgnEnvFind rc n) 0)
+            (if (== (rgnScopedParam rc head) 1)
+              {
+                (let v (rgnUnknownCall rc args (spanOf e) 0))
+                (if (== (rgTyScalar tc (rgnCheckedTy e)) 1)
+                  0
+                  v)
+              }
+              (rgnUnknownCall rc args (spanOf e) (rgnExpr rc head)))
+            (if (&& (strEq n "__axiom_recover") (== (vecLen args) 2))
+              (rgnRecoverForm rc args (spanOf e))
+              (if (== (isCastLike n) 1)
+                (rgnLastArg rc args)
+                (if (! (== (findCtor tc n) 0))
                   (| (memGetWord rc 7) (rgnArgsUnion rc args 0 0))
-                  {
-                    (let ent (findFnEnt tc n))
-                    (if (== ent 0)
-                      (rgnUnknownCall rc args (spanOf e) 0)
-                      (if (== (memGetWord ent 3) 1)
-                        (rgnBuiltinCall rc n args (spanOf e))
-                        (if (== (memGetWord ent 4) 1)
-                          (rgnUnknownCall rc args (spanOf e) 0)
-                          (if (== (memGetWord ent 4) 2)
-                            {
-                              (rgnArgsUnion rc args 0 0)
-                              (memGetWord rc 7)
-                            }
-                            (rgnKnownCall rc ent n args (spanOf e) e)))))
-                  })))))
-      })
+                  (if (! (== (findStructIfConstruct tc n) 0))
+                    (| (memGetWord rc 7) (rgnArgsUnion rc args 0 0))
+                    {
+                      (let ent (findFnEnt tc n))
+                      (if (== ent 0)
+                        (rgnUnknownCall rc args (spanOf e) 0)
+                        (if (== (memGetWord ent 3) 1)
+                          (rgnBuiltinCall rc n args (spanOf e))
+                          (if (== (memGetWord ent 4) 1)
+                            (rgnUnknownCall rc args (spanOf e) 0)
+                            (if (== (memGetWord ent 4) 2)
+                              {
+                                (rgnArgsUnion rc args 0 0)
+                                (memGetWord rc 7)
+                              }
+                              (rgnKnownCall rc ent n args (spanOf e) e)))))
+                    })))))
+        }))
+    (__release (as args Int))
+    (__release (as head Int))
+    result
   })
 
 (pub :: rgnLastArg (-> Int Nodes Int))
