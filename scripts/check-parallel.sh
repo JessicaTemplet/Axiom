@@ -268,10 +268,13 @@ if [[ "$tl_p" == 0 ]]; then ok "processes: no thread_local in the module"; else 
 # globals (MM-PAR-7), and the resource-owner head and unwinding flag
 # (MM-EXEC-20). This fixture declares no effect and creates no resource
 # owner, so its evidence slot and owner sequence counter are absent.
-if [[ "$tl_t" == 11 ]]; then ok "threads: exactly 11 live thread_local(localexec) globals - allocator, recovery point and both registries"; else bad "threads: $tl_t thread_local globals, expected 11"; grep 'thread_local' "$work/t470.ll" | sed 's/^/     /' | head -14; fi
+# Guard bounds, alternate stack storage and its frame top are per-thread.
 live_tls=(__axiom_bump __axiom_bump_end __axiom_chunk __axiom_free
   __axiom_high __axiom_slabs __axiom_recover_top __axiom_par_live
-  __axiom_par_seq __axiom_res_head __axiom_res_unwinding)
+  __axiom_par_seq __axiom_res_head __axiom_res_unwinding
+  __axiom_stack_lo __axiom_stack_hi __axiom_stack_alt __axiom_stack_top)
+want_tls="${#live_tls[@]}"
+if [[ "$tl_t" == "$want_tls" ]]; then ok "threads: exactly $want_tls live thread_local(localexec) globals - allocator, recovery point, registries and stack guards"; else bad "threads: $tl_t thread_local globals, expected $want_tls"; grep 'thread_local' "$work/t470.ll" | sed 's/^/     /'; fi
 for g in "${live_tls[@]}"; do
   grep -q "^@$g = internal thread_local(localexec) global" "$work/t470.ll" || bad "threads: @$g did not move"
 done
@@ -289,10 +292,11 @@ if "$axc" --threads emit-llvm "$fx471" -o "$work/t471.ll" > "$work/t471-emit.log
   for g in "${live_tls[@]}" __axiom_res_seq; do
     grep -q "^@$g = internal thread_local(localexec) global" "$work/t471.ll" || missing_tls="$missing_tls $g"
   done
-  if [[ "$tl_trap" == 12 && -z "$missing_tls" ]]; then
-    ok "threads: the resource-using trap fixture retains all 12 live TLS globals"
+  want_trap_tls=$((want_tls + 1))
+  if [[ "$tl_trap" == "$want_trap_tls" && -z "$missing_tls" ]]; then
+    ok "threads: the resource-using trap fixture retains all $want_trap_tls live TLS globals"
   else
-    bad "threads: the trap fixture emitted $tl_trap TLS globals, expected 12; missing:$missing_tls"
+    bad "threads: the trap fixture emitted $tl_trap TLS globals, expected $want_trap_tls; missing:$missing_tls"
   fi
 else
   bad "threads: the resource-using trap fixture did not emit"

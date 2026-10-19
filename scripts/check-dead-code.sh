@@ -235,8 +235,10 @@ for ln in text.split("\n"):
 # Ordinary function descriptors do not have this representation and keep
 # all of their initializer edges.
 TABLE = re.compile(r'@' + SYM + r' = internal constant \[(\d+) x i64\] \[')
-ROW = re.compile(r'  i64 ptrtoint \(ptr @' + SYM + r' to i64\), '
-                 r'i64 ptrtoint \(ptr @' + SYM + r' to i64\), i64 (\d+),?')
+ADDRESS = r'ptrtoint \(ptr @' + SYM + r' to i64\)'
+RELATIVE = r'sub \(i64 ' + ADDRESS + r', i64 ' + ADDRESS + r'\)'
+ROW = re.compile(r'  i64 ' + ADDRESS + r', i64 ' + ADDRESS + r', i64 (\d+),?')
+RELROW = re.compile(r'  i64 ' + RELATIVE + r', i64 ' + RELATIVE + r', i64 (\d+),?')
 STRING = re.compile(r'@' + SYM + r' = private unnamed_addr constant '
                     r'\[(\d+) x i8\] c"((?:[^"\\]|\\[0-9A-Fa-f]{2})*)"')
 
@@ -247,15 +249,21 @@ def llvm_bytes(value):
 reflections = set()
 for symbol, lines in nodes.items():
     head = TABLE.fullmatch(lines[0])
-    if not head or lines[-1] != "]":
+    relative = lines[-1] == '], section "__TEXT,__const"'
+    if not head or (not relative and lines[-1] != "]"):
         continue
-    rows = [ROW.fullmatch(line) for line in lines[1:-1]]
+    rows = [(RELROW if relative else ROW).fullmatch(line) for line in lines[1:-1]]
     if not rows or any(row is None for row in rows):
         continue
     if int(head[2]) != len(rows) * 3:
         continue
     for row in rows:
-        function, name, length = row.groups()
+        if relative:
+            function, function_base, name, name_base, length = row.groups()
+            if function_base != symbol or name_base != symbol:
+                break
+        else:
+            function, name, length = row.groups()
         if function not in order or name not in nodes:
             break
         literal = STRING.fullmatch(nodes[name][0])
