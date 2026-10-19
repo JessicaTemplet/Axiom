@@ -1912,7 +1912,7 @@ Path - taking a filesystem path apart and putting one together.
 
 | Name | Kind | Type | Effects | Contracts | Summary |
 |---|---|---|---|---|---|
-| `pathLastSlash` | value | `(-> String (Option Int))` |  |  | The index of the last `/` in `p`, or `None`. |
+| `pathLastSlash` | value | `(-> String (Option Int))` |  |  | The index of the last `/` in `p`, or `None`. Where `pathBackslashSeparates` is 1, as on Windows, a `\` counts too. |
 | `pathDir` | value | `(-> String String)` | `Alloc,Mut` |  | Everything up to and including the last `/`, or "" when `p` names something in the working directory. |
 | `pathBase` | value | `(-> String String)` | `Alloc,Mut` |  | Everything after the last `/` - the file name on its own, or `p` entire when there is no separator. |
 | `pathWithSlash` | value | `(-> String String)` | `Alloc,Mut` |  | A directory name that ends in `/`, so concatenation forms a path. |

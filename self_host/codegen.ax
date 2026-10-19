@@ -6,7 +6,7 @@
 (import Fmt)
 (import Vec)
 (import Sys)
-(import Sys.Platform (sysForkNum sysCloseNum))
+(import Sys.Platform (sysForkNum sysCloseNum pathListSep exeSuffixTried))
 (import IO (fileExists readFile stderr writeStr))
 (import Err)
 (import Path)
@@ -5339,11 +5339,18 @@
 ; choice `Sys.sysRunSearch` makes for its own `PATH` walk: the question
 ; here is which directory the name came from, and a candidate that
 ; cannot be opened is one this has no business selecting.
+; `PATH` splits on `pathListSep`, `;` on Windows, and where
+; `exeSuffixTried` says so a name with no extension is looked for as
+; `NAME.exe`, the file a Windows shell ran for `axiom`.
 (pub :: pathOfCommand (-> String String))
 ;@axiom:effect(io)
 (pub fn (pathOfCommand name)
   {
-    (let parts (strSplit (sysEnv "PATH") 58))
+    (let parts (strSplit (sysEnv "PATH") pathListSep))
+    (let file
+      (if (&& (== exeSuffixTried 1) (== (strLen (pathExt name)) 0))
+        (concat name ".exe")
+        name))
     (let mut i 0)
     (let mut found "")
     {
@@ -5354,7 +5361,7 @@
             (if (> (strLen d) 0)
               {
                 (let dir (pathWithSlash d))
-                (if (fileExists (concat dir name))
+                (if (fileExists (concat dir file))
                   (set found dir))
               })
           }
@@ -14383,13 +14390,11 @@
     (baseName (entryInputPath))
     (baseName (moduleSrcPath modname (memGetWord cg 26) (pathDir (entryInputPath))))))
 
-; Everything after the last `/`, or the whole string when there is
-; none. Recursion per slash; paths are shallow, strings are short.
+; Everything after the last separator, or the whole string when there
+; is none: `pathBase`, which knows `\` where the platform does.
 (pub :: baseName (-> String String))
 (pub fn (baseName p)
-  (match (strFindByte p 47 0)
-    ((None) p)
-    ((Some i) (baseName (strSlice p (+ i 1) (- (strLen p) (+ i 1)))))))
+  (pathBase p))
 
 ; The text behind a marker: the entry input, or the module search's
 ; winner. "" when neither can be read.
