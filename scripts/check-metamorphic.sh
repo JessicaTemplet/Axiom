@@ -244,9 +244,11 @@ ablate "nid-fn-wins" symbols.ax \
   "            (smNid sm name \"DSig:\")" \
   sigmove
 
+# The bare scan keeps the first-match lookup while removing the module
+# view. The old indexed bare-only helper has no production callers.
 ablate "module-view" codegen.ax \
   "((None) (mangledForModCg cg bi name m))" \
-  "((None) (mangledForBareCg cg bi name))" \
+  "((None) (mangledForIn (memGetWordVec cg 12) (memGetWordVec cg 13) name 0))" \
   shadow
 ablate "entry-out-of-scope" typecheck.ax \
   "(pub fn (fnEntOutOfModuleScope tc m name e)
