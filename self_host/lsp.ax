@@ -4800,7 +4800,8 @@
   })
 
 ; Derived results are keyed by the workspace revision, method and params.
-; Eight entries and four MiB bound retained storage. File observations
+; Eight entries and four MiB bound retained storage. Cursor traffic
+; evicts older cursor results before reusable document replies. File observations
 ; include unsuccessful higher-priority candidates, so creating a module
 ; cannot leave a cached result pointing at the old search winner.
 (pub :: lspCacheKey (-> Int String Int String))
@@ -4808,7 +4809,13 @@
   (if (lspCacheable method)
     {
       (let key
-        (concat (fmtInt revision) (concat "\n" (concat method (concat "\n" (jsonWrite params))))))
+        (concat
+          (if (|| (!= (jsonGet params "position") 0)
+                (|| (!= (jsonGet params "positions") 0) (!= (jsonGet params "item") 0)))
+            "P"
+            "D")
+          (concat (fmtInt revision)
+            (concat "\n" (concat method (concat "\n" (jsonWrite params)))))))
       (if (<= (strLen key) 4096)
         key
         "")
@@ -4949,19 +4956,70 @@
     {
       (let mut bytes 0)
       (let mut i 0)
+      (let mut admit true)
       {
         (while (< i (vecLen cache))
           {
             (set bytes (+ bytes (strLen (vecGetStr cache i))))
             (set i (+ i 1))
           })
-        (if (|| (>= (vecLen cache) 16) (> (+ bytes (+ (strLen key) (strLen entry))) 4194304))
-          (vecClear cache))
-        (vecPush cache key)
-        (vecPush cache entry)
+        (while (&& admit
+                 (|| (>= (vecLen cache) 16) (> (+ bytes (+ (strLen key) (strLen entry))) 4194304)))
+          {
+            (let victim (lspCacheVictim cache (== (strByte key 0) 68)))
+            (if (< victim 0)
+              (set admit false)
+              {
+                (set bytes (- bytes
+                             (+ (strLen (vecGetStr cache victim))
+                               (strLen (vecGetStr cache (+ victim 1))))))
+                (lspCacheRemove cache victim)
+              })
+          })
+        (if admit
+          {
+            (vecPush cache key)
+            (vecPush cache entry)
+          })
         0
       }
     }))
+
+; FIFO within each class. A cursor result cannot displace a cache
+; containing only reusable replies; it still answers without retention.
+(pub :: lspCacheVictim (-> Strings Bool Int))
+(pub fn (lspCacheVictim cache reusable)
+  {
+    (let mut i 0)
+    (let mut victim (- 0 1))
+    {
+      (while (&& (< i (vecLen cache)) (< victim 0))
+        {
+          (if (== (strByte (vecGetStr cache i) 0) 80)
+            (set victim i))
+          (set i (+ i 2))
+        })
+      (if (&& (< victim 0) (&& reusable (> (vecLen cache) 0)))
+        0
+        victim)
+    }
+  })
+
+(pub :: lspCacheRemove (-> Strings Int Int))
+(pub fn (lspCacheRemove cache index)
+  {
+    (let mut i index)
+    {
+      (while (< (+ i 2) (vecLen cache))
+        {
+          (vecSet cache i (vecGetStr cache (+ i 2)))
+          (set i (+ i 1))
+        })
+      (vecPop cache)
+      (vecPop cache)
+      0
+    }
+  })
 
 (pub :: lspCacheInvalidate (-> Int Int))
 (pub fn (lspCacheInvalidate store)
