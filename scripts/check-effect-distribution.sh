@@ -152,13 +152,15 @@ have() { # have <got> <want> <what>
 # Region frame reuse and temporary cleanup add lexical Unsafe to
 # rgnCtxNew and rgnApp for their balanced reference releases. Their
 # Alloc and Mut requirements remain; no IO row changes.
+# Grouped patterns add one Alloc,Mut parser helper. Comparing both
+# trees with the same compiler changes no existing row or IO requirement.
 echo "== compiler view: symbols --calls self_host/main.ax =="
 "$axc" --diagnostic-format=ai symbols --calls self_host/main.ax > "$work/main.axsym" 2>"$work/main.err" \
   || { fail "could not read symbols over self_host/main.ax"; echo "check-effect-distribution: $failed failed"; exit 1; }
 rows="$(grep -c '^F ' "$work/main.axsym" || true)"
 (( rows >= 4000 )) && ok "$rows functions listed (floor 4000)" \
   || fail "only $rows functions listed; the floor is 4000 (the corpus moved or the read broke)"
-have "$(bucket "$work/main.axsym" 'Alloc,Mut')" 3182 "exactly Alloc,Mut"
+have "$(bucket "$work/main.axsym" 'Alloc,Mut')" 3183 "exactly Alloc,Mut"
 have "$(bucket "$work/main.axsym" 'Alloc,IO,Mut')" 446 "Alloc,IO,Mut"
 have "$(bucket "$work/main.axsym" 'Mut')" 184 "exactly Mut"
 have "$(bucket "$work/main.axsym" 'Alloc')" 100 "exactly Alloc"

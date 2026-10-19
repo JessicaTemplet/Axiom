@@ -6878,7 +6878,36 @@
     ; one it would be the literal 0 and match a zero.
     (if (&& (peekIs tokens pos TK_LPAREN) (peekIs tokens (advance pos) TK_RPAREN))
       (pErrExp (advance pos) "expression")
-      (parseExpr tokens pos))))
+      (if (&& (peekIs tokens pos TK_LPAREN) (peekIs tokens (advance pos) TK_LPAREN))
+        (parseGroupedArmPattern tokens pos)
+        (parseExpr tokens pos)))))
+
+; Grouping keeps pattern context: parsing its contents as expressions
+; would turn a nested `(Red)` test back into a catch-all binder.
+; A grouped constructor head can still take arguments, as `(Wrap)` in
+; `((Wrap) (Red))`; flatten that head into the ordinary pattern spine.
+(pub :: parseGroupedArmPattern (-> Ints Int Int))
+(pub fn (parseGroupedArmPattern tokens pos)
+  {
+    (let inner (parseArmPattern tokens (advance pos)))
+    (if (== (memGetWord inner 0) 0)
+      inner
+      {
+        (let pat (readAstNode inner 1))
+        (let after (memGetWord inner 2))
+        (if (peekIs tokens after TK_RPAREN)
+          (pOk pat (advance after))
+          {
+            (let head
+              (if (== (nodeTag pat) TAG_P_CON0)
+                (mkEVarAt (nodeAName pat) (nodeSpan pat))
+                pat))
+            (if (== (nodeTag (spineHead head)) TAG_E_VAR)
+              (parseArmPatternArgs tokens after head)
+              (pErrExp (advance pos) "constructor"))
+          })
+      })
+  })
 
 ; Reorder a named constructor pattern into the positional spine the
 ; rest of both compilers already understands. `declared` is the
