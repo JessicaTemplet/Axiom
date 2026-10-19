@@ -4950,10 +4950,12 @@
     (expandNamedStruct e env bs)
     (if (expStructNeedsLabels (spineHead e) env bs)
       (if (nodeGeneratedCall e)
-        (expandNamedStruct
-          (setCtorFieldNames e
-            (expNamedFieldNames (nodeBChildren (expNamedStructDecl env (spineHead e))) vecNew 0))
-          env bs)
+        (match (expNamedStructDecl env (spineHead e))
+          ((ExpStructFound decl)
+            (expandNamedStruct
+              (setCtorFieldNames e (expNamedFieldNames (nodeBChildren decl) vecNew 0)) env bs)
+          )
+          (_ (expandNamedStruct e env bs)))
         (expNamedBad env (nodeSpan e)
           "struct construction requires a label for every field; positional struct construction is not supported"))
       (expandAppUnlabelled e env bs))))
@@ -11454,18 +11456,21 @@
   {
     (let head (spineHead e))
     (let name (nodeAName head))
-    (let decl (expNamedStructDecl env head))
     (if (&& (== (expBound bs name) 1) (== (nodeDefScope head) 0))
       (expNamedBad env (nodeSpan e)
         (concat "labelled construction requires a struct name; `"
           (concat name "` is a local binding")))
-      (if (nodeSame decl nilNode)
-        (expNamedBad env (nodeSpan e)
-          (concat "struct name `" (concat name "` is ambiguous; qualify it with its module")))
-        (if (nodeSame decl nilNode)
+      (match (expNamedStructDecl env head)
+        ((ExpStructAmbiguous)
+          (expNamedBad env (nodeSpan e)
+            (concat "struct name `" (concat name "` is ambiguous; qualify it with its module")))
+        )
+        ((ExpStructMissing)
           (expNamedBad env (nodeSpan e)
             (concat "labelled construction requires a visible struct; `"
               (concat name "` does not name one")))
+        )
+        ((ExpStructFound decl)
           {
             (let labels (nodeFieldNamesNames e))
             (let fields (nodeBChildren decl))
@@ -11486,7 +11491,8 @@
                   }
                 }
               })
-          })))
+          }
+        )))
   })
 
 ; Values are already expanded, including fresh parameters for direct
@@ -11617,13 +11623,18 @@
 ; A supplied argument keeps its enclosing declaration’s module when a
 ; macro expands it again. A free template head resolves at its macro’s
 ; definition. Qualified names select a module and preserve privacy.
-(pub :: expNamedStructDecl (-> Int ASTNode ASTNode))
+(pub data ExpStructResolution
+  (ExpStructMissing)
+  (ExpStructAmbiguous)
+  (ExpStructFound ASTNode))
+
+(pub :: expNamedStructDecl (-> Int ASTNode ExpStructResolution))
 (pub fn (expNamedStructDecl env head)
   {
     (let name (nodeAName head))
     (let bare (bareOf name))
     (match (internFind (memGetWord env 31) bare)
-      ((None) nilNode)
+      ((None) (ExpStructMissing))
       ((Some index)
         (expChooseStructDecl (vecGet (expStructBuckets env) index) name bare
           (if (== (nodeDefScope head) 1)
@@ -11632,10 +11643,10 @@
       ))
   })
 
-(pub :: expChooseStructDecl (-> (Vec ASTNode) String String Int ASTNode))
+(pub :: expChooseStructDecl (-> Nodes String String Int ExpStructResolution))
 (pub fn (expChooseStructDecl decls name bare site)
   {
-    (let mut chosen nilNode)
+    (let mut chosen (ExpStructMissing))
     (let mut priority 0)
     (let mut i 0)
     {
@@ -11661,10 +11672,10 @@
                     (if (> rank priority)
                       {
                         (set priority rank)
-                        (set chosen d)
+                        (set chosen (ExpStructFound d))
                       }
                       (if (== rank priority)
-                        (set chosen nilNode)))
+                        (set chosen (ExpStructAmbiguous))))
                   })
               })
             (set i (+ i 1))
@@ -11695,12 +11706,9 @@
     (if (|| (&& (== (expBound bs (nodeAName head)) 1) (== (nodeDefScope head) 0))
           (! (nodeSame (expFindMacro env (nodeAName head)) nilNode)))
       false
-      {
-        (let decl (expNamedStructDecl env head))
-        (if (nodeSame decl nilNode)
-          false
-          (> (vecLen (nodeBChildren decl)) 0))
-      })))
+      (match (expNamedStructDecl env head)
+        ((ExpStructFound decl) (> (vecLen (nodeBChildren decl)) 0))
+        (_ false)))))
 
 ; Only a template head supplied by substitution can generate a
 ; declaration-order construction. An explicit constructor name written
