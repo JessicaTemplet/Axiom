@@ -628,13 +628,35 @@
   (winWriteFile :: (-> Int Int Int Int Int Int) (symbol "WriteFile"))
   (winReadFile :: (-> Int Int Int Int Int Int) (symbol "ReadFile"))
   (winExitProcess :: (-> Int Int) (symbol "ExitProcess"))
-  (winGetLastError :: Int (symbol "GetLastError")))
+  (winGetLastError :: Int (symbol "GetLastError"))
+  (winCreateFileW :: (-> Int Int Int Int Int Int Int Int) (symbol "CreateFileW"))
+  (winCloseHandle :: (-> Int Int) (symbol "CloseHandle"))
+  (winSetFilePointerEx :: (-> Int Int Int Int Int) (symbol "SetFilePointerEx"))
+  (winDeleteFileW :: (-> Int Int) (symbol "DeleteFileW"))
+  (winMoveFileExW :: (-> Int Int Int Int) (symbol "MoveFileExW"))
+  (winCreateDirectoryW :: (-> Int Int Int) (symbol "CreateDirectoryW"))
+  (winRemoveDirectoryW :: (-> Int Int) (symbol "RemoveDirectoryW"))
+  (winGetFileInformationByHandleEx :: (-> Int Int Int Int Int)
+    (symbol "GetFileInformationByHandleEx"))
+  (winGetCurrentDirectoryW :: (-> Int Int Int) (symbol "GetCurrentDirectoryW")))
 
 ; HANDLE GetStdHandle(DWORD) - a HANDLE: not masked.
 ; BOOL WriteFile(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED) - BOOL: masked.
 ; BOOL ReadFile(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED) - BOOL: masked.
 ; void ExitProcess(UINT) - never returns.
 ; DWORD GetLastError(void) - DWORD: masked.
+; HANDLE CreateFileW(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD,
+;   DWORD, HANDLE) - a HANDLE: not masked, and -1 on failure.
+; BOOL CloseHandle(HANDLE) - BOOL: masked.
+; BOOL SetFilePointerEx(HANDLE, LARGE_INTEGER, PLARGE_INTEGER, DWORD) -
+;   BOOL: masked. The distance is one 64-bit register on both arches.
+; BOOL DeleteFileW(LPCWSTR) - BOOL: masked.
+; BOOL MoveFileExW(LPCWSTR, LPCWSTR, DWORD) - BOOL: masked.
+; BOOL CreateDirectoryW(LPCWSTR, LPSECURITY_ATTRIBUTES) - BOOL: masked.
+; BOOL RemoveDirectoryW(LPCWSTR) - BOOL: masked.
+; BOOL GetFileInformationByHandleEx(HANDLE, FILE_INFO_BY_HANDLE_CLASS,
+;   LPVOID, DWORD) - BOOL: masked.
+; DWORD GetCurrentDirectoryW(DWORD, LPWSTR) - DWORD: masked.
 ; A descriptor to a HANDLE: see the header.
 (:: winHandleOf (-> Int Int))
 ;@axiom:effect(io)
@@ -650,23 +672,47 @@
 
 ; A Win32 error code as the errno `Sys.ax`'s callers already test for,
 ; NEGATED, so every `sysFailed`/`sysErrno` comparison above this file
-; is unchanged. The table is the console-and-process half; the file
-; half (ERROR_ALREADY_EXISTS -> eExist, ERROR_DIRECTORY -> eIsDir, ...)
-; arrives with the bindings that can produce it. Anything unmapped is
-; EIO (5): a failure, named as a failure, never mistaken for a count.
+; is unchanged. Anything unmapped is EIO (5): a failure, named as a
+; failure, never mistaken for a count.
 (:: winErrnoOf (-> Int Int))
 (fn (winErrnoOf code)
+  ; ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND: ENOENT.
   (if (|| (== code 2) (== code 3))
-    (- 0 2)
-    (if (== code 5)
+      (- 0 2)
+    ; ERROR_ACCESS_DENIED: EACCES.
+    (== code 5)
       (- 0 13)
-      (if (== code 6)
-        (- 0 9)
-        (if (== code 8)
-          (- 0 12)
-          (if (|| (== code 109) (== code 232))
-            (- 0 32)
-            (- 0 5)))))))
+    ; ERROR_INVALID_HANDLE: EBADF.
+    (== code 6)
+      (- 0 9)
+    ; ERROR_NOT_ENOUGH_MEMORY: ENOMEM.
+    (== code 8)
+      (- 0 12)
+    ; ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION: EBUSY.
+    (|| (== code 32) (== code 33))
+      (- 0 16)
+    ; ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS: EEXIST.
+    (|| (== code 80) (== code 183))
+      (- 0 eExist)
+    ; ERROR_INVALID_PARAMETER, ERROR_INVALID_NAME: EINVAL.
+    (|| (== code 87) (== code 123))
+      (- 0 22)
+    ; ERROR_DISK_FULL: ENOSPC.
+    (== code 112)
+      (- 0 28)
+    ; ERROR_BROKEN_PIPE, ERROR_NO_DATA: EPIPE.
+    (|| (== code 109) (== code 232))
+      (- 0 32)
+    ; ERROR_DIR_NOT_EMPTY: ENOTEMPTY.
+    (== code 145)
+      (- 0 39)
+    ; ERROR_FILENAME_EXCED_RANGE: ENAMETOOLONG.
+    (== code 206)
+      (- 0 36)
+    ; ERROR_DIRECTORY: ENOTDIR.
+    (== code 267)
+      (- 0 20)
+    (- 0 5)))
 
 ; The DWORD out-cell `WriteFile`/`ReadFile` write their count through.
 ; A fresh 8-byte word per call, zeroed by `__alloc`, so the upper half
@@ -700,7 +746,9 @@
 ;; read(fd, buf, count): `Ok` bytes read, `Ok 0` at end of file, or
 ;; `Err` carrying the errno. A broken pipe (ERROR_BROKEN_PIPE, 109) on a
 ;; read is end of file, which is what a POSIX read of a closed pipe
-;; answers too.
+;; answers too. A directory handle refuses the read with
+;; ERROR_INVALID_FUNCTION (1), which answers EISDIR, as `read` of a
+;; directory does on Linux and Darwin.
 ;; The platform's own way to read from a descriptor where raw `read` is
 ;; not available; `Err` 78 where the raw syscall is used instead.
 (pub :: platformReadFd (-> Int Int Int (Result Int Error)))
@@ -715,7 +763,9 @@
         {
           (let code (& winGetLastError 4294967295))
           (if (== code 109)
-            (Ok 0)
+              (Ok 0)
+            (== code 1)
+              (Err (mkError eIsDir "platformReadFd"))
             (Err (mkError (- 0 (winErrnoOf code)) "platformReadFd")))
         }
         (Ok (& (__load64 cell 0) 4294967295)))
@@ -730,6 +780,489 @@
 ;@axiom:effect(unsafe)
 (pub fn (platformExitWith code)
   (winExitProcess code))
+
+; ------------------------------------------------------------------
+; Files and directories.
+;
+; `Sys.ax` and `IO.ax` hand paths over as NUL-terminated UTF-8, and the
+; `W` calls take NUL-terminated UTF-16. `winWidePath` converts in this
+; file, with no kernel32 call, so the conversion is the same on every
+; Windows build and refuses malformed UTF-8 with EINVAL rather than
+; substituting U+FFFD into a name the caller never wrote. Names coming
+; back (`platformReadDir`, `platformGetCwd`) convert the other way, and
+; there an unpaired surrogate, which NTFS permits, becomes U+FFFD.
+;
+; Every file opens with all three share modes, so a file another
+; handle holds open can still be read, written, renamed and deleted, as
+; on POSIX. `FILE_FLAG_BACKUP_SEMANTICS` lets the same call open a
+; directory, which is how `ioReadDir` lists one and how `isDir` tells
+; one apart: the open succeeds and the read answers EISDIR. Handles
+; are not inherited unless a spawn asks, so `O_CLOEXEC` needs nothing.
+;
+; Paths keep the classic MAX_PATH limit of 260 UTF-16 units: a longer
+; one fails with ENAMETOOLONG or ENOENT.
+; ------------------------------------------------------------------
+; Store the UTF-16 unit `u` at index `j` of `dst`, little-endian.
+(:: winPut16 (-> Int Int Int Int))
+;@axiom:effect(unsafe)
+(fn (winPut16 dst j u)
+  {
+    (__store8 dst (* j 2) (& u 255))
+    (__store8 dst (+ (* j 2) 1) (& (/ u 256) 255))
+    0
+  })
+
+(:: winGet16 (-> Int Int Int))
+;@axiom:effect(unsafe)
+(fn (winGet16 src j)
+  (+ (__load8 src (* j 2)) (* (__load8 src (+ (* j 2) 1)) 256)))
+
+; The little-endian u32 at byte `off` of `p`. `__load64` indexes words,
+; and the records below put fields at byte offsets that aren't.
+(:: winGet32 (-> Int Int Int))
+;@axiom:effect(unsafe)
+(fn (winGet32 p off)
+  (+ (+ (__load8 p off) (* (__load8 p (+ off 1)) 256))
+    (+ (* (__load8 p (+ off 2)) 65536) (* (__load8 p (+ off 3)) 16777216))))
+
+(:: winIsCont (-> Int Bool))
+(fn (winIsCont b)
+  (== (& b 192) 128))
+
+; The length of the NUL-terminated bytes at `p`.
+(:: winCLen (-> Int Int Int))
+;@axiom:effect(unsafe)
+(fn (winCLen p i)
+  (if (== (__load8 p i) 0)
+    i
+    (winCLen p (+ i 1))))
+
+; Decode the UTF-8 at `src` from byte `i` into UTF-16 units at `dst`
+; from unit `j`, through the NUL. Answers the number of units before
+; the NUL, or -1 at the first malformed sequence: a stray continuation
+; byte, a truncated sequence, an overlong form, a surrogate, or a code
+; point past U+10FFFF. A continuation test fails on the NUL, so the
+; walk never reads past the end.
+(:: winWideFrom (-> Int Int Int Int Int))
+;@axiom:effect(unsafe)
+(fn (winWideFrom src i dst j)
+  {
+    (let b0 (__load8 src i))
+    (if (== b0 0)
+        {
+          (winPut16 dst j 0)
+          j
+        }
+      (< b0 128)
+        {
+          (winPut16 dst j b0)
+          (winWideFrom src (+ i 1) dst (+ j 1))
+        }
+      (&& (>= b0 194) (<= b0 223))
+        {
+          (let b1 (__load8 src (+ i 1)))
+          (if (winIsCont b1)
+            {
+              (winPut16 dst j (+ (* (& b0 31) 64) (& b1 63)))
+              (winWideFrom src (+ i 2) dst (+ j 1))
+            }
+            (- 0 1))
+        }
+      (&& (>= b0 224) (<= b0 239))
+        {
+          (let b1 (__load8 src (+ i 1)))
+          (if (winIsCont b1)
+            {
+              (let b2 (__load8 src (+ i 2)))
+              (if (winIsCont b2)
+                {
+                  (let cp (+ (+ (* (& b0 15) 4096) (* (& b1 63) 64)) (& b2 63)))
+                  (if (|| (< cp 2048) (&& (>= cp 55296) (<= cp 57343)))
+                    (- 0 1)
+                    {
+                      (winPut16 dst j cp)
+                      (winWideFrom src (+ i 3) dst (+ j 1))
+                    })
+                }
+                (- 0 1))
+            }
+            (- 0 1))
+        }
+      (&& (>= b0 240) (<= b0 244))
+        {
+          (let b1 (__load8 src (+ i 1)))
+          (if (winIsCont b1)
+            {
+              (let b2 (__load8 src (+ i 2)))
+              (if (winIsCont b2)
+                {
+                  (let b3 (__load8 src (+ i 3)))
+                  (if (winIsCont b3)
+                    {
+                      (let cp
+                        (+ (+ (+ (* (& b0 7) 262144) (* (& b1 63) 4096)) (* (& b2 63) 64))
+                          (& b3 63)))
+                      (if (|| (< cp 65536) (> cp 1114111))
+                        (- 0 1)
+                        {
+                          (let c (- cp 65536))
+                          (winPut16 dst j (+ 55296 (/ c 1024)))
+                          (winPut16 dst (+ j 1) (+ 56320 (% c 1024)))
+                          (winWideFrom src (+ i 4) dst (+ j 2))
+                        })
+                    }
+                    (- 0 1))
+                }
+                (- 0 1))
+            }
+            (- 0 1))
+        }
+      (- 0 1))
+  })
+
+; A fresh NUL-terminated UTF-16 copy of the NUL-terminated UTF-8 path
+; at `p`, or 0 when the path is not valid UTF-8. A UTF-8 path never
+; needs more units than it has bytes, so the buffer is sized by bytes.
+(:: winWidePath (-> Int Int))
+;@axiom:effect(unsafe)
+(fn (winWidePath p)
+  {
+    (let dst (__alloc (* (+ (winCLen p 0) 1) 2)))
+    (if (< (winWideFrom p 0 dst 0) 0)
+      0
+      dst)
+  })
+
+; Encode the code point `cp` as UTF-8 at `dst + k`, answering the next
+; free byte.
+(:: winPutUtf8 (-> Int Int Int Int))
+;@axiom:effect(unsafe)
+(fn (winPutUtf8 dst k cp)
+  (if (< cp 128)
+      {
+        (__store8 dst k cp)
+        (+ k 1)
+      }
+    (< cp 2048)
+      {
+        (__store8 dst k (+ 192 (/ cp 64)))
+        (__store8 dst (+ k 1) (+ 128 (& cp 63)))
+        (+ k 2)
+      }
+    (< cp 65536)
+      {
+        (__store8 dst k (+ 224 (/ cp 4096)))
+        (__store8 dst (+ k 1) (+ 128 (& (/ cp 64) 63)))
+        (__store8 dst (+ k 2) (+ 128 (& cp 63)))
+        (+ k 3)
+      }
+    {
+      (__store8 dst k (+ 240 (/ cp 262144)))
+      (__store8 dst (+ k 1) (+ 128 (& (/ cp 4096) 63)))
+      (__store8 dst (+ k 2) (+ 128 (& (/ cp 64) 63)))
+      (__store8 dst (+ k 3) (+ 128 (& cp 63)))
+      (+ k 4)
+    }))
+
+; Encode the `n` UTF-16 units at `src` from unit `j` as UTF-8 at `dst`
+; from byte `k`, answering the byte count written. A surrogate pair
+; becomes one code point; an unpaired surrogate becomes U+FFFD. The
+; caller sizes `dst` at three bytes per unit, which every unit fits.
+(:: winUtf8From (-> Int Int Int Int Int Int))
+(fn (winUtf8From src j n dst k)
+  (if (>= j n)
+    k
+    {
+      (let u (winGet16 src j))
+      (if (&& (&& (>= u 55296) (<= u 56319)) (< (+ j 1) n))
+          {
+            (let v (winGet16 src (+ j 1)))
+            (if (&& (>= v 56320) (<= v 57343))
+              (winUtf8From src (+ j 2) n dst
+                (winPutUtf8 dst k (+ 65536 (+ (* (- u 55296) 1024) (- v 56320)))))
+              (winUtf8From src (+ j 1) n dst (winPutUtf8 dst k 65533)))
+          }
+        (&& (>= u 55296) (<= u 57343))
+          (winUtf8From src (+ j 1) n dst (winPutUtf8 dst k 65533))
+        (winUtf8From src (+ j 1) n dst (winPutUtf8 dst k u)))
+    }))
+
+; The last error as a negated errno, the answer every shim below fails with.
+(:: winLastErr Int)
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (winLastErr)
+  (winErrnoOf (& winGetLastError 4294967295)))
+
+; A BOOL answer as 0, or the last error.
+(:: winBoolResult (-> Int Int))
+;@axiom:effect(io)
+(fn (winBoolResult ok)
+  (if (== (& ok 4294967295) 0)
+    winLastErr
+    0))
+
+; CreateFileW's access, from the open flags in Linux's spelling:
+; O_RDONLY 0, O_WRONLY 1 and O_RDWR 2 in the low two bits, and O_APPEND
+; (0x400) asking for FILE_APPEND_DATA, which puts every write at the
+; end, in place of GENERIC_WRITE.
+(:: winAccessOf (-> Int Int))
+(fn (winAccessOf flags)
+  {
+    (let mode (& flags 3))
+    (let read
+      (if (|| (== mode 0) (== mode 2))
+        2147483648
+        0))
+    (let write
+      (if (== mode 0)
+          0
+        (!= (& flags 1024) 0)
+          ; FILE_APPEND_DATA | SYNCHRONIZE
+          1048580
+        ; GENERIC_WRITE
+        1073741824))
+    (| read write)
+  })
+
+; CreateFileW's disposition, from O_CREAT (0x40), O_EXCL (0x80) and
+; O_TRUNC (0x200): CREATE_NEW 1, CREATE_ALWAYS 2, OPEN_EXISTING 3,
+; OPEN_ALWAYS 4, TRUNCATE_EXISTING 5.
+(:: winDispositionOf (-> Int Int))
+(fn (winDispositionOf flags)
+  {
+    (let creat (!= (& flags 64) 0))
+    (let excl (!= (& flags 128) 0))
+    (let trunc (!= (& flags 512) 0))
+    (if (&& creat excl)
+        1
+      (&& creat trunc)
+        2
+      creat
+        4
+      trunc
+        5
+      3)
+  })
+
+; 1 when the handle `h` names a directory, from FILE_BASIC_INFO's
+; attributes (FileBasicInfo is class 0, and the attributes sit at byte
+; 32 of its 40), 0 when it doesn't, or -1 when the query fails.
+(:: winIsDirHandle (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (winIsDirHandle h)
+  {
+    (let info (__alloc 40))
+    (if (== (& (winGetFileInformationByHandleEx h 0 info 40) 4294967295) 0)
+      (- 0 1)
+      (if (!= (& (winGet32 info 32) 16) 0)
+        1
+        0))
+  })
+
+;; open(path, flags, mode): a descriptor, or `-errno`. The flags are
+;; the ones this module declares; the mode is ignored, because Windows
+;; files take their permissions from the directory they are made in.
+;; The platform's own way to open a path where raw `open` is not
+;; available; -ENOSYS where the raw syscall is used instead.
+(pub :: platformOpen (-> Int Int Int Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (platformOpen path flags mode)
+  {
+    (let wide (winWidePath path))
+    (if (== wide 0)
+      (- 0 22)
+      {
+        ; FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, and
+        ; FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS.
+        (let h (winCreateFileW wide (winAccessOf flags) 7 0 (winDispositionOf flags) 33554560 0))
+        (if (== h (- 0 1))
+            winLastErr
+          (== (& flags oDirectory) 0)
+            h
+          {
+            (let isdir (winIsDirHandle h))
+            (if (== isdir 1)
+              h
+              {
+                (winCloseHandle h)
+                (if (< isdir 0)
+                  (- 0 5)
+                  (- 0 20))
+              })
+          })
+      })
+  })
+
+;; close(fd): 0, or `-errno`.
+;; The platform's own way to close a descriptor where raw `close` is not
+;; available; -ENOSYS where the raw syscall is used instead.
+(pub :: platformClose (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (platformClose fd)
+  (winBoolResult (winCloseHandle (winHandleOf fd))))
+
+;; lseek(fd, offset, whence): the new absolute offset, or `-errno`. FILE_BEGIN, FILE_CURRENT and FILE_END are 0, 1
+;; and 2, as SEEK_SET, SEEK_CUR and SEEK_END are.
+;; The platform's own way to move a descriptor's offset where raw
+;; `lseek` is not available; -ENOSYS where the raw syscall is used
+;; instead.
+(pub :: platformSeek (-> Int Int Int Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (platformSeek fd offset whence)
+  {
+    (let cell winCell)
+    (if (== (& (winSetFilePointerEx (winHandleOf fd) offset cell whence) 4294967295) 0)
+      winLastErr
+      (__load64 cell 0))
+  })
+
+;; unlink(path): 0, or `-errno`.
+;; The platform's own way to remove a file where raw `unlink` is not
+;; available; -ENOSYS where the raw syscall is used instead.
+(pub :: platformUnlink (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (platformUnlink path)
+  {
+    (let wide (winWidePath path))
+    (if (== wide 0)
+      (- 0 22)
+      (winBoolResult (winDeleteFileW wide)))
+  })
+
+;; rename(from, to): 0, or `-errno`. An existing
+;; file at `to` is replaced, as POSIX `rename` replaces it
+;; (MOVEFILE_REPLACE_EXISTING).
+;; The platform's own way to rename a path where raw `rename` is not
+;; available; -ENOSYS where the raw syscall is used instead.
+(pub :: platformRename (-> Int Int Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (platformRename from to)
+  {
+    (let wto (winWidePath to))
+    (if (== wto 0)
+      (- 0 22)
+      {
+        (let wfrom (winWidePath from))
+        (if (== wfrom 0)
+          (- 0 22)
+          (winBoolResult (winMoveFileExW wfrom wto 1)))
+      })
+  })
+
+;; mkdir(path, mode): 0, or `-errno`; EEXIST when
+;; the path is already there. The mode is ignored, as `platformOpen`'s
+;; is.
+;; The platform's own way to make a directory where raw `mkdir` is not
+;; available; -ENOSYS where the raw syscall is used instead.
+(pub :: platformMkdir (-> Int Int Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (platformMkdir path mode)
+  {
+    (let wide (winWidePath path))
+    (if (== wide 0)
+      (- 0 22)
+      (winBoolResult (winCreateDirectoryW wide 0)))
+  })
+
+;; rmdir(path): 0, or `-errno`; ENOTEMPTY when the
+;; directory still holds entries.
+;; The platform's own way to remove a directory where raw `rmdir` is not
+;; available; -ENOSYS where the raw syscall is used instead.
+(pub :: platformRmdir (-> Int Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (platformRmdir path)
+  {
+    (let wide (winWidePath path))
+    (if (== wide 0)
+      (- 0 22)
+      (winBoolResult (winRemoveDirectoryW wide)))
+  })
+
+; Rewrite the FILE_FULL_DIR_INFO records at `src` as the records
+; `IO.ioReadDirDecode` reads at `dst`, from byte `k`, answering the
+; bytes written. A source record holds NextEntryOffset (u32) at 0,
+; FileNameLength in bytes (u32) at 60, and the UTF-16 name at 68; the
+; last one's NextEntryOffset is 0. Each output record carries its
+; length (u16) at 16 and its NUL-terminated UTF-8 name at 19, rounded
+; up to 8 bytes as `getdents64` rounds them.
+(:: winDirRecords (-> Int Int Int Int))
+;@axiom:effect(unsafe)
+(fn (winDirRecords src dst k)
+  {
+    (let next (winGet32 src 0))
+    (let units (/ (winGet32 src 60) 2))
+    (let rec (+ dst k))
+    (let end (winUtf8From (+ src 68) 0 units (+ rec 19) 0))
+    (let reclen (* (/ (+ (+ 19 end) 8) 8) 8))
+    (__store8 rec (+ 19 end) 0)
+    (__store8 rec 16 (& reclen 255))
+    (__store8 rec 17 (/ reclen 256))
+    (if (== next 0)
+      (+ k reclen)
+      (winDirRecords (+ src next) dst (+ k reclen)))
+  })
+
+;; Read the next entries of the directory open as `fd` into the `count`
+;; bytes at `buf`: the bytes written, 0 once the listing is
+;; done, or `-errno`. The records have the layout Linux's
+;; `getdents64` gives, which is the one `IO.ax` reads.
+;; The platform's own way to read a directory where raw `getdents` is
+;; not available; -ENOSYS where the raw syscall is used instead.
+(pub :: platformReadDir (-> Int Int Int Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (platformReadDir fd buf count)
+  {
+    ; A source record is at least 68 bytes plus two per unit; its
+    ; rewrite is at most 27 plus three per unit. Asking for half of
+    ; `count` keeps every rewrite inside `buf`.
+    (let want (/ count 2))
+    (let src (__alloc want))
+    ; FileFullDirectoryInfo, class 14.
+    (if (== (& (winGetFileInformationByHandleEx (winHandleOf fd) 14 src want) 4294967295) 0)
+      {
+        (let code (& winGetLastError 4294967295))
+        ; ERROR_NO_MORE_FILES
+        (if (== code 18)
+          0
+          (winErrnoOf code))
+      }
+      (winDirRecords src buf 0))
+  })
+
+;; The working directory as NUL-terminated UTF-8 in the `count` bytes
+;; at `buf`: its length, or `-errno`; ERANGE when
+;; it doesn't fit.
+;; The platform's own way to read the working directory where raw
+;; `getcwd` is not available; -ENOSYS where the raw syscall is used
+;; instead.
+(pub :: platformGetCwd (-> Int Int Int))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (platformGetCwd buf count)
+  {
+    (let units 32768)
+    (let wide (__alloc (* units 2)))
+    (let n (& (winGetCurrentDirectoryW units wide) 4294967295))
+    (if (== n 0)
+        winLastErr
+      (|| (> n units) (> (* n 3) (- count 1)))
+        (- 0 34)
+      {
+        (let len (winUtf8From wide 0 n buf 0))
+        (__store8 buf len 0)
+        len
+      })
+  })
 
 ; ------------------------------------------------------------------
 ; The clock id `Sys.ax` hands to clock_gettime. Windows has no
@@ -928,10 +1461,11 @@
 (pub fn (oNoFollow)
   0)
 
-;; as above
+;; O_DIRECTORY in Linux's spelling, 0x10000. `platformOpen` reads it
+;; and refuses a path that isn't a directory with ENOTDIR.
 (pub :: oDirectory Int)
 (pub fn (oDirectory)
-  0)
+  65536)
 
 ;; EXDEV, 18 on every kernel here: what `sysOpenBeneath` answers for a
 ;; path that would leave its directory, the errno Linux's

@@ -2075,7 +2075,7 @@ Sys - portable syscall wrappers.
 
 ## `Sys.Platform`
 
-`stdlib/Sys/Platform.darwin.ax` — 166 public names
+`stdlib/Sys/Platform.darwin.ax` — 175 public names
 
 Sys.Platform - the numbers this target's kernel uses: syscall
 numbers, open and socket flags, errno values, poll and signal
@@ -2187,6 +2187,15 @@ target being compiled for (this one is `darwin`).
 | `platformWriteFd` | value | `(-> Int Int Int (Result Int Error))` | `Alloc` |  | The platform's own way to write to a descriptor where raw `write` is not available; `Err` 78 where the raw syscall is used instead. |
 | `platformReadFd` | value | `(-> Int Int Int (Result Int Error))` | `Alloc` |  | The platform's own way to read from a descriptor where raw `read` is not available; `Err` 78 where the raw syscall is used instead. |
 | `platformExitWith` | value | `(-> Int Int)` |  |  | The platform's own way to end the process where raw `exit` is not available; -78 where the raw syscall is used instead. |
+| `platformOpen` | value | `(-> Int Int Int Int)` |  |  | The platform's own way to open a path where raw `open` is not available; -78 where the raw syscall is used instead. |
+| `platformClose` | value | `(-> Int Int)` |  |  | The platform's own way to close a descriptor where raw `close` is not available; -78 where the raw syscall is used instead. |
+| `platformSeek` | value | `(-> Int Int Int Int)` |  |  | The platform's own way to move a descriptor's offset where raw `lseek` is not available; -78 where the raw syscall is used instead. |
+| `platformUnlink` | value | `(-> Int Int)` |  |  | The platform's own way to remove a file where raw `unlink` is not available; -78 where the raw syscall is used instead. |
+| `platformRename` | value | `(-> Int Int Int)` |  |  | The platform's own way to rename a path where raw `rename` is not available; -78 where the raw syscall is used instead. |
+| `platformMkdir` | value | `(-> Int Int Int)` |  |  | The platform's own way to make a directory where raw `mkdir` is not available; -78 where the raw syscall is used instead. |
+| `platformRmdir` | value | `(-> Int Int)` |  |  | The platform's own way to remove a directory where raw `rmdir` is not available; -78 where the raw syscall is used instead. |
+| `platformReadDir` | value | `(-> Int Int Int Int)` |  |  | The platform's own way to read a directory where raw `getdents` is not available; -78 where the raw syscall is used instead. |
+| `platformGetCwd` | value | `(-> Int Int Int)` |  |  | The platform's own way to read the working directory where raw `getcwd` is not available; -78 where the raw syscall is used instead. |
 | `ttyUsesTermios` | value | `Int` |  |  | Whether this platform's terminal control is the POSIX `termios` trio - read the attributes, edit them, write them back - reached through `ioctl`. Windows answers 0: its mechanism is `GetConsoleMode`/`SetConsoleMode` against a HANDLE, which shares no part of this shape. |
 | `sysIoctlNum` | value | `Int` |  |  | ioctl(fd, request, arg) - BSD 54, encoded the way every number in this file is: `0x2000000 \| 54` = 33554486. Probe: `SYS_ioctl = 54 (0x36)`, `SYS_ioctl encoded = 33554486`. |
 | `tcGetAttrReq` | value | `Int` |  |  | TIOCGETA - read the terminal attributes into a `struct termios`. |
