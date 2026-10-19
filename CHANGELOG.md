@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- Effect inference charges closure construction to its creation site,
+  including an immediately called closure or an ignored callback.
+  `restrict(no-alloc)` refuses these allocations. Tested by
+  `scripts/check-unboxed-sums.sh`.
+
 - Native POSIX executables and worker threads use guarded stacks.
   Overflow exits 86 with a named backtrace from the interrupted frame;
   unrelated faults retain their signal status. Explicit task stack

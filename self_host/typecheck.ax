@@ -17104,6 +17104,8 @@
         {
           (let m (walkLambdaLatent tc e bound))
           {
+            ; emitLambda allocates the closure record at its creation site.
+            (effAdd acc (builtinEff "Alloc"))
             (latentBuiltinsInto acc m.row 0)
             (Some (fnValsOne (LambdaFn m)))
           }
@@ -17311,7 +17313,10 @@
   (if (== h 0)
     0
     (if (== (nodeTag h) TAG_E_LAM)
-      (walkEffects tc (nodeB h) (bsWithParams bound (nodeAVec h) bsOpaque 0) acc)
+      {
+        (effAdd acc (builtinEff "Alloc"))
+        (walkEffects tc (nodeB h) (bsWithParams bound (nodeAVec h) bsOpaque 0) acc)
+      }
       (walkEffects tc h bound acc))))
 
 ; The arguments of a call to `ent`. Each value that is a function -
@@ -17364,14 +17369,18 @@
                 }))
           }
           (if (== (nodeTag a) TAG_E_LAM)
-            (if (! (== pend 1))
-              {
-                (let m (walkLambdaLatent tc a bound))
+            {
+              ; Creating an argument allocates even if the callee never calls it.
+              (effAdd acc (builtinEff "Alloc"))
+              (if (! (== pend 1))
                 {
-                  (addGated acc m.row u 0)
-                  (latentApplyU bound m.uses u)
-                }
-              })
+                  (let m (walkLambdaLatent tc a bound))
+                  {
+                    (addGated acc m.row u 0)
+                    (latentApplyU bound m.uses u)
+                  }
+                })
+            }
             (walkEffects tc a bound acc)))
         (walkEffectsArgVecAt tc v (+ i 1) bound acc ent)
       }
@@ -17902,6 +17911,7 @@
                   {
                     (let m (walkLambdaLatent tc e bound))
                     {
+                      (effAdd acc (builtinEff "Alloc"))
                       (latentBuiltinsInto acc m.row 0)
                       (latentCustomPossibleInto acc m.row 0)
                       (latentApply bound m.uses vecNew 1 0)
@@ -25311,7 +25321,7 @@
       (if (== (graphSeeds tc last e 1) 1)
         (concat ": " (graphRender path))
         (if (== (vecLen path) 1)
-          " in its own body (a constructor application, an `alloc` form, or a `handle` installing a handler)"
+          " in its own body (a constructor or closure, an `alloc` form, or a `handle` installing a handler)"
           (concat (concat (concat ": " (graphRender path)) ", in ")
             (concat (concat "`" (bareOf (memGetWordStr last 0))) "`'s own body"))))
     }))

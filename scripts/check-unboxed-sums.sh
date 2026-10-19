@@ -562,6 +562,72 @@ else
   bad "the claim fixture did not emit"
 fi
 
+# A closure owns a record even when its body is pure or never called.
+# Cover creation as a local, a return value, an argument and a call head.
+cat > "$work/us/closures.ax" <<'AX'
+(:: ignore (-> (-> Int Int) Int))
+(fn (ignore f) 9)
+
+(:: local (-> Int Int))
+;@axiom:restrict(no-alloc)
+(fn (local n) { (let f (lambda (x) (+ n x))) (f 1) })
+
+(:: maker (-> Int (-> Int Int)))
+;@axiom:restrict(no-alloc)
+(fn (maker n) (lambda (x) (+ n x)))
+
+(:: immediate (-> Int Int))
+;@axiom:restrict(no-alloc)
+(fn (immediate n) ((lambda (x) (+ n x)) 1))
+
+(:: ignored (-> Int Int))
+;@axiom:restrict(no-alloc)
+(fn (ignored n) (ignore (lambda (x) (+ n x))))
+
+(:: scalar (-> Int Int))
+;@axiom:restrict(no-alloc)
+(fn (scalar n) (+ n 1))
+
+(:: main Int)
+(fn (main) (+ (scalar 0) (+ (+ (local 1) ((maker 1) 1)) (+ (immediate 1) (ignored 1)))))
+AX
+"$axc" --diagnostic-format=ai check "$work/us/closures.ax" > "$work/us/closures.check" 2>&1 || true
+if python3 - "$work/us/closures.check" <<'PY'
+import re, sys
+s = open(sys.argv[1], encoding="utf-8").read()
+refused = re.findall(r'^E AX3049 .*?"`([^`]+)` claims `restrict\(no-alloc\)`', s, re.M)
+if sorted(refused) != ['ignored', 'immediate', 'local', 'maker']:
+    sys.exit('wrong closure allocation refusals: %r\n%s' % (refused, s))
+if any(not line.startswith('E AX3049 ') for line in s.splitlines() if line.startswith('E ')):
+    sys.exit('unrelated check failure: ' + s)
+PY
+then
+  ok "closure creation: local, returned, immediate and ignored closures refuse no-alloc; scalar keeps it"
+else
+  bad "closure creation is missing from the Alloc restriction"
+fi
+sed '/^;@axiom:restrict/d' "$work/us/closures.ax" > "$work/us/closures-untagged.ax"
+if "$axc" --diagnostic-format=ai emit-llvm "$work/us/closures-untagged.ax" -o "$work/us/closures.ll" > "$work/us/closures.log" 2>&1 \
+   && "$axc" --diagnostic-format=ai symbols "$work/us/closures-untagged.ax" > "$work/us/closures.syms" 2>> "$work/us/closures.log"; then
+  closure_mismatch=0
+  for fn in local maker immediate ignored scalar ignore; do
+    expected=1; [[ "$fn" == scalar || "$fn" == ignore ]] && expected=0
+    actual="$(calls_in "$work/us/closures.ll" "$fn" axiom_alloc)"
+    row="$(grep "^F $fn " "$work/us/closures.syms")"
+    has_alloc=0
+    grep -qE '#effects=([^ #]*,)?Alloc([, #]|$)' <<< "$row" && has_alloc=1
+    if [[ -z "$row" || "$actual" != "$expected" || "$has_alloc" != "$expected" ]] \
+       || ! grep -qE "^define [^@]*@$fn\\(" "$work/us/closures.ll"; then
+      bad "$fn: allocation calls $actual and Alloc row $has_alloc, expected $expected"
+      closure_mismatch=1
+    fi
+  done
+  (( closure_mismatch )) || ok "closure allocation rows agree with emitted records, including the scalar controls"
+else
+  bad "closure allocation row and emitted record disagree"
+  tail -10 "$work/us/closures.log"
+fi
+
 # ------------------------------------------------------------------
 echo
 echo "== 6. the checker's mirror against the emitter, over the compiler itself =="
@@ -572,7 +638,7 @@ echo "== 6. the checker's mirror against the emitter, over the compiler itself =
 # are unboxed live in two files (`pairFnOK`, `tcPairFnOK`), and this
 # checks they have not drifted.
 if "$axc" emit-llvm --input "$repo_root/self_host/main.ax" -o "$work/us/self.ll" > "$work/us/self.log" 2>&1 \
-   && "$axc" symbols --diagnostic-format=ai "$repo_root/self_host/main.ax" > "$work/us/self.syms" 2>/dev/null; then
+   && "$axc" --diagnostic-format=ai symbols "$repo_root/self_host/main.ax" > "$work/us/self.syms" 2>/dev/null; then
   if out="$(python3 "$repo_root/scripts/lib/alloc-rows.py" "$work/us/self.syms" "$work/us/self.ll" 2>&1)"; then
     ok "self-compile: $out"
   else

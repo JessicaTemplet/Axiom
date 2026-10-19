@@ -396,6 +396,11 @@ closed, and one remains:
 |---|---|---|
 | calls a target the compiler cannot resolve | adds a transparency mark to the known effects | finite target sets are followed through locals, parameters and capability fields, but unresolved targets still carry `#effects-incomplete`. An `effect(pure)` claim over an incomplete row draws `AX3037`; the reported effects remain a labelled lower bound |
 
+Constructing a lambda contributes `Alloc` at its creation site, even
+when the body is pure or the receiving function never calls it.
+A named single-argument function uses a static descriptor and allocates
+no closure record. Tested by `scripts/check-unboxed-sums.sh`.
+
 A call through an effect-transparent parameter often passes it an
 argument the walk can't follow, such as a load, a call result or an
 `if`. That argument sets the mark only when the position it lands in
