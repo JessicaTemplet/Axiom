@@ -12,6 +12,835 @@
 (import diag)
 (import Float)
 
+; Typed syntax handles use one packed arena boundary. The reference map
+; follows the declared payload view at each write, including replacements.
+(pub :: nilNode ASTNode)
+;@axiom:effect(unsafe)
+(pub fn (nilNode)
+  (as 0 ASTNode))
+
+(pub :: nodeSame (-> ASTNode ASTNode Bool))
+(pub fn (nodeSame a b)
+  (addrEq (addrOf a) (addrOf b)))
+
+(:: nodeWord (-> ASTNode Int Int))
+(fn (nodeWord n index)
+  (if (nodeSame n nilNode)
+    0
+    (memGetWord (as n Int) index)))
+
+(:: nodeStore (-> ASTNode Int a Bool Int))
+;@axiom:effect(unsafe)
+(fn (nodeStore n index value reference)
+  {
+    (let h (as n Int))
+    (let sw (__load64 (- h 8) 0))
+    (let bit (<< 1 (+ index 16)))
+    (let old (__load64 h index))
+    (__retainref value)
+    (__store64 h index (as value Int))
+    (__store64 (- h 8) 0
+      (if reference
+        (| sw bit)
+        (& sw (^ bit (- 0 1)))))
+    (if (!= (& sw bit) 0)
+      (__release old))
+    0
+  })
+
+(pub :: nodeWireEmpty (-> Int ASTNode))
+;@axiom:effect(unsafe)
+(pub fn (nodeWireEmpty tag)
+  {
+    (let n (as (memAllocMapped 104 0) ASTNode))
+    (nodeStore n 0 tag false)
+    n
+  })
+
+(pub :: readAstNode (-> Int Int ASTNode))
+;@axiom:effect(unsafe)
+(pub fn (readAstNode base index)
+  (as (memGetWord base index) ASTNode))
+
+(pub :: readAstNodes (-> Int Int Nodes))
+;@axiom:effect(unsafe)
+(pub fn (readAstNodes base index)
+  (as (memGetWord base index) Nodes))
+
+(pub :: writeNodeWord (-> ASTNode Int Int Int))
+(pub fn (writeNodeWord n index value)
+  (nodeStore n index value false))
+
+(pub :: writeNodeChild (-> ASTNode Int ASTNode Int))
+(pub fn (writeNodeChild n index value)
+  (nodeStore n index value true))
+
+(pub :: writeNodeChildren (-> ASTNode Int Nodes Int))
+(pub fn (writeNodeChildren n index value)
+  (nodeStore n index value true))
+
+(pub :: writeNodeText (-> ASTNode Int String Int))
+(pub fn (writeNodeText n index value)
+  (nodeStore n index value true))
+
+(pub :: writeNodeNames (-> ASTNode Int Names Int))
+(pub fn (writeNodeNames n index value)
+  (nodeStore n index value true))
+
+(pub :: writeNodeWords (-> ASTNode Int Ints Int))
+(pub fn (writeNodeWords n index value)
+  (nodeStore n index value true))
+
+(pub :: nodeAChild (-> ASTNode ASTNode))
+;@axiom:effect(unsafe)
+(pub fn (nodeAChild n)
+  (as (nodeWord n 1) ASTNode))
+
+(pub :: nodeAChildren (-> ASTNode Nodes))
+;@axiom:effect(unsafe)
+(pub fn (nodeAChildren n)
+  (as (nodeWord n 1) Nodes))
+
+(pub :: nodeAText (-> ASTNode String))
+;@axiom:effect(unsafe)
+(pub fn (nodeAText n)
+  (as (nodeWord n 1) String))
+
+(pub :: nodeANames (-> ASTNode Names))
+;@axiom:effect(unsafe)
+(pub fn (nodeANames n)
+  (as (nodeWord n 1) Names))
+
+(pub :: nodeBWord (-> ASTNode Int))
+(pub fn (nodeBWord n)
+  (nodeWord n 2))
+
+(pub :: nodeBChild (-> ASTNode ASTNode))
+;@axiom:effect(unsafe)
+(pub fn (nodeBChild n)
+  (as (nodeWord n 2) ASTNode))
+
+(pub :: nodeBChildren (-> ASTNode Nodes))
+;@axiom:effect(unsafe)
+(pub fn (nodeBChildren n)
+  (as (nodeWord n 2) Nodes))
+
+(pub :: nodeBNames (-> ASTNode Names))
+;@axiom:effect(unsafe)
+(pub fn (nodeBNames n)
+  (as (nodeWord n 2) Names))
+
+(pub :: nodeBWords (-> ASTNode Ints))
+;@axiom:effect(unsafe)
+(pub fn (nodeBWords n)
+  (as (nodeWord n 2) Ints))
+
+(pub :: nodeCWord (-> ASTNode Int))
+(pub fn (nodeCWord n)
+  (nodeWord n 3))
+
+(pub :: nodeCChild (-> ASTNode ASTNode))
+;@axiom:effect(unsafe)
+(pub fn (nodeCChild n)
+  (as (nodeWord n 3) ASTNode))
+
+(pub :: nodeCChildren (-> ASTNode Nodes))
+;@axiom:effect(unsafe)
+(pub fn (nodeCChildren n)
+  (as (nodeWord n 3) Nodes))
+
+(pub :: nodeCText (-> ASTNode String))
+;@axiom:effect(unsafe)
+(pub fn (nodeCText n)
+  (as (nodeWord n 3) String))
+
+(pub :: nodeCNames (-> ASTNode Names))
+;@axiom:effect(unsafe)
+(pub fn (nodeCNames n)
+  (as (nodeWord n 3) Names))
+
+(pub :: nodeCWords (-> ASTNode Ints))
+;@axiom:effect(unsafe)
+(pub fn (nodeCWords n)
+  (as (nodeWord n 3) Ints))
+
+(pub :: nodeTyChild (-> ASTNode ASTNode))
+;@axiom:effect(unsafe)
+(pub fn (nodeTyChild n)
+  (as (nodeWord n 6) ASTNode))
+
+(pub :: nodeTyChildren (-> ASTNode Nodes))
+;@axiom:effect(unsafe)
+(pub fn (nodeTyChildren n)
+  (as (nodeWord n 6) Nodes))
+
+(pub :: nodeTyNames (-> ASTNode Names))
+;@axiom:effect(unsafe)
+(pub fn (nodeTyNames n)
+  (as (nodeWord n 6) Names))
+
+(pub :: nodeAxtagsWord (-> ASTNode Int))
+(pub fn (nodeAxtagsWord n)
+  (nodeWord n 7))
+
+(pub :: nodeAxtagsWords (-> ASTNode Ints))
+;@axiom:effect(unsafe)
+(pub fn (nodeAxtagsWords n)
+  (as (nodeWord n 7) Ints))
+
+(pub :: nodeFieldNamesWord (-> ASTNode Int))
+(pub fn (nodeFieldNamesWord n)
+  (nodeWord n 9))
+
+(pub :: nodeFieldNamesNames (-> ASTNode Names))
+;@axiom:effect(unsafe)
+(pub fn (nodeFieldNamesNames n)
+  (as (nodeWord n 9) Names))
+
+(pub :: nodeFieldNamesWords (-> ASTNode Ints))
+;@axiom:effect(unsafe)
+(pub fn (nodeFieldNamesWords n)
+  (as (nodeWord n 9) Ints))
+
+(pub :: nodeDefScopeWord (-> ASTNode Int))
+(pub fn (nodeDefScopeWord n)
+  (nodeWord n 10))
+
+(pub :: nodeBinderTyChild (-> ASTNode ASTNode))
+;@axiom:effect(unsafe)
+(pub fn (nodeBinderTyChild n)
+  (as (nodeWord n 11) ASTNode))
+
+(pub :: nodeSyntaxIdentityWords (-> ASTNode Ints))
+;@axiom:effect(unsafe)
+(pub fn (nodeSyntaxIdentityWords n)
+  (as (nodeWord n 12) Ints))
+
+(pub :: nodeBuildTErrPlain (-> Int Int Int ASTNode))
+(pub fn (nodeBuildTErrPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_T_ERR))
+    (writeNodeWord n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildEStr (-> String Int Int Int ASTNode))
+(pub fn (nodeBuildEStr a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_STR))
+    (writeNodeText n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildESubcheck (-> ASTNode Nodes ASTNode Int ASTNode))
+(pub fn (nodeBuildESubcheck a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_SUBCHECK))
+    (writeNodeChild n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeChild n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEvstampCallPlain (-> ASTNode Ints TypeEnv ASTNode))
+(pub fn (nodeBuildEvstampCallPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_EVSTAMP))
+    (writeNodeChild n 1 a)
+    (writeNodeWords n 2 b)
+    (nodeStore n 3 c true)
+    n
+  })
+
+(pub :: nodeBuildBinding (-> Int String ASTNode ASTNode Int ASTNode))
+(pub fn (nodeBuildBinding tag a b c sp)
+  {
+    (let n (nodeWireEmpty tag))
+    (writeNodeText n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeChild n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEBegin (-> Nodes Int Int Int ASTNode))
+(pub fn (nodeBuildEBegin a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_BEGIN))
+    (writeNodeChildren n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEApp (-> ASTNode ASTNode Ints Int ASTNode))
+(pub fn (nodeBuildEApp a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_APP))
+    (writeNodeChild n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeWords n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDSig (-> String Ints Int Int ASTNode))
+(pub fn (nodeBuildDSig a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_SIG))
+    (writeNodeText n 1 a)
+    (writeNodeWords n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDFn (-> String Names ASTNode Int ASTNode))
+(pub fn (nodeBuildDFn a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_FN))
+    (writeNodeText n 1 a)
+    (writeNodeNames n 2 b)
+    (writeNodeChild n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEIf (-> ASTNode ASTNode ASTNode Int ASTNode))
+(pub fn (nodeBuildEIf a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_IF))
+    (writeNodeChild n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeChild n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEMatch (-> ASTNode Nodes Int Int ASTNode))
+(pub fn (nodeBuildEMatch a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_MATCH))
+    (writeNodeChild n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildPCon0 (-> String Int Int Int ASTNode))
+(pub fn (nodeBuildPCon0 a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_P_CON0))
+    (writeNodeText n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildMArm (-> ASTNode ASTNode Int Int ASTNode))
+(pub fn (nodeBuildMArm a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_M_ARM))
+    (writeNodeChild n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEField (-> ASTNode String Int Int ASTNode))
+(pub fn (nodeBuildEField a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_FIELD))
+    (writeNodeChild n 1 a)
+    (writeNodeText n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildTVarPlain (-> String Int Int ASTNode))
+(pub fn (nodeBuildTVarPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_T_VAR))
+    (writeNodeText n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildEvstampResultPlain (-> ASTNode Int ASTNode ASTNode))
+(pub fn (nodeBuildEvstampResultPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_EVSTAMP))
+    (writeNodeChild n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeChild n 3 c)
+    n
+  })
+
+(pub :: nodeBuildEIntPlain (-> Int Int Int ASTNode))
+(pub fn (nodeBuildEIntPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_E_INT))
+    (writeNodeWord n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildEVarPlain (-> String Int Int ASTNode))
+(pub fn (nodeBuildEVarPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_E_VAR))
+    (writeNodeText n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildEInt (-> Int Int Int Int ASTNode))
+(pub fn (nodeBuildEInt a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_INT))
+    (writeNodeWord n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildTConPlain (-> String Nodes Int ASTNode))
+(pub fn (nodeBuildTConPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_T_CON))
+    (writeNodeText n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildTArrPlain (-> ASTNode ASTNode Int ASTNode))
+(pub fn (nodeBuildTArrPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_T_ARR))
+    (writeNodeChild n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildTTupPlain (-> Nodes Int Int ASTNode))
+(pub fn (nodeBuildTTupPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_T_TUP))
+    (writeNodeChildren n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildTPtrPlain (-> ASTNode Int Int ASTNode))
+(pub fn (nodeBuildTPtrPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_T_PTR))
+    (writeNodeChild n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildEVar (-> String Int Int Int ASTNode))
+(pub fn (nodeBuildEVar a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_VAR))
+    (writeNodeText n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildELet (-> String ASTNode ASTNode Int ASTNode))
+(pub fn (nodeBuildELet a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_LET))
+    (writeNodeText n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeChild n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEIfPlain (-> ASTNode ASTNode ASTNode ASTNode))
+(pub fn (nodeBuildEIfPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_E_IF))
+    (writeNodeChild n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeChild n 3 c)
+    n
+  })
+
+(pub :: nodeBuildEBeginPlain (-> Nodes Int Int ASTNode))
+(pub fn (nodeBuildEBeginPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_E_BEGIN))
+    (writeNodeChildren n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildDImport (-> String Names Int Int ASTNode))
+(pub fn (nodeBuildDImport a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_IMPORT))
+    (writeNodeText n 1 a)
+    (writeNodeNames n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDData (-> String Nodes Int Int ASTNode))
+(pub fn (nodeBuildDData a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_DATA))
+    (writeNodeText n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDStruct (-> String Nodes Nodes Int ASTNode))
+(pub fn (nodeBuildDStruct a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_STRUCT))
+    (writeNodeText n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeChildren n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDMacro (-> String Names ASTNode Int ASTNode))
+(pub fn (nodeBuildDMacro a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_MACRO))
+    (writeNodeText n 1 a)
+    (writeNodeNames n 2 b)
+    (writeNodeChild n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDSubtype (-> String ASTNode Nodes Int ASTNode))
+(pub fn (nodeBuildDSubtype a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_SUBTYPE))
+    (writeNodeText n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeChildren n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildCtorPlain (-> String Int Ints ASTNode))
+(pub fn (nodeBuildCtorPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_CTOR))
+    (writeNodeText n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWords n 3 c)
+    n
+  })
+
+(pub :: nodeBuildFieldFlagsPlain (-> String Int Int ASTNode))
+(pub fn (nodeBuildFieldFlagsPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_FIELD))
+    (writeNodeText n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildEFlt (-> Int Int Int Int ASTNode))
+(pub fn (nodeBuildEFlt a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_FLT))
+    (writeNodeWord n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEChar (-> Int Int Int Int ASTNode))
+(pub fn (nodeBuildEChar a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_CHAR))
+    (writeNodeWord n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDSynfor (-> String ASTNode Nodes Int ASTNode))
+(pub fn (nodeBuildDSynfor a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_SYNFOR))
+    (writeNodeText n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeChildren n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDEffect (-> String Names Nodes Int ASTNode))
+(pub fn (nodeBuildDEffect a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_EFFECT))
+    (writeNodeText n 1 a)
+    (writeNodeNames n 2 b)
+    (writeNodeChildren n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDExtern (-> String Names Nodes Int ASTNode))
+(pub fn (nodeBuildDExtern a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_EXTERN))
+    (writeNodeText n 1 a)
+    (writeNodeNames n 2 b)
+    (writeNodeChildren n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDAlias (-> String ASTNode Names Int ASTNode))
+(pub fn (nodeBuildDAlias a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_ALIAS))
+    (writeNodeText n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeNames n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildDMacrocall (-> String Nodes Int Int ASTNode))
+(pub fn (nodeBuildDMacrocall a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_D_MACROCALL))
+    (writeNodeText n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildETry (-> ASTNode Int Int Int ASTNode))
+(pub fn (nodeBuildETry a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_TRY))
+    (writeNodeChild n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEWhilePlain (-> ASTNode Nodes Int ASTNode))
+(pub fn (nodeBuildEWhilePlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_E_WHILE))
+    (writeNodeChild n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildESet (-> String ASTNode Int Int ASTNode))
+(pub fn (nodeBuildESet a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_SET))
+    (writeNodeText n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildELetm (-> String ASTNode ASTNode Int ASTNode))
+(pub fn (nodeBuildELetm a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_LETM))
+    (writeNodeText n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeChild n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildERegion (-> String ASTNode Int Int ASTNode))
+(pub fn (nodeBuildERegion a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_REGION))
+    (writeNodeText n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEHandlePlain (-> ASTNode Nodes ASTNode ASTNode))
+(pub fn (nodeBuildEHandlePlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_E_HANDLE))
+    (writeNodeChild n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeChild n 3 c)
+    n
+  })
+
+(pub :: nodeBuildESetf (-> ASTNode String ASTNode Int ASTNode))
+(pub fn (nodeBuildESetf a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_SETF))
+    (writeNodeChild n 1 a)
+    (writeNodeText n 2 b)
+    (writeNodeChild n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildELam (-> Names ASTNode Int Int ASTNode))
+(pub fn (nodeBuildELam a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_LAM))
+    (writeNodeNames n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEMatchPlain (-> ASTNode Nodes Int ASTNode))
+(pub fn (nodeBuildEMatchPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_E_MATCH))
+    (writeNodeChild n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildMFor (-> String ASTNode Nodes Int ASTNode))
+(pub fn (nodeBuildMFor a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_M_FOR))
+    (writeNodeText n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeChildren n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildPConnamed (-> String Nodes Nodes Int ASTNode))
+(pub fn (nodeBuildPConnamed a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_P_CONNAMED))
+    (writeNodeText n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeChildren n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildMArmPlain (-> ASTNode ASTNode Int ASTNode))
+(pub fn (nodeBuildMArmPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_M_ARM))
+    (writeNodeChild n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+(pub :: nodeBuildEWhile (-> ASTNode Nodes Int Int ASTNode))
+(pub fn (nodeBuildEWhile a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_WHILE))
+    (writeNodeChild n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildEHandle (-> ASTNode Nodes ASTNode Int ASTNode))
+(pub fn (nodeBuildEHandle a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_E_HANDLE))
+    (writeNodeChild n 1 a)
+    (writeNodeChildren n 2 b)
+    (writeNodeChild n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildFieldType (-> String ASTNode Int Int ASTNode))
+(pub fn (nodeBuildFieldType a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_FIELD))
+    (writeNodeText n 1 a)
+    (writeNodeChild n 2 b)
+    (writeNodeWord n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildCtor (-> String Int Ints Int ASTNode))
+(pub fn (nodeBuildCtor a b c sp)
+  {
+    (let n (nodeWireEmpty TAG_CTOR))
+    (writeNodeText n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWords n 3 c)
+    (writeNodeWord n 4 sp)
+    n
+  })
+
+(pub :: nodeBuildNilPlain (-> Int Int Int ASTNode))
+(pub fn (nodeBuildNilPlain a b c)
+  {
+    (let n (nodeWireEmpty TAG_NIL))
+    (writeNodeWord n 1 a)
+    (writeNodeWord n 2 b)
+    (writeNodeWord n 3 c)
+    n
+  })
+
+; Macro rules alone retain a heterogeneous wire-shaped packet.
+(pub :: packedNodeAt (-> Ints Int ASTNode))
+;@axiom:effect(unsafe)
+(pub fn (packedNodeAt words index)
+  (as (vecGet words index) ASTNode))
+
 ; ------------------------------------------------------------------
 ; AST node: tagged union. tag + a,b,c fields. Unused = 0.
 ; ------------------------------------------------------------------
@@ -30,52 +859,30 @@
 ; for a positional one. Tenth word for the same reason `axtags` was
 ; eighth and `module` ninth: every existing reader indexes by
 ; position, so appending is the only change that is free.
-(pub struct ASTNode
-  (tag : Int)
-  (a : Int)
-  (b : Int)
-  (c : Int)
-  (span : Int)
-  (vis : Int)
-  (ty : Int)
-  (axtags : Int)
-  (module : Int)
-  (fieldNames : Int)
-  (defscope : Int)
-  (binderTy : Int)
-  (syntaxIdentity : Int))
-
 ; A declaration's visibility: 1 when it was written `pub`, 0 otherwise.
 ; stage0 splices only the PUBLIC declarations of an imported module
 ; into the program; stage1 spliced all of them, so a reference to a
 ; private imported name compiled here and was AX3001 there.
-(pub :: nodeVis (-> Int Int))
+(pub :: nodeVis (-> ASTNode Int))
 (pub fn (nodeVis n)
-  (memGetWord n 5))
+  (nodeWord n 5))
 
-(pub :: nodeAxtags (-> Int Int))
+(pub :: nodeAxtags (-> ASTNode Int))
 (pub fn (nodeAxtags n)
-  (memGetWord n 7))
+  (nodeWord n 7))
 
-; The `Vec` view of the same word. The cast is at the return,
-; not the call sites - see `nodeCName`.
-(pub :: nodeAxtagsVec (-> Int (Vec a)))
-;@axiom:effect(unsafe)
-(pub fn (nodeAxtagsVec n)
-  (as (nodeAxtags n) (Vec a)))
-
-(pub :: setNodeSpan (-> Int Int Int))
+(pub :: setNodeSpan (-> ASTNode Int ASTNode))
 (pub fn (setNodeSpan n sp)
   {
-    (memSetWord n 4 sp)
+    (writeNodeWord n 4 sp)
     n
   })
 
-(pub :: markPub (-> Int Int))
+(pub :: markPub (-> ASTNode ASTNode))
 (pub fn (markPub n)
   {
-    (if (! (== n 0))
-      (memSetWord n 5 1))
+    (if (! (nodeSame n nilNode))
+      (writeNodeWord n 5 1))
     n
   })
 
@@ -84,23 +891,9 @@
 ; nothing moves. What lives here varies by tag - a type node for
 ; TAG_D_SIG/TAG_FIELD, a Vec of field type nodes for TAG_CTOR, a Vec
 ; of tyvar name Strs for TAG_D_DATA.
-(pub :: nodeTy (-> Int Int))
+(pub :: nodeTy (-> ASTNode Int))
 (pub fn (nodeTy n)
-  (memGetWord n 6))
-
-; The `Vec` view of the same word. The cast is at the return,
-; not the call sites - see `nodeCName`.
-(pub :: nodeTyVec (-> Int (Vec a)))
-;@axiom:effect(unsafe)
-(pub fn (nodeTyVec n)
-  (as (nodeTy n) (Vec a)))
-
-(pub :: setNodeTy (-> Int Int Int))
-(pub fn (setNodeTy n t)
-  {
-    (memSetWord n 6 t)
-    n
-  })
+  (nodeWord n 6))
 
 ; Node tags.
 (pub :: TAG_NIL Int)
@@ -452,67 +1245,46 @@
 (pub fn (TAG_P_CONNAMED)
   43)
 
-(pub :: nodeTag (-> Int Int))
+(pub :: nodeTag (-> ASTNode Int))
 (pub fn (nodeTag n)
-  (memGetWord n 0))
+  (nodeWord n 0))
 
 ; Word 1 of an ASTNode. What it MEANS is fixed by the node's tag, which
 ; the type system does not model - so this answers the word, and
 ; `nodeAName` answers the reading almost every tag gives it.
-(pub :: nodeA (-> Int Int))
+(pub :: nodeA (-> ASTNode Int))
 (pub fn (nodeA n)
-  (memGetWord n 1))
-
-; The `Vec` view of the same word. The cast is at the return,
-; not the call sites - see `nodeCName`.
-(pub :: nodeAVec (-> Int (Vec a)))
-;@axiom:effect(unsafe)
-(pub fn (nodeAVec n)
-  (as (nodeA n) (Vec a)))
+  (nodeWord n 1))
 
 ; The name in word 1: a declaration's name, a variable's spelling, a
 ; constructor's. The cast is here, at a return inside a signature that
 ; carries the type - see `nodeCName`.
-(pub :: nodeAName (-> Int String))
+(pub :: nodeAName (-> ASTNode String))
 ;@axiom:effect(unsafe)
 (pub fn (nodeAName n)
   (as (nodeA n) String))
 
-(pub :: nodeB (-> Int Int))
+(pub :: nodeB (-> ASTNode Int))
 (pub fn (nodeB n)
-  (memGetWord n 2))
-
-; The `Vec` view of the same word. The cast is at the return,
-; not the call sites - see `nodeCName`.
-(pub :: nodeBVec (-> Int (Vec a)))
-;@axiom:effect(unsafe)
-(pub fn (nodeBVec n)
-  (as (nodeB n) (Vec a)))
+  (nodeWord n 2))
 
 ; The String view of word 2. See `nodeCName` for why the cast lives
 ; here and not at the call sites.
-(pub :: nodeBName (-> Int String))
+(pub :: nodeBName (-> ASTNode String))
 ;@axiom:effect(unsafe)
 (pub fn (nodeBName n)
   (as (nodeB n) String))
 
-(pub :: nodeC (-> Int Int))
+(pub :: nodeC (-> ASTNode Int))
 (pub fn (nodeC n)
-  (memGetWord n 3))
-
-; The `Vec` view of the same word. The cast is at the return,
-; not the call sites - see `nodeCName`.
-(pub :: nodeCVec (-> Int (Vec a)))
-;@axiom:effect(unsafe)
-(pub fn (nodeCVec n)
-  (as (nodeC n) (Vec a)))
+  (nodeWord n 3))
 
 ; The String view of word 3, for the node tags whose third field is a
 ; name. The cast is HERE, at a return inside a signature that carries
 ; the type, and not at the call sites - a cast at an argument root
 ; classifies that value's evidence 0 and drops its retain or its
 ; release (docs/memory-model.md MM-LIFE-2e, measured).
-(pub :: nodeCName (-> Int String))
+(pub :: nodeCName (-> ASTNode String))
 ;@axiom:effect(unsafe)
 (pub fn (nodeCName n)
   (as (nodeC n) String))
@@ -532,53 +1304,9 @@
 ; that it is no longer invisible, which is what lets an owner
 ; elsewhere release its own share safely (docs/memory-model.md
 ; MM-LIFE-2c).
-(pub :: mkNode (-> Int a b c Int))
-(pub fn (mkNode t a b c)
-  {
-    (__retainref a)
-    (__retainref b)
-    (__retainref c)
-    (as (ASTNode
-          :tag t
-          :a (as a Int)
-          :b (as b Int)
-          :c (as c Int)
-          :span 0
-          :vis 0
-          :ty 0
-          :axtags 0
-          :module 0
-          :fieldNames 0
-          :defscope 0
-          :binderTy 0
-          :syntaxIdentity 0) Int)
-  })
-
-(pub :: mkNodeAt (-> Int a b c Int Int))
-(pub fn (mkNodeAt t a b c sp)
-  {
-    (__retainref a)
-    (__retainref b)
-    (__retainref c)
-    (as (ASTNode
-          :tag t
-          :a (as a Int)
-          :b (as b Int)
-          :c (as c Int)
-          :span sp
-          :vis 0
-          :ty 0
-          :axtags 0
-          :module 0
-          :fieldNames 0
-          :defscope 0
-          :binderTy 0
-          :syntaxIdentity 0) Int)
-  })
-
-(pub :: nodeSpan (-> Int Int))
+(pub :: nodeSpan (-> ASTNode Int))
 (pub fn (nodeSpan n)
-  (memGetWord n 4))
+  (nodeWord n 4))
 
 ; The module word: a String when the declaration carries one, and 0
 ; when it does not - which is why the word and its String view are
@@ -586,28 +1314,21 @@
 ; `nodeModuleName` answers the second. The honest type is an option in
 ; a machine word, and this split is as close as the language gets
 ; until one exists.
-(pub :: nodeModule (-> Int Int))
+(pub :: nodeModule (-> ASTNode Int))
 (pub fn (nodeModule n)
-  (memGetWord n 8))
+  (nodeWord n 8))
 
 ; The String view. Only ask it where the word is known non-zero. The
 ; cast is here, at a return inside a signature that carries the type -
 ; see `nodeCName`.
-(pub :: nodeModuleName (-> Int String))
+(pub :: nodeModuleName (-> ASTNode String))
 ;@axiom:effect(unsafe)
 (pub fn (nodeModuleName n)
   (as (nodeModule n) String))
 
-(pub :: nodeFieldNames (-> Int Int))
+(pub :: nodeFieldNames (-> ASTNode Int))
 (pub fn (nodeFieldNames n)
-  (memGetWord n 9))
-
-; The `Vec` view of the same word. The cast is at the return,
-; not the call sites - see `nodeCName`.
-(pub :: nodeFieldNamesVec (-> Int (Vec a)))
-;@axiom:effect(unsafe)
-(pub fn (nodeFieldNamesVec n)
-  (as (nodeFieldNames n) (Vec a)))
+  (nodeWord n 9))
 
 ; A template-owned VAR keeps its definition module in word 8. It
 ; survives subsequent expansion by another macro, whose site differs.
@@ -626,14 +1347,14 @@
 ; A template's own binders never carry it: they are gensym-renamed
 ; (MAC-HYG-3) and resolve through their scope records long before the
 ; free-identifier arm is reached.
-(pub :: nodeDefScope (-> Int Int))
+(pub :: nodeDefScope (-> ASTNode Int))
 (pub fn (nodeDefScope n)
-  (memGetWord n 10))
+  (nodeWord n 10))
 
-(pub :: setNodeDefScope (-> Int Int))
+(pub :: setNodeDefScope (-> ASTNode ASTNode))
 (pub fn (setNodeDefScope n)
   {
-    (memSetWord n 10 1)
+    (writeNodeWord n 10 1)
     n
   })
 
@@ -660,17 +1381,17 @@
 ; and a scrutinee of `(Result Int String)` makes it `Int`, which is
 ; the difference between a word that cannot alias the block and a
 ; reference that can.
-(pub :: nodeBinderTy (-> Int Int))
+(pub :: nodeBinderTy (-> ASTNode Int))
 (pub fn (nodeBinderTy n)
-  (memGetWord n 11))
+  (nodeWord n 11))
 
 ; Expansion retains an identifier's binding when another macro receives
 ; it as syntax. On a variable this holds an expander-owned
 ; SyntaxIdentity; on a captured binding form, its lexical records.
 ; It is zero on parsed nodes. Later phases read renamed names.
-(pub :: nodeSyntaxIdentity (-> Int Int))
+(pub :: nodeSyntaxIdentity (-> ASTNode Int))
 (pub fn (nodeSyntaxIdentity n)
-  (memGetWord n 12))
+  (nodeWord n 12))
 
 ; Whether an application's answer is a machine word, as the checker
 ; proved it - 1 for `Int`, `Float`, `Bool`, `Char` and the empty
@@ -705,31 +1426,24 @@
 ; checking proved its operand and result have the same type, so its
 ; ownership and evidence follow the operand. This proof never claims
 ; that the value is a word or fresh in a region.
-(pub :: nodeResWord (-> Int Int))
+(pub :: nodeResWord (-> ASTNode Int))
 (pub fn (nodeResWord n)
-  (memGetWord n 7))
+  (nodeWord n 7))
 
-(pub :: setNodeResWord (-> Int Int Int))
+(pub :: setNodeResWord (-> ASTNode Int ASTNode))
 (pub fn (setNodeResWord n w)
   {
-    (memSetWord n 7 w)
+    (writeNodeWord n 7 w)
     n
   })
 
-(pub :: setNodeBinderTy (-> Int Int Int))
-(pub fn (setNodeBinderTy n t)
-  {
-    (memSetWord n 11 t)
-    n
-  })
-
-(pub :: mkEInt (-> Int Int))
+(pub :: mkEInt (-> Int ASTNode))
 (pub fn (mkEInt v)
-  (mkNode TAG_E_INT v 0 0))
+  (nodeBuildEIntPlain v 0 0))
 
-(pub :: mkEVar (-> String Int))
+(pub :: mkEVar (-> String ASTNode))
 (pub fn (mkEVar n)
-  (mkNode TAG_E_VAR n 0 0))
+  (nodeBuildEVarPlain n 0 0))
 
 ; `()`, the unit value: the one value of the unit type `()`, the empty
 ; tuple. It is an integer literal 0 marked with 2 in word 2, so every
@@ -737,118 +1451,118 @@
 ; which is all of them - already handles it; only the checker reads
 ; the mark, to give it the unit type. (Word 2 is 1 on the zero that
 ; unary `-` inserts, `unaryMinusToBinary`.)
-(pub :: mkEUnitAt (-> Int Int))
+(pub :: mkEUnitAt (-> Int ASTNode))
 (pub fn (mkEUnitAt sp)
-  (mkNodeAt TAG_E_INT 0 2 0 sp))
+  (nodeBuildEInt 0 2 0 sp))
 
-(pub :: isUnitLit (-> Int Bool))
+(pub :: isUnitLit (-> ASTNode Bool))
 (pub fn (isUnitLit e)
-  (if (== e 0)
+  (if (nodeSame e nilNode)
     false
     (&& (== (nodeTag e) TAG_E_INT) (== (nodeB e) 2))))
 
 ; Type-node constructors. parseType builds these; only the checker
 ; reads them.
-(pub :: mkTVar (-> String Int))
+(pub :: mkTVar (-> String ASTNode))
 (pub fn (mkTVar n)
-  (mkNode TAG_T_VAR n 0 0))
+  (nodeBuildTVarPlain n 0 0))
 
-(pub :: mkTCon (-> String Ints Int))
+(pub :: mkTCon (-> String Nodes ASTNode))
 (pub fn (mkTCon n args)
-  (mkNode TAG_T_CON n args 0))
+  (nodeBuildTConPlain n args 0))
 
-(pub :: mkTArr (-> Int Int Int))
+(pub :: mkTArr (-> ASTNode ASTNode ASTNode))
 (pub fn (mkTArr p r)
-  (mkNode TAG_T_ARR p r 0))
+  (nodeBuildTArrPlain p r 0))
 
-(pub :: mkTTup (-> Ints Int))
+(pub :: mkTTup (-> Nodes ASTNode))
 (pub fn (mkTTup xs)
-  (mkNode TAG_T_TUP xs 0 0))
+  (nodeBuildTTupPlain xs 0 0))
 
 ; A pointer holds its referent only. The `mut` flag is gone: no
 ; spelling ever set it, `(* mut T)` is refused as a tuple, and the
 ; renderers' `*mut` arms printed nothing anywhere.
-(pub :: mkTPtr (-> Int Int))
+(pub :: mkTPtr (-> ASTNode ASTNode))
 (pub fn (mkTPtr inner)
-  (mkNode TAG_T_PTR inner 0 0))
+  (nodeBuildTPtrPlain inner 0 0))
 
-(pub :: mkTErr Int)
+(pub :: mkTErr ASTNode)
 (pub fn (mkTErr)
-  (mkNode TAG_T_ERR 0 0 0))
+  (nodeBuildTErrPlain 0 0 0))
 
 ; An application's span is its FUNCTION's span, not the open paren's -
 ; stage0's `Expr::span()` recurses to the head for `EApp`, so a
 ; diagnostic about `(f 1)` points at `f`. Copying the child's span at
 ; construction is exactly equivalent to that recursion and costs one
 ; word instead of a walk.
-(pub :: mkEApp (-> Int Int Int))
+(pub :: mkEApp (-> ASTNode ASTNode ASTNode))
 (pub fn (mkEApp f x)
-  (mkNodeAt TAG_E_APP f x 0 (nodeSpan f)))
+  (nodeBuildEApp f x nilWords (nodeSpan f)))
 
-(pub :: mkEVarAt (-> String Int Int))
+(pub :: mkEVarAt (-> String Int ASTNode))
 (pub fn (mkEVarAt n sp)
-  (mkNodeAt TAG_E_VAR n 0 0 sp))
+  (nodeBuildEVar n 0 0 sp))
 
 ; A `let` node's span is its BINDER's - the token the name came from.
 ; stage0's `Expr::span()` answers the body's span for a `let`, but
 ; nothing in stage1 asks that question; what its diagnostics need is
 ; where the binding was introduced, which is where AX3012's secondary
 ; and its `mut` fix point.
-(pub :: mkELetAt (-> String Int Int Int Int))
+(pub :: mkELetAt (-> String ASTNode ASTNode Int ASTNode))
 (pub fn (mkELetAt n v b sp)
-  (mkNodeAt TAG_E_LET n v b sp))
+  (nodeBuildELet n v b sp))
 
-(pub :: mkEIf (-> Int Int Int Int))
+(pub :: mkEIf (-> ASTNode ASTNode ASTNode ASTNode))
 (pub fn (mkEIf t c a)
-  (mkNode TAG_E_IF t c a))
+  (nodeBuildEIfPlain t c a))
 
-(pub :: mkEBegin (-> Ints Int))
+(pub :: mkEBegin (-> (Vec ASTNode) ASTNode))
 (pub fn (mkEBegin xs)
-  (mkNode TAG_E_BEGIN xs 0 0))
+  (nodeBuildEBeginPlain xs 0 0))
 
 ; Span-carrying variants. A diagnostic about a declaration points at
 ; its *name*, so the name token's span is the one worth keeping - and
 ; the only one this slice's checks ever report. Everything else keeps
 ; span 0, which no consumer reads.
-(pub :: mkDFnAt (-> String Ints Int Int Int))
+(pub :: mkDFnAt (-> String Names ASTNode Int ASTNode))
 (pub fn (mkDFnAt n p b sp)
-  (mkNodeAt TAG_D_FN n p b sp))
+  (nodeBuildDFn n p b sp))
 
-(pub :: mkDSigAt (-> String Int Int Int))
+(pub :: mkDSigAt (-> String Ints Int ASTNode))
 (pub fn (mkDSigAt n t sp)
-  (mkNodeAt TAG_D_SIG n t 0 sp))
+  (nodeBuildDSig n t 0 sp))
 
 ; With the module path's span, so a diagnostic about the import - an
 ; unexported name in its list - has somewhere to point.
-(pub :: mkDImportAt (-> String Ints Int Int))
+(pub :: mkDImportAt (-> String Names Int ASTNode))
 (pub fn (mkDImportAt m ns sp)
-  (mkNodeAt TAG_D_IMPORT m ns 0 sp))
+  (nodeBuildDImport m ns 0 sp))
 
-(pub :: mkDDataAt (-> String Ints Int Int))
+(pub :: mkDDataAt (-> String (Vec ASTNode) Int ASTNode))
 (pub fn (mkDDataAt n cs sp)
-  (mkNodeAt TAG_D_DATA n cs 0 sp))
+  (nodeBuildDData n cs 0 sp))
 
-(pub :: mkDStructAt (-> String Ints Int Int))
+(pub :: mkDStructAt (-> String (Vec ASTNode) Int ASTNode))
 (pub fn (mkDStructAt n fs sp)
-  (mkNodeAt TAG_D_STRUCT n fs 0 sp))
+  (nodeBuildDStruct n fs nilNodes sp))
 
-(pub :: mkDMacroAt (-> String Int Int Int Int))
+(pub :: mkDMacroAt (-> String Names ASTNode Int ASTNode))
 (pub fn (mkDMacroAt n ps b sp)
-  (mkNodeAt TAG_D_MACRO n ps b sp))
+  (nodeBuildDMacro n ps b sp))
 
 ; A subtype declaration: name, base TYPE node, bounds Vec of EXPR
 ; nodes (1-2: lower only, or lower and upper), name span.
-(pub :: mkDSubtypeAt (-> String Int Ints Int Int))
+(pub :: mkDSubtypeAt (-> String ASTNode (Vec ASTNode) Int ASTNode))
 (pub fn (mkDSubtypeAt n base range sp)
-  (mkNodeAt TAG_D_SUBTYPE n base range sp))
+  (nodeBuildDSubtype n base range sp))
 
-(pub :: mkCtor (-> Int Int Ints Int))
+(pub :: mkCtor (-> String Int Ints ASTNode))
 (pub fn (mkCtor n a fl)
-  (mkNode TAG_CTOR n a fl))
+  (nodeBuildCtorPlain n a fl))
 
-(pub :: mkField (-> Int Int Int))
+(pub :: mkField (-> String Int ASTNode))
 (pub fn (mkField n t)
-  (mkNode TAG_FIELD n t 0))
+  (nodeBuildFieldFlagsPlain n t 0))
 
 ; ------------------------------------------------------------------
 ; Parse result.
@@ -883,7 +1597,10 @@
 
 (pub :: pOk (-> a Int Int))
 (pub fn (pOk v p)
-  (as (PResult :ok 1 :value (as v Int) :pos p :exp "" :code "") Int))
+  {
+    (__retainref v)
+    (as (PResult :ok 1 :value (as v Int) :pos p :exp "" :code "") Int)
+  })
 
 (pub :: pErr (-> Int Int))
 (pub fn (pErr p)
@@ -895,7 +1612,10 @@
 ; call site would hide it from the reader of the result's type.
 (pub :: pErrWith (-> a Int))
 (pub fn (pErrWith v)
-  (as (PResult :ok 0 :value (as v Int) :pos 0 :exp "" :code "") Int))
+  {
+    (__retainref v)
+    (as (PResult :ok 0 :value (as v Int) :pos 0 :exp "" :code "") Int)
+  })
 
 (pub :: pErrExp (-> Int String Int))
 (pub fn (pErrExp p e)
@@ -1622,25 +2342,24 @@
   (if (peekIs tokens pos TK_INT)
     {
       (let t (vecGet tokens pos))
-      (pOk (mkNodeAt TAG_E_INT (strToInt (tokenLexeme t)) 0 0 (tokenSpan t)) (advance pos))
+      (pOk (nodeBuildEInt (strToInt (tokenLexeme t)) 0 0 (tokenSpan t)) (advance pos))
     }
     (if (peekIs tokens pos TK_FLOAT)
       {
         (let t (vecGet tokens pos))
-        (pOk (mkNodeAt TAG_E_FLT (floatLexemeBits (tokenLexeme t)) 0 0 (tokenSpan t)) (advance pos))
+        (pOk (nodeBuildEFlt (floatLexemeBits (tokenLexeme t)) 0 0 (tokenSpan t)) (advance pos))
       }
       (if (peekIs tokens pos TK_CHARLIT)
         ; A char is its codepoint word at runtime, but its TYPE is Char,
         ; so it keeps its own tag; codegen emits it as the integer it is.
         {
           (let t (vecGet tokens pos))
-          (pOk (mkNodeAt TAG_E_CHAR (charLexemeCode (tokenLexeme t)) 0 0 (tokenSpan t))
-            (advance pos))
+          (pOk (nodeBuildEChar (charLexemeCode (tokenLexeme t)) 0 0 (tokenSpan t)) (advance pos))
         }
         (if (peekIs tokens pos TK_STRING)
           {
             (let t (vecGet tokens pos))
-            (pOk (mkNodeAt TAG_E_STR (tokenLexeme t) 0 0 (tokenSpan t)) (advance pos))
+            (pOk (nodeBuildEStr (tokenLexeme t) 0 0 (tokenSpan t)) (advance pos))
           }
           (pErr pos))))))
 
@@ -1793,7 +2512,7 @@
 ; `.field` suffixes make field accesses, folded left so `a.b.c` reads
 ; the `c` of the value at `a.b`. Dotted module paths never reach here -
 ; imports parse through parseModPath.
-(pub :: parseFieldChain (-> Ints Int Int Int))
+(pub :: parseFieldChain (-> Ints Int ASTNode Int))
 (pub fn (parseFieldChain tokens pos base)
   ; The node's span is the FIELD NAME token's - AX3007's anchor. An
   ; expression-position anchor for the whole access is the BASE's span
@@ -1801,7 +2520,7 @@
   ; computes by walking, not by reading this slot.
   (if (&& (peekIs tokens pos TK_DOT) (peekIs tokens (advance pos) TK_IDENT))
     (parseFieldChain tokens (advance (advance pos))
-      (mkNodeAt TAG_E_FIELD base (tokenLexeme (vecGet tokens (advance pos))) 0
+      (nodeBuildEField base (tokenLexeme (vecGet tokens (advance pos))) 0
         (tokenSpan (vecGet tokens (advance pos)))))
     (pOk base pos)))
 
@@ -1931,7 +2650,7 @@
       (pOk (mkEVarAt (tokenLexeme t) (tokenSpan t)) (advance pos))
     }
     (if (peekIs tokens pos TK_LPAREN)
-      (parseMacroPatArgs tokens (advance pos) 0)
+      (parseMacroPatArgs tokens (advance pos) nilNode)
       (if (|| (peekIs tokens pos TK_INT)
             (|| (peekIs tokens pos TK_FLOAT)
               (|| (peekIs tokens pos TK_CHARLIT) (peekIs tokens pos TK_STRING))))
@@ -1941,10 +2660,10 @@
 ; The elements of a parenthesised pattern, folded into a spine. An
 ; EMPTY one is refused: `()` would match a form of zero elements, and
 ; no argument is one, so it is a rule that could never fire.
-(pub :: parseMacroPatArgs (-> Ints Int Int Int))
+(pub :: parseMacroPatArgs (-> Ints Int ASTNode Int))
 (pub fn (parseMacroPatArgs tokens pos acc)
   (if (peekIs tokens pos TK_RPAREN)
-    (if (== acc 0)
+    (if (nodeSame acc nilNode)
       (pErrExp pos "a pattern")
       (pOk acc (advance pos)))
     (if (peekIs tokens pos TK_EOF)
@@ -1954,9 +2673,9 @@
         (if (== (memGetWord r 0) 0)
           r
           (parseMacroPatArgs tokens (memGetWord r 2)
-            (if (== acc 0)
-              (memGetWord r 1)
-              (mkEApp acc (memGetWord r 1)))))
+            (if (nodeSame acc nilNode)
+              (readAstNode r 1)
+              (mkEApp acc (readAstNode r 1)))))
       })))
 
 ; A rule head's argument list. Answers three parallel vectors, one
@@ -2002,7 +2721,7 @@
                 0))
             {
               (vecPush pats (memGetWord r 1))
-              (vecPush names (patSlotName (memGetWord r 1)))
+              (vecPush names (patSlotName (readAstNode r 1)))
               (vecPush spells
                 (concat (patTokensSpelling tokens pos afterPat "")
                   (if (== rep 1)
@@ -2032,9 +2751,9 @@
 ; `VAR` spelling `...` nested in a form, which matching would
 ; otherwise bind as an ordinary name, one silent wrong answer per
 ; element. Pure readers, so untagged.
-(pub :: patHasEllipsis (-> Int Int))
+(pub :: patHasEllipsis (-> ASTNode Int))
 (pub fn (patHasEllipsis p)
-  (if (== p 0)
+  (if (nodeSame p nilNode)
     0
     {
       (let tg (nodeTag p))
@@ -2043,14 +2762,14 @@
           1
           0)
         (if (== tg TAG_E_APP)
-          (if (== (patHasEllipsis (nodeA p)) 1)
+          (if (== (patHasEllipsis (nodeAChild p)) 1)
             1
-            (patHasEllipsis (nodeB p)))
+            (patHasEllipsis (nodeBChild p)))
           0))
     }))
 
 ; The names-slot entry for one top-level pattern element.
-(pub :: patSlotName (-> Int String))
+(pub :: patSlotName (-> ASTNode String))
 (pub fn (patSlotName p)
   (if (== (nodeTag p) TAG_E_VAR)
     (if (strEq (nodeAName p) "_")
@@ -2222,7 +2941,7 @@
                   (if (== (memGetWord r 0) 0)
                     r
                     {
-                      (markPub (memGetWord r 1))
+                      (markPub (readAstNode r 1))
                       r
                     })
                 })
@@ -2294,12 +3013,12 @@
 ; walks nodeA, and nodeA of `((x xs) (y ys))` is `(x xs)`. It is kept
 ; in the node's name slot because a diagnostic wants a name to quote,
 ; not because the expander reads it.
-(pub :: parseIterBinder (-> Int String))
+(pub :: parseIterBinder (-> ASTNode String))
 (pub fn (parseIterBinder e)
   (if (== (nodeTag e) TAG_E_VAR)
     (nodeAName e)
     (if (== (nodeTag e) TAG_E_APP)
-      (parseIterBinder (nodeA e))
+      (parseIterBinder (nodeAChild e))
       "")))
 
 ; Parse `syntax/for BINDS DECL...` with the form's `(` already
@@ -2319,7 +3038,7 @@
         (if (== (memGetWord bindR 0) 0)
           bindR
           {
-            (let binds (memGetWord bindR 1))
+            (let binds (readAstNode bindR 1))
             (let afterSeq (memGetWord bindR 2))
             {
               (let var (parseIterBinder binds))
@@ -2332,18 +3051,18 @@
       (pErrExp p1 "("))
   })
 
-(pub :: parseDeclForBody (-> Ints Int String Int Int Ints Int))
+(pub :: parseDeclForBody (-> Ints Int String ASTNode Int (Vec ASTNode) Int))
 (pub fn (parseDeclForBody tokens pos var seq sp acc)
   (if (peekIs tokens pos TK_RPAREN)
     (if (== (vecLen acc) 0)
       (pErr pos)
-      (pOk (mkNodeAt TAG_D_SYNFOR var seq acc sp) (advance pos)))
+      (pOk (nodeBuildDSynfor var seq acc sp) (advance pos)))
     (if (peekIs tokens pos TK_LPAREN)
       {
         (let r (parseTopForm tokens (advance pos)))
         (if (== (memGetWord r 0) 0)
           r
-          (parseDeclForBody tokens (memGetWord r 2) var seq sp (vecPush acc (memGetWord r 1))))
+          (parseDeclForBody tokens (memGetWord r 2) var seq sp (vecPush acc (readAstNode r 1))))
       }
       (pErrExp pos "("))))
 
@@ -2383,7 +3102,7 @@
             (let r (parseEffectOps tokens (memGetWord nr 2) ops opFields))
             (if (== (memGetWord r 0) 0)
               r
-              (pOk (mkNodeAt TAG_D_EFFECT name ops opFields nameSpan) (memGetWord r 2)))
+              (pOk (nodeBuildDEffect name ops opFields nameSpan) (memGetWord r 2)))
           }
         }
       })
@@ -2393,7 +3112,7 @@
 ; the end position, so acceptance is unchanged; a type the parser
 ; cannot read leaves 0 in the field and only `symbols` is the poorer
 ; for it.
-(pub :: parseEffectOps (-> Ints Int Ints Ints Int))
+(pub :: parseEffectOps (-> Ints Int Names Nodes Int))
 (pub fn (parseEffectOps tokens pos ops opFields)
   (if (peekIs tokens pos TK_RPAREN)
     (pOk 0 (advance pos))
@@ -2408,12 +3127,12 @@
                 {
                   (let tr (parseType tokens (advance (memGetWord nr 2))))
                   (if (== (memGetWord tr 0) 0)
-                    0
-                    (memGetWord tr 1))
+                    nilNode
+                    (readAstNode tr 1))
                 }
-                0))
+                nilNode))
             {
-              (vecPush ops (memGetWord nr 1))
+              (vecPush ops (memGetWordStr nr 1))
               ; With the NAME's span, the way a trait's methods
               ; have carried one since they were parsed: an
               ; operation is a definition, so a duplicate of it
@@ -2421,7 +3140,7 @@
               ; it. `mkField` leaves span 0 and a spanless
               ; diagnostic is a suppressed one.
               (vecPush opFields
-                (mkNodeAt TAG_FIELD (memGetWord nr 1) tyNode 0
+                (nodeBuildFieldExtern (memGetWordStr nr 1) tyNode ""
                   (tokenSpan (vecGet tokens (advance pos)))))
               {
                 (let r (skipParens tokens (memGetWord nr 2) 1))
@@ -2529,7 +3248,7 @@
                 (let r (parseExternItems tokens (advance pos) names items))
                 (if (== (memGetWord r 0) 0)
                   r
-                  (pOk (mkNodeAt TAG_D_EXTERN lib names items (tokenSpan libTok)) (memGetWord r 2)))
+                  (pOk (nodeBuildDExtern lib names items (tokenSpan libTok)) (memGetWord r 2)))
               })
           ))
       }
@@ -2546,8 +3265,7 @@
 ; symbol, or a clause the design document once proposed (`effects`,
 ; `opaque`, `drop`) used to be skipped without a word, and `(opaque
 ; Thing ...)` bound an item called `opaque`.
-(pub :: parseExternItems (-> Ints Int Ints Ints Int))
-;@axiom:effect(unsafe)
+(pub :: parseExternItems (-> Ints Int Names Nodes Int))
 (pub fn (parseExternItems tokens pos names items)
   (if (peekIs tokens pos TK_RPAREN)
     (pOk 0 (advance pos))
@@ -2566,10 +3284,10 @@
                   (if (== (memGetWord cr 0) 0)
                     cr
                     {
-                      (vecPush names (memGetWord nr 1))
+                      (vecPush names (memGetWordStr nr 1))
                       (vecPush items
-                        (mkNodeAt TAG_FIELD (memGetWord nr 1) (memGetWord tr 1)
-                          (as (memGetWord cr 1) String) (tokenSpan (vecGet tokens (advance pos)))))
+                        (nodeBuildFieldExtern (memGetWordStr nr 1) (readAstNode tr 1)
+                          (memGetWordStr cr 1) (tokenSpan (vecGet tokens (advance pos)))))
                       (parseExternItems tokens (memGetWord cr 2) names items)
                     })
                 })
@@ -2675,7 +3393,7 @@
                 (if (== (memGetWord tr 0) 0)
                   (pErr origPos)
                   (if (peekIs tokens (memGetWord tr 2) TK_RPAREN)
-                    (pOk (mkNodeAt TAG_D_ALIAS name (memGetWord tr 1) tvs nameSpan)
+                    (pOk (nodeBuildDAlias name (readAstNode tr 1) tvs nameSpan)
                       (advance (memGetWord tr 2)))
                     (pErr origPos)))
               })
@@ -2711,7 +3429,7 @@
             (if (== (memGetWord tr 0) 0)
               (pErr origPos)
               {
-                (let base (memGetWord tr 1))
+                (let base (readAstNode tr 1))
                 (let p2 (memGetWord tr 2))
                 (if (&& (peekIs tokens p2 TK_IDENT)
                       (strEq (tokenLexeme (vecGet tokens p2)) "range"))
@@ -2720,7 +3438,7 @@
                     (if (== (memGetWord lr 0) 0)
                       (pErr origPos)
                       {
-                        (let lower (memGetWord lr 1))
+                        (let lower (readAstNode lr 1))
                         (let p3 (memGetWord lr 2))
                         (if (&& (peekIs tokens p3 TK_DOT) (peekIs tokens (advance p3) TK_DOT))
                           {
@@ -2732,7 +3450,7 @@
                                   (let bounds vecNew)
                                   {
                                     (vecPush bounds lower)
-                                    (vecPush bounds (memGetWord ur 1))
+                                    (vecPush bounds (readAstNode ur 1))
                                     (pOk
                                       (mkDSubtypeAt name base bounds
                                         (tokenSpan (vecGet tokens pos)))
@@ -2960,9 +3678,9 @@
 ; Word 3 is unused on variable nodes. A checked operator carries its
 ; integer descriptor here; a numeric conversion carries source * 256 +
 ; target. Application payload words remain children for generic walkers.
-(pub :: nodeIntegerCode (-> Int Int))
+(pub :: nodeIntegerCode (-> ASTNode Int))
 (pub fn (nodeIntegerCode e)
-  (if (== e 0)
+  (if (nodeSame e nilNode)
     0
     {
       (let head (spineHead e))
@@ -2971,7 +3689,7 @@
         0)
     }))
 
-(pub :: nodeIntegerOp (-> Int Int))
+(pub :: nodeIntegerOp (-> ASTNode Int))
 (pub fn (nodeIntegerOp e)
   {
     (let code (nodeIntegerCode e))
@@ -2980,7 +3698,7 @@
       0)
   })
 
-(pub :: nodeIntegerConversion (-> Int Int))
+(pub :: nodeIntegerConversion (-> ASTNode Int))
 (pub fn (nodeIntegerConversion e)
   {
     (let code (nodeIntegerCode e))
@@ -3106,7 +3824,7 @@
               (let r (parseTypeAtom tokens (advance pos)))
               (if (== (memGetWord r 0) 0)
                 r
-                (pOk (mkTPtr (memGetWord r 1)) (memGetWord r 2)))
+                (pOk (mkTPtr (readAstNode r 1)) (memGetWord r 2)))
             }
             ; `linear` is RESERVED, not parsed. It used to build the
             ; nominal type constructor `Linear T`, which was a real
@@ -3256,7 +3974,7 @@
 
 ; `(-> A B C)` folds right: A -> (B -> C). `i` walks from the second-
 ; to-last element down to 0, wrapping `acc` each step.
-(pub :: foldArrows (-> Ints Int Int Int))
+(pub :: foldArrows (-> Nodes Int ASTNode ASTNode))
 (pub fn (foldArrows tys i acc)
   (if (< i 0)
     acc
@@ -3326,9 +4044,8 @@
             tr
             (if (peekIs tokens (memGetWord tr 2) TK_RPAREN)
               (pOk
-                (setNodeTy
-                  (mkDSigAt name (as (sigFloatFlags tokens typePos) Int)
-                    (tokenSpan (vecGet tokens pos)))
+                (setNodeTyWord
+                  (mkDSigAt name (sigFloatFlags tokens typePos) (tokenSpan (vecGet tokens pos)))
                   (memGetWord tr 1))
                 (advance (memGetWord tr 2)))
               ; stage0's `expect(RParen)` renders its expectation as
@@ -3594,17 +4311,17 @@
     }
     0))
 
-(pub :: parseConstructors (-> Ints Int String Int Ints Int Int))
+(pub :: parseConstructors (-> Ints Int String Int (Vec ASTNode) Int Int))
 (pub fn (parseConstructors tokens pos dataName nameSpan acc tvs)
   (if (peekIs tokens pos TK_RPAREN)
-    (pOk (setNodeTy (mkDDataAt dataName acc nameSpan) tvs) (advance pos))
+    (pOk (setNodeTyWord (mkDDataAt dataName acc nameSpan) tvs) (advance pos))
     (if (peekIs tokens pos TK_LPAREN)
       {
         (let r (parseOneCtor tokens (advance pos)))
         (if (== (memGetWord r 0) 0)
           r
           {
-            (let ctor (memGetWord r 1))
+            (let ctor (readAstNode r 1))
             (let nextPos (memGetWord r 2))
             (parseConstructors tokens nextPos dataName nameSpan (vecPush acc ctor) tvs)
           })
@@ -3619,7 +4336,7 @@
       ; one it is consumed before checking ever runs.
       (if (&& (peekIs tokens pos TK_IDENT) (strEq (tokenLexeme (vecGet tokens pos)) "..."))
         {
-          (let mkr (setNodeTy (mkCtor (as "..." Int) 0 vecNew) (as vecNew Int)))
+          (let mkr (setNodeTyChildren (mkCtor "..." 0 vecNew) vecNew))
           {
             (setNodeSpan mkr (tokenSpan (vecGet tokens pos)))
             (parseConstructors tokens (advance pos) dataName nameSpan (vecPush acc mkr) tvs)
@@ -3651,7 +4368,7 @@
       ; reports each constructor at its own name, and until it the
       ; ctor nodes carried none.
       {
-        (setNodeSpan (memGetWord r0 1) (tokenSpan (vecGet tokens pos)))
+        (setNodeSpan (readAstNode r0 1) (tokenSpan (vecGet tokens pos)))
         r0
       })
   })
@@ -3663,10 +4380,10 @@
     (if (== (memGetWord nr 0) 0)
       nr
       {
-        (let ctorName (memGetWord nr 1))
+        (let ctorName (memGetWordStr nr 1))
         (let nextPos (memGetWord nr 2))
         (if (peekIs tokens nextPos TK_RPAREN)
-          (pOk (setNodeTy (mkCtor ctorName 0 vecNew) (as vecNew Int)) (advance nextPos))
+          (pOk (setNodeTyChildren (mkCtor ctorName 0 vecNew) vecNew) (advance nextPos))
           ; A STRUCT VARIANT: `(Rect { w : Int, h : Int })`. The field
           ; names are recorded, and everything else about the
           ; constructor - arity, per-field float flags, per-field type
@@ -3684,12 +4401,11 @@
 ; `name : Type` pairs to the closing brace, commas optional - stage0
 ; treats a comma as separator-or-not, so `{ w : Int h : Int }` parses
 ; the same as `{ w : Int, h : Int }`.
-(pub :: parseNamedFieldTypes (-> Ints Int Ints Int Ints Strings Int))
+(pub :: parseNamedFieldTypes (-> Ints Int Ints String Nodes Names Int))
 (pub fn (parseNamedFieldTypes tokens pos flags ctorName tys names)
   (if (peekIs tokens pos TK_RBRACE)
     (if (peekIs tokens (advance pos) TK_RPAREN)
-      (pOk
-        (setCtorFieldNames (setNodeTy (mkCtor ctorName (vecLen flags) flags) (as tys Int)) names)
+      (pOk (setCtorFieldNames (setNodeTyChildren (mkCtor ctorName (vecLen flags) flags) tys) names)
         (advance (advance pos)))
       (pErr (advance pos)))
     (if (peekIs tokens pos TK_IDENT)
@@ -3709,7 +4425,7 @@
                   (if (peekIs tokens (advance (advance pos)) TK_IDENT)
                     (identIsFloat tokens (advance (advance pos)))
                     0))
-                (vecPush tys (memGetWord tr 1))
+                (vecPush tys (readAstNode tr 1))
                 (parseNamedFieldTypes tokens (skipFieldComma tokens (memGetWord tr 2)) flags
                   ctorName tys names)
               })
@@ -3729,10 +4445,10 @@
     (advance pos)
     pos))
 
-(pub :: setCtorFieldNames (-> Int Strings Int))
+(pub :: setCtorFieldNames (-> ASTNode Strings ASTNode))
 (pub fn (setCtorFieldNames n names)
   {
-    (memSetWord n 9 names)
+    (writeNodeNames n 9 names)
     n
   })
 
@@ -3746,10 +4462,10 @@
 ; these types and checks construction arguments against them. The flag
 ; rule above is deliberately unchanged (`(Float)` parenthesised is
 ; still flag 0), so codegen behaves bit-identically.
-(pub :: parseFieldTypes (-> Ints Int Ints Int Ints Int))
+(pub :: parseFieldTypes (-> Ints Int Ints String Nodes Int))
 (pub fn (parseFieldTypes tokens pos flags ctorName tys)
   (if (peekIs tokens pos TK_RPAREN)
-    (pOk (setNodeTy (mkCtor ctorName (vecLen flags) flags) (as tys Int)) (advance pos))
+    (pOk (setNodeTyChildren (mkCtor ctorName (vecLen flags) flags) tys) (advance pos))
     ; A field type that does not parse is refused where it stands. It
     ; used to become the silent wildcard, which matches every type, so
     ; `(Lo (Vec 1))` declared a field of any type at all.
@@ -3763,7 +4479,7 @@
               (if (peekIs tokens pos TK_IDENT)
                 (identIsFloat tokens pos)
                 0))
-            (vecPush tys (memGetWord tr 1))
+            (vecPush tys (readAstNode tr 1))
             (parseFieldTypes tokens (memGetWord tr 2) flags ctorName tys)
           })
       }
@@ -3772,11 +4488,11 @@
 ; A parsed type, or the silent wildcard for one the grammar cannot
 ; represent - the checker treats a nameless TVar as matching anything
 ; and never renders it, so failure here can only under-report.
-(pub :: typeNodeOrWildcard (-> Int Int))
+(pub :: typeNodeOrWildcard (-> Int ASTNode))
 (pub fn (typeNodeOrWildcard r)
   (if (== (memGetWord r 0) 0)
     (mkTVar "")
-    (memGetWord r 1)))
+    (readAstNode r 1)))
 
 ; ------------------------------------------------------------------
 ; Parse (struct Name (field1 : Type1) (field2 : Type2) ...)
@@ -3864,7 +4580,7 @@
 ; The bare words after a struct's name, each as a TAG_E_VAR node that
 ; keeps its span for the checker's diagnostic. Answers the position of
 ; the first token that is not one.
-(pub :: collectStructMarkers (-> Ints Int Ints Int))
+(pub :: collectStructMarkers (-> Ints Int (Vec ASTNode) Int))
 (pub fn (collectStructMarkers tokens pos markers)
   (if (peekIs tokens pos TK_IDENT)
     {
@@ -3878,14 +4594,14 @@
 
 ; A struct declaration's markers - the Vec `collectStructMarkers`
 ; built - or an empty vector when it has none.
-(pub :: structMarkers (-> Int Ints))
+(pub :: structMarkers (-> ASTNode (Vec ASTNode)))
 (pub fn (structMarkers d)
   (if (== (nodeC d) 0)
     vecNew
-    (nodeCVec d)))
+    (nodeCChildren d)))
 
 ; Does the declaration carry the marker spelled `m`?
-(pub :: structHasMarker (-> Int String Bool))
+(pub :: structHasMarker (-> ASTNode String Bool))
 (pub fn (structHasMarker d m)
   {
     (let ms (structMarkers d))
@@ -3907,12 +4623,12 @@
 ; field; codegen classifies the type as a scalar. Every phase asks this
 ; one predicate, so the three cannot disagree about which structs are
 ; words.
-(pub :: structIsWord (-> Int Bool))
+(pub :: structIsWord (-> ASTNode Bool))
 (pub fn (structIsWord d)
   (structHasMarker d "word"))
 
 ; A word struct a `parallel` binding may capture (MM-PAR-6, AX3064).
-(pub :: structIsShared (-> Int Bool))
+(pub :: structIsShared (-> ASTNode Bool))
 (pub fn (structIsShared d)
   (structHasMarker d "shared"))
 
@@ -3960,7 +4676,7 @@
         (structTyParamRun tokens (advance pos)))
       0)))
 
-(pub :: parseFieldsTv (-> Ints Int String Int Ints Strings Int))
+(pub :: parseFieldsTv (-> Ints Int String Int (Vec ASTNode) Strings Int))
 (pub fn (parseFieldsTv tokens pos structName nameSpan acc tvs)
   {
     (let r (parseFields tokens pos structName nameSpan acc))
@@ -3979,12 +4695,12 @@
       (if (== (vecLen tvs) 0)
         r
         {
-          (setNodeTy (memGetWord r 1) (as tvs Int))
+          (setNodeTyNames (readAstNode r 1) tvs)
           r
         }))
   })
 
-(pub :: parseFields (-> Ints Int String Int Ints Int))
+(pub :: parseFields (-> Ints Int String Int (Vec ASTNode) Int))
 (pub fn (parseFields tokens pos structName nameSpan acc)
   (if (peekIs tokens pos TK_RPAREN)
     (pOk (mkDStructAt structName acc nameSpan) (advance pos))
@@ -3994,7 +4710,7 @@
         (if (== (memGetWord r 0) 0)
           r
           {
-            (let field (memGetWord r 1))
+            (let field (readAstNode r 1))
             (let nextPos (memGetWord r 2))
             (parseFields tokens nextPos structName nameSpan (vecPush acc field))
           })
@@ -4040,9 +4756,9 @@
 ; Was this struct field declared `mut`? Word c, 0 on every field the
 ; parser did not mark and on every TAG_FIELD a macro template rebuilt
 ; before `expBuildStructFieldsIn` learned to carry it.
-(pub :: fieldIsMut (-> Int Int))
+(pub :: fieldIsMut (-> ASTNode Int))
 (pub fn (fieldIsMut f)
-  (if (== (memGetWord f 3) 0)
+  (if (== (nodeCWord f) 0)
     0
     1))
 
@@ -4073,7 +4789,7 @@
       ; type the parser could not read - had nowhere to point and
       ; said nothing at all.
       {
-        (let fieldName (memGetWord nr 1))
+        (let fieldName (memGetWordStr nr 1))
         (let nextPos (memGetWord nr 2))
         {
           (let fieldTy
@@ -4085,7 +4801,7 @@
               (let fl (identIsFloat tokens (advance nextPos)))
               (if (peekIs tokens (advance (advance nextPos)) TK_RPAREN)
                 (pOk
-                  (setNodeSpan (setNodeTy (mkField fieldName fl) fieldTy)
+                  (setNodeSpan (setNodeTyChild (mkField fieldName fl) fieldTy)
                     (tokenSpan (vecGet tokens pos)))
                   (advance (advance (advance nextPos))))
                 ; A field has one type. What followed it used to be
@@ -4099,7 +4815,7 @@
                       (if (== (memGetWord r 0) 0)
                         r
                         (pOk
-                          (setNodeSpan (setNodeTy (mkField fieldName fl) fieldTy)
+                          (setNodeSpan (setNodeTyChild (mkField fieldName fl) fieldTy)
                             (tokenSpan (vecGet tokens pos)))
                           (memGetWord r 2)))
                     })
@@ -4116,7 +4832,7 @@
                 (if (== (memGetWord afterSkip 0) 0)
                   afterSkip
                   (pOk
-                    (setNodeSpan (setNodeTy (mkField fieldName 0) fieldTy)
+                    (setNodeSpan (setNodeTyChild (mkField fieldName 0) fieldTy)
                       (tokenSpan (vecGet tokens pos)))
                     (memGetWord afterSkip 2))))
             })
@@ -4157,7 +4873,7 @@
               (let argsR (parseExprList tokens afterHead vecNew))
               (if (== (memGetWord argsR 0) 0)
                 argsR
-                (pOk (mkNodeAt TAG_D_MACROCALL name (memGetWord argsR 1) 0 (tokenSpan head))
+                (pOk (nodeBuildDMacrocall name (readAstNodes argsR 1) 0 (tokenSpan head))
                   (memGetWord argsR 2)))
             }
           }
@@ -4222,12 +4938,12 @@
 ; pattern and name vectors with the used set beside them; the rule
 ; record carries all three (slots 2 and 0 rewritten, slot 5 the
 ; `[lits used]` pair the unused check reads).
-(pub :: rewriteRuleLits (-> Ints Strings Strings Ints))
+(pub :: rewriteRuleLits (-> Nodes Names Names Ints))
 (pub fn (rewriteRuleLits pats names lits)
   {
     (let used vecNew)
     {
-      (let pats2 vecNew)
+      (let pats2 nodesNew)
       {
         (let names2 vecNew)
         {
@@ -4246,7 +4962,7 @@
     }
   })
 
-(pub :: rewriteRuleLitsIn (-> Ints Strings Strings Strings Ints Strings Int Int))
+(pub :: rewriteRuleLitsIn (-> Nodes Names Names Names Nodes Names Int Int))
 (pub fn (rewriteRuleLitsIn pats names lits used pats2 names2 i)
   (if (>= i (vecLen pats))
     0
@@ -4265,7 +4981,7 @@
 ; Whether this pattern node is a reserved literal spelling (top
 ; level or nested - the recursive use): exactly what the names
 ; slot must not carry as a binder.
-(pub :: patIsReserved (-> Int Int))
+(pub :: patIsReserved (-> ASTNode Int))
 (pub fn (patIsReserved p)
   (if (== (nodeTag p) TAG_E_VAR)
     (if (strStartsWith (nodeAName p) "syntax/literal ")
@@ -4273,7 +4989,7 @@
       0)
     0))
 
-(pub :: rewritePatLits (-> Int Strings Strings Int))
+(pub :: rewritePatLits (-> ASTNode Strings Strings ASTNode))
 (pub fn (rewritePatLits p lits used)
   (if (== (nodeTag p) TAG_E_VAR)
     {
@@ -4290,7 +5006,7 @@
           }))
     }
     (if (== (nodeTag p) TAG_E_APP)
-      (mkEApp (rewritePatLits (nodeA p) lits used) (rewritePatLits (nodeB p) lits used))
+      (mkEApp (rewritePatLits (nodeAChild p) lits used) (rewritePatLits (nodeBChild p) lits used))
       p)))
 
 ; Zero or more parenthesized DECLARATIONS - a rule-form macro's
@@ -4312,7 +5028,7 @@
 ; own name stops the list, which is what makes a malformed second rule
 ; a refusal rather than a silent truncation - the caller then demands
 ; the closing paren and fails there.
-(pub :: parseMacroRules (-> Ints Int String Ints Strings Int))
+(pub :: parseMacroRules (-> Ints Int String IntRows Names Int))
 ;@axiom:effect(unsafe)
 (pub fn (parseMacroRules tokens pos macName acc lits)
   (if (if (peekIs tokens pos TK_LPAREN)
@@ -4351,7 +5067,7 @@
                     (let kinds (memGetWordVec tplR 1))
                     {
                       (let rw
-                        (rewriteRuleLits (as (vecGet three 0) (Vec Int))
+                        (rewriteRuleLits (as (vecGet three 0) Nodes)
                           (as (vecGet three 1) (Vec String)) lits))
                       {
                         (let litpair vecNew)
@@ -4365,7 +5081,7 @@
                           (vecPush rule (vecGet three 3))
                           (vecPush rule (as litpair Int))
                           (vecPush rule (vecGet kinds 1))
-                          (vecPush acc (as rule Int))
+                          (vecPush acc rule)
                           (parseMacroRules tokens (memGetWord tplR 2) macName acc lits)
                         }
                       }
@@ -4481,11 +5197,11 @@
 
 ; The expression template of rule `i` of `rules`, or 0 when the rule's
 ; template is only declarations (slot 6, `parseMacroRules`).
-(pub :: ruleExprAt (-> IntRows Int Int))
+(pub :: ruleExprAt (-> IntRows Int ASTNode))
 (pub fn (ruleExprAt rules i)
-  (vecGet (vecGet rules i) 6))
+  (packedNodeAt (vecGet rules i) 6))
 
-(pub :: parseTplDecls (-> Ints Int Ints Int))
+(pub :: parseTplDecls (-> Ints Int (Vec ASTNode) Int))
 (pub fn (parseTplDecls tokens pos acc)
   (if (peekIs tokens pos TK_RPAREN)
     (if (== (vecLen acc) 0)
@@ -4497,7 +5213,7 @@
         (if (== (memGetWord r 0) 0)
           r
           {
-            (vecPush acc (memGetWord r 1))
+            (vecPush acc (readAstNode r 1))
             (parseTplDecls tokens (memGetWord r 2) acc)
           })
       }
@@ -4512,7 +5228,7 @@
       ; `...` outside a template stays AX2001 where it stands.
       (if (&& (peekIs tokens pos TK_IDENT) (strEq (tokenLexeme (vecGet tokens pos)) "..."))
         {
-          (vecPush acc (mkNodeAt TAG_D_MACROCALL "..." vecNew 0 (tokenSpan (vecGet tokens pos))))
+          (vecPush acc (nodeBuildDMacrocall "..." vecNew 0 (tokenSpan (vecGet tokens pos))))
           (parseTplDecls tokens (advance pos) acc)
         }
         (pErr pos)))))
@@ -4572,13 +5288,13 @@
       (if (== (memGetWord rulesR 0) 0)
         rulesR
         {
-          (let rules (memGetWordVec rulesR 1))
+          (let rules (pResultRules rulesR))
           (let after (memGetWord rulesR 2))
           (if (peekIs tokens after TK_RPAREN)
             {
-              (let node (mkDMacroAt macName (vecGet (vecGet rules 0) 0) 0 macSpan))
+              (let node (mkDMacroAt macName (ruleParamsAt rules 0) nilNode macSpan))
               {
-                (memSetWord node 9 rules)
+                (writeNodeValueWords node 9 rules)
                 (pOk node (advance after))
               }
             }
@@ -4613,12 +5329,12 @@
             (if (== (memGetWord paramsR 0) 0)
               paramsR
               {
-                (let params (memGetWord paramsR 1))
+                (let params (memGetWordVec paramsR 1))
                 (let bodyR (parseExpr tokens (memGetWord paramsR 2)))
                 (if (== (memGetWord bodyR 0) 0)
                   bodyR
                   {
-                    (let body (memGetWord bodyR 1))
+                    (let body (readAstNode bodyR 1))
                     (let afterBody (memGetWord bodyR 2))
                     (if (peekIs tokens afterBody TK_RPAREN)
                       (pOk (mkDMacroAt macName params body macSpan) (advance afterBody))
@@ -4662,7 +5378,7 @@
                     (if (== (memGetWord bodyR 0) 0)
                       bodyR
                       {
-                        (let exprs (memGetWordVec bodyR 1))
+                        (let exprs (readAstNodes bodyR 1))
                         (let afterBody (memGetWord bodyR 2))
                         (if (== (vecLen exprs) 0)
                           (pErr afterParams)
@@ -4714,11 +5430,11 @@
       ; the operand's null span was a crash on `(if ...)?`
       ; (tests/stdlib/891-propagate-on-forms.ax).
       {
-        (let inner (memGetWord r 1))
+        (let inner (readAstNode r 1))
         (let qsp (tokenSpan (vecGet tokens pos)))
         (parsePostfix tokens
           (pOk
-            (mkNodeAt TAG_E_TRY inner 0 0
+            (nodeBuildETry inner 0 0
               (mkSpan
                 (if (== (nodeSpan inner) 0)
                   (spanStart qsp)
@@ -4934,31 +5650,31 @@
 ; type slot first so type operands never enter the expression walk.
 ; A parsed type is lowered to the canonical type-operand spine used by
 ; explicit conversions. Type slots stay out of the value/ownership walk.
-(pub :: typeExprAt (-> Int Int Int))
+(pub :: typeExprAt (-> ASTNode Int ASTNode))
 (pub fn (typeExprAt ty sp)
   {
     (let tag (nodeTag ty))
     (if (|| (== tag TAG_T_VAR) (== tag TAG_T_CON))
       (if (== tag TAG_T_VAR)
         (mkEVarAt (nodeAName ty) sp)
-        (typeExprArgs (mkEVarAt (nodeAName ty) sp) (nodeBVec ty) 0 sp))
+        (typeExprArgs (mkEVarAt (nodeAName ty) sp) (nodeBChildren ty) 0 sp))
       (if (== tag TAG_T_ARR)
         (typeExprArrow ty (mkEVarAt "->" sp) sp)
         (if (== tag TAG_T_PTR)
-          (mkEApp (mkEVarAt "*" sp) (typeExprAt (nodeA ty) sp))
+          (mkEApp (mkEVarAt "*" sp) (typeExprAt (nodeAChild ty) sp))
           (mkEUnitAt sp))))
   })
 
-(pub :: typeExprArgs (-> Int Ints Int Int Int))
+(pub :: typeExprArgs (-> ASTNode (Vec ASTNode) Int Int ASTNode))
 (pub fn (typeExprArgs head args i sp)
   (if (>= i (vecLen args))
     head
     (typeExprArgs (mkEApp head (typeExprAt (vecGet args i) sp)) args (+ i 1) sp)))
 
-(pub :: typeExprArrow (-> Int Int Int Int))
+(pub :: typeExprArrow (-> ASTNode ASTNode Int ASTNode))
 (pub fn (typeExprArrow ty head sp)
   (if (== (nodeTag ty) TAG_T_ARR)
-    (typeExprArrow (nodeB ty) (mkEApp head (typeExprAt (nodeA ty) sp)) sp)
+    (typeExprArrow (nodeBChild ty) (mkEApp head (typeExprAt (nodeAChild ty) sp)) sp)
     (mkEApp head (typeExprAt ty sp))))
 
 (pub :: parseAsExpr (-> Ints Int Int))
@@ -4977,9 +5693,9 @@
               (pOk
                 (mkEApp
                   (mkEApp (mkEVarAt "__as_numeric" (tokenSpan (vecGet tokens (- pos 1))))
-                    (typeExprAt (memGetWord target 1)
+                    (typeExprAt (readAstNode target 1)
                       (tokenSpan (vecGet tokens (memGetWord value 2)))))
-                  (memGetWord value 1))
+                  (readAstNode value 1))
                 (advance after))
               (pErrExp after "the end of an as expression"))
           })
@@ -4993,13 +5709,13 @@
     (if (== (memGetWord er 0) 0)
       er
       {
-        (let inner (memGetWord er 1))
+        (let inner (readAstNode er 1))
         (let tr (parseType tokens (memGetWord er 2)))
         (if (== (memGetWord tr 0) 0)
           tr
           {
             (let tyExpr
-              (typeExprAt (memGetWord tr 1) (tokenSpan (vecGet tokens (memGetWord er 2)))))
+              (typeExprAt (readAstNode tr 1) (tokenSpan (vecGet tokens (memGetWord er 2)))))
             (let after (memGetWord tr 2))
             (if (peekIs tokens after TK_RPAREN)
               (pOk (mkEApp (mkEApp (mkEVarAt "__ascribe" (nodeSpan inner)) tyExpr) inner)
@@ -5020,11 +5736,11 @@
       condR
       ; Consumes the while form's closing paren.
       {
-        (let cnd (memGetWord condR 1))
+        (let cnd (readAstNode condR 1))
         (let bodyR (parseExprList tokens (memGetWord condR 2) vecNew))
         (if (== (memGetWord bodyR 0) 0)
           bodyR
-          (pOk (mkNode TAG_E_WHILE cnd (memGetWord bodyR 1) 0) (memGetWord bodyR 2)))
+          (pOk (nodeBuildEWhilePlain cnd (readAstNodes bodyR 1) 0) (memGetWord bodyR 2)))
       })
   })
 
@@ -5205,17 +5921,17 @@
         (if (== isPair 1)
           (pErrExp (memGetWord aR 2)
             "the container: an element-index binder `(x i)` takes the container shape only, `(for (x i) in xs body)`, because a range counts its own index")
-          (parseForRange tokens (advance (advance (memGetWord aR 2))) xName xSpan (memGetWord aR 1)
-            kwSpan))
+          (parseForRange tokens (advance (advance (memGetWord aR 2))) xName xSpan
+            (readAstNode aR 1) kwSpan))
         {
           (let bR (parseForBody tokens (memGetWord aR 2)))
           (if (== (memGetWord bR 0) 0)
             bR
             (pOk
               (if (== isPair 1)
-                (mkForContainerIndexed xName xSpan iName iSpan (memGetWord aR 1) (memGetWord bR 1)
-                  kwSpan)
-                (mkForContainer xName xSpan (memGetWord aR 1) (memGetWord bR 1) kwSpan))
+                (mkForContainerIndexed xName xSpan iName iSpan (readAstNode aR 1)
+                  (readAstNode bR 1) kwSpan)
+                (mkForContainer xName xSpan (readAstNode aR 1) (readAstNode bR 1) kwSpan))
               (memGetWord bR 2)))
         }))
   })
@@ -5230,7 +5946,7 @@
 
 ; The range shapes, from just after `..`: `hi`, then either the body or
 ; `by step` and the body. `lo` is already parsed.
-(pub :: parseForRange (-> Ints Int String Int Int Int Int))
+(pub :: parseForRange (-> Ints Int String Int ASTNode Int Int))
 (pub fn (parseForRange tokens pos xName xSpan lo kwSpan)
   {
     (let hR (parseExpr tokens pos))
@@ -5249,7 +5965,7 @@
                 (pErrExp (advance afterHi) "the step after `by`: `(for i in lo..hi by step body)`")
                 sR)
               {
-                (let step (memGetWord sR 1))
+                (let step (readAstNode sR 1))
                 (if (&& (== (nodeTag step) TAG_E_INT) (== (nodeA step) 0))
                   (pErrExp (advance afterHi)
                     "a nonzero step: a step of `0` never advances the counter")
@@ -5258,7 +5974,7 @@
                     (if (== (memGetWord bR 0) 0)
                       bR
                       (pOk
-                        (mkForRangeStep xName xSpan lo (memGetWord hR 1) step (memGetWord bR 1)
+                        (mkForRangeStep xName xSpan lo (readAstNode hR 1) step (readAstNode bR 1)
                           kwSpan)
                         (memGetWord bR 2)))
                   })
@@ -5268,7 +5984,7 @@
             (let bR (parseForBody tokens afterHi))
             (if (== (memGetWord bR 0) 0)
               bR
-              (pOk (mkForRange xName xSpan lo (memGetWord hR 1) (memGetWord bR 1) kwSpan)
+              (pOk (mkForRange xName xSpan lo (readAstNode hR 1) (readAstNode bR 1) kwSpan)
                 (memGetWord bR 2)))
           })
       })
@@ -5293,7 +6009,7 @@
 ; A two-argument call, `(f a b)`, as the left spine an application
 ; already is. `mkEApp` copies the head's span, so the whole call
 ; reports at `sp`.
-(pub :: mkForCall2 (-> String Int Int Int Int))
+(pub :: mkForCall2 (-> String ASTNode ASTNode Int ASTNode))
 (pub fn (mkForCall2 f a b sp)
   (mkEApp (mkEApp (mkEVarAt f sp) a) b))
 
@@ -5303,7 +6019,7 @@
 ; pinned by its first use (`scripts/check-type-pinning.sh`), and a
 ; generated one that is never used at a second type has nothing to pin
 ; it.
-(pub :: forSeq2 (-> Int Int Ints))
+(pub :: forSeq2 (-> ASTNode ASTNode (Vec ASTNode)))
 (pub fn (forSeq2 a b)
   {
     (let v vecNew)
@@ -5326,30 +6042,30 @@
 ; from the un-hoisted expressions, which is the hand-written loop this
 ; keyword replaces, and the ablation `tests/stdlib/466-for-loop.ax`
 ; terms 4 and 5 are written to catch.
-(pub :: forWhileBody (-> String Int Int Int Int Int Int Ints))
+(pub :: forWhileBody (-> String Int ASTNode ASTNode ASTNode ASTNode Int (Vec ASTNode)))
 (pub fn (forWhileBody bindName bindSpan elem cond bump body kwSpan)
   (forSeq2
-    (mkNode TAG_E_WHILE cond
-      (forSeq2 (mkELetAt bindName elem body bindSpan) (mkNodeAt TAG_E_SET "for$i" bump 0 kwSpan)) 0)
+    (nodeBuildEWhilePlain cond
+      (forSeq2 (mkELetAt bindName elem body bindSpan) (nodeBuildESet "for$i" bump 0 kwSpan)) 0)
     (mkEInt 0)))
 
 ; The plain loop control both old shapes share: against `for$n`, up by
 ; one. Built by the caller so the stepped range, whose control reads
 ; two hoisted bindings instead of one, shares the tail below.
-(pub :: forUpByOne (-> Int Ints))
+(pub :: forUpByOne (-> Int (Vec ASTNode)))
 (pub fn (forUpByOne kwSpan)
   (forSeq2 (mkForCall2 "<" (mkEVarAt "for$i" kwSpan) (mkEVarAt "for$n" kwSpan) kwSpan)
     (mkForCall2 "+" (mkEVarAt "for$i" kwSpan) (mkEInt 1) kwSpan)))
 
 ; (for i in LO..HI BODY). `for$lo` and `for$n` are bound in source order and
 ; before the loop, so each end is computed ONCE.
-(pub :: mkForRange (-> String Int Int Int Int Int Int))
+(pub :: mkForRange (-> String Int ASTNode ASTNode ASTNode Int ASTNode))
 (pub fn (mkForRange bindName bindSpan lo hi body kwSpan)
   {
     (let ctl (forUpByOne kwSpan))
     (mkELetAt "for$lo" lo
       (mkELetAt "for$n" hi
-        (mkNodeAt TAG_E_LETM "for$i" (mkEVarAt "for$lo" kwSpan)
+        (nodeBuildELetm "for$i" (mkEVarAt "for$lo" kwSpan)
           (mkEBegin
             (forWhileBody bindName bindSpan (mkEVarAt "for$i" kwSpan) (vecGet ctl 0) (vecGet ctl 1)
               body kwSpan))
@@ -5361,12 +6077,12 @@
 ; (for i in LO..HI by STEP BODY). `for$step` joins the hoisted bindings, bound
 ; beside the ends in source order. The condition reads its sign: up
 ; while below `hi`, down while above it.
-(pub :: mkForRangeStep (-> String Int Int Int Int Int Int Int))
+(pub :: mkForRangeStep (-> String Int ASTNode ASTNode ASTNode ASTNode Int ASTNode))
 (pub fn (mkForRangeStep bindName bindSpan lo hi step body kwSpan)
   (mkELetAt "for$lo" lo
     (mkELetAt "for$hi" hi
       (mkELetAt "for$step" step
-        (mkNodeAt TAG_E_LETM "for$i" (mkEVarAt "for$lo" kwSpan)
+        (nodeBuildELetm "for$i" (mkEVarAt "for$lo" kwSpan)
           (mkEBegin
             (forWhileBody bindName bindSpan (mkEVarAt "for$i" kwSpan)
               (mkEIf (mkForCall2 ">" (mkEVarAt "for$step" kwSpan) (mkEInt 0) kwSpan)
@@ -5394,12 +6110,12 @@
 ; `XS`'s span produced. `tests/diagnostics/626-for-not-a-container`
 ; holds the eight rows: two per site over an `Int`, a `String` and a
 ; `Map`, each pair naming what fits.
-(pub :: mkForContainer (-> String Int Int Int Int Int))
+(pub :: mkForContainer (-> String Int ASTNode ASTNode Int ASTNode))
 (pub fn (mkForContainer bindName bindSpan xs body kwSpan)
   {
     (let ctl (forUpByOne kwSpan))
     (mkELetAt "for$v" xs
-      (mkNodeAt TAG_E_LETM "for$i" (mkEInt 0)
+      (nodeBuildELetm "for$i" (mkEInt 0)
         (mkELetAt "for$n" (mkEApp (mkEVarAt "Vec$vecLen" kwSpan) (mkEVarAt "for$v" (nodeSpan xs)))
           (mkEBegin
             (forWhileBody bindName bindSpan
@@ -5413,12 +6129,12 @@
 ; (for (x k) in XS BODY). The container with its index: the element `let`
 ; outside, the index `let` inside, each carrying its own binder
 ; token's span, so hover and rename land on the text the user wrote.
-(pub :: mkForContainerIndexed (-> String Int String Int Int Int Int Int))
+(pub :: mkForContainerIndexed (-> String Int String Int ASTNode ASTNode Int ASTNode))
 (pub fn (mkForContainerIndexed bindName bindSpan idxName idxSpan xs body kwSpan)
   {
     (let ctl (forUpByOne kwSpan))
     (mkELetAt "for$v" xs
-      (mkNodeAt TAG_E_LETM "for$i" (mkEInt 0)
+      (nodeBuildELetm "for$i" (mkEInt 0)
         (mkELetAt "for$n" (mkEApp (mkEVarAt "Vec$vecLen" kwSpan) (mkEVarAt "for$v" (nodeSpan xs)))
           (mkEBegin
             (forWhileBody bindName bindSpan
@@ -5464,7 +6180,7 @@
         bodyR
         (if (peekIs tokens (memGetWord bodyR 2) TK_RPAREN)
           (pOk
-            (mkNodeAt TAG_E_REGION (tokenLexeme nameTok) (memGetWord bodyR 1) (tokenSpan nameTok)
+            (nodeBuildERegion (tokenLexeme nameTok) (readAstNode bodyR 1) (tokenSpan nameTok)
               kwSpan)
             (advance (memGetWord bodyR 2)))
           (pErrExp (memGetWord bodyR 2)
@@ -5530,7 +6246,7 @@
           (if (== (memGetWord br 0) 0)
             br
             {
-              (let binds (memGetWordVec br 1))
+              (let binds (readAstNodes br 1))
               (let afterBinds (memGetWord br 2))
               (if (== (vecLen binds) 0)
                 (pErrExp (- afterBinds 1)
@@ -5540,7 +6256,7 @@
                   (if (== (memGetWord bodyR 0) 0)
                     bodyR
                     {
-                      (let exprs (memGetWordVec bodyR 1))
+                      (let exprs (readAstNodes bodyR 1))
                       (let afterBody (memGetWord bodyR 2))
                       (if (== (vecLen exprs) 0)
                         (pErrExp afterBinds "a body expression after the binding list")
@@ -5562,7 +6278,7 @@
 ; The binding list `((x e) ...)`, each pair carried as a TAG_NIL node
 ; with a=name and b=expression, the NAME token's span, as
 ; a local declaration does. Parallel bindings are immutable at their join.
-(pub :: parseParBindings (-> Ints Int Ints Int))
+(pub :: parseParBindings (-> Ints Int (Vec ASTNode) Int))
 (pub fn (parseParBindings tokens pos acc)
   (if (peekIs tokens pos TK_RPAREN)
     (pOk acc (advance pos))
@@ -5580,7 +6296,7 @@
                 valR
                 (if (peekIs tokens (memGetWord valR 2) TK_RPAREN)
                   (parseParBindings tokens (advance (memGetWord valR 2))
-                    (vecPush acc (mkNodeAt TAG_NIL nm (memGetWord valR 1) 0 (tokenSpan nt))))
+                    (vecPush acc (nodeBuildParallelBinding nm (readAstNode valR 1) (tokenSpan nt))))
                   (pErrExp (memGetWord valR 2)
                     "`)` - a `parallel` binding is one name and one expression")))
             })
@@ -5608,7 +6324,7 @@
 ; nothing between the lends and the return but spawns and joins, which
 ; is what makes the scope sound, and why a hand-written `__par_spawn`
 ; gets no such record.
-(pub :: mkParallel (-> String Int Ints Int Int Int Int))
+(pub :: mkParallel (-> String Int (Vec ASTNode) ASTNode Int Int ASTNode))
 (pub fn (mkParallel rname rspan binds body kwSpan formPos)
   {
     (let id (parIndexName formPos))
@@ -5632,16 +6348,16 @@
   })
 
 ; The spawns, outermost first, so the first binding starts first.
-(pub :: parSpawnLets (-> Ints Int Int Int String Int))
+(pub :: parSpawnLets (-> (Vec ASTNode) Int ASTNode Int String ASTNode))
 (pub fn (parSpawnLets binds i inner kwSpan id)
   (if (>= i (vecLen binds))
     inner
-    (mkELetAt (parHandleName i) (parSpawnCall (nodeB (vecGet binds i)) kwSpan id)
+    (mkELetAt (parHandleName i) (parSpawnCall (nodeBChild (vecGet binds i)) kwSpan id)
       (parSpawnLets binds (+ i 1) inner kwSpan id) kwSpan)))
 
 ; The joins, outermost first, so `a` is bound before `b`. Each carries
 ; its binder token's span, so hover and rename land on what was written.
-(pub :: parJoinLets (-> Ints Int Int Int Int))
+(pub :: parJoinLets (-> (Vec ASTNode) Int ASTNode Int ASTNode))
 (pub fn (parJoinLets binds i body kwSpan)
   (if (>= i (vecLen binds))
     body
@@ -5657,7 +6373,7 @@
 ; binding that answers a `String` is `AX3004: expected (Int -> Int),
 ; found (_a -> String)` underlining the expression the author wrote,
 ; not the word `parallel` (`tests/diagnostics/641-parallel-word`).
-(pub :: parSpawnCall (-> Int Int String Int))
+(pub :: parSpawnCall (-> ASTNode Int String ASTNode))
 (pub fn (parSpawnCall e kwSpan id)
   {
     (let ps vecNew)
@@ -5715,7 +6431,8 @@
               hR
               (if (peekIs tokens (memGetWord hR 2) TK_RPAREN)
                 (pOk
-                  (mkNode TAG_E_HANDLE (memGetWord bodyR 1) (memGetWord effsR 1) (memGetWord hR 1))
+                  (nodeBuildEHandlePlain (readAstNode bodyR 1) (readAstNodes effsR 1)
+                    (readAstNode hR 1))
                   (advance (memGetWord hR 2)))
                 (pErr (memGetWord hR 2))))
           })
@@ -5723,7 +6440,7 @@
   })
 
 ; The names inside a handle's effect list, each as a spanned var node.
-(pub :: parseEffectNames (-> Ints Int Ints Int))
+(pub :: parseEffectNames (-> Ints Int (Vec ASTNode) Int))
 (pub fn (parseEffectNames tokens pos acc)
   (if (peekIs tokens pos TK_RPAREN)
     (pOk acc (advance pos))
@@ -5761,13 +6478,13 @@
           (if (== (memGetWord valR 0) 0)
             valR
             {
-              (let val (memGetWord valR 1))
+              (let val (readAstNode valR 1))
               (let afterVal (memGetWord valR 2))
               (if (peekIs tokens afterVal TK_RPAREN)
                 ; The node's span is its TARGET's - stage0
                 ; points both AX3001 and AX3012 about a `set`
                 ; at the name being assigned, not at the form.
-                (pOk (mkNodeAt TAG_E_SET (memGetWord nr 1) val 0 (tokenSpan (vecGet tokens pos)))
+                (pOk (nodeBuildESet (memGetWordStr nr 1) val 0 (tokenSpan (vecGet tokens pos)))
                   (advance afterVal))
                 (pErr afterVal))
             })
@@ -5776,7 +6493,7 @@
 
 ; At a `.`: if another `.` follows the field, the field folds into the
 ; base; otherwise it is the store target and the value follows.
-(pub :: parseSetField (-> Ints Int Int Int))
+(pub :: parseSetField (-> Ints Int ASTNode Int))
 (pub fn (parseSetField tokens pos base)
   (if (&& (peekIs tokens pos TK_DOT) (peekIs tokens (advance pos) TK_IDENT))
     {
@@ -5784,18 +6501,18 @@
       (let after (advance (advance pos)))
       (if (peekIs tokens after TK_DOT)
         (parseSetField tokens after
-          (mkNodeAt TAG_E_FIELD base fname 0 (tokenSpan (vecGet tokens (advance pos)))))
+          (nodeBuildEField base fname 0 (tokenSpan (vecGet tokens (advance pos)))))
         {
           (let valR (parseExpr tokens after))
           (if (== (memGetWord valR 0) 0)
             valR
             {
-              (let val (memGetWord valR 1))
+              (let val (readAstNode valR 1))
               (let afterVal (memGetWord valR 2))
               (if (peekIs tokens afterVal TK_RPAREN)
                 ; Span = the stored field's name token, AX3007's
                 ; anchor, as on TAG_E_FIELD.
-                (pOk (mkNodeAt TAG_E_SETF base fname val (tokenSpan (vecGet tokens (advance pos))))
+                (pOk (nodeBuildESetf base fname val (tokenSpan (vecGet tokens (advance pos))))
                   (advance afterVal))
                 (pErr afterVal))
             })
@@ -5834,7 +6551,7 @@
 ; Each lambda carries the `lambda`/`fn` keyword's span. A node with no
 ; span is a diagnostic with no snippet - `check-render-selfhost.sh`
 ; refuses to bless one, which is how the missing span here was found.
-(pub :: curryLam (-> (Vec a) Int Int Int Int))
+(pub :: curryLam (-> Names ASTNode Int Int ASTNode))
 (pub fn (curryLam params body sp i)
   (if (>= i (vecLen params))
     body
@@ -5847,17 +6564,17 @@
             v
           }
         })
-      (mkNodeAt TAG_E_LAM one (curryLam params body sp (+ i 1)) 0 sp)
+      (nodeBuildELam one (curryLam params body sp (+ i 1)) 0 sp)
     }))
 
 ; Zero parameters still builds one lambda, so the CHECKER can refuse it
 ; with a span rather than the parser refusing it without one: a lambda
 ; of no parameters can never be called, because `(f)` and `f` are the
 ; same expression.
-(pub :: mkLamCurried (-> (Vec a) Int Int Int))
+(pub :: mkLamCurried (-> Names ASTNode Int ASTNode))
 (pub fn (mkLamCurried params body sp)
   (if (== (vecLen params) 0)
-    (mkNodeAt TAG_E_LAM params body 0 sp)
+    (nodeBuildELam params body 0 sp)
     (curryLam params body sp 0)))
 
 (pub :: parseLamExpr (-> Ints Int Int))
@@ -5880,7 +6597,7 @@
               (if (== (memGetWord bodyR 0) 0)
                 bodyR
                 {
-                  (let body (memGetWord bodyR 1))
+                  (let body (readAstNode bodyR 1))
                   (let afterBody (memGetWord bodyR 2))
                   (if (peekIs tokens afterBody TK_RPAREN)
                     (pOk (mkLamCurried params body kwSp) (advance afterBody))
@@ -5893,7 +6610,7 @@
   })
 
 ; Fold binding pairs [0..i] around `body`, innermost binding first.
-(pub :: foldLets (-> Ints Int Int Int))
+(pub :: foldLets (-> (Vec ASTNode) ASTNode Int ASTNode))
 (pub fn (foldLets binds body i)
   (if (< i 0)
     body
@@ -5901,8 +6618,8 @@
       (let b (vecGet binds i))
       (foldLets binds
         (if (== (nodeC b) 1)
-          (mkNodeAt TAG_E_LETM (nodeA b) (nodeB b) body (nodeSpan b))
-          (mkELetAt (nodeAName b) (nodeB b) body (nodeSpan b)))
+          (nodeBuildELetm (nodeAText b) (nodeBChild b) body (nodeSpan b))
+          (mkELetAt (nodeAName b) (nodeBChild b) body (nodeSpan b)))
         (- i 1))
     }))
 
@@ -5935,7 +6652,7 @@
           "the test operand: `if` takes `(if test then else)`, or `(if test then)` to answer `()`, variadically `(if t1 b1 t2 b2 ... els)`")
         testR)
       {
-        (let test (memGetWord testR 1))
+        (let test (readAstNode testR 1))
         (let afterTest (memGetWord testR 2))
         {
           (let thenR (parseExpr tokens afterTest))
@@ -5944,7 +6661,7 @@
               (pErrExp afterTest
                 "the `then` branch: `if` takes `(if test then else)`, or `(if test then)` to answer `()`, variadically `(if t1 b1 t2 b2 ... els)`")
               thenR)
-            (parseIfTail tokens (memGetWord thenR 2) test (memGetWord thenR 1)))
+            (parseIfTail tokens (memGetWord thenR 2) test (readAstNode thenR 1)))
         }
       })
   })
@@ -5956,7 +6673,7 @@
 ; desugar, so there is no second representation for any later pass
 ; to learn. A `)` where an else could stand ends the chain with the
 ; unit value as its else: `(if t b)` and `(if t1 b1 t2 b2)`.
-(pub :: parseIfTail (-> Ints Int Int Int Int))
+(pub :: parseIfTail (-> Ints Int ASTNode ASTNode Int))
 (pub fn (parseIfTail tokens pos test thenEx)
   {
     (let eR (parseExpr tokens pos))
@@ -5968,7 +6685,7 @@
         (pOk (mkEIf test thenEx (mkEUnitAt (tokenSpan (vecGet tokens pos)))) (advance pos))
         eR)
       {
-        (let e (memGetWord eR 1))
+        (let e (readAstNode eR 1))
         (let afterE (memGetWord eR 2))
         (if (peekIs tokens afterE TK_RPAREN)
           (pOk (mkEIf test thenEx e) (advance afterE))
@@ -5977,10 +6694,10 @@
             (if (== (memGetWord thenR 0) 0)
               thenR
               {
-                (let tailR (parseIfTail tokens (memGetWord thenR 2) e (memGetWord thenR 1)))
+                (let tailR (parseIfTail tokens (memGetWord thenR 2) e (readAstNode thenR 1)))
                 (if (== (memGetWord tailR 0) 0)
                   tailR
-                  (pOk (mkEIf test thenEx (memGetWord tailR 1)) (memGetWord tailR 2)))
+                  (pOk (mkEIf test thenEx (readAstNode tailR 1)) (memGetWord tailR 2)))
               })
           })
       })
@@ -5996,17 +6713,17 @@
     (if (== (memGetWord scrutR 0) 0)
       scrutR
       {
-        (let scrut (memGetWord scrutR 1))
+        (let scrut (readAstNode scrutR 1))
         (let afterScrut (memGetWord scrutR 2))
         {
           (let armsR (parseMatchArms tokens afterScrut vecNew))
           (if (== (memGetWord armsR 0) 0)
             armsR
             {
-              (let arms (memGetWord armsR 1))
+              (let arms (readAstNodes armsR 1))
               (let afterArms (memGetWord armsR 2))
               (if (peekIs tokens afterArms TK_RPAREN)
-                (pOk (mkNode TAG_E_MATCH scrut arms 0) (advance afterArms))
+                (pOk (nodeBuildEMatchPlain scrut arms 0) (advance afterArms))
                 (pErr afterArms))
             })
         }
@@ -6016,7 +6733,7 @@
 ; Stops *at* the closing paren without consuming it: `parseMatchExpr`
 ; expects to find it and consume it itself. Consuming it here made every
 ; `match` a parse error, since the caller then demanded a second one.
-(pub :: parseMatchArms (-> Ints Int Ints Int))
+(pub :: parseMatchArms (-> Ints Int (Vec ASTNode) Int))
 (pub fn (parseMatchArms tokens pos acc)
   (if (peekIs tokens pos TK_RPAREN)
     (pOk acc pos)
@@ -6032,14 +6749,14 @@
           (let forR (parseMatchForArm tokens (advance pos)))
           (if (== (memGetWord forR 0) 0)
             forR
-            (parseMatchArms tokens (memGetWord forR 2) (vecPush acc (memGetWord forR 1))))
+            (parseMatchArms tokens (memGetWord forR 2) (vecPush acc (readAstNode forR 1))))
         }
         {
           (let armR (parseMatchArm tokens (advance pos)))
           (if (== (memGetWord armR 0) 0)
             armR
             {
-              (let arm (memGetWord armR 1))
+              (let arm (readAstNode armR 1))
               (let afterArm (memGetWord armR 2))
               (parseMatchArms tokens afterArm (vecPush acc arm))
             })
@@ -6057,7 +6774,7 @@
       (if (&& (peekIs tokens pos TK_IDENT) (strEq (tokenLexeme (vecGet tokens pos)) "..."))
         {
           (let mkr
-            (mkNodeAt TAG_M_ARM (mkEVarAt "..." (tokenSpan (vecGet tokens pos))) 0 0
+            (nodeBuildMArm (mkEVarAt "..." (tokenSpan (vecGet tokens pos))) nilNode 0
               (tokenSpan (vecGet tokens pos))))
           (parseMatchArms tokens (advance pos) (vecPush acc mkr))
         }
@@ -6079,7 +6796,7 @@
         (if (== (memGetWord bindR 0) 0)
           bindR
           {
-            (let binds (memGetWord bindR 1))
+            (let binds (readAstNode bindR 1))
             (let afterSeq (memGetWord bindR 2))
             {
               (let var (parseIterBinder binds))
@@ -6090,12 +6807,12 @@
                   (if (== (memGetWord armsR 0) 0)
                     armsR
                     {
-                      (let arms (memGetWordVec armsR 1))
+                      (let arms (readAstNodes armsR 1))
                       (let afterArms (memGetWord armsR 2))
                       (if (== (vecLen arms) 0)
                         (pErr afterArms)
                         (if (peekIs tokens afterArms TK_RPAREN)
-                          (pOk (mkNodeAt TAG_M_FOR var binds arms sp) (advance afterArms))
+                          (pOk (nodeBuildMFor var binds arms sp) (advance afterArms))
                           (pErr afterArms)))
                     })
                 })
@@ -6145,12 +6862,12 @@
       (if (== (memGetWord head 0) 0)
         head
         {
-          (let node (memGetWord head 1))
+          (let node (readAstNode head 1))
           (let after (memGetWord head 2))
           (if (!= (nodeTag node) TAG_E_VAR)
             (pErrExp (advance pos) "constructor")
             (if (peekIs tokens after TK_RPAREN)
-              (pOk (mkNodeAt TAG_P_CON0 (nodeAName node) 0 0 (nodeSpan node)) (advance after))
+              (pOk (nodeBuildPCon0 (nodeAName node) 0 0 (nodeSpan node)) (advance after))
               (if (peekIs tokens after TK_LBRACE)
                 (parseNamedPatFields tokens (advance after) (nodeAName node) (nodeSpan node) vecNew
                   vecNew)
@@ -6171,11 +6888,11 @@
 ; A field the pattern omits becomes `_`, which binds nothing - stage0
 ; fills the same hole with a wildcard, so a partial named pattern is
 ; legal by construction and needs no arity check.
-(pub :: namedPatSpine (-> String Ints Ints Ints Int Int))
+(pub :: namedPatSpine (-> String Names Nodes Nodes Int ASTNode))
 (pub fn (namedPatSpine cname declared names pats sp)
   (namedPatSpineFrom declared names pats 0 (mkEVarAt cname sp)))
 
-(pub :: namedPatSpineFrom (-> Ints Ints Ints Int Int Int))
+(pub :: namedPatSpineFrom (-> Names Nodes Nodes Int ASTNode ASTNode))
 (pub fn (namedPatSpineFrom declared names pats i acc)
   (if (>= i (vecLen declared))
     acc
@@ -6197,7 +6914,7 @@
 ; The recursion keeps the -1 and stays private, as `Path.ax`'s
 ; `pathLastSlashFrom` does: the boundary is where the type is worth
 ; having, and a walk that has not finished is not a boundary.
-(pub :: namedFieldIndex (-> Ints String (Option Int)))
+(pub :: namedFieldIndex (-> (Vec ASTNode) String (Option Int)))
 (pub fn (namedFieldIndex names n)
   {
     (let i (namedFieldIndexFrom names n 0))
@@ -6206,7 +6923,7 @@
       (Some i))
   })
 
-(:: namedFieldIndexFrom (-> Ints String Int Int))
+(:: namedFieldIndexFrom (-> (Vec ASTNode) String Int Int))
 (fn (namedFieldIndexFrom names n i)
   (if (>= i (vecLen names))
     (- 0 1)
@@ -6215,13 +6932,13 @@
       (namedFieldIndexFrom names n (+ i 1)))))
 
 ; Is `n` one of the constructor's declared fields?
-(pub :: declaredHasField (-> Ints String Int))
+(pub :: declaredHasField (-> Names String Int))
 (pub fn (declaredHasField declared n)
   (if (== (as declared Int) 0)
     0
     (declaredHasFieldFrom declared n 0)))
 
-(pub :: declaredHasFieldFrom (-> Ints String Int Int))
+(pub :: declaredHasFieldFrom (-> Names String Int Int))
 (pub fn (declaredHasFieldFrom declared n i)
   (if (>= i (vecLen declared))
     0
@@ -6238,11 +6955,11 @@
 ; `{ f = pat, g }` to the closing brace. A bare name PUNS: `{ w, h }`
 ; means `{ w = w, h = h }`, which is stage0's rule and is resolved
 ; here at parse time, since it needs no knowledge of the declaration.
-(pub :: parseNamedPatFields (-> Ints Int String Int Ints Ints Int))
+(pub :: parseNamedPatFields (-> Ints Int String Int (Vec ASTNode) (Vec ASTNode) Int))
 (pub fn (parseNamedPatFields tokens pos cname csp names pats)
   (if (peekIs tokens pos TK_RBRACE)
     (if (peekIs tokens (advance pos) TK_RPAREN)
-      (pOk (mkNodeAt TAG_P_CONNAMED cname names pats csp) (advance (advance pos)))
+      (pOk (nodeBuildPConnamed cname names pats csp) (advance (advance pos)))
       (pErr (advance pos)))
     (if (peekIs tokens pos TK_IDENT)
       {
@@ -6258,7 +6975,7 @@
               (if (== (memGetWord pr 0) 0)
                 pr
                 {
-                  (vecPush pats (memGetWord pr 1))
+                  (vecPush pats (readAstNode pr 1))
                   (parseNamedPatFields tokens (skipFieldComma tokens (memGetWord pr 2)) cname csp
                     names pats)
                 })
@@ -6272,7 +6989,7 @@
       }
       (pErr pos))))
 
-(pub :: parseArmPatternArgs (-> Ints Int Int Int))
+(pub :: parseArmPatternArgs (-> Ints Int ASTNode Int))
 (pub fn (parseArmPatternArgs tokens pos acc)
   (if (peekIs tokens pos TK_RPAREN)
     (pOk acc (advance pos))
@@ -6282,7 +6999,7 @@
         (let r (parseArmPattern tokens pos))
         (if (== (memGetWord r 0) 0)
           r
-          (parseArmPatternArgs tokens (memGetWord r 2) (mkEApp acc (memGetWord r 1))))
+          (parseArmPatternArgs tokens (memGetWord r 2) (mkEApp acc (readAstNode r 1))))
       })))
 
 (pub :: parseMatchArm (-> Ints Int Int))
@@ -6292,17 +7009,17 @@
     (if (== (memGetWord patR 0) 0)
       patR
       {
-        (let pat (memGetWord patR 1))
+        (let pat (readAstNode patR 1))
         (let afterPat (memGetWord patR 2))
         {
           (let bodyR (parseExpr tokens afterPat))
           (if (== (memGetWord bodyR 0) 0)
             bodyR
             {
-              (let body (memGetWord bodyR 1))
+              (let body (readAstNode bodyR 1))
               (let afterBody (memGetWord bodyR 2))
               (if (peekIs tokens afterBody TK_RPAREN)
-                (pOk (mkNode TAG_M_ARM pat body 0) (advance afterBody))
+                (pOk (nodeBuildMArmPlain pat body 0) (advance afterBody))
                 (pErr afterBody))
             })
         }
@@ -6316,7 +7033,7 @@
 (pub fn (parseBlock tokens pos)
   (parseBlockBody tokens pos vecNew))
 
-(pub :: parseBlockBody (-> Ints Int Ints Int))
+(pub :: parseBlockBody (-> Ints Int (Vec ASTNode) Int))
 (pub fn (parseBlockBody tokens pos acc)
   (if (peekIs tokens pos TK_RBRACE)
     ; An empty `{}` is the same defect one node along. It parsed as a
@@ -6339,7 +7056,7 @@
           (let r (parseExpr tokens pos))
           (if (== (memGetWord r 0) 0)
             r
-            (parseBlockBody tokens (memGetWord r 2) (vecPush acc (memGetWord r 1))))
+            (parseBlockBody tokens (memGetWord r 2) (vecPush acc (readAstNode r 1))))
         }))))
 
 ; A local declaration belongs to the block that contains it. Lower
@@ -6352,7 +7069,7 @@
       (&& (strEq (tokenLexeme (vecGet tokens (advance pos))) kwLet)
         (! (peekIs tokens (advance (advance pos)) TK_LPAREN))))))
 
-(pub :: parseBlockLocalLet (-> Ints Int Ints Int))
+(pub :: parseBlockLocalLet (-> Ints Int (Vec ASTNode) Int))
 (pub fn (parseBlockLocalLet tokens pos acc)
   {
     (let nr (parseIdentName tokens pos))
@@ -6387,8 +7104,8 @@
                         (let sp (tokenSpan (vecGet tokens (- (memGetWord nameR 2) 1))))
                         (let local
                           (if mutable
-                            (mkNodeAt TAG_E_LETM name (memGetWord valueR 1) (memGetWord bodyR 1) sp)
-                            (mkELetAt name (memGetWord valueR 1) (memGetWord bodyR 1) sp)))
+                            (nodeBuildELetm name (readAstNode valueR 1) (readAstNode bodyR 1) sp)
+                            (mkELetAt name (readAstNode valueR 1) (readAstNode bodyR 1) sp)))
                         (pOk (mkEBegin (vecPush acc local)) (memGetWord bodyR 2))
                       })
                   })
@@ -6407,13 +7124,13 @@
     (if (== (memGetWord r 0) 0)
       r
       {
-        (let fnExpr (memGetWord r 1))
+        (let fnExpr (readAstNode r 1))
         (let nextPos (memGetWord r 2))
         {
           (let ar (parseArgs tokens nextPos fnExpr))
           (if (== (memGetWord ar 0) 0)
             ar
-            (pOk (unaryMinusToBinary (memGetWord ar 1)) (memGetWord ar 2)))
+            (pOk (unaryMinusToBinary (readAstNode ar 1)) (memGetWord ar 2)))
         }
       })
   })
@@ -6434,18 +7151,18 @@
 ; keeps the ordinary binary path. Word 2 marks the inserted zero, so
 ; the checker can give it the operand's numeric type. A source-written
 ; `(- 0 x)` still requires x to be Int.
-(pub :: unaryMinusToBinary (-> Int Int))
+(pub :: unaryMinusToBinary (-> ASTNode ASTNode))
 (pub fn (unaryMinusToBinary e)
   (if (== (nodeTag e) TAG_E_APP)
     {
-      (let head (nodeA e))
+      (let head (nodeAChild e))
       (if (&& (== (nodeTag head) TAG_E_VAR) (strEq (nodeAName head) "-"))
-        (mkEApp (mkEApp head (mkNode TAG_E_INT 0 1 0)) (nodeB e))
+        (mkEApp (mkEApp head (nodeBuildEIntPlain 0 1 0)) (nodeBChild e))
         e)
     }
     e))
 
-(pub :: parseArgs (-> Ints Int Int Int))
+(pub :: parseArgs (-> Ints Int ASTNode Int))
 (pub fn (parseArgs tokens pos fnExpr)
   (if (peekIs tokens pos TK_RPAREN)
     (pOk fnExpr (advance pos))
@@ -6460,7 +7177,7 @@
           (if (== (memGetWord r 0) 0)
             r
             {
-              (let arg (memGetWord r 1))
+              (let arg (readAstNode r 1))
               (let nextPos (memGetWord r 2))
               (parseArgs tokens nextPos (mkEApp fnExpr arg))
             })
@@ -6469,7 +7186,7 @@
 ; Labels belong to the complete application, in source order. Values
 ; remain ordinary arguments, so expression visitors see every value.
 ; Expansion resolves the struct and lowers its checked field order.
-(pub :: parseNamedArgs (-> Ints Int Int Strings Ints Int))
+(pub :: parseNamedArgs (-> Ints Int ASTNode Strings Ints Int))
 (pub fn (parseNamedArgs tokens pos call labels spans)
   (if (peekIs tokens pos TK_RPAREN)
     (pOk (setNamedCall call labels spans) (advance pos))
@@ -6483,7 +7200,7 @@
             (let valueR (parseExpr tokens (memGetWord nameR 2)))
             (if (== (memGetWord valueR 0) 0)
               valueR
-              (parseNamedArgs tokens (memGetWord valueR 2) (mkEApp call (memGetWord valueR 1))
+              (parseNamedArgs tokens (memGetWord valueR 2) (mkEApp call (readAstNode valueR 1))
                 (vecPush labels (memGetWordStr nameR 1))
                 (vecPush spans (tokenSpan (vecGet tokens (advance pos))))))
           })
@@ -6491,27 +7208,27 @@
 
 ; Application word c is otherwise unused. Keep label spans there until
 ; expansion so field diagnostics point at the label the reader wrote.
-(pub :: setNamedCall (-> Int Strings Ints Int))
+(pub :: setNamedCall (-> ASTNode Strings Ints ASTNode))
 (pub fn (setNamedCall call labels spans)
   {
     (setCtorFieldNames call labels)
-    (memSetWord call 3 spans)
+    (writeNodeWords call 3 spans)
     call
   })
 
 ; ------------------------------------------------------------------
 ; Parse declarations until EOF.
 ; ------------------------------------------------------------------
-(pub :: parseDecls (-> Ints Int Ints Int))
+(pub :: parseDecls (-> Ints Int (Vec ASTNode) Int))
 (pub fn (parseDecls tokens pos acc)
   {
     (let r (parseDecl tokens pos))
     (if (== (memGetWord r 0) 0)
       r
       {
-        (let val (memGetWord r 1))
+        (let val (readAstNode r 1))
         (let nextPos (memGetWord r 2))
-        (if (== val 0)
+        (if (nodeSame val nilNode)
           (pOk acc nextPos)
           (if (&& (== (nodeTag val) TAG_D_IMPORT)
                 (&& (> (vecLen acc) 0) (!= (nodeTag (vecGet acc (- (vecLen acc) 1))) TAG_D_IMPORT)))
@@ -6630,13 +7347,13 @@
           ; after it is refused, as the formatter refuses it. It used to
           ; be dropped with no word, and a claim such as
           ; `restrict(no-alloc)` then applied to nothing.
-          (if (< (attachAxtags (memGetWordVec r 1) 0 axtags 0) (vecLen axtags))
+          (if (< (attachAxtags (readAstNodes r 1) 0 axtags 0) (vecLen axtags))
             (pErrExp (- (vecLen tokens) 1) "a declaration after the `;@axiom:` tag")
             r))
       })
   })
 
-(pub :: attachAxtags (-> Ints Int Ints Int Int))
+(pub :: attachAxtags (-> (Vec ASTNode) Int Ints Int Int))
 (pub fn (attachAxtags decls i axtags next)
   (if (>= i (vecLen decls))
     next
@@ -6651,7 +7368,7 @@
           (let upto (axtagsUpto axtags next limit))
           {
             (if (> upto next)
-              (memSetWord d 7 (axtagSlice axtags next upto)))
+              (writeNodeWords d 7 (axtagSlice axtags next upto)))
             (attachAxtags decls (+ i 1) axtags (attachAxtagsNested d axtags upto))
           }
         }
@@ -6679,14 +7396,14 @@
 ; An `impl`'s methods and a `trait`'s defaults were the other two
 ; nested positions, and were the ones this was written for. Traits
 ; went in 0.6.0 and the macro rules are what is left.
-(pub :: attachAxtagsNested (-> Int Ints Int Int))
+(pub :: attachAxtagsNested (-> ASTNode Ints Int Int))
 (pub fn (attachAxtagsNested d axtags cur)
   ; A rule whose template is only an expression has an empty declaration
   ; list, with nothing to thread tags through, and head-list
   ; macros hold no rules at all (word 9 == 0, which the callee returns
   ; at once).
   (if (== (nodeTag d) TAG_D_MACRO)
-    (attachAxtagsRules (memGetWordVec d 9) 0 axtags cur)
+    (attachAxtagsRules (nodeFieldNamesWords d) 0 axtags cur)
     cur))
 
 ; A declaration macro's TEMPLATES, which are declarations the author
@@ -6852,12 +7569,12 @@
 ; or text left over after the expression ends. `(> n 0) and more` is a
 ; refusal and not a silent truncation, which is why the EOF test is
 ; here and not left to whoever reads the node.
-(pub :: contractExprOf (-> Int Int))
+(pub :: contractExprOf (-> Int ASTNode))
 (pub fn (contractExprOf t)
   {
     (let txt (contractTextOf t))
     (if (== (strLen txt) 0)
-      0
+      nilNode
       {
         (let toks (lex txt))
         {
@@ -6865,10 +7582,10 @@
           {
             (let r (parseExpr toks 0))
             (if (== (memGetWord r 0) 0)
-              0
+              nilNode
               (if (peekIs toks (memGetWord r 2) TK_EOF)
-                (memGetWord r 1)
-                0))
+                (readAstNode r 1)
+                nilNode))
           }
         }
       })
@@ -6881,13 +7598,13 @@
 ; common path is one `vecLen`. That is `deprecatedTable`'s argument in
 ; `typecheck.ax`, and the reason this is not a scan of the whole
 ; declaration list per function.
-(pub :: contractTagsFor (-> Ints Int Ints))
+(pub :: contractTagsFor (-> (Vec ASTNode) ASTNode Ints))
 (pub fn (contractTagsFor sigs d)
   {
     (let v vecNew)
     {
       (contractTagsInto v (contractSigTags sigs (nodeAName d) 0))
-      (contractTagsInto v (memGetWordVec d 7))
+      (contractTagsInto v (nodeAxtagsWords d))
       v
     }
   })
@@ -6913,11 +7630,11 @@
 ; The signatures in `decls` that carry a contract tag, as a Vec of
 ; declaration nodes. One pass, kept, so the lookup above is a scan of
 ; the contracts rather than of the program.
-(pub :: contractSigIndex (-> Ints Ints))
+(pub :: contractSigIndex (-> (Vec ASTNode) (Vec ASTNode)))
 (pub fn (contractSigIndex decls)
   (contractSigIndexFrom decls vecNew 0))
 
-(pub :: contractSigIndexFrom (-> Ints Ints Int Ints))
+(pub :: contractSigIndexFrom (-> (Vec ASTNode) (Vec ASTNode) Int (Vec ASTNode)))
 ;@axiom:effect(unsafe)
 (pub fn (contractSigIndexFrom decls acc i)
   (if (>= i (vecLen decls))
@@ -6925,7 +7642,7 @@
     {
       (let d (vecGet decls i))
       {
-        (if (&& (== (nodeTag d) TAG_D_SIG) (== (contractTagCount (memGetWordVec d 7) 0) 1))
+        (if (&& (== (nodeTag d) TAG_D_SIG) (== (contractTagCount (nodeAxtagsWords d) 0) 1))
           (vecPush acc d)
           (as 0 (Vec Int)))
         (contractSigIndexFrom decls acc (+ i 1))
@@ -6943,18 +7660,18 @@
         1
         (contractTagCount tags (+ i 1))))))
 
-(pub :: contractSigTags (-> Ints String Int Ints))
+(pub :: contractSigTags (-> (Vec ASTNode) String Int Ints))
 ;@axiom:effect(unsafe)
 (pub fn (contractSigTags sigs name i)
   (if (>= i (vecLen sigs))
     (as 0 (Vec Int))
     (if (strEq (nodeAName (vecGet sigs i)) name)
-      (memGetWordVec (vecGet sigs i) 7)
+      (nodeAxtagsWords (vecGet sigs i))
       (contractSigTags sigs name (+ i 1)))))
 
 ; The clauses on either half of a function declaration, in source order.
 ; Tools read the raw tag text so the contract they show is the one checked.
-(pub :: contractSourceFor (-> Ints Int String))
+(pub :: contractSourceFor (-> (Vec ASTNode) ASTNode String))
 (pub fn (contractSourceFor decls d)
   (if (|| (== (nodeTag d) TAG_D_FN) (== (nodeTag d) TAG_D_SIG))
     {
@@ -6977,7 +7694,7 @@
               {
                 (let v vecNew)
                 {
-                  (contractTagsInto v (memGetWordVec subject 7))
+                  (contractTagsInto v (nodeAxtagsWords subject))
                   v
                 }
               }))
@@ -7009,10 +7726,10 @@
 ; those two callers and went in 0.6.0; the survivor is the
 ; duplicate-definition check, which asks this of an `effect`'s
 ; operations.
-(pub :: findFieldNamed (-> Ints String Int Int))
+(pub :: findFieldNamed (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (findFieldNamed fields name i)
   (if (>= i (vecLen fields))
-    0
+    nilNode
     (if (strEq (nodeAName (vecGet fields i)) name)
       (vecGet fields i)
       (findFieldNamed fields name (+ i 1)))))
@@ -7021,7 +7738,7 @@
 ; name is one this checker minted, and an empty name is the silent
 ; wildcard; neither is rigid. Both the checker and the emitter ask this
 ; of the same D_SIG tree, so it is asked in one place.
-(pub :: tyIsSrcVar (-> Int Int))
+(pub :: tyIsSrcVar (-> ASTNode Int))
 (pub fn (tyIsSrcVar t)
   (if (!= (nodeTag t) TAG_T_VAR)
     0
@@ -7037,34 +7754,34 @@
 ; An application spine, which the parser builds left-nested: the head
 ; it bottoms out at, its arguments in SOURCE order, and how many there
 ; are. Every pass that looks through a call asks one of these three.
-(pub :: spineHead (-> Int Int))
+(pub :: spineHead (-> ASTNode ASTNode))
 (pub fn (spineHead e)
   (if (== (nodeTag e) TAG_E_APP)
-    (spineHead (nodeA e))
+    (spineHead (nodeAChild e))
     e))
 
-(pub :: spineArgVec (-> Int Ints Ints))
+(pub :: spineArgVec (-> ASTNode Nodes Nodes))
 (pub fn (spineArgVec e acc)
   (if (== (nodeTag e) TAG_E_APP)
     {
-      (spineArgVec (nodeA e) acc)
-      (vecPush acc (nodeB e))
+      (spineArgVec (nodeAChild e) acc)
+      (vecPush acc (nodeBChild e))
       acc
     }
     acc))
 
-(pub :: spineArgs (-> Int Int Int))
+(pub :: spineArgs (-> ASTNode Int Int))
 (pub fn (spineArgs e acc)
   (if (== (nodeTag e) TAG_E_APP)
-    (spineArgs (nodeA e) (+ acc 1))
+    (spineArgs (nodeAChild e) (+ acc 1))
     acc))
 
-(pub :: arrowArity (-> Int Int))
+(pub :: arrowArity (-> ASTNode Int))
 (pub fn (arrowArity t)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     0
     (if (== (nodeTag t) TAG_T_ARR)
-      (+ 1 (arrowArity (nodeB t)))
+      (+ 1 (arrowArity (nodeBChild t)))
       0)))
 
 ; The type declared for argument position `i` of the arrow `t`, or 0
@@ -7086,39 +7803,238 @@
 ; other, so nothing compared them. `arrowArity` beside it has always
 ; lived here for the same reason: an arrow spine is the parser's shape
 ; and every pass reads it the same way.
-(pub :: arrowParamTy (-> Int Int Int))
+(pub :: arrowParamTy (-> ASTNode Int ASTNode))
 (pub fn (arrowParamTy t i)
-  (if (== t 0)
-    0
+  (if (nodeSame t nilNode)
+    nilNode
     (if (!= (nodeTag t) TAG_T_ARR)
-      0
+      nilNode
       (if (<= i 0)
-        (nodeA t)
-        (arrowParamTy (nodeB t) (- i 1))))))
+        (nodeAChild t)
+        (arrowParamTy (nodeBChild t) (- i 1))))))
 
 ; Allocation-free access to one argument of the canonical application spine.
-(pub :: spineArgAt (-> Int Int Int))
+(pub :: spineArgAt (-> ASTNode Int ASTNode))
 (pub fn (spineArgAt e i)
   (spineArgFromEnd e (- (- (spineArgs e 0) 1) i)))
 
-(pub :: spineArgFromEnd (-> Int Int Int))
+(pub :: spineArgFromEnd (-> ASTNode Int ASTNode))
 (pub fn (spineArgFromEnd e k)
   (if (<= k 0)
-    (nodeB e)
-    (spineArgFromEnd (nodeA e) (- k 1))))
+    (nodeBChild e)
+    (spineArgFromEnd (nodeAChild e) (- k 1))))
 
 ; On an APP, word 10 records that its head came from a macro name
 ; parameter or an expansion-time name query. The expander can then
 ; resolve a generated struct call without accepting positional source
 ; construction. On a VAR the same slot remains the definition scope.
-(pub :: nodeGeneratedCall (-> Int Bool))
+(pub :: nodeGeneratedCall (-> ASTNode Bool))
 (pub fn (nodeGeneratedCall call)
-  (&& (== (nodeTag call) TAG_E_APP) (== (memGetWord call 10) 1)))
+  (&& (== (nodeTag call) TAG_E_APP) (== (nodeDefScopeWord call) 1)))
 
-(pub :: markGeneratedCall (-> Int Int))
+(pub :: markGeneratedCall (-> ASTNode ASTNode))
 (pub fn (markGeneratedCall call)
   {
     (if (== (nodeTag call) TAG_E_APP)
-      (memSetWord call 10 1))
+      (writeNodeWord call 10 1))
     call
   })
+
+; Packet encoding is the sole public reader of an unclassified syntax word.
+(pub :: nodeWireWord (-> ASTNode Int Int))
+(pub fn (nodeWireWord node index)
+  (nodeWord node index))
+
+; Copy the word and its ownership role together; raw copies would lose a
+; reference or release an integer when the destination changes shape.
+(pub :: nodeCopyWord (-> ASTNode ASTNode Int Int))
+;@axiom:effect(unsafe)
+(pub fn (nodeCopyWord dst src index)
+  {
+    (let from (as src Int))
+    (let bit (<< 1 (+ index 16)))
+    (let word (__load64 from index))
+    (let reference (!= (& (__load64 (- from 8) 0) bit) 0))
+    (if reference
+      (__retain word))
+    (nodeStore dst index word reference)
+  })
+
+(pub :: nodeClone (-> ASTNode ASTNode))
+(pub fn (nodeClone src)
+  (if (nodeSame src nilNode)
+    nilNode
+    {
+      (let dst (nodeWireEmpty (nodeTag src)))
+      (let mut index 1)
+      (while (< index 13)
+        {
+          (nodeCopyWord dst src index)
+          (set index (+ index 1))
+        })
+      dst
+    }))
+
+(pub :: writeNodeValueWords (-> ASTNode Int (Vec (Vec Int)) Int))
+(pub fn (writeNodeValueWords n index value)
+  (nodeStore n index value true))
+
+(pub :: nodeFieldNamesRows (-> ASTNode (Vec (Vec Int))))
+;@axiom:effect(unsafe)
+(pub fn (nodeFieldNamesRows node)
+  (as (nodeWord node 9) (Vec (Vec Int))))
+
+(pub :: nodeBuildFieldOffset (-> Int Int ASTNode))
+(pub fn (nodeBuildFieldOffset index floating)
+  {
+    (let n (nodeWireEmpty TAG_FIELD))
+    (writeNodeWord n 1 index)
+    (writeNodeWord n 2 floating)
+    n
+  })
+
+(pub :: nodeBuildFieldExtern (-> String ASTNode String Int ASTNode))
+(pub fn (nodeBuildFieldExtern name ty symbol span)
+  {
+    (let n (nodeWireEmpty TAG_FIELD))
+    (writeNodeText n 1 name)
+    (writeNodeChild n 2 ty)
+    (writeNodeText n 3 symbol)
+    (writeNodeWord n 4 span)
+    n
+  })
+
+(pub :: nodeBuildParallelBinding (-> String ASTNode Int ASTNode))
+(pub fn (nodeBuildParallelBinding name value span)
+  {
+    (let n (nodeWireEmpty TAG_NIL))
+    (writeNodeText n 1 name)
+    (writeNodeChild n 2 value)
+    (writeNodeWord n 4 span)
+    n
+  })
+
+(pub :: setNodeTyWord (-> ASTNode Int ASTNode))
+(pub fn (setNodeTyWord node value)
+  {
+    (writeNodeWord node 6 value)
+    node
+  })
+
+(pub :: setNodeTyChild (-> ASTNode ASTNode ASTNode))
+(pub fn (setNodeTyChild node value)
+  {
+    (writeNodeChild node 6 value)
+    node
+  })
+
+(pub :: setNodeTyText (-> ASTNode String ASTNode))
+(pub fn (setNodeTyText node value)
+  {
+    (writeNodeText node 6 value)
+    node
+  })
+
+(pub :: setNodeTyChildren (-> ASTNode Nodes ASTNode))
+(pub fn (setNodeTyChildren node value)
+  {
+    (writeNodeChildren node 6 value)
+    node
+  })
+
+(pub :: setNodeTyNames (-> ASTNode Names ASTNode))
+(pub fn (setNodeTyNames node value)
+  {
+    (writeNodeNames node 6 value)
+    node
+  })
+
+(pub :: setNodeBinderTyChild (-> ASTNode ASTNode ASTNode))
+(pub fn (setNodeBinderTyChild node value)
+  {
+    (writeNodeChild node 11 value)
+    node
+  })
+
+(pub :: setNodeBinderTyText (-> ASTNode String ASTNode))
+(pub fn (setNodeBinderTyText node value)
+  {
+    (writeNodeText node 11 value)
+    node
+  })
+
+(pub :: nodeIdentityKey (-> ASTNode String))
+(pub fn (nodeIdentityKey node)
+  (fmtInt (as node Int)))
+
+; The packet decoder has already taken the payload's owned share.
+(pub :: nodeWireStore (-> ASTNode Int Int Bool Int))
+(pub fn (nodeWireStore node index ownedWord reference)
+  (nodeStore node index ownedWord reference))
+
+(pub :: ruleParamsAt (-> IntRows Int Names))
+;@axiom:effect(unsafe)
+(pub fn (ruleParamsAt rules index)
+  (as (vecGet (vecGet rules index) 0) Names))
+
+(pub :: ruleDeclsAt (-> IntRows Int Nodes))
+;@axiom:effect(unsafe)
+(pub fn (ruleDeclsAt rules index)
+  (as (vecGet (vecGet rules index) 1) Nodes))
+
+(pub :: pResultRules (-> Int IntRows))
+;@axiom:effect(unsafe)
+(pub fn (pResultRules result)
+  (as (memGetWord result 1) IntRows))
+
+(pub :: nodeSetPayload (-> ASTNode Int AstPayload Int))
+(pub fn (nodeSetPayload node index payload)
+  (match payload
+    ((AstWord value) (writeNodeWord node index value))
+    ((AstText value) (writeNodeText node index value))
+    ((AstChild value) (writeNodeChild node index value))
+    ((AstChildren value) (writeNodeChildren node index value))
+    ((AstNames value) (writeNodeNames node index value))
+    ((AstWords value) (writeNodeWords node index value))))
+
+(pub :: nodeChildAt (-> ASTNode Int ASTNode))
+;@axiom:effect(unsafe)
+(pub fn (nodeChildAt node index)
+  (as (nodeWord node index) ASTNode))
+
+(pub :: nodeChildrenAt (-> ASTNode Int Nodes))
+;@axiom:effect(unsafe)
+(pub fn (nodeChildrenAt node index)
+  (as (nodeWord node index) Nodes))
+
+(pub :: nodeNamesAt (-> ASTNode Int Names))
+;@axiom:effect(unsafe)
+(pub fn (nodeNamesAt node index)
+  (as (nodeWord node index) Names))
+
+(pub :: nodeTextAt (-> ASTNode Int String))
+;@axiom:effect(unsafe)
+(pub fn (nodeTextAt node index)
+  (as (nodeWord node index) String))
+
+; The checker-only call stamp stores a typed substitution environment.
+(pub :: nodeCTypeEnv (-> ASTNode TypeEnv))
+;@axiom:effect(unsafe)
+(pub fn (nodeCTypeEnv node)
+  (as (nodeWord node 3) TypeEnv))
+
+; A pending lambda owns the copied scope that supplies its captured types.
+(pub :: nodeBuildPartial (-> Ints Int Int ASTNode))
+(pub fn (nodeBuildPartial entries own span)
+  {
+    (let node (nodeWireEmpty TAG_NIL))
+    (writeNodeWords node 1 entries)
+    (writeNodeWord node 2 own)
+    (writeNodeWord node 4 span)
+    node
+  })
+
+(pub :: nodeAWords (-> ASTNode Ints))
+;@axiom:effect(unsafe)
+(pub fn (nodeAWords node)
+  (as (nodeWord node 1) Ints))

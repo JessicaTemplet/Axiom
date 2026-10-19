@@ -267,11 +267,11 @@ s = s[:start] + """(pub fn (rgnWhile rc e)
     (let rep (memGetWord rc 11))
     {
       (memSetWord rc 11 0)
-      (rgnExpr rc (nodeA e))
-      (rgnSeq rc (nodeBVec e) 0 0)
+      (rgnExpr rc (nodeAChild e))
+      (rgnSeq rc (nodeBChildren e) 0 0)
       (memSetWord rc 11 rep)
-      (rgnExpr rc (nodeA e))
-      (rgnSeq rc (nodeBVec e) 0 0)
+      (rgnExpr rc (nodeAChild e))
+      (rgnSeq rc (nodeBChildren e) 0 0)
       0
     }
   })

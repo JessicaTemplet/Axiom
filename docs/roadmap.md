@@ -72,7 +72,7 @@ integrator would still need.
 
 | Item | State | Where it's specified or tested |
 |---|---|---|
-| Compiler data uses typed structures and checked effect boundaries across every phase | In progress | Effect values use checked variants; AST and declaration handles still need migration |
+| Compiler data uses typed structures and checked effect boundaries across every phase | In progress | Typed AST and effect values cross every phase; packed registry and frame storage remains |
 | Native tool arguments keep their string vector type to the syscall boundary | Done | `scripts/check-driver.sh`, `scripts/check-bootstrap.sh` |
 | Known callback arguments honour effect restrictions through forwarding and captures | Done | `tests/diagnostics/1463-callback-restrictions.ax` |
 | Stored lambdas contribute their resolved effects at field calls | Done | `tests/diagnostics/1462-lambda-field-effects.ax` |

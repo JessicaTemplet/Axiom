@@ -236,7 +236,7 @@ ablate "param-first" codegen.ax \
   "(if (&& (isNullaryFnCg cg full) (! parameter))" \
   "(if (isNullaryFnCg cg full)"
 ablate "named-pattern" typecheck.ax \
-  "(patBindersVec (nodeCVec pat) 0 acc)" \
+  "(patBindersVec (nodeCChildren pat) 0 acc)" \
   "0"
 
 ablate "nid-fn-wins" symbols.ax \

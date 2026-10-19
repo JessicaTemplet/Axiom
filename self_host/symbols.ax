@@ -96,9 +96,9 @@
 ;   TList         [a]
 ;   TPtr          *a
 ; ------------------------------------------------------------------
-(pub :: symTy (-> Int String))
+(pub :: symTy (-> ASTNode String))
 (pub fn (symTy t)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     "{unknown}"
     {
       (let tag (nodeTag t))
@@ -108,7 +108,7 @@
           (nodeAName t)
           (if (== tag TAG_T_CON)
             {
-              (let args (nodeBVec t))
+              (let args (nodeBChildren t))
               (if (|| (== (as args Int) 0) (== (vecLen args) 0))
                 (srcSpelling (nodeAName t))
                 {
@@ -127,10 +127,11 @@
                 })
             }
             (if (== tag TAG_T_ARR)
-              (concat "(" (concat (symTy (nodeA t)) (concat " -> " (concat (symTy (nodeB t)) ")"))))
+              (concat "("
+                (concat (symTy (nodeAChild t)) (concat " -> " (concat (symTy (nodeBChild t)) ")"))))
               (if (== tag TAG_T_TUP)
                 {
-                  (let xs (nodeAVec t))
+                  (let xs (nodeAChildren t))
                   (let mut s "(")
                   {
                     (if (! (== (as xs Int) 0))
@@ -145,7 +146,7 @@
                   }
                 }
                 (if (== tag TAG_T_PTR)
-                  (concat "*" (symTy (nodeA t)))
+                  (concat "*" (symTy (nodeAChild t)))
                   "{unknown}"))))))
     }))
 
@@ -361,12 +362,12 @@
     0))
 
 ; Insert-if-absent (stage0's `or_insert`).
-(pub :: saPutSoft (-> Strings Ints String Ints Int))
+(pub :: saPutSoft (-> Strings (Vec a) String a Int))
 (pub fn (saPutSoft names vals key val)
   (if (< (saIdx names key) 0)
     {
       (vecPush names key)
-      (vecPushVec vals val)
+      (vecPush vals val)
       0
     }
     0))
@@ -375,7 +376,7 @@
 ; (a span AND a unit). The single-value put breaks lockstep there: the
 ; first put pushes the name, the second then finds it present and
 ; `vecSet`s into a value Vec that has no such slot yet.
-(pub :: saPut2 (-> Strings Ints Ints String Int Int Int))
+(pub :: saPut2 (-> Strings (Vec a) (Vec b) String a b Int))
 (pub fn (saPut2 names v1 v2 key a b)
   {
     (let i (saIdx names key))
@@ -393,7 +394,7 @@
       })
   })
 
-(pub :: saPutSoft2 (-> Strings Ints Ints String Int Int Int))
+(pub :: saPutSoft2 (-> Strings (Vec a) (Vec b) String a b Int))
 (pub fn (saPutSoft2 names v1 v2 key a b)
   (if (< (saIdx names key) 0)
     {
@@ -413,17 +414,35 @@
       (vecGet vals i))
   })
 
-; The tags and parameter tables store vectors of AST or name handles.
-; Scalar metadata, including operation type nodes, uses `saGet` directly.
-(pub :: saGetVec (-> Strings Ints String Ints))
+; Typed values retain their container element types through lookup.
+(pub :: saGetVec (-> Strings (Vec Ints) String Ints))
 ;@axiom:effect(unsafe)
 (pub fn (saGetVec names vals key)
-  (as (saGet names vals key) (Vec Int)))
+  {
+    (let i (saIdx names key))
+    (if (< i 0)
+      (as 0 Ints)
+      (vecGet vals i))
+  })
 
-(pub :: saGetNames (-> Strings Ints String Strings))
+(pub :: saGetNames (-> Strings (Vec Names) String Names))
 ;@axiom:effect(unsafe)
 (pub fn (saGetNames names vals key)
-  (as (saGet names vals key) (Vec String)))
+  {
+    (let i (saIdx names key))
+    (if (< i 0)
+      (as 0 Names)
+      (vecGet vals i))
+  })
+
+(pub :: saGetNode (-> Strings Nodes String ASTNode))
+(pub fn (saGetNode names vals key)
+  {
+    (let i (saIdx names key))
+    (if (< i 0)
+      nilNode
+      (vecGet vals i))
+  })
 
 ; Byte-wise ascending insertion sort, in place: stage0's effect list
 ; arrives sorted (probed: `Beta,zeta`), and byte order is what Rust's
@@ -642,33 +661,33 @@
 ; three span namespaces, ctor spans, nid variants, axtags, and fn
 ; parameter names.
 (pub struct SymMaps
-  (fnN : (Vec Int))
+  (fnN : Names)
   (fnS : (Vec Int))
-  (fnU : (Vec Int))
-  (tyN : (Vec Int))
+  (fnU : Ints)
+  (tyN : Names)
   (tyS : (Vec Int))
-  (tyU : (Vec Int))
+  (tyU : Ints)
   (retired6 : (Vec Int))
   (retired7 : (Vec Int))
   (retired8 : (Vec Int))
-  (ctN : (Vec Int))
+  (ctN : Names)
   (ctS : (Vec Int))
-  (ctU : (Vec Int))
-  (nidN : (Vec Int))
+  (ctU : Ints)
+  (nidN : Names)
   (nidV : (Vec Int))
-  (tagN : (Vec Int))
-  (tagV : (Vec Int))
-  (prmN : (Vec Int))
-  (prmV : (Vec Int))
-  (opN : (Vec Int))
-  (opV : (Vec Int))
-  (mcN : (Vec Int))
+  (tagN : Names)
+  (tagV : (Vec Ints))
+  (prmN : Names)
+  (prmV : (Vec Names))
+  (opN : Names)
+  (opV : Nodes)
+  (mcN : Names)
   (mcS : (Vec Int))
-  (mcU : (Vec Int))
-  (efN : (Vec Int))
+  (mcU : Ints)
+  (efN : Names)
   (efS : (Vec Int))
-  (efU : (Vec Int))
-  (fnD : (Vec Int)))
+  (efU : Ints)
+  (fnD : (Vec ASTNode)))
 
 ; Words 6/7/8 were the `trait` name/span/unit maps. RETIRED IN
 ; PLACE rather than removed, on the same reasoning as `TC`'s two:
@@ -743,7 +762,7 @@
     ((None) false)
     ((Some _) true)))
 
-(pub :: smCollect (-> Int Int Ints Int))
+(pub :: smCollect (-> Int ASTNode Ints Int))
 (pub fn (smCollect sm d units)
   (if (smGenerated (nodeAName d))
     0
@@ -772,8 +791,8 @@
                 (nodeSpan d) u)
               (smNid sm name "DFn:")
               (smTags sm d name)
-              (saPut2 (memGetWordVec sm 16) (memGetWordVec sm 17) (memGetWordVec sm 26) name
-                (nodeB d) d)
+              (saPut2 (memGetWordVec sm 16) (memGetWordVec sm 17) (readAstNodes sm 26) name
+                (nodeBNames d) d)
             }
             (if (== tag TAG_D_DATA)
               {
@@ -782,7 +801,7 @@
                 (smNid sm name "DData:")
                 (smTags sm d name)
                 {
-                  (let ctors (nodeBVec d))
+                  (let ctors (nodeBChildren d))
                   (let mut i 0)
                   (while (< i (vecLen ctors))
                     {
@@ -822,7 +841,7 @@
                       ; it rather than answering `builtin` (the checker registers
                       ; it as a function with no span of its own)
                       {
-                        (let items (nodeCVec d))
+                        (let items (nodeCChildren d))
                         (let mut i 0)
                         (if (! (== (as items Int) 0))
                           (while (< i (vecLen items))
@@ -857,7 +876,7 @@
                         ; and `#unhandled=trap` on this row is where it reads
                         ; that.
                         {
-                          (let fields (nodeCVec d))
+                          (let fields (nodeCChildren d))
                           (let mut i 0)
                           (let _t (smTags sm d name))
                           (let _e
@@ -869,12 +888,12 @@
                               {
                                 (let f (vecGet fields i))
                                 {
-                                  (saPut (memGetWordVec sm 18) (memGetWordVec sm 19) (nodeAName f)
-                                    (nodeB f))
+                                  (saPut (memGetWordVec sm 18) (readAstNodes sm 19) (nodeAName f)
+                                    (nodeBChild f))
                                   (if (! (== (nodeModule d) 0))
-                                    (saPut (memGetWordVec sm 18) (memGetWordVec sm 19)
+                                    (saPut (memGetWordVec sm 18) (readAstNodes sm 19)
                                       (concat (concat (nodeModuleName d) "$") (nodeAName f))
-                                      (nodeB f)))
+                                      (nodeBChild f)))
                                   (set i (+ i 1))
                                 }
                               }))
@@ -906,11 +925,11 @@
 ; own declaration words, and a renderer that appended to one would be
 ; mutating the AST to print it - the same rule `#calls=` follows below
 ; when it sorts a copy.
-(pub :: smTags (-> Int Int String Int))
+(pub :: smTags (-> Int ASTNode String Int))
 ;@axiom:effect(unsafe)
 (pub fn (smTags sm d name)
   {
-    (let tags (nodeAxtagsVec d))
+    (let tags (nodeAxtagsWords d))
     (if (== (as tags Int) 0)
       (saPutSoft (memGetWordVec sm 14) (memGetWordVec sm 15) name (as 0 (Vec Int)))
       (if (== (vecLen tags) 0)
@@ -967,7 +986,7 @@
     }
   })
 
-(pub :: smBuild (-> Ints Ints Int))
+(pub :: smBuild (-> (Vec ASTNode) Ints Int))
 (pub fn (smBuild decls units)
   {
     (let sm smNew)
@@ -1609,7 +1628,7 @@
                             (saGetNames (memGetWordVec sm 16) (memGetWordVec sm 17) name) trunc
                             metas))
                         {
-                          (let opTy (saGet (memGetWordVec sm 18) (memGetWordVec sm 19) name))
+                          (let opTy (saGetNode (memGetWordVec sm 18) (readAstNodes sm 19) name))
                           (vecPush
                             lines
                             (symLine
@@ -1624,9 +1643,9 @@
                               (if (== (strLen loc) 0)
                                 "-"
                                 loc)
-                              (if (&& (== isOp 1) (!= (as opTy Int) 0))
-                                (symTy (as opTy Int))
-                                (symTy (memGetWord e 1)))
+                              (if (&& (== isOp 1) (! (nodeSame opTy nilNode)))
+                                (symTy opTy)
+                                (symTy (readAstNode e 1)))
                               (smNidFor sm name)
                               metas))
                         }
@@ -1689,7 +1708,7 @@
                                   "-"
                                   loc)
                               }
-                              (symTy (memGetWord c 3)) ""
+                              (symTy (readAstNode c 3)) ""
                               {
                                 (let m vecNew)
                                 {
@@ -1715,7 +1734,7 @@
               (let s (vecGet sts i))
               {
                 (let name (memGetWordStr s 0))
-                (let fields (memGetWordVec s 1))
+                (let fields (readAstNodes s 1))
                 {
                   {
                     (let metas vecNew)
@@ -1726,7 +1745,8 @@
                         {
                           (let f (vecGet fields k))
                           {
-                            (vecPush fparts (concat (nodeAName f) (concat ":" (symTy (nodeTy f)))))
+                            (vecPush fparts
+                              (concat (nodeAName f) (concat ":" (symTy (nodeTyChild f)))))
                             (set k (+ k 1))
                           }
                         })
@@ -1777,7 +1797,7 @@
                   ; `smTagMetas`.
                   {
                     (let metas vecNew)
-                    (let tvs (nodeCVec d))
+                    (let tvs (nodeCChildren d))
                     {
                       (smTagMetas sm name metas)
                       (if (&& (!= (as tvs Int) 0) (> (vecLen tvs) 0))
@@ -1791,7 +1811,7 @@
                               "-"
                               loc)
                           }
-                          (symTy (nodeB d)) (smNidFor sm name) metas))
+                          (symTy (nodeBChild d)) (smNidFor sm name) metas))
                     }
                   }
                   (set i (+ i 1))

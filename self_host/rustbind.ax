@@ -76,8 +76,7 @@
 ; resolution: from then on a declaration's visibility word answers
 ; "may another module name it", which is 1 for everything in the
 ; entry file (codegen.ax, `resolveDeclsPhase`).
-(pub :: rbPubNames (-> Ints Ints))
-;@axiom:effect(unsafe)
+(pub :: rbPubNames (-> Nodes Names))
 (pub fn (rbPubNames decls)
   {
     (let out vecNew)
@@ -88,8 +87,8 @@
           {
             (let d (vecGet decls i))
             (if (&& (== (nodeTag d) TAG_D_FN) (== (nodeVis d) 1))
-              (vecPush out (as (nodeA d) Int))
-              (as 0 (Vec Int)))
+              (vecPush out (nodeAName d))
+              out)
           }
           (set i (+ i 1))
         })
@@ -97,8 +96,7 @@
     }
   })
 
-(pub :: rbNamed (-> Ints String Bool))
-;@axiom:effect(unsafe)
+(pub :: rbNamed (-> Names String Bool))
 (pub fn (rbNamed names n)
   {
     (let mut i 0)
@@ -118,11 +116,11 @@
 ; Types: what the binding carries, and how each side spells it
 ; ------------------------------------------------------------------
 ; The `data`/`struct` declaration named `name` in the entry, or 0.
-(pub :: rbDataDecl (-> Ints String Int))
+(pub :: rbDataDecl (-> (Vec ASTNode) String ASTNode))
 (pub fn (rbDataDecl decls name)
   {
     (let mut i 0)
-    (let mut found 0)
+    (let mut found nilNode)
     {
       (while (< i (vecLen decls))
         {
@@ -152,9 +150,10 @@
   (srcSpelling name))
 
 ; 1 when `t` is a word leaf: Int, Float, Bool, Char, Handle, Foreign.
-(pub :: rbIsWordLeaf (-> Int Int))
+(pub :: rbIsWordLeaf (-> ASTNode Int))
 (pub fn (rbIsWordLeaf t)
-  (if (&& (!= t 0) (&& (== (nodeTag t) TAG_T_CON) (== (vecLen (nodeBVec t)) 0)))
+  (if (&& (! (nodeSame t nilNode))
+        (&& (== (nodeTag t) TAG_T_CON) (== (vecLen (nodeBChildren t)) 0)))
     {
       (let n (nodeAName t))
       (if (|| (strEq n "Int")
@@ -166,11 +165,11 @@
     }
     0))
 
-(pub :: rbIsString (-> Int Int))
+(pub :: rbIsString (-> ASTNode Int))
 (pub fn (rbIsString t)
-  (if (&& (!= t 0)
+  (if (&& (! (nodeSame t nilNode))
         (&& (== (nodeTag t) TAG_T_CON)
-          (&& (== (vecLen (nodeBVec t)) 0) (strEq (nodeAName t) "String"))))
+          (&& (== (vecLen (nodeBChildren t)) 0) (strEq (nodeAName t) "String"))))
     1
     0))
 
@@ -182,9 +181,9 @@
 ; `axh_vec_*` shims. So the binding spells every `Vec` `AxWord` and
 ; converts in neither direction, exactly as it did while a `Vec` WAS an
 ; `Int` and this predicate was not needed.
-(pub :: rbIsVec (-> Int Int))
+(pub :: rbIsVec (-> ASTNode Int))
 (pub fn (rbIsVec t)
-  (if (&& (!= t 0) (&& (== (nodeTag t) TAG_T_CON) (strEq (nodeAName t) "Vec")))
+  (if (&& (! (nodeSame t nilNode)) (&& (== (nodeTag t) TAG_T_CON) (strEq (nodeAName t) "Vec")))
     1
     0))
 
@@ -193,14 +192,14 @@
 ; build one from any slice of `i64` without being able to break it -
 ; which is not true of a `(Vec String)`, whose every element Axiom will
 ; dereference. Every other `Vec` crosses as the raw word it was.
-(pub :: rbIsIntVec (-> Int Int))
+(pub :: rbIsIntVec (-> ASTNode Int))
 (pub fn (rbIsIntVec t)
-  (if (&& (== (rbIsVec t) 1) (== (vecLen (nodeBVec t)) 1))
+  (if (&& (== (rbIsVec t) 1) (== (vecLen (nodeBChildren t)) 1))
     {
-      (let e (vecGet (nodeBVec t) 0))
-      (if (&& (!= e 0)
+      (let e (vecGet (nodeBChildren t) 0))
+      (if (&& (! (nodeSame e nilNode))
             (&& (== (nodeTag e) TAG_T_CON)
-              (&& (== (vecLen (nodeBVec e)) 0) (strEq (nodeAName e) "Int"))))
+              (&& (== (vecLen (nodeBChildren e)) 0) (strEq (nodeAName e) "Int"))))
         1
         0)
     }
@@ -214,9 +213,9 @@
 ; that passes one to Axiom is `unsafe` in the generated file: the
 ; caller has to promise what the type cannot. Until 2026-09-26 every
 ; such wrapper was a safe `pub fn`, and so was every `from_axiom`.
-(pub :: rbRawIn (-> Ints Int Ints Int))
+(pub :: rbRawIn (-> (Vec ASTNode) ASTNode Names Int))
 (pub fn (rbRawIn decls t visiting)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     0
     (if (== (rbIsWordLeaf t) 1)
       {
@@ -239,7 +238,7 @@
                 (let mut raw 0)
                 (let mut i 0)
                 {
-                  (vecPush visiting (as m Int))
+                  (vecPush visiting m)
                   (while (< i (vecLen cs))
                     {
                       {
@@ -262,7 +261,7 @@
           0)))))
 
 ; 1 when any of `params` passes a raw word to Axiom.
-(pub :: rbAnyRaw (-> Ints Ints Int))
+(pub :: rbAnyRaw (-> (Vec ASTNode) (Vec ASTNode) Int))
 (pub fn (rbAnyRaw decls params)
   {
     (let mut i 0)
@@ -280,14 +279,14 @@
 
 ; 1 when `t` is a sum or product the binding carries as a value: the
 ; builtin `Option`/`Result`, or a declaration of the entry file.
-(pub :: rbIsData (-> Ints Int Int))
+(pub :: rbIsData (-> (Vec ASTNode) ASTNode Int))
 (pub fn (rbIsData decls t)
-  (if (&& (!= t 0) (== (nodeTag t) TAG_T_CON))
+  (if (&& (! (nodeSame t nilNode)) (== (nodeTag t) TAG_T_CON))
     {
       (let n (nodeAName t))
       (if (|| (strEq n "Option") (strEq n "Err$Result"))
         1
-        (if (== (rbDataDecl decls n) 0)
+        (if (nodeSame (rbDataDecl decls n) nilNode)
           0
           1))
     }
@@ -296,55 +295,55 @@
 ; The constructors of the data type `t` (an instantiation), each a
 ; 3-slot Vec: [name, Vec of field types (instantiated), Vec of field
 ; names or 0]. `Option`, `Result` and the entry's declarations.
-(pub :: rbCtorsOf (-> Ints Int IntRows))
+(pub :: rbCtorsOf (-> (Vec ASTNode) ASTNode IntRows))
 ;@axiom:effect(unsafe)
 (pub fn (rbCtorsOf decls t)
   {
     (let n (nodeAName t))
-    (let args (nodeBVec t))
+    (let args (nodeBChildren t))
     (let out vecNew)
     {
       (if (strEq n "Option")
         {
-          (vecPush out (rbCtor "None" vecNew (as 0 (Vec Int))))
-          (vecPush out (rbCtor "Some" (rbVec1 (vecGet args 0)) (as 0 (Vec Int))))
+          (vecPush out (rbCtor "None" vecNew (as 0 Names)))
+          (vecPush out (rbCtor "Some" (rbVec1 (vecGet args 0)) (as 0 Names)))
         }
         (if (strEq n "Err$Result")
           {
-            (vecPush out (rbCtor "Ok" (rbVec1 (vecGet args 0)) (as 0 (Vec Int))))
-            (vecPush out (rbCtor "Err" (rbVec1 (vecGet args 1)) (as 0 (Vec Int))))
+            (vecPush out (rbCtor "Ok" (rbVec1 (vecGet args 0)) (as 0 Names)))
+            (vecPush out (rbCtor "Err" (rbVec1 (vecGet args 1)) (as 0 Names)))
           }
           {
             (let d (rbDataDecl decls n))
-            (if (! (== d 0))
+            (if (! (nodeSame d nilNode))
               (if (== (nodeTag d) TAG_D_STRUCT)
                 ; one constructor, the struct's name, named fields
                 {
-                  (let fs (nodeBVec d))
+                  (let fs (nodeBChildren d))
                   (let tys vecNew)
                   (let names vecNew)
                   (let mut i 0)
                   {
                     (while (< i (vecLen fs))
                       {
-                        (vecPush tys (nodeTy (vecGet fs i)))
-                        (vecPush names (as (nodeA (vecGet fs i)) Int))
+                        (vecPush tys (nodeTyChild (vecGet fs i)))
+                        (vecPush names (nodeAName (vecGet fs i)))
                         (set i (+ i 1))
                       })
                     (vecPush out (rbCtor n tys names))
                   }
                 }
                 {
-                  (let cs (nodeBVec d))
-                  (let vars (nodeTyVec d))
+                  (let cs (nodeBChildren d))
+                  (let vars (nodeTyNames d))
                   (let mut i 0)
                   (while (< i (vecLen cs))
                     {
                       {
                         (let c (vecGet cs i))
                         (vecPush out
-                          (rbCtor (nodeAName c) (rbSubstAll (nodeTyVec c) vars args)
-                            (nodeFieldNamesVec c)))
+                          (rbCtor (nodeAName c) (rbSubstAll (nodeTyChildren c) vars args)
+                            (nodeFieldNamesNames c)))
                       }
                       (set i (+ i 1))
                     })
@@ -354,7 +353,7 @@
     }
   })
 
-(pub :: rbCtor (-> String Ints Ints Ints))
+(pub :: rbCtor (-> String (Vec ASTNode) Names Ints))
 (pub fn (rbCtor name tys names)
   {
     (let v vecNew)
@@ -371,7 +370,7 @@
 (pub fn (rbCtorName c)
   (as (vecGet c 0) String))
 
-(pub :: rbCtorTys (-> Ints Ints))
+(pub :: rbCtorTys (-> Ints (Vec ASTNode)))
 (pub fn (rbCtorTys c)
   (vecGetVec c 1))
 
@@ -379,7 +378,7 @@
 (pub fn (rbCtorNames c)
   (vecGetVec c 2))
 
-(pub :: rbVec1 (-> Int Ints))
+(pub :: rbVec1 (-> ASTNode (Vec ASTNode)))
 (pub fn (rbVec1 x)
   {
     (let v vecNew)
@@ -392,10 +391,10 @@
 ; A type with the declaration's variables replaced by the
 ; instantiation's arguments: `(Cons a (List a))` at `(List Int)` is
 ; `(Cons Int (List Int))`.
-(pub :: rbSubst (-> Int Ints Ints Int))
+(pub :: rbSubst (-> ASTNode Names (Vec ASTNode) ASTNode))
 (pub fn (rbSubst t vars args)
-  (if (== t 0)
-    0
+  (if (nodeSame t nilNode)
+    nilNode
     {
       (let tag (nodeTag t))
       (if (== tag TAG_T_VAR)
@@ -406,17 +405,18 @@
             t)
         }
         (if (== tag TAG_T_CON)
-          (if (== (vecLen (nodeBVec t)) 0)
+          (if (== (vecLen (nodeBChildren t)) 0)
             t
-            (mkNode TAG_T_CON (nodeA t) (rbSubstAll (nodeBVec t) vars args) 0))
+            (nodeBuildTConPlain (nodeAText t) (rbSubstAll (nodeBChildren t) vars args) 0))
           (if (== tag TAG_T_ARR)
-            (mkNode TAG_T_ARR (rbSubst (nodeA t) vars args) (rbSubst (nodeB t) vars args) 0)
+            (nodeBuildTArrPlain (rbSubst (nodeAChild t) vars args)
+              (rbSubst (nodeBChild t) vars args) 0)
             (if (== tag TAG_T_TUP)
-              (mkNode TAG_T_TUP (rbSubstAll (nodeAVec t) vars args) 0 0)
+              (nodeBuildTTupPlain (rbSubstAll (nodeAChildren t) vars args) 0 0)
               t))))
     }))
 
-(pub :: rbSubstAll (-> Ints Ints Ints Ints))
+(pub :: rbSubstAll (-> (Vec ASTNode) Names (Vec ASTNode) (Vec ASTNode)))
 (pub fn (rbSubstAll ts vars args)
   {
     (let out vecNew)
@@ -432,8 +432,7 @@
     }
   })
 
-(pub :: rbIndexOfName (-> Ints String Int))
-;@axiom:effect(unsafe)
+(pub :: rbIndexOfName (-> Names String Int))
 (pub fn (rbIndexOfName names n)
   (if (== (as names Int) 0)
     (- 0 1)
@@ -542,7 +541,7 @@
 ; `rbTypesBlock` writes no `struct`/`enum`; `rbRustType` answers "",
 ; so every `pub fn` mentioning the type becomes a `//` note instead of
 ; a wrapper.
-(pub :: rbTypeNamesSpellable (-> Ints Int Int))
+(pub :: rbTypeNamesSpellable (-> (Vec ASTNode) ASTNode Int))
 ;@axiom:effect(unsafe)
 (pub fn (rbTypeNamesSpellable decls t)
   (if (rbIsRustIdent (rbCarrierName (nodeAName t)))
@@ -583,8 +582,7 @@
 ; The first name in `names` (a Vec of String) that is not a Rust
 ; identifier, or "" when every one of them is. A binder name is never
 ; empty, so "" is unambiguous.
-(pub :: rbFirstUnspellable (-> Ints String))
-;@axiom:effect(unsafe)
+(pub :: rbFirstUnspellable (-> Names String))
 (pub fn (rbFirstUnspellable names)
   {
     (let mut i 0)
@@ -606,9 +604,9 @@
 ; Does the binding carry `t`? Words, String, and a data type whose
 ; every field it carries. A recursive type is carried coinductively:
 ; a name already being examined is assumed carried (`visiting`).
-(pub :: rbCarried (-> Ints Int Ints Int))
+(pub :: rbCarried (-> (Vec ASTNode) ASTNode Names Int))
 (pub fn (rbCarried decls t visiting)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     0
     (if (== (rbIsWordLeaf t) 1)
       1
@@ -632,7 +630,7 @@
                     (let mut ok 1)
                     (let mut i 0)
                     {
-                      (vecPush visiting (as m Int))
+                      (vecPush visiting m)
                       (while (< i (vecLen cs))
                         {
                           {
@@ -656,14 +654,14 @@
 
 ; A type's name in a shim symbol and a Rust identifier: `Int`,
 ; `Pair`, `Option_Int`, `Result_Int_String`, `List_Option_Int`.
-(pub :: rbMangle (-> Int String))
+(pub :: rbMangle (-> ASTNode String))
 (pub fn (rbMangle t)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     "_"
     (if (== (nodeTag t) TAG_T_CON)
       {
         (let mut s (rbCarrierName (nodeAName t)))
-        (let args (nodeBVec t))
+        (let args (nodeBChildren t))
         (let mut i 0)
         {
           (while (< i (vecLen args))
@@ -678,7 +676,7 @@
 
 ; Every data instantiation the `pub` signatures reach, including
 ; through fields, each once, in first-seen order.
-(pub :: rbInstances (-> Ints Ints Ints))
+(pub :: rbInstances (-> (Vec ASTNode) Names (Vec ASTNode)))
 (pub fn (rbInstances decls pubNames)
   {
     (let insts vecNew)
@@ -692,8 +690,8 @@
             (if (&& (== (nodeTag d) TAG_D_FN) (rbNamed pubNames (nodeAName d)))
               {
                 (let sigd (rbFindSig decls (nodeAName d) 0))
-                (if (! (== sigd 0))
-                  (rbCollectInst decls (nodeTy sigd) insts seen))
+                (if (! (nodeSame sigd nilNode))
+                  (rbCollectInst decls (nodeTyChild sigd) insts seen))
               })
           }
           (set i (+ i 1))
@@ -702,16 +700,16 @@
     }
   })
 
-(pub :: rbCollectInst (-> Ints Int Ints Ints Int))
+(pub :: rbCollectInst (-> (Vec ASTNode) ASTNode (Vec ASTNode) Names Int))
 (pub fn (rbCollectInst decls t insts seen)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     0
     {
       (let tag (nodeTag t))
       (if (== tag TAG_T_ARR)
         {
-          (rbCollectInst decls (nodeA t) insts seen)
-          (rbCollectInst decls (nodeB t) insts seen)
+          (rbCollectInst decls (nodeAChild t) insts seen)
+          (rbCollectInst decls (nodeBChild t) insts seen)
         }
         (if (&& (== tag TAG_T_CON) (== (rbIsData decls t) 1))
           (if (== (rbCarried decls t vecNew) 0)
@@ -724,7 +722,7 @@
                   (let cs (rbCtorsOf decls t))
                   (let mut i 0)
                   {
-                    (vecPush seen (as m Int))
+                    (vecPush seen m)
                     (vecPush insts t)
                     (while (< i (vecLen cs))
                       {
@@ -749,7 +747,7 @@
 ; A source identity and an exported symbol are separate keys. Refuse a
 ; collision before synthesising declarations, with a module diagnostic
 ; rather than a span in generated text presented as the user's source.
-(pub :: rbCollisionName (-> Ints Ints String))
+(pub :: rbCollisionName (-> Nodes Names String))
 (pub fn (rbCollisionName decls pubNames)
   {
     (let insts (rbInstances decls pubNames))
@@ -775,7 +773,7 @@
 ; The synthesised Axiom shims
 ; ------------------------------------------------------------------
 ; Axiom source for every accessor shim the binding calls.
-(pub :: rbShimSource (-> Ints Ints String))
+(pub :: rbShimSource (-> Nodes Names String))
 (pub fn (rbShimSource decls pubNames)
   {
     (let insts (rbInstances decls pubNames))
@@ -796,13 +794,13 @@
 ; Source generated for standard Result must name Err's constructors
 ; even when the entry declares its own Ok or Err. Rust keeps the short
 ; constructor names in its own Result type.
-(:: rbShimCtorName (-> Int String String))
+(:: rbShimCtorName (-> ASTNode String String))
 (fn (rbShimCtorName t name)
   (if (strEq (nodeAName t) "Err$Result")
     (concat "Err::" name)
     name))
 
-(pub :: rbShimsFor (-> Ints Int String))
+(pub :: rbShimsFor (-> (Vec ASTNode) ASTNode String))
 ;@axiom:effect(unsafe)
 (pub fn (rbShimsFor decls t)
   ; the tag
@@ -918,11 +916,11 @@
     }
   })
 
-(pub :: rbIsStructType (-> Ints Int Int))
+(pub :: rbIsStructType (-> (Vec ASTNode) ASTNode Int))
 (pub fn (rbIsStructType decls t)
   {
     (let d (rbDataDecl decls (nodeAName t)))
-    (if (== d 0)
+    (if (nodeSame d nilNode)
       0
       (if (== (nodeTag d) TAG_D_STRUCT)
         1
@@ -945,7 +943,7 @@
     }
   })
 
-(pub :: rbSpellEachSp (-> Ints Int String))
+(pub :: rbSpellEachSp (-> (Vec ASTNode) Int String))
 (pub fn (rbSpellEachSp v i)
   (if (>= i (vecLen v))
     ""
@@ -955,7 +953,7 @@
 ; after the module's first check, so every type has its declaration's
 ; identity. The combined module is checked again. A parse
 ; failure here is a compiler bug and says so.
-(pub :: rbAppendShims (-> Ints Ints Int))
+(pub :: rbAppendShims (-> (Vec ASTNode) Names Int))
 ;@axiom:effect(io)
 (pub fn (rbAppendShims decls pubNames)
   {
@@ -973,7 +971,7 @@
             0
           }
           {
-            (let ds (memGetWordVec pr 1))
+            (let ds (readAstNodes pr 1))
             (let mut i 0)
             {
               (while (< i (vecLen ds))
@@ -993,7 +991,7 @@
 ; ------------------------------------------------------------------
 ; The whole file, from the entry unit's declarations (shims included)
 ; and the names that were `pub` when parsed.
-(pub :: rustBindingOf (-> Ints Ints String String))
+(pub :: rustBindingOf (-> (Vec ASTNode) Names String String))
 (pub fn (rustBindingOf decls pubNames fileName)
   {
     (let raws vecNew)
@@ -1152,18 +1150,18 @@
 ; This also covers the synthesised `axh_*` shims below, whose names
 ; embed a type's and a constructor's, though `rbTypeNamesSpellable`
 ; has already stopped a poisoned type reaching `rbShimSource` at all.
-(pub :: rbOneFn (-> Ints Int Ints Ints Ints Int))
+(pub :: rbOneFn (-> (Vec ASTNode) ASTNode Ints Ints Ints Int))
 (pub fn (rbOneFn decls f raws wraps notes)
   {
     (let name (nodeAName f))
     (let sigd (rbFindSig decls (nodeAName f) 0))
     {
       (let ty
-        (if (== sigd 0)
-          0
-          (nodeTy sigd)))
+        (if (nodeSame sigd nilNode)
+          nilNode
+          (nodeTyChild sigd)))
       (if (rbIsRustIdent name)
-        (if (== ty 0)
+        (if (nodeSame ty nilNode)
           {
             (vecPush notes
               (as (concat "// `"
@@ -1173,7 +1171,7 @@
           {
             (let params (rbParamTypes ty vecNew))
             (let res (sigResultOf ty))
-            (let names (nodeBVec f))
+            (let names (nodeBNames f))
             (if (strStartsWith name "axh_")
               {
                 (vecPush raws (as (rbRawDecl name params) Int))
@@ -1236,10 +1234,10 @@
     }
   })
 
-(pub :: rbFindSig (-> Ints String Int Int))
+(pub :: rbFindSig (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (rbFindSig decls name i)
   (if (>= i (vecLen decls))
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_SIG) (strEq (nodeAName d) name))
@@ -1248,21 +1246,21 @@
     }))
 
 ; The parameter types along the arrow spine, and the result past it.
-(pub :: rbParamTypes (-> Int Ints Ints))
+(pub :: rbParamTypes (-> ASTNode (Vec ASTNode) (Vec ASTNode)))
 (pub fn (rbParamTypes ty acc)
-  (if (&& (!= ty 0) (== (nodeTag ty) TAG_T_ARR))
+  (if (&& (! (nodeSame ty nilNode)) (== (nodeTag ty) TAG_T_ARR))
     {
-      (vecPush acc (nodeA ty))
-      (rbParamTypes (nodeB ty) acc)
+      (vecPush acc (nodeAChild ty))
+      (rbParamTypes (nodeBChild ty) acc)
     }
     acc))
 
 ; The Rust type of `t` in a wrapper's signature, or "" when the
 ; binding does not carry it. `pos` is 0 for a parameter, 1 for a
 ; result, 2 for a field of a data type (owned everywhere).
-(pub :: rbRustType (-> Ints Int Int String))
+(pub :: rbRustType (-> (Vec ASTNode) ASTNode Int String))
 (pub fn (rbRustType decls t pos)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     ""
     (if (== (rbIsWordLeaf t) 1)
       {
@@ -1296,28 +1294,28 @@
                     (concat "&" own)
                     own)
                 })
-              (if (&& (== (nodeTag t) TAG_T_TUP) (&& (== pos 1) (== (vecLen (nodeAVec t)) 0)))
+              (if (&& (== (nodeTag t) TAG_T_TUP) (&& (== pos 1) (== (vecLen (nodeAChildren t)) 0)))
                 "()"
                 ""))))))))
 
 ; The Rust spelling of a carried data type as a value: `Pair`,
 ; `Option<i64>`, `Result<i64, AxString>`, `List_Int`.
-(pub :: rbRustDataName (-> Ints Int String))
+(pub :: rbRustDataName (-> (Vec ASTNode) ASTNode String))
 (pub fn (rbRustDataName decls t)
   {
     (let n (nodeAName t))
     (if (strEq n "Option")
-      (concat "Option<" (concat (rbRustType decls (vecGet (nodeBVec t) 0) 2) ">"))
+      (concat "Option<" (concat (rbRustType decls (vecGet (nodeBChildren t) 0) 2) ">"))
       (if (strEq n "Err$Result")
         (concat "Result<"
-          (concat (rbRustType decls (vecGet (nodeBVec t) 0) 2)
-            (concat ", " (concat (rbRustType decls (vecGet (nodeBVec t) 1) 2) ">"))))
+          (concat (rbRustType decls (vecGet (nodeBChildren t) 0) 2)
+            (concat ", " (concat (rbRustType decls (vecGet (nodeBChildren t) 1) 2) ">"))))
         (rbMangle t)))
   })
 
 ; The first type the binding cannot carry, spelled for the note; ""
 ; when every leaf is carried.
-(pub :: rbFirstUnsupported (-> Ints Ints Int String))
+(pub :: rbFirstUnsupported (-> (Vec ASTNode) (Vec ASTNode) ASTNode String))
 (pub fn (rbFirstUnsupported decls params res)
   {
     (let mut i 0)
@@ -1342,7 +1340,7 @@
 ; is answered by renaming. Without the split, `(pub data P*/q (C/*d Int
 ; Int))` was reported as a type the binding does not carry, which is
 ; false - it carries a two-field product perfectly well.
-(pub :: rbUncarriedPhrase (-> Ints Int String))
+(pub :: rbUncarriedPhrase (-> (Vec ASTNode) ASTNode String))
 (pub fn (rbUncarriedPhrase decls t)
   (concat "`"
     (concat (rbSpellType t)
@@ -1351,7 +1349,7 @@
         "`, which the binding does not carry"))))
 
 ; `extern "C"` line: every word is `i64` on the wire.
-(pub :: rbRawDecl (-> String Ints String))
+(pub :: rbRawDecl (-> String (Vec ASTNode) String))
 (pub fn (rbRawDecl name params)
   (concat "        pub fn "
     (concat name (concat (concat "(" (concat (rbRawParams (vecLen params) 0) ")")) " -> i64;\n"))))
@@ -1373,7 +1371,7 @@
 ; is 1 when `e` is a reference (a match binder, a `&T` parameter), 0
 ; when it is the value itself. A data-typed value becomes an OWNED
 ; word the caller releases after the call (`rbIsOwnedWord`).
-(pub :: rbToWord (-> Int String Int String))
+(pub :: rbToWord (-> ASTNode String Int String))
 (pub fn (rbToWord t e isRef)
   {
     (let deref
@@ -1403,7 +1401,7 @@
                   ")")))))))
   })
 
-(pub :: rbIsOwnedWord (-> Ints Int Int))
+(pub :: rbIsOwnedWord (-> (Vec ASTNode) ASTNode Int))
 (pub fn (rbIsOwnedWord decls t)
   (if (== (rbIsData decls t) 1)
     1
@@ -1411,7 +1409,7 @@
 
 ; A Rust expression for the value of type `t` held in the OWNED word
 ; `w` (a result, or an accessor's answer): adopted or consumed.
-(pub :: rbFromWord (-> Int String String))
+(pub :: rbFromWord (-> ASTNode String String))
 (pub fn (rbFromWord t w)
   (if (== (rbIsWordLeaf t) 1)
     {
@@ -1435,7 +1433,7 @@
 ; ------------------------------------------------------------------
 ; The Rust types and their conversion functions
 ; ------------------------------------------------------------------
-(pub :: rbTypesBlock (-> Ints Ints String))
+(pub :: rbTypesBlock (-> (Vec ASTNode) (Vec ASTNode) String))
 (pub fn (rbTypesBlock decls insts)
   {
     (let mut out "")
@@ -1453,7 +1451,7 @@
 ; The Rust side of one data instantiation: the type (unless it is
 ; `Option`/`Result`, which Rust has), `__from_<M>` consuming an owned
 ; word, `__to_<M>` answering one.
-(pub :: rbTypeFor (-> Ints Int String))
+(pub :: rbTypeFor (-> (Vec ASTNode) ASTNode String))
 (pub fn (rbTypeFor decls t)
   {
     (let m (rbMangle t))
@@ -1489,7 +1487,7 @@
   })
 
 ; `pub struct T { pub f0: .. }` or `pub enum T { C0(..), C1 }`.
-(pub :: rbTypeDecl (-> Ints Int IntRows String))
+(pub :: rbTypeDecl (-> (Vec ASTNode) ASTNode IntRows String))
 (pub fn (rbTypeDecl decls t cs)
   {
     (let rn (rbRustDataName decls t))
@@ -1546,7 +1544,7 @@
 
 ; A field's Rust type: owned, and boxed when it reaches the type
 ; being declared (a recursive `List`'s tail).
-(pub :: rbFieldRustType (-> Ints String Int String))
+(pub :: rbFieldRustType (-> (Vec ASTNode) String ASTNode String))
 (pub fn (rbFieldRustType decls m ft)
   {
     (let rt (rbRustType decls ft 2))
@@ -1555,7 +1553,7 @@
       rt)
   })
 
-(pub :: rbFieldRustTypes (-> Ints String Ints Int String))
+(pub :: rbFieldRustTypes (-> (Vec ASTNode) String (Vec ASTNode) Int String))
 (pub fn (rbFieldRustTypes decls m tys i)
   (if (>= i (vecLen tys))
     ""
@@ -1567,7 +1565,7 @@
         (rbFieldRustTypes decls m tys (+ i 1))))))
 
 ; Does type `t` reach the data type mangled `m` through its fields?
-(pub :: rbReaches (-> Ints Int String Ints Bool))
+(pub :: rbReaches (-> (Vec ASTNode) ASTNode String Names Bool))
 (pub fn (rbReaches decls t m visiting)
   (if (== (rbIsData decls t) 0)
     false
@@ -1582,7 +1580,7 @@
             (let mut found false)
             (let mut j 0)
             {
-              (vecPush visiting (as tm Int))
+              (vecPush visiting tm)
               (while (< j (vecLen cs))
                 {
                   {
@@ -1615,7 +1613,7 @@
 ; `fn __from_M(word: AxWord) -> T`: read the tag, read each field of
 ; the live constructor (an owned word each) into a local, build the
 ; value, release the word.
-(pub :: rbFromFn (-> Ints Int IntRows String String))
+(pub :: rbFromFn (-> (Vec ASTNode) ASTNode IntRows String String))
 (pub fn (rbFromFn decls t cs rn)
   {
     (let m (rbMangle t))
@@ -1701,7 +1699,7 @@
 
 ; How a constructor is written in Rust: `Pair { a: .., b: .. }`,
 ; `Shape::Rect(..)`, `Some(..)`, `Err(..)`, `None`.
-(pub :: rbCtorExpr (-> Ints Int Ints String String String))
+(pub :: rbCtorExpr (-> (Vec ASTNode) ASTNode Ints String String String))
 (pub fn (rbCtorExpr decls t c rn args)
   {
     (let n (nodeAName t))
@@ -1721,7 +1719,7 @@
 ; `fn __to_M(v: &T) -> AxWord`: build the word through the
 ; constructor shim, releasing the owned words of data-typed fields
 ; afterwards (the constructor retained what it kept).
-(pub :: rbToFn (-> Ints Int IntRows String String))
+(pub :: rbToFn (-> (Vec ASTNode) ASTNode IntRows String String))
 (pub fn (rbToFn decls t cs rn)
   {
     (let m (rbMangle t))
@@ -1813,7 +1811,7 @@
     }
   })
 
-(pub :: rbCtorPat (-> Ints Int Ints String String String))
+(pub :: rbCtorPat (-> (Vec ASTNode) ASTNode Ints String String String))
 (pub fn (rbCtorPat decls t c rn pat)
   {
     (let n (nodeAName t))
@@ -1833,7 +1831,7 @@
 ; ------------------------------------------------------------------
 ; Wrappers
 ; ------------------------------------------------------------------
-(pub :: rbWrapper (-> Ints String Int Ints Int Ints String))
+(pub :: rbWrapper (-> (Vec ASTNode) String ASTNode (Vec ASTNode) ASTNode Names String))
 (pub fn (rbWrapper decls name ty params res names)
   {
     (let rname (rbSnake name))
@@ -1876,8 +1874,7 @@
           (concat rels (concat (rbResultExpr res rty) "}\n\n")))))
   })
 
-(pub :: rbSigLine (-> Ints Ints Ints Int String))
-;@axiom:effect(unsafe)
+(pub :: rbSigLine (-> (Vec ASTNode) (Vec ASTNode) Names Int String))
 (pub fn (rbSigLine decls params names i)
   (if (>= i (vecLen params))
     ""
@@ -1892,8 +1889,7 @@
 
 ; A `&str` argument becomes an `AxString` for the call's duration; a
 ; data argument becomes an owned word released after it.
-(pub :: rbArgLets (-> Ints Ints Ints Int String))
-;@axiom:effect(unsafe)
+(pub :: rbArgLets (-> (Vec ASTNode) (Vec ASTNode) Names Int String))
 (pub fn (rbArgLets decls params names i)
   (if (>= i (vecLen params))
     ""
@@ -1911,7 +1907,7 @@
         (rbArgLets decls params names (+ i 1)))
     }))
 
-(pub :: rbArgRels (-> Ints Ints Int String))
+(pub :: rbArgRels (-> (Vec ASTNode) (Vec ASTNode) Int String))
 (pub fn (rbArgRels decls params i)
   (if (>= i (vecLen params))
     ""
@@ -1921,8 +1917,7 @@
         "")
       (rbArgRels decls params (+ i 1)))))
 
-(pub :: rbArgList (-> Ints Ints Ints Int String))
-;@axiom:effect(unsafe)
+(pub :: rbArgList (-> (Vec ASTNode) (Vec ASTNode) Names Int String))
 (pub fn (rbArgList decls params names i)
   (if (>= i (vecLen params))
     ""
@@ -1943,7 +1938,7 @@
     }))
 
 ; The result: the owned word `__r`, converted.
-(pub :: rbResultExpr (-> Int String String))
+(pub :: rbResultExpr (-> ASTNode String String))
 (pub fn (rbResultExpr res rty)
   (if (strEq rty "()")
     "    let _ = __r;\n"
@@ -2070,36 +2065,36 @@
 
 ; A type spelled as the source spells it, for signatures, the doc
 ; line and the notes.
-(pub :: rbSpellType (-> Int String))
+(pub :: rbSpellType (-> ASTNode String))
 (pub fn (rbSpellType t)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     "?"
     {
       (let tag (nodeTag t))
       (if (== tag TAG_T_CON)
-        (if (== (vecLen (nodeBVec t)) 0)
+        (if (== (vecLen (nodeBChildren t)) 0)
           (rbSourceName (nodeAName t))
           (concat "("
-            (concat (concat (rbSourceName (nodeAName t)) (rbSpellEach (nodeBVec t) 0)) ")")))
+            (concat (concat (rbSourceName (nodeAName t)) (rbSpellEach (nodeBChildren t) 0)) ")")))
         (if (== tag TAG_T_VAR)
           (rbSourceName (nodeAName t))
           (if (== tag TAG_T_ARR)
             (concat "(->" (concat (rbSpellSpine t) ")"))
             (if (== tag TAG_T_TUP)
-              (if (== (vecLen (nodeAVec t)) 0)
+              (if (== (vecLen (nodeAChildren t)) 0)
                 "()"
-                (concat "(Tuple" (concat (rbSpellEach (nodeAVec t) 0) ")")))
+                (concat "(Tuple" (concat (rbSpellEach (nodeAChildren t) 0) ")")))
               "?"))))
     }))
 
-(pub :: rbSpellEach (-> Ints Int String))
+(pub :: rbSpellEach (-> (Vec ASTNode) Int String))
 (pub fn (rbSpellEach v i)
   (if (>= i (vecLen v))
     ""
     (concat " " (concat (rbSpellType (vecGet v i)) (rbSpellEach v (+ i 1))))))
 
-(pub :: rbSpellSpine (-> Int String))
+(pub :: rbSpellSpine (-> ASTNode String))
 (pub fn (rbSpellSpine t)
-  (if (&& (!= t 0) (== (nodeTag t) TAG_T_ARR))
-    (concat " " (concat (rbSpellType (nodeA t)) (rbSpellSpine (nodeB t))))
+  (if (&& (! (nodeSame t nilNode)) (== (nodeTag t) TAG_T_ARR))
+    (concat " " (concat (rbSpellType (nodeAChild t)) (rbSpellSpine (nodeBChild t))))
     (concat " " (rbSpellType t))))

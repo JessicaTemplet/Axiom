@@ -14,7 +14,7 @@
 
 (pub struct FrontParsed
   (source : String)
-  (decls : (Vec Int)))
+  (decls : (Vec ASTNode)))
 
 (struct FrontWriter
   (mut bytes : String)
@@ -46,6 +46,11 @@
 ;@axiom:effect(unsafe)
 (fn (frontVector word)
   (as word (Vec Int)))
+
+(:: frontNode (-> Int ASTNode))
+;@axiom:effect(unsafe)
+(fn (frontNode word)
+  (as word ASTNode))
 
 ; w = word, s = string, n = node, N/S/W/P = vector of nodes/strings/
 ; words/spans, p = span, R = macro rules, A = annotations, L = literal pair.
@@ -257,23 +262,23 @@
 ; The header holds a seven-bit node tag and nine presence bits. Zero
 ; fields are reconstructed from mkNode's defaults, preserving null versus
 ; an allocated empty vector without copying unused metadata words.
-(:: frontNodeMask (-> Int Int))
+(:: frontNodeMask (-> ASTNode Int))
 (fn (frontNodeMask node)
   {
     (let mut mask 0)
     (let mut field 1)
     (while (< field 10)
       {
-        (if (!= (memGetWord node field) 0)
+        (if (!= (nodeWireWord node field) 0)
           (set mask (| mask (<< 1 (- field 1)))))
         (set field (+ field 1))
       })
     mask
   })
 
-(:: frontPutNode (-> FrontWriter Int Int Int))
+(:: frontPutNode (-> FrontWriter ASTNode Int Int))
 (fn (frontPutNode out value depth)
-  (if (== value 0)
+  (if (nodeSame value nilNode)
     (frontPutWord out (- 0 1))
     {
       (let tag (nodeTag value))
@@ -300,7 +305,7 @@
                       (frontKind tag field)))
                   (if (&& (== tag TAG_FIELD) (|| (== field 2) (== field 3)))
                     (frontPutWord out kind))
-                  (let payload (memGetWord value field))
+                  (let payload (nodeWireWord value field))
                   (if (&& (== kind 119) (! (frontRawValid tag field payload)))
                     (set out.good false))
                   (frontPutValue out payload kind (+ depth 1))
@@ -319,7 +324,7 @@
       (match kind
         (119 (frontPutWord out value))
         (115 (frontPutString out value))
-        (110 (frontPutNode out value depth))
+        (110 (frontPutNode out (frontNode value) depth))
         (78 (frontPutVector out value 110 depth))
         (83 (frontPutVector out value 115 depth))
         (87 (frontPutVector out value 119 depth))
@@ -365,27 +370,80 @@
       0
     }))
 
-(:: frontGetString (-> FrontReader Int))
+(:: frontGetString (-> FrontReader String))
 (fn (frontGetString input)
   {
     (let size (frontGetWord input))
     (if (== size (- 0 1))
-      0
+      (frontString 0)
       (if (&& input.good (&& (>= size 0) (<= size (- (strLen input.bytes) input.pos))))
         {
           (let text (strSlice input.bytes input.pos size))
           (set input.pos (+ input.pos (frontPad size)))
-          (__retainref text)
-          (as text Int)
+          text
         }
         {
           (set input.good false)
-          0
+          (frontString 0)
+        }))
+  })
+
+(struct FrontReadPosition
+  (input : FrontReader)
+  (depth : Int))
+
+(:: frontGetText (-> FrontReadPosition String))
+(fn (frontGetText position)
+  (frontGetString position.input))
+
+(:: frontGetChild (-> FrontReadPosition ASTNode))
+(fn (frontGetChild position)
+  (frontGetNode position.input position.depth))
+
+; Homogeneous packets use owning vectors of their decoded element type.
+(:: frontGetItems (-> FrontReader Int (-> FrontReadPosition a) (Vec a)))
+;@axiom:effect(unsafe)
+(fn (frontGetItems input depth decode)
+  {
+    (let count (frontGetWord input))
+    (if (== count (- 0 1))
+      (as 0 (Vec a))
+      (if (&& input.good (&& (>= count 0) (<= count (/ (- (strLen input.bytes) input.pos) 8))))
+        {
+          (let values (vecWithCapacity count))
+          (let position (FrontReadPosition :input input :depth (+ depth 1)))
+          (let mut i 0)
+          (while (&& input.good (< i count))
+            {
+              (vecPush values (decode position))
+              (set i (+ i 1))
+            })
+          values
+        }
+        {
+          (set input.good false)
+          (as 0 (Vec a))
         }))
   })
 
 (:: frontGetVector (-> FrontReader Int Int Int))
 (fn (frontGetVector input kind depth)
+  (if (== kind 110)
+    {
+      (let values (frontGetItems input depth frontGetChild))
+      (__retainref values)
+      (as values Int)
+    }
+    (if (== kind 115)
+      {
+        (let values (frontGetItems input depth frontGetText))
+        (__retainref values)
+        (as values Int)
+      }
+      (frontGetRawVector input kind depth))))
+
+(:: frontGetRawVector (-> FrontReader Int Int Int))
+(fn (frontGetRawVector input kind depth)
   {
     (let count (frontGetWord input))
     (if (== count (- 0 1))
@@ -422,69 +480,74 @@
     (as record Int)
   })
 
-(:: frontGetNode (-> FrontReader Int Int))
+(:: frontGetNode (-> FrontReader Int ASTNode))
 (fn (frontGetNode input depth)
-  {
-    (let header (frontGetWord input))
-    (let tag (& header 127))
-    (let mask (>> header 7))
-    (if (== header (- 0 1))
-      0
-      (if (|| (< header 0) (|| (> mask 511) (strEq (frontShape tag) "!")))
-        {
-          (set input.good false)
-          0
-        }
-        {
-          (let node (mkNode tag 0 0 0))
-          (let mut field 1)
-          (let mut fieldKind 0)
-          (let mut symbolKind 0)
-          (while (&& input.good (< field 10))
-            {
-              (if (!= (& mask (<< 1 (- field 1))) 0)
-                {
-                  (let kind
+  (if (> depth 512)
+    {
+      (set input.good false)
+      nilNode
+    }
+    {
+      (let header (frontGetWord input))
+      (let tag (& header 127))
+      (let mask (>> header 7))
+      (if (== header (- 0 1))
+        nilNode
+        (if (|| (< header 0) (|| (> mask 511) (strEq (frontShape tag) "!")))
+          {
+            (set input.good false)
+            nilNode
+          }
+          {
+            (let node (nodeWireEmpty tag))
+            (let mut field 1)
+            (let mut fieldKind 0)
+            (let mut symbolKind 0)
+            (while (&& input.good (< field 10))
+              {
+                (if (!= (& mask (<< 1 (- field 1))) 0)
+                  {
+                    (let kind
+                      (if (&& (== tag TAG_FIELD) (|| (== field 2) (== field 3)))
+                        (frontGetWord input)
+                        (frontKind tag field)))
                     (if (&& (== tag TAG_FIELD) (|| (== field 2) (== field 3)))
-                      (frontGetWord input)
-                      (frontKind tag field)))
-                  (if (&& (== tag TAG_FIELD) (|| (== field 2) (== field 3)))
-                    {
-                      (if (== field 2)
-                        (set fieldKind kind)
-                        (set symbolKind kind))
-                      (if (!
-                            (|| (== kind 119)
-                              (== kind
-                                (if (== field 2)
-                                  110
-                                  115))))
-                        (set input.good false))
-                    })
-                  (let payload (frontGetValue input kind (+ depth 1)))
-                  (if (|| (== payload 0) (&& (== kind 119) (! (frontRawValid tag field payload))))
-                    (set input.good false))
-                  (memSetWord node field payload)
-                })
-              (set field (+ field 1))
-            })
-          (if (|| (!= (nodeModule node) 0)
-                (&& (== tag TAG_FIELD)
-                  (||
-                    (&& (!= fieldKind 0)
-                      (!= fieldKind
-                        (if (== (nodeTy node) 0)
-                          110
-                          119)))
-                    (&& (!= symbolKind 0)
-                      (!= symbolKind
-                        (if (== (nodeTy node) 0)
-                          115
-                          119))))))
-            (set input.good false))
-          node
-        }))
-  })
+                      {
+                        (if (== field 2)
+                          (set fieldKind kind)
+                          (set symbolKind kind))
+                        (if (!
+                              (|| (== kind 119)
+                                (== kind
+                                  (if (== field 2)
+                                    110
+                                    115))))
+                          (set input.good false))
+                      })
+                    (let payload (frontGetValue input kind (+ depth 1)))
+                    (if (|| (== payload 0) (&& (== kind 119) (! (frontRawValid tag field payload))))
+                      (set input.good false))
+                    (nodeWireStore node field payload (!= kind 119))
+                  })
+                (set field (+ field 1))
+              })
+            (if (|| (!= (nodeModule node) 0)
+                  (&& (== tag TAG_FIELD)
+                    (||
+                      (&& (!= fieldKind 0)
+                        (!= fieldKind
+                          (if (== (nodeTy node) 0)
+                            110
+                            119)))
+                      (&& (!= symbolKind 0)
+                        (!= symbolKind
+                          (if (== (nodeTy node) 0)
+                            115
+                            119))))))
+              (set input.good false))
+            node
+          }))
+    }))
 
 (:: frontGetValue (-> FrontReader Int Int Int))
 (fn (frontGetValue input kind depth)
@@ -495,8 +558,20 @@
     }
     (match kind
       (119 (frontGetWord input))
-      (115 (frontGetString input))
-      (110 (frontGetNode input depth))
+      (115
+        {
+          (let text (frontGetString input))
+          (__retainref text)
+          (as text Int)
+        }
+      )
+      (110
+        {
+          (let node (frontGetNode input depth))
+          (__retainref node)
+          (as node Int)
+        }
+      )
       (78 (frontGetVector input 110 depth))
       (83 (frontGetVector input 115 depth))
       (87 (frontGetVector input 119 depth))
@@ -522,7 +597,7 @@
       (97
         {
           (let off (frontGetWord input))
-          (let content (frontString (frontGetString input)))
+          (let content (frontGetString input))
           (as (AxtagEnt :off off :content content) Int)
         }
       )
@@ -645,11 +720,11 @@
       (if (!= (frontGetWord input) frontMagic)
         None
         {
-          (let source (frontString (frontGetString input)))
+          (let source (frontGetString input))
           (set input.sourceBytes (if (== (as source Int) 0)
             0
             (strLen source)))
-          (let decls (frontVector (frontGetVector input 110 0)))
+          (let decls (frontGetItems input 0 frontGetChild))
           (if (&& input.good
                 (&& (== input.pos (strLen bytes))
                   (&& (!= (as source Int) 0) (!= (as decls Int) 0))))
@@ -668,6 +743,6 @@
         (let parsed (parseModuleWith tokens (scanAxtags source)))
         (if (== (memGetWord parsed 0) 0)
           None
-          (Some (FrontParsed :source source :decls (memGetWordVec parsed 1))))
+          (Some (FrontParsed :source source :decls (readAstNodes parsed 1))))
       })
   })

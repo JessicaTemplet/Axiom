@@ -2073,7 +2073,7 @@
 ; archive does define. `compileFile` runs this before the toolchain;
 ; `groundDeclares` below stays as the span-less fallback for IR built
 ; by another path.
-(pub :: groundExternsSpanned (-> String Ints Ints Int Ints Int))
+(pub :: groundExternsSpanned (-> String (Vec ASTNode) Ints Int Ints Int))
 ;@axiom:effect(io)
 (pub fn (groundExternsSpanned ir decls units dfmt linkArgs)
   {
@@ -2108,7 +2108,7 @@
     }
   })
 
-(pub :: groundEachSpanned (-> Ints Ints Ints Ints Ints Int Int Int))
+(pub :: groundEachSpanned (-> Ints Ints Ints (Vec ASTNode) Ints Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (groundEachSpanned names blobs paths decls units dfmt i)
@@ -2128,9 +2128,9 @@
           (let want
             {
               (let it (findExternItem decls n 0))
-              (if (== it 0)
+              (if (nodeSame it nilNode)
                 ""
-                (externSigTag (nodeB it)))
+                (externSigTag (nodeBChild it)))
             })
           (let have (descriptorsOf blobs n))
           (if (|| (== (strLen want) 0) (|| (== (vecLen have) 0) (>= (strIndexIn have want) 0)))
@@ -2140,7 +2140,7 @@
               {
                 (let d
                   (mkDiag SEV_ERROR "AX4005" "extern-shape"
-                    (if (== item 0)
+                    (if (nodeSame item nilNode)
                       0
                       (nodeSpan item))
                     (concat (concat "`" (concat n "` is exported by the crate for "))
@@ -2159,7 +2159,7 @@
                   {
                     (let out
                       (renderDiagsFormat dfmt ds
-                        (if (== item 0)
+                        (if (nodeSame item nilNode)
                           {
                             (let uv vecNew)
                             {
@@ -2204,7 +2204,7 @@
             {
               (let d
                 (mkDiag SEV_ERROR "AX4004" "ungrounded-symbol"
-                  (if (== item 0)
+                  (if (nodeSame item nilNode)
                     0
                     (nodeSpan item))
                   msg 0 0 help))
@@ -2217,7 +2217,7 @@
                 {
                   (let out
                     (renderDiagsFormat dfmt ds
-                      (if (== item 0)
+                      (if (nodeSame item nilNode)
                         {
                           (let u vecNew)
                           {
@@ -2243,7 +2243,7 @@
 ; comparison apart at every call site. The recursion below keeps the
 ; -1 and stays private; the boundary is where the type is worth
 ; having.
-(pub :: findExternUnit (-> Ints String Ints (Option Int)))
+(pub :: findExternUnit (-> (Vec ASTNode) String Ints (Option Int)))
 (pub fn (findExternUnit decls sym units)
   {
     (let u (findExternUnitFrom decls sym units 0))
@@ -2252,14 +2252,15 @@
       (Some u))
   })
 
-(:: findExternUnitFrom (-> Ints String Ints Int Int))
+(:: findExternUnitFrom (-> (Vec ASTNode) String Ints Int Int))
 ;@axiom:effect(unsafe)
 (fn (findExternUnitFrom decls sym units i)
   (if (>= i (vecLen decls))
     (- 0 1)
     {
       (let d (vecGet decls i))
-      (if (&& (== (nodeTag d) TAG_D_EXTERN) (!= (findExternItemIn (nodeCVec d) sym 0) 0))
+      (if (&& (== (nodeTag d) TAG_D_EXTERN)
+            (! (nodeSame (findExternItemIn (nodeCChildren d) sym 0) nilNode)))
         (if (== (as (nodeModule d) Int) 0)
           0
           (unitIndexOf units (as (nodeModule d) String) 0))
@@ -2269,27 +2270,27 @@
 ; The descriptor string an extern item's declared type spells:
 ; `<params>_<ret>`, one tag per parameter, the result after the
 ; underscore. Mirrors rust/axiom-ffi-classify.
-(pub :: externSigTag (-> Int String))
+(pub :: externSigTag (-> ASTNode String))
 (pub fn (externSigTag ty)
-  (if (== ty 0)
+  (if (nodeSame ty nilNode)
     ""
     (concat (sigParamTags ty) (concat "_" (sigTagOf (sigResultOf ty))))))
 
-(pub :: sigParamTags (-> Int String))
+(pub :: sigParamTags (-> ASTNode String))
 (pub fn (sigParamTags ty)
-  (if (&& (!= ty 0) (== (nodeTag ty) TAG_T_ARR))
-    (concat (sigTagOf (nodeA ty)) (sigParamTags (nodeB ty)))
+  (if (&& (! (nodeSame ty nilNode)) (== (nodeTag ty) TAG_T_ARR))
+    (concat (sigTagOf (nodeAChild ty)) (sigParamTags (nodeBChild ty)))
     ""))
 
-(pub :: sigResultOf (-> Int Int))
+(pub :: sigResultOf (-> ASTNode ASTNode))
 (pub fn (sigResultOf ty)
-  (if (&& (!= ty 0) (== (nodeTag ty) TAG_T_ARR))
-    (sigResultOf (nodeB ty))
+  (if (&& (! (nodeSame ty nilNode)) (== (nodeTag ty) TAG_T_ARR))
+    (sigResultOf (nodeBChild ty))
     ty))
 
-(pub :: sigTagOf (-> Int String))
+(pub :: sigTagOf (-> ASTNode String))
 (pub fn (sigTagOf t)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     "i"
     (if (== (nodeTag t) TAG_T_ARR)
       "c"
@@ -2387,39 +2388,40 @@
         ""))))
 
 ; The extern ITEM node binding linker symbol `sym`, or 0.
-(pub :: findExternItem (-> Ints String Int Int))
+(pub :: findExternItem (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (findExternItem decls sym i)
   (if (>= i (vecLen decls))
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (== (nodeTag d) TAG_D_EXTERN)
         {
-          (let it (findExternItemIn (nodeCVec d) sym 0))
-          (if (== it 0)
+          (let it (findExternItemIn (nodeCChildren d) sym 0))
+          (if (nodeSame it nilNode)
             (findExternItem decls sym (+ i 1))
             it)
         }
         (findExternItem decls sym (+ i 1)))
     }))
 
-(pub :: findExternItemIn (-> Ints String Int Int))
+(pub :: findExternItemIn (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (findExternItemIn items sym i)
   (if (== (as items Int) 0)
-    0
+    nilNode
     (if (>= i (vecLen items))
-      0
+      nilNode
       (if (strEq (nodeCName (vecGet items i)) sym)
         (vecGet items i)
         (findExternItemIn items sym (+ i 1))))))
 
-(pub :: findExternLib (-> Ints String Int String))
+(pub :: findExternLib (-> (Vec ASTNode) String Int String))
 (pub fn (findExternLib decls sym i)
   (if (>= i (vecLen decls))
     ""
     {
       (let d (vecGet decls i))
-      (if (&& (== (nodeTag d) TAG_D_EXTERN) (!= (findExternItemIn (nodeCVec d) sym 0) 0))
+      (if (&& (== (nodeTag d) TAG_D_EXTERN)
+            (! (nodeSame (findExternItemIn (nodeCChildren d) sym 0) nilNode)))
         (nodeAName d)
         (findExternLib decls sym (+ i 1)))
     }))

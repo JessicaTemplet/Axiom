@@ -1,10 +1,9 @@
 ; core.ax — compiler data structures shared by every phase.
 ;
-; Axiom's uniform representation means every value is a machine word.
-; Struct pointers, constructor tags, string pointers, and spans are all
-; `Int` at this layer. The field-type annotations name the logical type
-; for the human reader and the type checker; the codegen treats every
-; field as an 8-byte slot.
+; Pipeline values retain their logical types even though native values
+; occupy machine words. AST handles and homogeneous syntax vectors are
+; distinct from scalar words; packed storage is read through parser's
+; typed arena views.
 (import Mem)
 (import Str)
 (import Vec)
@@ -33,10 +32,47 @@
 ; Composite types for the pipeline boundaries. Every phase consumes
 ; and answers these same shapes, so their signatures name them once
 ; here instead of repeating the vector spelling at every call site.
-; Aliases are transparent: `Decls` is `(Vec Int)` wherever it stands.
+; Aliases are transparent: `Decls` is `(Vec ASTNode)` wherever it stands.
 ; ------------------------------------------------------------------
-; A declaration list: AST node handles, one per top-level form.
-(pub type Decls (Vec Int))
+; The parser owns this packed layout and its dynamic reference map.
+; Other phases use typed handles and payload views rather than constructing
+; the record or interpreting an AST address as a scalar.
+(pub struct ASTNode sealed
+  (tag : Int)
+  (a : Int)
+  (b : Int)
+  (c : Int)
+  (span : Int)
+  (vis : Int)
+  (ty : Int)
+  (axtags : Int)
+  (module : Int)
+  (fieldNames : Int)
+  (defscope : Int)
+  (binderTy : Int)
+  (syntaxIdentity : Int))
+
+(pub type Nodes (Vec ASTNode))
+
+(pub type NodesRows (Vec Nodes))
+
+; A declaration list has one syntax handle per top-level form.
+(pub type Decls Nodes)
+
+; A substitution owns each source name and its instantiated type together.
+(pub struct TypeBinding
+  (name : String)
+  (ty : ASTNode))
+
+(pub type TypeEnv (Vec TypeBinding))
+
+(pub :: typeBindingName (-> TypeBinding String))
+(pub fn (typeBindingName binding)
+  binding.name)
+
+(pub :: typeBindingTy (-> TypeBinding ASTNode))
+(pub fn (typeBindingTy binding)
+  binding.ty)
 
 ; A module's compilation units, parallel to the merged `Decls`.
 (pub type Units (Vec Int))
@@ -312,7 +348,7 @@
 
 ; Append every element of `src` to `acc`, answering `acc`.
 ;@axiom:restrict(no-io,no-foreign)
-(pub :: vecAppendFrom (-> (Vec Int) (Vec Int) Int (Vec Int)))
+(pub :: vecAppendFrom (-> (Vec a) (Vec a) Int (Vec a)))
 (pub fn (vecAppendFrom src acc i)
   (if (>= i (vecLen src))
     acc
@@ -335,3 +371,39 @@
       j
     }
   })
+
+(pub :: nilNodes Nodes)
+;@axiom:effect(unsafe)
+(pub fn (nilNodes)
+  (as 0 Nodes))
+
+(pub :: vecIsNull (-> (Vec a) Bool))
+(pub fn (vecIsNull v)
+  (addrEq (addrOf v) (addrOf 0)))
+
+(pub :: nilWords Ints)
+;@axiom:effect(unsafe)
+(pub fn (nilWords)
+  (as 0 Ints))
+
+(pub :: nilNames Names)
+;@axiom:effect(unsafe)
+(pub fn (nilNames)
+  (as 0 Names))
+
+(pub :: nodesNew Nodes)
+(pub fn (nodesNew)
+  vecNew)
+
+(pub :: namesNew Names)
+(pub fn (namesNew)
+  vecNew)
+
+; A replacement payload keeps its ownership type through syntax cloning.
+(pub data AstPayload
+  (AstWord Int)
+  (AstText String)
+  (AstChild ASTNode)
+  (AstChildren Nodes)
+  (AstNames Names)
+  (AstWords Ints))

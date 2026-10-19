@@ -76,17 +76,23 @@
 ; Each index owns its bucket vectors; an empty slot is a typed null.
 (type LspBuckets (Vec (Vec Int)))
 
+(struct LspNamedNode
+  (name : String)
+  (node : ASTNode))
+
+(type LspNodeBuckets (Vec (Vec LspNamedNode)))
+
 ; A null slot has no bucket to inspect.
-(pub :: lspBucketMissing (-> Ints Bool))
+(pub :: lspBucketMissing (-> (Vec a) Bool))
 (pub fn (lspBucketMissing bucket)
   (== (as bucket Int) 0))
 
 ; Null slots are only tested or replaced before a bucket is read.
-(pub :: lspBucketsNew (-> Int LspBuckets))
+(pub :: lspBucketsNew (-> Int (Vec (Vec a))))
 ;@axiom:effect(unsafe)
 (pub fn (lspBucketsNew slots)
   {
-    (let empty (as 0 (Vec Int)))
+    (let empty (as 0 (Vec a)))
     (let buckets vecNew)
     (let mut i 0)
     (while (< i slots)
@@ -487,7 +493,7 @@
       true
       (lspSeenFrom seen name (+ i 1)))))
 
-(pub :: lspPreflight (-> Ints Int String Strings String))
+(pub :: lspPreflight (-> (Vec ASTNode) Int String Strings String))
 ;@axiom:effect(io)
 (pub fn (lspPreflight decls tcode entryDir seen)
   {
@@ -500,7 +506,7 @@
           {
             (if (== (nodeTag n) TAG_D_IMPORT)
               {
-                (let name (memGetWordStr n 1))
+                (let name (nodeAText n))
                 (if (! (lspSeenHas seen name))
                   {
                     (vecPush seen name)
@@ -519,7 +525,7 @@
                           {
                             (let pr (parseModuleWith (lex src) (scanAxtags src)))
                             (if (! (== (memGetWord pr 0) 0))
-                              (set missing (lspPreflight (memGetWordVec pr 1) tcode entryDir seen)))
+                              (set missing (lspPreflight (readAstNodes pr 1) tcode entryDir seen)))
                           }
                         ))
                     }
@@ -687,7 +693,7 @@
 ; take a fatal CLI path. The table is also the resolver's source input.
 ; The first failure carries its own unit; callers never index it using
 ; the entry document's bytes.
-(pub :: lspWorkspacePreflight (-> LspWorkspace Ints Int String Ints Int Int))
+(pub :: lspWorkspacePreflight (-> LspWorkspace (Vec ASTNode) Int String Ints Int Int))
 ;@axiom:effect(io)
 (pub fn (lspWorkspacePreflight workspace decls tcode entryDir units owner)
   {
@@ -746,7 +752,7 @@
                                       }
                                     }
                                     (set failure (lspWorkspacePreflight workspace
-                                                   (memGetWordVec pr 1) tcode entryDir units unit)))
+                                                   (readAstNodes pr 1) tcode entryDir units unit)))
                                 }
                               }
                             }
@@ -803,7 +809,7 @@
                 lexD)
               src (lspLineIndex src) (lspPathToUri path)))
           {
-            (let decls (memGetWordVec pr 1))
+            (let decls (readAstNodes pr 1))
             (let tcode (checkedTargetCode hostTarget))
             (let entryDir (pathDir path))
             (let units
@@ -913,7 +919,7 @@
 ; array: `lspLintDoc` into an array of their own, so `lspCheckDoc` can
 ; take them before expansion rewrites the tree and publish them after
 ; the checker's diagnostics.
-(pub :: lspLintRaw (-> String Ints Int))
+(pub :: lspLintRaw (-> String (Vec ASTNode) Int))
 (pub fn (lspLintRaw src decls)
   {
     (let out jsonArr)
@@ -1218,7 +1224,7 @@
   })
 
 ; `true` or `false` as a bare variable with a span worth pointing at.
-(pub :: lspLintBoolName (-> Int String Bool))
+(pub :: lspLintBoolName (-> ASTNode String Bool))
 (pub fn (lspLintBoolName e want)
   (if (== (nodeTag e) TAG_E_VAR)
     (if (strEq (nodeAName e) want)
@@ -1230,10 +1236,10 @@
 ; false)` is dead code before it is anything else, and one Hint per
 ; site is the whole allowance - two squiggles on one form would read
 ; as stuttering.
-(pub :: lspLintIf (-> Int Int Int))
+(pub :: lspLintIf (-> Int ASTNode Int))
 (pub fn (lspLintIf lx e)
   {
-    (let t (nodeA e))
+    (let t (nodeAChild e))
     (if (== (nodeTag t) TAG_E_VAR)
       {
         (let cn (nodeAName t))
@@ -1262,10 +1268,10 @@
 ; just names, which is why the scope is asked and not only the tree.
 ; The condition stays a bare name for the reason the header gives:
 ; the squiggle must spell what the message quotes.
-(pub :: lspLintBoolIf (-> Int Int String Int Int))
+(pub :: lspLintBoolIf (-> Int ASTNode String Int Int))
 (pub fn (lspLintBoolIf lx e cn sp)
-  (if (lspLintBoolName (nodeB e) "true")
-    (if (lspLintBoolName (nodeC e) "false")
+  (if (lspLintBoolName (nodeBChild e) "true")
+    (if (lspLintBoolName (nodeCChild e) "false")
       (if (lspLintScopeHas lx "true")
         0
         (if (lspLintScopeHas lx "false")
@@ -1278,7 +1284,7 @@
 ; Match arms: pattern binders scope the arm body, then pop. The count
 ; answers how many, exactly as `lspNavWalkArms` counts for its own
 ; pop.
-(pub :: lspLintArms (-> Int Ints Int Int))
+(pub :: lspLintArms (-> Int (Vec ASTNode) Int Int))
 (pub fn (lspLintArms lx arms i)
   (if (>= i (vecLen arms))
     0
@@ -1287,17 +1293,17 @@
       {
         (if (== (nodeTag arm) TAG_M_ARM)
           {
-            (let bound (lspLintPat lx (nodeA arm)))
+            (let bound (lspLintPat lx (nodeAChild arm)))
             {
-              (lspLintWalk lx (nodeB arm))
+              (lspLintWalk lx (nodeBChild arm))
               (lspLintPop lx bound)
             }
           }
           (if (== (nodeTag arm) TAG_M_FOR)
             {
-              (lspLintWalk lx (nodeB arm))
+              (lspLintWalk lx (nodeBChild arm))
               (lspLintPush lx (nodeAName arm) 0 0)
-              (lspLintArms lx (nodeCVec arm) 0)
+              (lspLintArms lx (nodeCChildren arm) 0)
               (lspLintPop lx 1)
             }))
         (lspLintArms lx arms (+ i 1))
@@ -1307,9 +1313,9 @@
 ; Pattern binders resolve references but are never reported: a field
 ; ignored by name documents the shape it came in, and `_` says so
 ; out loud. `lspNavWalkPat`'s shape, without the occurrences.
-(pub :: lspLintPat (-> Int Int Int))
+(pub :: lspLintPat (-> Int ASTNode Int))
 (pub fn (lspLintPat lx p)
-  (if (== p 0)
+  (if (nodeSame p nilNode)
     0
     {
       (let tag (nodeTag p))
@@ -1323,24 +1329,24 @@
         (if (== tag TAG_E_APP)
           (lspLintPatSpine lx p)
           (if (== tag TAG_P_CONNAMED)
-            (lspLintPatVec lx (nodeCVec p) 0)
+            (lspLintPatVec lx (nodeCChildren p) 0)
             0)))
     }))
 
 ; `(Just x)` is App(Var Just, Var x): the spine's head names the
 ; constructor and every argument along it is a sub-pattern.
-(pub :: lspLintPatSpine (-> Int Int Int))
+(pub :: lspLintPatSpine (-> Int ASTNode Int))
 (pub fn (lspLintPatSpine lx m)
   (if (== (nodeTag m) TAG_E_APP)
     {
-      (let a (lspLintPatSpine lx (nodeA m)))
-      (+ a (lspLintPat lx (nodeB m)))
+      (let a (lspLintPatSpine lx (nodeAChild m)))
+      (+ a (lspLintPat lx (nodeBChild m)))
     }
     (if (== (nodeTag m) TAG_E_VAR)
       0
       (lspLintPat lx m))))
 
-(pub :: lspLintPatVec (-> Int Ints Int Int))
+(pub :: lspLintPatVec (-> Int (Vec ASTNode) Int Int))
 (pub fn (lspLintPatVec lx pats i)
   (if (>= i (vecLen pats))
     0
@@ -1349,7 +1355,7 @@
       (+ a (lspLintPatVec lx pats (+ i 1)))
     }))
 
-(pub :: lspLintWalkVec (-> Int Ints Int Int))
+(pub :: lspLintWalkVec (-> Int (Vec ASTNode) Int Int))
 (pub fn (lspLintWalkVec lx xs i)
   (if (>= i (vecLen xs))
     0
@@ -1363,9 +1369,9 @@
 ; arm is a leaf it descends nowhere from - missing a use would be a
 ; false positive, so coverage here is the correctness property, and
 ; it is held by construction against that walk's case list.
-(pub :: lspLintWalk (-> Int Int Int))
+(pub :: lspLintWalk (-> Int ASTNode Int))
 (pub fn (lspLintWalk lx e)
-  (if (== e 0)
+  (if (nodeSame e nilNode)
     0
     {
       (let tag (nodeTag e))
@@ -1373,50 +1379,50 @@
         (lspLintUse lx (nodeAName e))
         (if (== tag TAG_E_APP)
           {
-            (lspLintWalk lx (nodeA e))
-            (lspLintWalk lx (nodeB e))
+            (lspLintWalk lx (nodeAChild e))
+            (lspLintWalk lx (nodeBChild e))
           }
           (if (== tag TAG_E_LAM)
             {
-              (let ps (nodeAVec e))
+              (let ps (nodeAChildren e))
               (if (== (vecLen ps) 0)
-                (lspLintWalk lx (nodeB e))
+                (lspLintWalk lx (nodeBChild e))
                 {
                   (lspLintPush lx (vecGetStr ps 0) 0 0)
-                  (lspLintWalk lx (nodeB e))
+                  (lspLintWalk lx (nodeBChild e))
                   (lspLintPop lx 1)
                 })
             }
             (if (|| (== tag TAG_E_LET) (== tag TAG_E_LETM))
               {
-                (lspLintWalk lx (nodeB e))
+                (lspLintWalk lx (nodeBChild e))
                 (lspLintPush lx (nodeAName e) (nodeSpan e)
                   (if (lspLintLetOk (nodeAName e) (nodeSpan e))
                     1
                     0))
-                (lspLintWalk lx (nodeC e))
+                (lspLintWalk lx (nodeCChild e))
                 (lspLintPop lx 1)
               }
               (if (== tag TAG_E_IF)
                 {
                   (lspLintIf lx e)
-                  (lspLintWalk lx (nodeA e))
-                  (lspLintWalk lx (nodeB e))
-                  (lspLintWalk lx (nodeC e))
+                  (lspLintWalk lx (nodeAChild e))
+                  (lspLintWalk lx (nodeBChild e))
+                  (lspLintWalk lx (nodeCChild e))
                 }
                 (if (== tag TAG_E_BEGIN)
-                  (lspLintWalkVec lx (nodeAVec e) 0)
+                  (lspLintWalkVec lx (nodeAChildren e) 0)
                   (if (|| (== tag TAG_E_WHILE) (== tag TAG_E_REGION))
                     (if (== tag TAG_E_REGION)
-                      (lspLintWalk lx (nodeB e))
+                      (lspLintWalk lx (nodeBChild e))
                       {
-                        (lspLintWalk lx (nodeA e))
-                        (lspLintWalkVec lx (nodeBVec e) 0)
+                        (lspLintWalk lx (nodeAChild e))
+                        (lspLintWalkVec lx (nodeBChildren e) 0)
                       })
                     (if (== tag TAG_E_MATCH)
                       {
-                        (lspLintWalk lx (nodeA e))
-                        (lspLintArms lx (nodeBVec e) 0)
+                        (lspLintWalk lx (nodeAChild e))
+                        (lspLintArms lx (nodeBChildren e) 0)
                       }
                       ; `cond` is AX2004: the parser builds none, so
                       ; no arm lints one. A variadic `if` arrives as
@@ -1427,18 +1433,18 @@
                         ; anywhere is still a dead binding. The
                         ; value follows the target in the source
                         ; and in this list.
-                        (lspLintWalk lx (nodeB e))
+                        (lspLintWalk lx (nodeBChild e))
                         (if (|| (== tag TAG_E_FIELD) (== tag TAG_E_TRY))
-                          (lspLintWalk lx (nodeA e))
+                          (lspLintWalk lx (nodeAChild e))
                           (if (== tag TAG_E_SETF)
                             {
-                              (lspLintWalk lx (nodeA e))
-                              (lspLintWalk lx (nodeC e))
+                              (lspLintWalk lx (nodeAChild e))
+                              (lspLintWalk lx (nodeCChild e))
                             }
                             (if (== tag TAG_E_HANDLE)
                               {
-                                (lspLintWalk lx (nodeA e))
-                                (lspLintWalk lx (nodeC e))
+                                (lspLintWalk lx (nodeAChild e))
+                                (lspLintWalk lx (nodeCChild e))
                               }
                               0))))))))))))
     }))
@@ -1449,7 +1455,7 @@
 ; use at runtime - and neither are signatures, data, structs or
 ; imports, which hold no expressions. A top-level macro invocation's
 ; arguments are ordinary expressions and are walked.
-(pub :: lspLintWalkDecl (-> Int Int Int))
+(pub :: lspLintWalkDecl (-> Int ASTNode Int))
 (pub fn (lspLintWalkDecl lx d)
   {
     (let tag (nodeTag d))
@@ -1459,7 +1465,7 @@
       (memSetWord lx 5 (nodeAName d))
       (if (== tag TAG_D_FN)
         {
-          (let params (nodeBVec d))
+          (let params (nodeBChildren d))
           (let mut i 0)
           {
             (while (< i (vecLen params))
@@ -1467,12 +1473,12 @@
                 (lspLintPush lx (vecGetStr params i) 0 0)
                 (set i (+ i 1))
               })
-            (lspLintWalk lx (nodeC d))
+            (lspLintWalk lx (nodeCChild d))
             (lspLintPop lx (vecLen params))
           }
         }
         (if (== tag TAG_D_MACROCALL)
-          (lspLintWalkVec lx (nodeBVec d) 0)
+          (lspLintWalkVec lx (nodeBChildren d) 0)
           0))
     }
   })
@@ -1483,7 +1489,7 @@
 ; so a tag above either half of a `::`/`fn` pair lands on the one
 ; owner both halves share. Two parallel vectors, owners beside code
 ; vectors, because a vector holds one type and a name is not a Vec.
-(pub :: lspLintSuppBuild (-> Int Ints Int))
+(pub :: lspLintSuppBuild (-> Int (Vec ASTNode) Int))
 (pub fn (lspLintSuppBuild lx decls)
   {
     (let mut i 0)
@@ -1494,12 +1500,12 @@
           {
             ; An import's tag is the file's, under the owner "" that
             ; `lspLintSuppressed` asks about for every record.
-            (if (!= (memGetWord d 7) 0)
+            (if (!= (nodeAxtagsWord d) 0)
               (lspLintSuppDecl lx
                 (if (== (nodeTag d) TAG_D_IMPORT)
                   ""
                   (nodeAName d))
-                (memGetWordVec d 7) 0))
+                (nodeAxtagsWords d) 0))
             (set i (+ i 1))
           }
         })
@@ -1659,7 +1665,7 @@
 ; why a lint can never disagree with the checker about what the code
 ; means: it never sees what the code expands to, only what the
 ; author wrote.
-(pub :: lspLintDoc (-> Int String Ints Ints Int))
+(pub :: lspLintDoc (-> Int String Ints (Vec ASTNode) Int))
 (pub fn (lspLintDoc out src ix decls)
   {
     (let lx (lspLintContext src))
@@ -1763,7 +1769,7 @@
                 {
                   (if (== (memGetWord r 2) (- 0 2))
                     (set drop 1))
-                  (lspRecAppend decls (memGetWordVec r 1))
+                  (lspRecAppend decls (readAstNodes r 1))
                 })
               (set i (+ i 2))
             }
@@ -2014,7 +2020,7 @@
   })
 
 ;; Append every element of `more` to `out`.
-(pub :: lspRecAppend (-> Ints Ints Int))
+(pub :: lspRecAppend (-> (Vec ASTNode) (Vec ASTNode) Int))
 (pub fn (lspRecAppend out more)
   {
     (let mut i 0)
@@ -2421,7 +2427,7 @@
 ; One DocumentSymbol. `children` is omitted rather than sent empty:
 ; a client draws an expander arrow for `children: []` and gives the
 ; reader an empty drawer to open.
-(pub :: lspSymbolJson (-> String Ints Int Int))
+(pub :: lspSymbolJson (-> String Ints ASTNode Int))
 (pub fn (lspSymbolJson src ix d)
   {
     (let form (lspSymbolExtent src (nodeSpan d)))
@@ -2454,7 +2460,7 @@
 ; is not at column zero. Contained in the parent's form either way,
 ; which is what the protocol asks and what the gate now requires
 ; STRICTLY of every parent that has children.
-(pub :: lspSymbolChildren (-> String Ints Int Int))
+(pub :: lspSymbolChildren (-> String Ints ASTNode Int))
 (pub fn (lspSymbolChildren src ix d)
   {
     (let out jsonArr)
@@ -2462,7 +2468,7 @@
     (if (== kind 0)
       out
       {
-        (let ms (nodeBVec d))
+        (let ms (nodeBChildren d))
         (let mut i 0)
         {
           (while (< i (vecLen ms))
@@ -2598,10 +2604,10 @@
 ; LAST WINS, which is `MAC-LANG-11`'s rule for macros and worth keeping
 ; for the rest: a file that declares a name twice is already
 ; ill-formed, and the last one is what the expander would have used.
-(pub :: lspFindDecl (-> Ints String Int Int))
+(pub :: lspFindDecl (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindDecl decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (lspWantsSymbol (nodeTag d)) (&& (strEq (nodeAName d) name) (!= (nodeSpan d) 0)))
@@ -2618,10 +2624,10 @@
 ; so the comparison is against `bareOf`; and it is not in this
 ; document, so a declaration whose module is 0 - the entry file - is
 ; skipped here, having already been offered by `lspFindDecl`.
-(pub :: lspFindImported (-> Ints String Int Int))
+(pub :: lspFindImported (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindImported decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (lspWantsSymbol (nodeTag d))
@@ -2754,7 +2760,7 @@
 ; error while the user was mid-word would make navigation feel broken
 ; exactly when the file is.
 ; ------------------------------------------------------------------
-(pub :: lspResolveFor (-> LspWorkspace String String Ints Int))
+(pub :: lspResolveFor (-> LspWorkspace String String (Vec ASTNode) Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (lspResolveFor workspace path src decls)
@@ -2833,7 +2839,7 @@
     (if (== (memGetWord pr 0) 0)
       jsonNull
       {
-        (let decls (memGetWordVec pr 1))
+        (let decls (readAstNodes pr 1))
         (let ix (lspLineIndex src))
         {
           (let off (lspOffsetOf src ix (jsonGet params "position")))
@@ -2853,7 +2859,7 @@
                   loc
                   {
                     (let d (lspFindDecl decls w (- (vecLen decls) 1)))
-                    (if (!= d 0)
+                    (if (! (nodeSame d nilNode))
                       (jsonObjPut (jsonObjPut jsonObj "uri" (jsonStr uri)) "range"
                         (lspRange src (nodeSpan d)))
                       ; A CONSTRUCTOR THIS DOCUMENT DECLARES, before
@@ -2892,7 +2898,7 @@
 ; cannot disagree about what this document imports - and answer a
 ; Location in whichever module declares `w`. A resolver failure is
 ; null rather than a diagnostic, for the reason `lspResolveFor` gives.
-(pub :: lspDefinitionImported (-> LspWorkspace String String Ints String Int))
+(pub :: lspDefinitionImported (-> LspWorkspace String String (Vec ASTNode) String Int))
 ;@axiom:effect(io)
 (pub fn (lspDefinitionImported workspace path src decls w)
   {
@@ -2900,11 +2906,11 @@
     (if (== r 0)
       jsonNull
       {
-        (let allDecls (memGetWordVec r 0))
+        (let allDecls (readAstNodes r 0))
         (let units (memGetWordVec r 1))
         {
           (let d (lspFindImported allDecls w (- (vecLen allDecls) 1)))
-          (if (== d 0)
+          (if (nodeSame d nilNode)
             (lspCtorDefinitionImported allDecls units w)
             {
               (let u (lspUnitOf units (nodeModule d)))
@@ -3000,33 +3006,33 @@
   })
 
 ; The leftmost head of a spine: through applications to the callee.
-(pub :: lspSpineHead (-> Int Int))
+(pub :: lspSpineHead (-> ASTNode ASTNode))
 (pub fn (lspSpineHead v)
-  (if (== v 0)
-    0
+  (if (nodeSame v nilNode)
+    nilNode
     (if (!= (nodeTag v) TAG_E_APP)
       v
-      (lspSpineHead (nodeA v)))))
+      (lspSpineHead (nodeAChild v)))))
 
 ; The struct declaration named `sname` that declares a field named
 ; `fname`, or 0.
-(pub :: lspFindStructField (-> Ints String String Int))
+(pub :: lspFindStructField (-> (Vec ASTNode) String String ASTNode))
 (pub fn (lspFindStructField decls sname fname)
   {
     (let d (lspFindTypeDecl decls sname (- (vecLen decls) 1)))
-    (if (== d 0)
-      0
+    (if (nodeSame d nilNode)
+      nilNode
       (if (!= (nodeTag d) TAG_D_STRUCT)
-        0
-        (if (== (lspStructFieldNode (nodeBVec d) fname 0) 0)
-          0
+        nilNode
+        (if (nodeSame (lspStructFieldNode (nodeBChildren d) fname 0) nilNode)
+          nilNode
           d)))
   })
 
-(pub :: lspStructFieldNode (-> Ints String Int Int))
+(pub :: lspStructFieldNode (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspStructFieldNode fs fname i)
   (if (>= i (vecLen fs))
-    0
+    nilNode
     {
       (let f (vecGet fs i))
       (if (strEq (nodeAName f) fname)
@@ -3036,16 +3042,16 @@
 
 ; The struct behind a parameter: the `k`th arrow domain of the
 ; owner's signature, when it names a bare constructor type.
-(pub :: lspFieldParamStruct (-> Ints String String Int String))
+(pub :: lspFieldParamStruct (-> (Vec ASTNode) String String Int String))
 ;@axiom:effect(unsafe)
 (pub fn (lspFieldParamStruct decls owner name k)
   {
     (let sig (lspFindSig decls owner (- (vecLen decls) 1)))
-    (if (== sig 0)
+    (if (nodeSame sig nilNode)
       (as 0 String)
       {
-        (let t (nthParamTy (nodeTy sig) k 0))
-        (if (== t 0)
+        (let t (nthParamTy (nodeTyChild sig) k nilNode))
+        (if (nodeSame t nilNode)
           (as 0 String)
           (if (!= (nodeTag t) TAG_T_CON)
             (as 0 String)
@@ -3060,14 +3066,14 @@
 
 ; The struct behind a `let`: the constructor application the value
 ; builds, when its head is an upcased name.
-(pub :: lspFieldValueStruct (-> Int String))
+(pub :: lspFieldValueStruct (-> ASTNode String))
 ;@axiom:effect(unsafe)
 (pub fn (lspFieldValueStruct v)
-  (if (== v 0)
+  (if (nodeSame v nilNode)
     (as 0 String)
     {
       (let h (lspSpineHead v))
-      (if (== h 0)
+      (if (nodeSame h nilNode)
         (as 0 String)
         (if (!= (nodeTag h) TAG_E_VAR)
           (as 0 String)
@@ -3081,7 +3087,7 @@
 
 ; The struct behind a base name at an offset: a parameter's declared
 ; type, or a let's built value. Answers the bare name or null.
-(pub :: lspFieldBaseStruct (-> String Ints String Int String))
+(pub :: lspFieldBaseStruct (-> String (Vec ASTNode) String Int String))
 ;@axiom:effect(unsafe)
 (pub fn (lspFieldBaseStruct src decls base baseOff)
   {
@@ -3103,7 +3109,7 @@
                     (lspFieldParamStruct decls (memGetWordStr b 5) (memGetWordStr b 0)
                       (memGetWord b 6))
                     (if (== bkind NAV_B_LET)
-                      (lspFieldValueStruct (memGetWord b 6))
+                      (lspFieldValueStruct (readAstNode b 6))
                       (as 0 String)))
                 })
             }
@@ -3113,7 +3119,7 @@
   })
 
 ; A field use: `base.` ends where the word begins.
-(pub :: lspHoverFieldUse (-> String Ints String Int Int Int Int))
+(pub :: lspHoverFieldUse (-> String (Vec ASTNode) String Int Int Int Int))
 (pub fn (lspHoverFieldUse src decls base baseOff wsp range)
   {
     (let w (strSlice src (spanStart wsp) (- (spanEnd wsp) (spanStart wsp))))
@@ -3123,7 +3129,7 @@
         0
         {
           (let d (lspFindStructField decls sn w))
-          (if (== d 0)
+          (if (nodeSame d nilNode)
             0
             (lspHoverAtNote src decls d range ""
               (concat (concat (concat "field `" w) "` of `struct ") (concat (nodeAName d) "`"))))
@@ -3132,14 +3138,14 @@
   })
 
 ; A field declaration: the word sits in a struct's field slot.
-(pub :: lspHoverFieldDecl (-> String Ints Int Int Int))
+(pub :: lspHoverFieldDecl (-> String (Vec ASTNode) Int Int Int))
 (pub fn (lspHoverFieldDecl src decls wsp range)
   {
     (let w (strSlice src (spanStart wsp) (- (spanEnd wsp) (spanStart wsp))))
     (lspHoverFieldDeclIn decls src w (spanStart wsp) range (- (vecLen decls) 1))
   })
 
-(pub :: lspHoverFieldDeclIn (-> Ints String String Int Int Int Int))
+(pub :: lspHoverFieldDeclIn (-> (Vec ASTNode) String String Int Int Int Int))
 (pub fn (lspHoverFieldDeclIn decls src w off range i)
   (if (< i 0)
     0
@@ -3147,16 +3153,16 @@
       (let d (vecGet decls i))
       (if (!= (nodeTag d) TAG_D_STRUCT)
         (lspHoverFieldDeclIn decls src w off range (- i 1))
-        (if (== (lspFieldNodeAt (nodeBVec d) w off 0) 0)
+        (if (nodeSame (lspFieldNodeAt (nodeBChildren d) w off 0) nilNode)
           (lspHoverFieldDeclIn decls src w off range (- i 1))
           (lspHoverAtNote src decls d range ""
             (concat (concat (concat "field `" w) "` of `struct ") (concat (nodeAName d) "`")))))
     }))
 
-(pub :: lspFieldNodeAt (-> Ints String Int Int Int))
+(pub :: lspFieldNodeAt (-> (Vec ASTNode) String Int Int ASTNode))
 (pub fn (lspFieldNodeAt fs fname off i)
   (if (>= i (vecLen fs))
-    0
+    nilNode
     {
       (let f (vecGet fs i))
       (if (&& (strEq (nodeAName f) fname) (lspSpanHas (nodeSpan f) off))
@@ -3164,7 +3170,7 @@
         (lspFieldNodeAt fs fname off (+ i 1)))
     }))
 
-(pub :: lspHoverField (-> String Ints Int Int Int))
+(pub :: lspHoverField (-> String (Vec ASTNode) Int Int Int))
 (pub fn (lspHoverField src decls wsp range)
   {
     (let fs (spanStart wsp))
@@ -3357,10 +3363,10 @@
 ; its path, read through the same resolver `definition` uses. Null
 ; when `w` is not an imported module's name or the resolver has no
 ; unit for it.
-(pub :: lspModuleHover (-> LspWorkspace String String Ints String Int Int))
+(pub :: lspModuleHover (-> LspWorkspace String String (Vec ASTNode) String Int Int))
 ;@axiom:effect(io)
 (pub fn (lspModuleHover workspace path src decls w range)
-  (if (== (lspFixFindImport decls w (- (vecLen decls) 1)) 0)
+  (if (nodeSame (lspFixFindImport decls w (- (vecLen decls) 1)) nilNode)
     jsonNull
     {
       (let r (lspResolveFor workspace path src decls))
@@ -3402,7 +3408,7 @@
     (if (== (memGetWord pr 0) 0)
       jsonNull
       {
-        (let decls (memGetWordVec pr 1))
+        (let decls (readAstNodes pr 1))
         (let ix (lspLineIndex src))
         {
           (let off (lspOffsetOf src ix (jsonGet params "position")))
@@ -3437,7 +3443,7 @@
                             local
                             {
                               (let d (lspFindDecl decls w (- (vecLen decls) 1)))
-                              (if (!= d 0)
+                              (if (! (nodeSame d nilNode))
                                 (lspHoverAt src decls d range "")
                                 ; A CONSTRUCTOR is read at the `data` that
                                 ; declares it - the whole form, so its siblings
@@ -3447,7 +3453,7 @@
                                 ; what the rest of this function's header says.
                                 {
                                   (let dat (lspFindCtorData decls w (- (vecLen decls) 1)))
-                                  (if (== (lspCtorNodeOf dat w) 0)
+                                  (if (nodeSame (lspCtorNodeOf dat w) nilNode)
                                     ; A GENERATED NAME next, for `definition`'s
                                     ; reason: after every lookup misses, from
                                     ; the cache string, expanding nothing. Then
@@ -3500,7 +3506,7 @@
 ; no signature is read at itself, and then the fence is its first line:
 ; the header names the parameters, and the body is what `definition`
 ; is for.
-(pub :: lspHoverAt (-> String Ints Int Int String Int))
+(pub :: lspHoverAt (-> String (Vec ASTNode) ASTNode Int String Int))
 (pub fn (lspHoverAt dsrc ddecls d range origin)
   (lspHoverAtNote dsrc ddecls d range origin ""))
 
@@ -3509,16 +3515,16 @@
 ; whole `data`, which is the right thing to read, and without a note
 ; the tooltip would not say which of its constructors the cursor is
 ; actually on. "" is the ordinary case and costs nothing.
-(pub :: lspHoverAtNote (-> String Ints Int Int String String Int))
+(pub :: lspHoverAtNote (-> String (Vec ASTNode) ASTNode Int String String Int))
 (pub fn (lspHoverAtNote dsrc ddecls d range origin note)
   {
     (let sig
       (if (== (nodeTag d) TAG_D_FN)
         (lspFindSig ddecls (nodeAName d) (- (vecLen ddecls) 1))
-        0))
+        nilNode))
     {
       (let at
-        (if (== sig 0)
+        (if (nodeSame sig nilNode)
           d
           sig))
       {
@@ -3560,9 +3566,9 @@
 
 ; The fenced half. Everything read at its own form is quoted whole; a
 ; `fn` with no signature to be read at instead gives up its body.
-(pub :: lspHoverCode (-> String Int Int Int String))
+(pub :: lspHoverCode (-> String ASTNode ASTNode Int String))
 (pub fn (lspHoverCode dsrc d sig o)
-  (if (&& (== sig 0) (== (nodeTag d) TAG_D_FN))
+  (if (&& (nodeSame sig nilNode) (== (nodeTag d) TAG_D_FN))
     (lspFirstLine (lspFormText dsrc o))
     (lspFormText dsrc o)))
 
@@ -3574,7 +3580,7 @@
 ; declaration's span indexes that file, and names the module it found
 ; it in, because "where did this come from" is most of what a reader
 ; hovering an imported name is asking.
-(pub :: lspHoverImported (-> LspWorkspace String String Ints String Int Int))
+(pub :: lspHoverImported (-> LspWorkspace String String (Vec ASTNode) String Int Int))
 ;@axiom:effect(io)
 (pub fn (lspHoverImported workspace path src decls w range)
   {
@@ -3582,11 +3588,11 @@
     (if (== r 0)
       jsonNull
       {
-        (let allDecls (memGetWordVec r 0))
+        (let allDecls (readAstNodes r 0))
         (let units (memGetWordVec r 1))
         {
           (let d (lspFindImported allDecls w (- (vecLen allDecls) 1)))
-          (if (== d 0)
+          (if (nodeSame d nilNode)
             (lspHoverCtorImported allDecls units w range)
             {
               (let u (lspUnitOf units (nodeModule d)))
@@ -3948,10 +3954,10 @@
 ; so `NavHelper$bump`'s type is found under `NavHelper$bump`. Type
 ; names are not mangled, which is why this is asked about functions
 ; and nothing else.
-(pub :: lspFindSig (-> Ints String Int Int))
+(pub :: lspFindSig (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindSig decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_SIG) (&& (strEq (nodeAName d) name) (!= (nodeSpan d) 0)))
@@ -3966,7 +3972,7 @@
 ; The name is skipped by walking identifier bytes from the span rather
 ; than by its length, because an imported declaration's `nodeAName` is
 ; `NavHelper$bump` and the source spells `bump`.
-(pub :: lspSigType (-> String Int String))
+(pub :: lspSigType (-> String ASTNode String))
 (pub fn (lspSigType src sig)
   {
     (let o (lspFormStart src (spanStart (nodeSpan sig))))
@@ -4010,7 +4016,7 @@
     (if (== (memGetWord pr 0) 0)
       jsonArr
       {
-        (let decls (memGetWordVec pr 1))
+        (let decls (readAstNodes pr 1))
         (let out jsonArr)
         (let ix (lspLineIndex src))
         (let mut i 0)
@@ -4249,7 +4255,7 @@
 
 ; Parameters of the function whose contract contains the cursor. Signature
 ; tags attach to the signature, so find its matching definition as well.
-(pub :: lspComplContract (-> Int Strings String Ints Int String ()))
+(pub :: lspComplContract (-> Int Strings String (Vec ASTNode) Int String ()))
 (pub fn (lspComplContract out seen src decls off prefix)
   {
     (let ls (lspLineStartAt src off))
@@ -4260,7 +4266,7 @@
     }
   })
 
-(pub :: lspComplContractAt (-> Int Strings String Ints Ints Int String ()))
+(pub :: lspComplContractAt (-> Int Strings String (Vec ASTNode) (Vec ASTNode) Int String ()))
 (pub fn (lspComplContractAt out seen src decls sigs off prefix)
   {
     (let mut i 0)
@@ -4280,7 +4286,7 @@
                       (if (&& (>= off (memGetWord t 0))
                             (<= off (findNewline src (memGetWord t 0) (strLen src))))
                         {
-                          (let ps (nodeBVec d))
+                          (let ps (nodeBChildren d))
                           (let mut k 0)
                           {
                             (while (< k (vecLen ps))
@@ -4326,7 +4332,7 @@
             (lspComplKeywords out seen prefix)
             (if (! (== (memGetWord pr 0) 0))
               {
-                (let decls (memGetWordVec pr 1))
+                (let decls (readAstNodes pr 1))
                 {
                   (lspComplContract out seen src decls
                     (lspOffsetOf src ix (jsonGet params "position")) prefix)
@@ -4532,7 +4538,7 @@
 ; complete - plus the constructors, which the outline leaves out
 ; because they are not declarations and completion wants because they
 ; are names.
-(pub :: lspComplLocal (-> Int Strings String Ints String Int))
+(pub :: lspComplLocal (-> Int Strings String (Vec ASTNode) String Int))
 (pub fn (lspComplLocal out seen src decls prefix)
   {
     (let n (vecLen decls))
@@ -4548,7 +4554,7 @@
                   (lspComplOffer out seen (nodeAName d) (lspComplKind (nodeTag d))
                     (lspComplDetail src decls d) prefix))
                 (if (== (nodeTag d) TAG_D_DATA)
-                  (lspComplCtors out seen (nodeBVec d) prefix))
+                  (lspComplCtors out seen (nodeBChildren d) prefix))
               })
             (set i (+ i 1))
           }
@@ -4563,18 +4569,18 @@
 ; per keystroke. An imported name shows its MODULE instead, which is
 ; the question being asked about it anyway and costs one walk of the
 ; mangled name.
-(pub :: lspComplDetail (-> String Ints Int String))
+(pub :: lspComplDetail (-> String (Vec ASTNode) ASTNode String))
 (pub fn (lspComplDetail src decls d)
   (if (== (nodeTag d) TAG_D_FN)
     {
       (let sig (lspFindSig decls (nodeAName d) (- (vecLen decls) 1)))
-      (if (== sig 0)
+      (if (nodeSame sig nilNode)
         ""
         (lspSigType src sig))
     }
     ""))
 
-(pub :: lspComplCtors (-> Int Strings Ints String Int))
+(pub :: lspComplCtors (-> Int Strings (Vec ASTNode) String Int))
 (pub fn (lspComplCtors out seen ctors prefix)
   {
     (let n (vecLen ctors))
@@ -4597,7 +4603,7 @@
 ; not match the names the checker will accept is worse than no list.
 ; A resolver failure is an empty addition rather than a diagnostic -
 ; half-typed imports are the normal state of a file being edited.
-(pub :: lspComplImported (-> LspWorkspace Int Strings String String Ints String Int))
+(pub :: lspComplImported (-> LspWorkspace Int Strings String String (Vec ASTNode) String Int))
 ;@axiom:effect(io)
 (pub fn (lspComplImported workspace out seen path src decls prefix)
   {
@@ -4605,7 +4611,7 @@
     (if (== r 0)
       0
       {
-        (let allDecls (memGetWordVec r 0))
+        (let allDecls (readAstNodes r 0))
         (let units (memGetWord r 1))
         {
           (let n (vecLen allDecls))
@@ -4621,7 +4627,7 @@
                       (lspComplOffer out seen (bareOf (nodeAName d)) (lspComplKind (nodeTag d))
                         (lspModOf (nodeAName d)) prefix)
                       (if (== (nodeTag d) TAG_D_DATA)
-                        (lspComplCtors out seen (nodeBVec d) prefix))
+                        (lspComplCtors out seen (nodeBChildren d) prefix))
                     })
                   (set i (+ i 1))
                 }
@@ -5329,7 +5335,7 @@
             (let pr (parseModuleWith (lex (vecGetStr todo at)) (scanAxtags (vecGetStr todo at))))
             (if (!= (memGetWord pr 0) 0)
               {
-                (let decls (memGetWordVec pr 1))
+                (let decls (readAstNodes pr 1))
                 (let mut i 0)
                 (while (&& (! found) (< i (vecLen decls)))
                   {
@@ -5756,11 +5762,11 @@
 ;   word 6  the type table (`lspNavTypeBuild`): the names a type
 ;           position can resolve to
 ; ------------------------------------------------------------------
-(pub :: lspNavOccurrences (-> String Ints Ints))
+(pub :: lspNavOccurrences (-> String (Vec ASTNode) Ints))
 (pub fn (lspNavOccurrences src decls)
   (lspNavOccurrencesProbe src decls 0))
 
-(pub :: lspNavOccurrencesProbe (-> String Ints Int Ints))
+(pub :: lspNavOccurrencesProbe (-> String (Vec ASTNode) Int Ints))
 (pub fn (lspNavOccurrencesProbe src decls probe)
   {
     (let nv (lspNavContext src decls probe))
@@ -5775,7 +5781,7 @@
     }
   })
 
-(pub :: lspNavContext (-> String Ints Int Int))
+(pub :: lspNavContext (-> String (Vec ASTNode) Int Int))
 (pub fn (lspNavContext src decls probe)
   {
     (let nv (memAlloc 56))
@@ -5808,7 +5814,7 @@
 ; byte offsets: every occurrence in those declarations whose key is
 ; local, keyed by its start.
 ; ------------------------------------------------------------------
-(pub :: lspNavLocalIndex (-> String Ints Int Int LspBuckets))
+(pub :: lspNavLocalIndex (-> String (Vec ASTNode) Int Int LspBuckets))
 (pub fn (lspNavLocalIndex src decls rs re)
   {
     (let nv (lspNavContext src decls 0))
@@ -5829,7 +5835,7 @@
 ; spanned declaration's start, or EOF - meets [rs, re). A declaration
 ; with no span has no extent and is walked regardless, which costs
 ; nothing: it is an empty form or a marker.
-(pub :: lspNavDeclMeets (-> Ints Int Int Int Int Bool))
+(pub :: lspNavDeclMeets (-> (Vec ASTNode) Int Int Int Int Bool))
 (pub fn (lspNavDeclMeets decls i n rs re)
   {
     (let d (vecGet decls i))
@@ -5948,7 +5954,7 @@
   ; separate question and still does not list one.
   (|| (lspWantsSymbol tag) (|| (== tag TAG_D_ALIAS) (== tag TAG_D_SUBTYPE))))
 
-(pub :: lspNavTopBuild (-> Ints LspBuckets))
+(pub :: lspNavTopBuild (-> (Vec ASTNode) LspBuckets))
 (pub fn (lspNavTopBuild decls)
   {
     (let nb (fnIdxBuckets (vecLen decls)))
@@ -5963,7 +5969,7 @@
               {
                 (lspNavTopPut bs (nodeAName d) (nodeAName d))
                 (if (== (nodeTag d) TAG_D_DATA)
-                  (lspNavTopPutCtors bs (nodeAName d) (nodeBVec d) 0))
+                  (lspNavTopPutCtors bs (nodeAName d) (nodeBChildren d) 0))
               })
             (set i (+ i 1))
           }
@@ -5975,11 +5981,11 @@
 ; A declaration the outline would list under its own name: one of the
 ; kinds, with a span, and not a `(syntax/join ...)` marker - a marker
 ; is a spelling no reference can write.
-(pub :: lspNavIsNamedDecl (-> Int Bool))
+(pub :: lspNavIsNamedDecl (-> ASTNode Bool))
 (pub fn (lspNavIsNamedDecl d)
   (&& (lspNavDeclares (nodeTag d)) (&& (!= (nodeSpan d) 0) (== (expIsJoinMarker (nodeAName d)) 0))))
 
-(pub :: lspNavTopPutCtors (-> LspBuckets String Ints Int Int))
+(pub :: lspNavTopPutCtors (-> LspBuckets String (Vec ASTNode) Int Int))
 (pub fn (lspNavTopPutCtors bs dat ctors i)
   (if (>= i (vecLen ctors))
     0
@@ -6001,7 +6007,7 @@
 ; occurrence carries, so a type position and the declaration it names
 ; are one name. Kept apart from the table above because a type
 ; position must never resolve to a `fn`.
-(pub :: lspNavTypeBuild (-> Ints LspBuckets))
+(pub :: lspNavTypeBuild (-> (Vec ASTNode) LspBuckets))
 (pub fn (lspNavTypeBuild decls)
   {
     (let nb (fnIdxBuckets (vecLen decls)))
@@ -6240,11 +6246,11 @@
 ; emitted: it resolves the references beneath it, and there is nothing
 ; for an editor to point at.
 ; ------------------------------------------------------------------
-(pub :: lspNavBinderKey (-> String Int Int String))
+(pub :: lspNavBinderKey (-> String Int ASTNode String))
 (pub fn (lspNavBinderKey name span node)
   (if (!= span 0)
     (concat "@" (fmtInt (spanStart span)))
-    (concat "~" (concat (fmtInt node) (concat ":" name)))))
+    (concat "~" (concat (nodeIdentityKey node) (concat ":" name)))))
 
 (pub :: lspNavEmitBinder (-> Int String Int String Int Int Int))
 (pub fn (lspNavEmitBinder nv name span key bkind idx)
@@ -6388,7 +6394,7 @@
 ; ------------------------------------------------------------------
 ; The walk: declarations.
 ; ------------------------------------------------------------------
-(pub :: lspNavWalkDecl (-> Int Int Int))
+(pub :: lspNavWalkDecl (-> Int ASTNode Int))
 (pub fn (lspNavWalkDecl nv d)
   {
     (let tag (nodeTag d))
@@ -6433,7 +6439,7 @@
                       ; names the `data` it derives for.
                       {
                         (lspNavRef nv (nodeAName d) (nodeSpan d) NAV_READ)
-                        (lspNavWalkVec nv (nodeBVec d))
+                        (lspNavWalkVec nv (nodeBChildren d))
                       }
                       0))))))))
     }
@@ -6487,7 +6493,7 @@
   })
 
 ; One past the `)` closing the declaration's own form.
-(pub :: lspNavDeclEnd (-> String Int Int))
+(pub :: lspNavDeclEnd (-> String ASTNode Int))
 (pub fn (lspNavDeclEnd src d)
   (lspFormEnd src (lspFormStart src (spanStart (nodeSpan d)))))
 
@@ -6542,7 +6548,7 @@
 
 ; Every span from `i` on as a type reference, except the spellings in
 ; `tvs` (0 for none).
-(pub :: lspNavTypeRefs (-> Int Ints Ints Int Int))
+(pub :: lspNavTypeRefs (-> Int Ints Names Int Int))
 (pub fn (lspNavTypeRefs nv spans tvs i)
   (if (>= i (vecLen spans))
     0
@@ -6558,14 +6564,14 @@
       }
     }))
 
-(pub :: lspNavIsTyvar (-> Ints String Bool))
+(pub :: lspNavIsTyvar (-> Names String Bool))
 (pub fn (lspNavIsTyvar tvs name)
   (if (== (as tvs Int) 0)
     false
     (!= (strVecHas tvs name) 0)))
 
 ; `(:: name TYPE)`: everything after the name is the type.
-(pub :: lspNavTypesSig (-> Int Int Int))
+(pub :: lspNavTypesSig (-> Int ASTNode Int))
 ;@axiom:effect(unsafe)
 (pub fn (lspNavTypesSig nv d)
   (if (== (nodeSpan d) 0)
@@ -6573,7 +6579,7 @@
     {
       (let src (memGetWordStr nv 0))
       (lspNavTypeRefs nv (lspNavIdents src (spanEnd (nodeSpan d)) (lspNavDeclEnd src d))
-        (as 0 (Vec Int)) 0)
+        (as 0 Names) 0)
     }))
 
 ; `(data Name (a) (Ctor T...) (Ctor { f : T }))`: the constructors are
@@ -6581,14 +6587,14 @@
 ; order the source has them - which keeps the occurrence list in
 ; offset order - a field name is skipped, a type variable is skipped,
 ; and the rest name types.
-(pub :: lspNavTypesData (-> Int Int Int))
+(pub :: lspNavTypesData (-> Int ASTNode Int))
 (pub fn (lspNavTypesData nv d)
   (if (== (nodeSpan d) 0)
     0
     {
       (let src (memGetWordStr nv 0))
-      (let ctors (nodeBVec d))
-      (let tvs (nodeTyVec d))
+      (let ctors (nodeBChildren d))
+      (let tvs (nodeTyNames d))
       (let mut ci 0)
       (let mut i 0)
       {
@@ -6634,7 +6640,7 @@
 ; `(struct Name (f : T) (mut g : U))`: a field name is followed by a
 ; `:`, and the `mut` marker is the identifier before one - the
 ; parser's own test (`parseOneField`), made on bytes.
-(pub :: lspNavTypesStruct (-> Int Int Int))
+(pub :: lspNavTypesStruct (-> Int ASTNode Int))
 (pub fn (lspNavTypesStruct nv d)
   (if (== (nodeSpan d) 0)
     0
@@ -6667,14 +6673,14 @@
 ; tyvar list, which `parseAliasDecl` reads the same way; every other
 ; identifier in the form names the target type. There is no `=` in
 ; the canonical form, so the split is by the tyvar list, not a marker.
-(pub :: lspNavTypesAlias (-> Int Int Int))
+(pub :: lspNavTypesAlias (-> Int ASTNode Int))
 (pub fn (lspNavTypesAlias nv d)
   (if (== (nodeSpan d) 0)
     0
     {
       (let src (memGetWordStr nv 0))
       (lspNavTypeRefs nv (lspNavIdents src (spanEnd (nodeSpan d)) (lspNavDeclEnd src d))
-        (as (nodeCVec d) (Vec Int)) 0)
+        (nodeCNames d) 0)
     }))
 
 ; `(subtype Positive is Int range LO..HI)`: the identifiers between
@@ -6684,7 +6690,7 @@
 ; with a name rather than a rule. (Bounds are usually literals, and
 ; walking them as expressions would resolve against the empty
 ; top-level scope, which is a second claim needing its own gate.)
-(pub :: lspNavTypesSubtype (-> Int Int Int))
+(pub :: lspNavTypesSubtype (-> Int ASTNode Int))
 (pub fn (lspNavTypesSubtype nv d)
   (if (== (nodeSpan d) 0)
     0
@@ -6718,7 +6724,7 @@
 ; The declaration's own name, keyed by itself. A `fn` and its `::`
 ; signature both land here under the same key, which is what makes a
 ; rename touch both.
-(pub :: lspNavDeclName (-> Int Int Int Int))
+(pub :: lspNavDeclName (-> Int ASTNode Int Int))
 (pub fn (lspNavDeclName nv d role)
   (if (&& (!= (nodeSpan d) 0) (== (expIsJoinMarker (nodeAName d)) 0))
     (lspNavEmit nv (nodeAName d) (nodeSpan d) role (nodeAName d) 0 0)
@@ -6729,10 +6735,10 @@
 ; count agrees with the tree - see `lspHeaderParamSpans`. Each
 ; parameter is pushed as soon as it is emitted, so a second parameter
 ; spelling the first is seen by the rename probe as a collision.
-(pub :: lspNavWalkFn (-> Int Int Int))
+(pub :: lspNavWalkFn (-> Int ASTNode Int))
 (pub fn (lspNavWalkFn nv d)
   {
-    (let params (nodeBVec d))
+    (let params (nodeBChildren d))
     (let np (vecLen params))
     {
       (let spans
@@ -6760,7 +6766,7 @@
                 }
               }
             })
-          (lspNavWalk nv (nodeC d))
+          (lspNavWalk nv (nodeCChild d))
           (lspNavPopN nv np)
         }
       }
@@ -6775,9 +6781,9 @@
 ; node an `alloc` carries, a shape this walk does not know. A handle
 ; of 0 is a leaf too.
 ; ------------------------------------------------------------------
-(pub :: lspNavWalk (-> Int Int Int))
+(pub :: lspNavWalk (-> Int ASTNode Int))
 (pub fn (lspNavWalk nv e)
-  (if (== e 0)
+  (if (nodeSame e nilNode)
     0
     {
       (let tag (nodeTag e))
@@ -6785,15 +6791,15 @@
         (lspNavRef nv (nodeAName e) (nodeSpan e) NAV_READ)
         (if (== tag TAG_E_APP)
           {
-            (lspNavWalk nv (nodeA e))
+            (lspNavWalk nv (nodeAChild e))
             ; A format string's holes name bindings: `(println "{v}")`
             ; reads `v` as surely as `(println v)` does, so hover,
             ; definition, references, highlights and rename all reach
             ; it. Only the literal handed to a formatting macro is
             ; read this way; anywhere else `{v}` is text.
             (if (lspNavIsFormatCall e)
-              (lspNavHoles nv (nodeB e))
-              (lspNavWalk nv (nodeB e)))
+              (lspNavHoles nv (nodeBChild e))
+              (lspNavWalk nv (nodeBChild e)))
           }
           (if (== tag TAG_E_LAM)
             (lspNavWalkLam nv e)
@@ -6801,25 +6807,25 @@
               (lspNavWalkLet nv e)
               (if (== tag TAG_E_IF)
                 {
-                  (lspNavWalk nv (nodeA e))
-                  (lspNavWalk nv (nodeB e))
-                  (lspNavWalk nv (nodeC e))
+                  (lspNavWalk nv (nodeAChild e))
+                  (lspNavWalk nv (nodeBChild e))
+                  (lspNavWalk nv (nodeCChild e))
                 }
                 (if (== tag TAG_E_BEGIN)
-                  (lspNavWalkVec nv (nodeAVec e))
+                  (lspNavWalkVec nv (nodeAChildren e))
                   (if (|| (== tag TAG_E_WHILE) (== tag TAG_E_REGION))
                     (if (== tag TAG_E_REGION)
                       ; the name identifies a lexical scope and binds no
                       ; value: navigate references in the body
-                      (lspNavWalk nv (nodeB e))
+                      (lspNavWalk nv (nodeBChild e))
                       {
-                        (lspNavWalk nv (nodeA e))
-                        (lspNavWalkVec nv (nodeBVec e))
+                        (lspNavWalk nv (nodeAChild e))
+                        (lspNavWalkVec nv (nodeBChildren e))
                       })
                     (if (== tag TAG_E_MATCH)
                       {
-                        (lspNavWalk nv (nodeA e))
-                        (lspNavWalkArms nv (nodeBVec e) 0)
+                        (lspNavWalk nv (nodeAChild e))
+                        (lspNavWalkArms nv (nodeBChildren e) 0)
                       }
                       ; `cond` is AX2004: the parser builds none, so
                       ; no arm navigates one. A variadic `if` arrives
@@ -6830,34 +6836,34 @@
                         ; the source and in this list.
                         {
                           (lspNavRef nv (nodeAName e) (nodeSpan e) NAV_WRITE)
-                          (lspNavWalk nv (nodeB e))
+                          (lspNavWalk nv (nodeBChild e))
                         }
                         (if (|| (== tag TAG_E_FIELD) (== tag TAG_E_TRY))
                           ; A field name is not a variable; the
                           ; base is.
-                          (lspNavWalk nv (nodeA e))
+                          (lspNavWalk nv (nodeAChild e))
                           (if (== tag TAG_E_SETF)
                             {
-                              (lspNavWalk nv (nodeA e))
-                              (lspNavWalk nv (nodeC e))
+                              (lspNavWalk nv (nodeAChild e))
+                              (lspNavWalk nv (nodeCChild e))
                             }
                             (if (== tag TAG_E_HANDLE)
                               {
-                                (lspNavWalk nv (nodeA e))
-                                (lspNavWalkEffects nv (nodeBVec e) 0)
-                                (lspNavWalk nv (nodeC e))
+                                (lspNavWalk nv (nodeAChild e))
+                                (lspNavWalkEffects nv (nodeBChildren e) 0)
+                                (lspNavWalk nv (nodeCChild e))
                               }
                               0))))))))))))
     }))
 
 ; `(println "...")`, `(eprintln "...")` or `(format "...")`, with the
 ; literal as the argument: the one place a string's `{name}` is a hole.
-(pub :: lspNavIsFormatCall (-> Int Bool))
+(pub :: lspNavIsFormatCall (-> ASTNode Bool))
 (pub fn (lspNavIsFormatCall e)
   {
-    (let h (nodeA e))
-    (let arg (nodeB e))
-    (if (|| (== h 0) (== arg 0))
+    (let h (nodeAChild e))
+    (let arg (nodeBChild e))
+    (if (|| (nodeSame h nilNode) (nodeSame arg nilNode))
       false
       (if (|| (!= (nodeTag h) TAG_E_VAR) (!= (nodeTag arg) TAG_E_STR))
         false
@@ -6870,7 +6876,7 @@
 ; Each hole of the format string `lit` as a READ of the name it spells,
 ; at the name's own bytes: `{name}` and `{name:SPEC}`, with `{{` and
 ; `}}` as literal braces and a backslash escaping the byte after it.
-(pub :: lspNavHoles (-> Int Int Int))
+(pub :: lspNavHoles (-> Int ASTNode Int))
 (pub fn (lspNavHoles nv lit)
   {
     (let src (memGetWordStr nv 0))
@@ -6917,7 +6923,7 @@
       })
   })
 
-(pub :: lspNavWalkVec (-> Int Ints Int))
+(pub :: lspNavWalkVec (-> Int (Vec ASTNode) Int))
 (pub fn (lspNavWalkVec nv xs)
   {
     (let mut i 0)
@@ -6966,16 +6972,16 @@
 ; sixth word is an index or unused): field hover reads a `let`-bound
 ; base's type off the constructor the value builds, and no other
 ; reader consults the word, so nothing else moves.
-(pub :: lspNavWalkLet (-> Int Int Int))
+(pub :: lspNavWalkLet (-> Int ASTNode Int))
 (pub fn (lspNavWalkLet nv e)
   {
     (let name (nodeAName e))
     (let key (lspNavBinderKey (nodeAName e) (nodeSpan e) e))
     {
       (lspNavEmitBinder nv name (nodeSpan e) key NAV_B_LET (nodeB e))
-      (lspNavWalk nv (nodeB e))
+      (lspNavWalk nv (nodeBChild e))
       (lspNavPush nv name key)
-      (lspNavWalk nv (nodeC e))
+      (lspNavWalk nv (nodeCChild e))
       (lspNavPopN nv 1)
     }
   })
@@ -6987,7 +6993,7 @@
 ; nested nodes are not each scanned again as if they were lambdas of
 ; their own. A lambda written INSIDE another has its own keyword and
 ; its own span, so it is not part of the chain.
-(pub :: lspNavWalkLam (-> Int Int Int))
+(pub :: lspNavWalkLam (-> Int ASTNode Int))
 (pub fn (lspNavWalkLam nv e)
   {
     (let sp (nodeSpan e))
@@ -7004,9 +7010,9 @@
         {
           (while (lspNavInChain n sp)
             {
-              (if (> (vecLen (nodeAVec n)) 0)
+              (if (> (vecLen (nodeANames n)) 0)
                 {
-                  (let p (vecGetStr (nodeAVec n) 0))
+                  (let p (vecGetStr (nodeANames n) 0))
                   (let psp
                     (if ok
                       (vecGet spans k)
@@ -7020,7 +7026,7 @@
                     }
                   }
                 })
-              (set n (nodeB n))
+              (set n (nodeBChild n))
             })
           (lspNavWalk nv n)
           (lspNavPopN nv k)
@@ -7029,17 +7035,17 @@
     }
   })
 
-(pub :: lspNavInChain (-> Int Int Bool))
+(pub :: lspNavInChain (-> ASTNode Int Bool))
 (pub fn (lspNavInChain n sp)
-  (if (== n 0)
+  (if (nodeSame n nilNode)
     false
     (&& (== (nodeTag n) TAG_E_LAM) (== (nodeSpan n) sp))))
 
-(pub :: lspNavLamArity (-> Int Int Int Int))
+(pub :: lspNavLamArity (-> ASTNode Int Int Int))
 (pub fn (lspNavLamArity n sp acc)
   (if (lspNavInChain n sp)
-    (lspNavLamArity (nodeB n) sp
-      (if (> (vecLen (nodeAVec n)) 0)
+    (lspNavLamArity (nodeBChild n) sp
+      (if (> (vecLen (nodeANames n)) 0)
         (+ acc 1)
         acc))
     acc))
@@ -7047,7 +7053,7 @@
 ; `match` arms: the pattern's binders scope the arm's body. A
 ; `syntax/for` arm binds its iteration variable - spanless, it is a
 ; template construct - over its own arms.
-(pub :: lspNavWalkArms (-> Int Ints Int Int))
+(pub :: lspNavWalkArms (-> Int (Vec ASTNode) Int Int))
 (pub fn (lspNavWalkArms nv arms i)
   (if (>= i (vecLen arms))
     0
@@ -7056,17 +7062,17 @@
       {
         (if (== (nodeTag arm) TAG_M_ARM)
           {
-            (let bound (lspNavWalkPat nv (nodeA arm)))
+            (let bound (lspNavWalkPat nv (nodeAChild arm)))
             {
-              (lspNavWalk nv (nodeB arm))
+              (lspNavWalk nv (nodeBChild arm))
               (lspNavPopN nv bound)
             }
           }
           (if (== (nodeTag arm) TAG_M_FOR)
             {
-              (lspNavWalk nv (nodeB arm))
+              (lspNavWalk nv (nodeBChild arm))
               (lspNavPush nv (nodeAName arm) (lspNavBinderKey (nodeAName arm) 0 arm))
-              (lspNavWalkArms nv (nodeCVec arm) 0)
+              (lspNavWalkArms nv (nodeCChildren arm) 0)
               (lspNavPopN nv 1)
             }))
         (lspNavWalkArms nv arms (+ i 1))
@@ -7075,7 +7081,7 @@
 
 ; The effects a `handle` names, as references to effects - a namespace
 ; this document's declarations are not searched for.
-(pub :: lspNavWalkEffects (-> Int Ints Int Int))
+(pub :: lspNavWalkEffects (-> Int (Vec ASTNode) Int Int))
 (pub fn (lspNavWalkEffects nv effs i)
   (if (>= i (vecLen effs))
     0
@@ -7097,9 +7103,9 @@
 ; the top-level table alone - a local can never be a constructor.
 ; Every other variable in pattern position is a binder, except `_`.
 ; ------------------------------------------------------------------
-(pub :: lspNavWalkPat (-> Int Int Int))
+(pub :: lspNavWalkPat (-> Int ASTNode Int))
 (pub fn (lspNavWalkPat nv p)
-  (if (== p 0)
+  (if (nodeSame p nilNode)
     0
     {
       (let tag (nodeTag p))
@@ -7124,19 +7130,19 @@
             (if (== tag TAG_P_CONNAMED)
               {
                 (lspNavCtorRef nv (nodeAName p) (nodeSpan p))
-                (lspNavWalkPatVec nv (nodeCVec p) 0)
+                (lspNavWalkPatVec nv (nodeCChildren p) 0)
               }
               0))))
     }))
 
 ; `(Just x)` is App(Var Just, Var x): the spine's innermost head is the
 ; constructor and every argument along it is a sub-pattern.
-(pub :: lspNavWalkPatSpine (-> Int Int Int))
+(pub :: lspNavWalkPatSpine (-> Int ASTNode Int))
 (pub fn (lspNavWalkPatSpine nv m)
   (if (== (nodeTag m) TAG_E_APP)
     {
-      (let a (lspNavWalkPatSpine nv (nodeA m)))
-      (+ a (lspNavWalkPat nv (nodeB m)))
+      (let a (lspNavWalkPatSpine nv (nodeAChild m)))
+      (+ a (lspNavWalkPat nv (nodeBChild m)))
     }
     (if (== (nodeTag m) TAG_E_VAR)
       {
@@ -7145,7 +7151,7 @@
       }
       (lspNavWalkPat nv m))))
 
-(pub :: lspNavWalkPatVec (-> Int Ints Int Int))
+(pub :: lspNavWalkPatVec (-> Int (Vec ASTNode) Int Int))
 (pub fn (lspNavWalkPatVec nv pats i)
   (if (>= i (vecLen pats))
     0
@@ -7361,21 +7367,21 @@
 ;; The parsed declarations of `src`, through `lspParse`: a document
 ;; that does not parse answers the declarations that still parse
 ;; around its errors.
-(pub :: lspNavParse (-> String Ints))
+(pub :: lspNavParse (-> String (Vec ASTNode)))
 (pub fn (lspNavParse src)
-  (memGetWordVec (lspParse src) 1))
+  (readAstNodes (lspParse src) 1))
 
 ;; The same, or 0 when reading the document meant dropping some of its
 ;; tokens: a rename over that tree would leave the dropped references
 ;; spelt the old way.
-(pub :: lspNavParseExact (-> String Ints))
+(pub :: lspNavParseExact (-> String (Vec ASTNode)))
 ;@axiom:effect(unsafe)
 (pub fn (lspNavParseExact src)
   {
     (let pr (lspParse src))
     (if (lspParseLossy pr)
-      (as 0 (Vec Int))
-      (memGetWordVec pr 1))
+      (as 0 Nodes)
+      (readAstNodes pr 1))
   })
 
 ; ------------------------------------------------------------------
@@ -7439,7 +7445,7 @@
     p
     (pathJoin (unwrapOr cwd "") p)))
 
-(pub :: lspNavImportsPath (-> LspWorkspace Ints Int String String Bool))
+(pub :: lspNavImportsPath (-> LspWorkspace (Vec ASTNode) Int String String Bool))
 ;@axiom:effect(io)
 (pub fn (lspNavImportsPath workspace decls tcode entryDir target)
   {
@@ -7506,7 +7512,7 @@
 ; own would shadow the import, and is a different name.
 (pub :: lspNavForeignSel (-> (Vec a) Int String Ints))
 (pub fn (lspNavForeignSel texts pair bare)
-  (lspNavSameKey (lspNavOccurrences (vecGetStr texts (memGetWord pair 0)) (memGetWordVec pair 1))
+  (lspNavSameKey (lspNavOccurrences (vecGetStr texts (memGetWord pair 0)) (readAstNodes pair 1))
     (concat "?" bare) 1))
 
 ; The reverse direction: the cursor is on a name this document
@@ -7515,7 +7521,7 @@
 ; if THAT file is open in the store, its URI is answered, so its own
 ; occurrences can be listed. "" when the name is not an import, or
 ; the declaring file is not open.
-(pub :: lspNavHomeUri (-> LspWorkspace String String Ints String Strings String))
+(pub :: lspNavHomeUri (-> LspWorkspace String String (Vec ASTNode) String Strings String))
 ;@axiom:effect(io)
 (pub fn (lspNavHomeUri workspace path src decls w uris)
   {
@@ -7523,11 +7529,11 @@
     (if (== r 0)
       ""
       {
-        (let allDecls (memGetWordVec r 0))
+        (let allDecls (readAstNodes r 0))
         (let units (memGetWordVec r 1))
         {
           (let d (lspFindImported allDecls w (- (vecLen allDecls) 1)))
-          (if (== d 0)
+          (if (nodeSame d nilNode)
             ""
             {
               (let u (lspUnitOf units (nodeModule d)))
@@ -7621,7 +7627,8 @@
 ; isn't, its uses can't be listed without reading every file on disk,
 ; but the declaration itself is one lookup away - the one `definition`
 ; makes - so a request that includes the declaration still gets it.
-(pub :: lspNavHomeLocations (-> LspWorkspace Int String String Ints String Int Strings (Vec a) Int))
+(pub :: lspNavHomeLocations
+  (-> LspWorkspace Int String String (Vec ASTNode) String Int Strings (Vec a) Int))
 ;@axiom:effect(io)
 (pub fn (lspNavHomeLocations workspace out path src decls bare incl uris texts)
   {
@@ -7758,7 +7765,7 @@
       })
   })
 
-(pub :: lspRenameLocal (-> String String Ints Ints Ints String String Int))
+(pub :: lspRenameLocal (-> String String Ints (Vec ASTNode) Ints String String Int))
 (pub fn (lspRenameLocal src uri ix decls occs key newName)
   {
     (let probe (lspNavProbe newName key))
@@ -7791,7 +7798,7 @@
               (let otext (vecGetStr texts (memGetWord pair 0)))
               (let ouri (vecGetStr uris (memGetWord pair 0)))
               (let oocc
-                (lspNavOccurrences (vecGetStr texts (memGetWord pair 0)) (memGetWordVec pair 1)))
+                (lspNavOccurrences (vecGetStr texts (memGetWord pair 0)) (readAstNodes pair 1)))
               {
                 (if (lspNavNamed oocc newName)
                   (set clash true)
@@ -7828,7 +7835,7 @@
 ; The binder's Location for a local reference or binder; null for a
 ; local whose binder has no anchor - jumping to a declaration of the
 ; same name would be the wrong of the two answers.
-(pub :: lspNavLocalDefinition (-> String String Ints Ints Int Int))
+(pub :: lspNavLocalDefinition (-> String String Ints (Vec ASTNode) Int Int))
 (pub fn (lspNavLocalDefinition src uri ix decls off)
   {
     (let occs (lspNavOccurrences src decls))
@@ -7919,9 +7926,9 @@
 ; 0 and the poison type are both "unknown" to every reader here: a
 ; broken signature answers nothing rather than a rendering of the
 ; poison, the way the checker propagates it in silence.
-(pub :: lspShapeIsBad (-> Int Bool))
+(pub :: lspShapeIsBad (-> ASTNode Bool))
 (pub fn (lspShapeIsBad t)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     true
     (== (nodeTag t) TAG_T_ERR)))
 
@@ -7974,25 +7981,25 @@
 ; Drop one arrow domain per argument: the curried reading of a call.
 ; A non-arrow with arguments left, a missing type, and poison are
 ; all unknown.
-(pub :: lspShapeApplyArrow (-> Int Int Int))
+(pub :: lspShapeApplyArrow (-> ASTNode Int ASTNode))
 (pub fn (lspShapeApplyArrow ty n)
   (if (lspShapeIsBad ty)
-    0
+    nilNode
     (if (== n 0)
       ty
       (if (!= (nodeTag ty) TAG_T_ARR)
-        0
-        (lspShapeApplyArrow (nodeB ty) (- n 1))))))
+        nilNode
+        (lspShapeApplyArrow (nodeBChild ty) (- n 1))))))
 
 ; A builtin's type under application: its row's full arrow with one
 ; domain dropped per argument, so a partial application answers the
 ; remaining arrow.
-(pub :: lspShapeBuiltinTy (-> String Int Int))
+(pub :: lspShapeBuiltinTy (-> String Int ASTNode))
 (pub fn (lspShapeBuiltinTy h nargs)
   {
     (let r (lspShapeBuiltinRes h))
     (if (== r 0)
-      0
+      nilNode
       (lspShapeApplyArrow
         (if (== r 1)
           (mkTArr mkIntTy (mkTArr mkIntTy mkIntTy))
@@ -8005,37 +8012,39 @@
 ; The spine of a call: the head, with the arguments pushed in order.
 ; The loop is `lspViewHintsApp`'s, factored so a shape and a hint
 ; read one spine the same way.
-(pub :: lspShapeSpine (-> Int Ints Int))
+(pub :: lspShapeSpine (-> ASTNode (Vec ASTNode) ASTNode))
 (pub fn (lspShapeSpine e args)
   {
     (let mut h e)
     {
       (while (== (nodeTag h) TAG_E_APP)
         {
-          (vecPush args (nodeB h))
-          (set h (nodeA h))
+          (vecPush args (nodeBChild h))
+          (set h (nodeAChild h))
         })
       (lspViewReverse args)
       h
     }
   })
 
-; Bindings are a flat Vec of (name, node) pairs, names at even
-; words: a constructor's arity is single digits, so a scan is the
-; index. 0 is "unbound", which is exact because nothing binds 0 -
+; Typed bindings own each substituted node. A constructor has few
+; parameters, so lookup scans the bindings. A null node is unbound:
 ; an unknown argument binds nothing, and the coverage check below
 ; turns the hole into an unknown shape.
-(pub :: lspShapeBindGet (-> Ints String Int))
+(pub :: lspShapeBindGet (-> TypeEnv String ASTNode))
 (pub fn (lspShapeBindGet pairs name)
   (lspShapeBindGetIn pairs name 0))
 
-(pub :: lspShapeBindGetIn (-> Ints String Int Int))
+(pub :: lspShapeBindGetIn (-> TypeEnv String Int ASTNode))
 (pub fn (lspShapeBindGetIn pairs name i)
   (if (>= i (vecLen pairs))
-    0
-    (if (strEq (vecGetStr pairs i) name)
-      (vecGet pairs (+ i 1))
-      (lspShapeBindGetIn pairs name (+ i 2)))))
+    nilNode
+    {
+      (let binding (vecGet pairs i))
+      (if (strEq binding.name name)
+        binding.ty
+        (lspShapeBindGetIn pairs name (+ i 1)))
+    }))
 
 ; A parameter's index, or -1. A variable that names no parameter is
 ; not the call's to bind.
@@ -8056,7 +8065,7 @@
 ; argument, a parameter against an unknown one - binds nothing and
 ; passes, because mismatch is the checker's complaint and silence
 ; here would veto shapes the call does determine.
-(pub :: lspShapeBind (-> Int Int Strings Ints Int))
+(pub :: lspShapeBind (-> ASTNode ASTNode Strings TypeEnv Int))
 (pub fn (lspShapeBind ft arg params pairs)
   (if (lspShapeIsBad ft)
     0
@@ -8068,10 +8077,9 @@
             1
             {
               (let old (lspShapeBindGet pairs vn))
-              (if (== old 0)
+              (if (nodeSame old nilNode)
                 {
-                  (vecPush pairs (as vn Int))
-                  (vecPush pairs arg)
+                  (vecPush pairs (TypeBinding :name vn :ty arg))
                   1
                 }
                 (if (strEq (tyRender old) (tyRender arg))
@@ -8081,18 +8089,19 @@
           1)
       }
       (if (== (nodeTag ft) TAG_T_CON)
-        (if (&& (!= arg 0) (&& (== (nodeTag arg) TAG_T_CON) (strEq (nodeAName ft) (nodeAName arg))))
-          (lspShapeBindVec (nodeBVec ft) (nodeBVec arg) params pairs 0)
+        (if (&& (! (nodeSame arg nilNode))
+              (&& (== (nodeTag arg) TAG_T_CON) (strEq (nodeAName ft) (nodeAName arg))))
+          (lspShapeBindVec (nodeBChildren ft) (nodeBChildren arg) params pairs 0)
           1)
         (if (== (nodeTag ft) TAG_T_ARR)
-          (if (&& (!= arg 0) (== (nodeTag arg) TAG_T_ARR))
-            (if (== (lspShapeBind (nodeA ft) (nodeA arg) params pairs) 0)
+          (if (&& (! (nodeSame arg nilNode)) (== (nodeTag arg) TAG_T_ARR))
+            (if (== (lspShapeBind (nodeAChild ft) (nodeAChild arg) params pairs) 0)
               0
-              (lspShapeBind (nodeB ft) (nodeB arg) params pairs))
+              (lspShapeBind (nodeBChild ft) (nodeBChild arg) params pairs))
             1)
           1)))))
 
-(pub :: lspShapeBindVec (-> Ints Ints Strings Ints Int Int))
+(pub :: lspShapeBindVec (-> Nodes Nodes Strings TypeEnv Int Int))
 (pub fn (lspShapeBindVec fts args params pairs i)
   (if (>= i (vecLen fts))
     1
@@ -8106,18 +8115,18 @@
 ; its argument's shape, then every parameter read out in order. A
 ; field count that is not the argument count is unknown, and so is
 ; a parameter the call leaves unbound.
-(pub :: lspShapeCon (-> Ints Ints String Strings Ints Ints Int Int))
+(pub :: lspShapeCon (-> (Vec ASTNode) Ints String Strings (Vec ASTNode) (Vec ASTNode) Int ASTNode))
 (pub fn (lspShapeCon decls occs tname params fts args fuel)
   (if (!= (vecLen fts) (vecLen args))
-    0
+    nilNode
     {
       (let pairs vecNew)
       (if (== (lspShapeBindAll decls occs fts args params pairs fuel 0) 0)
-        0
+        nilNode
         (lspShapeConBuild tname params pairs 0 vecNew))
     }))
 
-(pub :: lspShapeBindAll (-> Ints Ints Ints Ints Strings Ints Int Int Int))
+(pub :: lspShapeBindAll (-> Nodes Ints Nodes Nodes Strings TypeEnv Int Int Int))
 (pub fn (lspShapeBindAll decls occs fts args params pairs fuel i)
   (if (>= i (vecLen fts))
     1
@@ -8126,14 +8135,14 @@
       0
       (lspShapeBindAll decls occs fts args params pairs fuel (+ i 1)))))
 
-(pub :: lspShapeConBuild (-> String Strings Ints Int Ints Int))
+(pub :: lspShapeConBuild (-> String Strings TypeEnv Int Nodes ASTNode))
 (pub fn (lspShapeConBuild tname params pairs i acc)
   (if (>= i (vecLen params))
     (mkTCon tname acc)
     {
       (let t (lspShapeBindGet pairs (vecGetStr params i)))
-      (if (== t 0)
-        0
+      (if (nodeSame t nilNode)
+        nilNode
         {
           (vecPush acc t)
           (lspShapeConBuild tname params pairs (+ i 1) acc)
@@ -8143,10 +8152,10 @@
 ; `t` with each parameter replaced by its argument: fresh nodes,
 ; the arguments shared. Arity is the caller's check, and a
 ; variable that names no parameter is shared as it stands.
-(pub :: lspShapeSubst (-> Int Strings Ints Int))
+(pub :: lspShapeSubst (-> ASTNode Strings (Vec ASTNode) ASTNode))
 (pub fn (lspShapeSubst t params args)
-  (if (== t 0)
-    0
+  (if (nodeSame t nilNode)
+    nilNode
     (if (== (nodeTag t) TAG_T_VAR)
       {
         (let at (lspShapeParamAt params (nodeAName t) 0))
@@ -8155,12 +8164,13 @@
           (vecGet args at))
       }
       (if (== (nodeTag t) TAG_T_CON)
-        (mkTCon (nodeAName t) (lspShapeSubstVec (nodeBVec t) params args 0 vecNew))
+        (mkTCon (nodeAName t) (lspShapeSubstVec (nodeBChildren t) params args 0 vecNew))
         (if (== (nodeTag t) TAG_T_ARR)
-          (mkTArr (lspShapeSubst (nodeA t) params args) (lspShapeSubst (nodeB t) params args))
+          (mkTArr (lspShapeSubst (nodeAChild t) params args)
+            (lspShapeSubst (nodeBChild t) params args))
           t)))))
 
-(pub :: lspShapeSubstVec (-> Ints Strings Ints Int Ints Ints))
+(pub :: lspShapeSubstVec (-> Nodes Strings Nodes Int Nodes Nodes))
 (pub fn (lspShapeSubstVec ts params args i acc)
   (if (|| (== (as ts Int) 0) (>= i (vecLen ts)))
     acc
@@ -8171,45 +8181,45 @@
 
 ; A `data`'s or `struct`'s type parameters. A `data` always writes
 ; its vector; a struct with none leaves the slot 0 (see
-; `parseFieldsTv`), which is why this is not `nodeTyVec` outright.
-(pub :: lspShapeTyParams (-> Int Strings))
+; `parseFieldsTv`), which is why this is not `nodeTyChildren` outright.
+(pub :: lspShapeTyParams (-> ASTNode Strings))
 (pub fn (lspShapeTyParams d)
   (if (== (nodeTy d) 0)
     vecNew
-    (nodeTyVec d)))
+    (nodeTyNames d)))
 
 ; The field types of a struct's fields, in order.
-(pub :: lspShapeFieldTys (-> Ints Int Ints Ints))
+(pub :: lspShapeFieldTys (-> (Vec ASTNode) Int (Vec ASTNode) (Vec ASTNode)))
 (pub fn (lspShapeFieldTys fs i acc)
   (if (== (as fs Int) 0)
     acc
     (if (>= i (vecLen fs))
       acc
       {
-        (vecPush acc (nodeTy (vecGet fs i)))
+        (vecPush acc (nodeTyChild (vecGet fs i)))
         (lspShapeFieldTys fs (+ i 1) acc)
       })))
 
 ; The `k`th parameter type of the `::` signature naming `owner`:
 ; the one lookup behind a parameter's hover, and behind a
 ; variable's shape. 0 for no signature or no arrow there.
-(pub :: lspShapeParamTy (-> Ints String Int Int))
+(pub :: lspShapeParamTy (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspShapeParamTy decls owner k)
   {
     (let sig (lspFindSig decls owner (- (vecLen decls) 1)))
-    (if (== sig 0)
-      0
-      (nthParamTy (nodeTy sig) k 0))
+    (if (nodeSame sig nilNode)
+      nilNode
+      (nthParamTy (nodeTyChild sig) k nilNode))
   })
 
 ; The arrows of a curried type: `Int` is 0, `(-> Int Int)` is 1.
-(pub :: lspShapeArrowArity (-> Int Int))
+(pub :: lspShapeArrowArity (-> ASTNode Int))
 (pub fn (lspShapeArrowArity ty)
-  (if (== ty 0)
+  (if (nodeSame ty nilNode)
     0
     (if (!= (nodeTag ty) TAG_T_ARR)
       0
-      (+ 1 (lspShapeArrowArity (nodeB ty))))))
+      (+ 1 (lspShapeArrowArity (nodeBChild ty))))))
 
 ; A nullary constructor as a value: its `data`, when the `data`
 ; takes no arguments. `(Dot)` is `Shape`; `(Nothing)` is unknown,
@@ -8217,20 +8227,20 @@
 ; `lspShapeCon` applies to a call. A constructor that TAKES
 ; arguments is unknown as a bare value, because the checker
 ; refuses it (AX3009) rather than typing it.
-(pub :: lspShapeCtorVar (-> Ints String Int))
+(pub :: lspShapeCtorVar (-> (Vec ASTNode) String ASTNode))
 (pub fn (lspShapeCtorVar decls name)
   {
     (let dat (lspFindCtorData decls name (- (vecLen decls) 1)))
-    (if (== dat 0)
-      0
+    (if (nodeSame dat nilNode)
+      nilNode
       {
         (let c (lspCtorNodeOf dat name))
-        (if (== c 0)
-          0
-          (if (!= (vecLen (nodeTyVec c)) 0)
-            0
+        (if (nodeSame c nilNode)
+          nilNode
+          (if (!= (vecLen (nodeTyChildren c)) 0)
+            nilNode
             (if (!= (vecLen (lspShapeTyParams dat)) 0)
-              0
+              nilNode
               (mkTCon (nodeAName dat) vecNew))))
       })
   })
@@ -8247,7 +8257,7 @@
 ; constructor answers its `data`. Signatures and constructors
 ; from this document only; anything imported is the next
 ; slice's read.
-(pub :: lspShapeVar (-> Ints Ints Int Int Int))
+(pub :: lspShapeVar (-> (Vec ASTNode) Ints ASTNode Int ASTNode))
 (pub fn (lspShapeVar decls occs e fuel)
   {
     (let name (nodeAName e))
@@ -8256,48 +8266,48 @@
       (if (strEq name "false")
         mkBoolTy
         (if (== (nodeSpan e) 0)
-          0
+          nilNode
           {
             (let o (lspNavAt occs (spanStart (nodeSpan e))))
             (if (== o 0)
-              0
+              nilNode
               {
                 (let key (memGetWordStr o 3))
                 (if (lspNavIsLocal key)
                   {
                     (let b (lspNavBinderOf occs key))
                     (if (== b 0)
-                      0
+                      nilNode
                       {
                         (let bkind (memGetWord b 4))
                         (if (== bkind NAV_B_PARAM)
                           {
                             (let t (lspShapeParamTy decls (memGetWordStr b 5) (memGetWord b 6)))
                             (if (lspShapeIsBad t)
-                              0
+                              nilNode
                               t)
                           }
                           (if (== bkind NAV_B_LET)
                             (if (<= fuel 0)
-                              0
+                              nilNode
                               {
-                                (let v (memGetWord b 6))
-                                (if (== v 0)
-                                  0
+                                (let v (readAstNode b 6))
+                                (if (nodeSame v nilNode)
+                                  nilNode
                                   (lspShapeOf decls occs v (- fuel 1)))
                               })
-                            0))
+                            nilNode))
                       })
                   }
                   {
                     (let sig (lspFindSig decls name (- (vecLen decls) 1)))
-                    (if (!= sig 0)
+                    (if (! (nodeSame sig nilNode))
                       {
-                        (let t (nodeTy sig))
+                        (let t (nodeTyChild sig))
                         (if (lspShapeIsBad t)
-                          0
+                          nilNode
                           (if (>= (lspShapeArrowArity t) 2)
-                            0
+                            nilNode
                             t))
                       }
                       (lspShapeCtorVar decls name))
@@ -8309,50 +8319,50 @@
 ; Two branches' join: the shape when both agree, unknown when they
 ; do not. Rendered strings are the comparison, because the two
 ; nodes are built apart and share nothing.
-(pub :: lspShapeJoin (-> Int Int Int))
+(pub :: lspShapeJoin (-> ASTNode ASTNode ASTNode))
 (pub fn (lspShapeJoin a b)
   (if (lspShapeIsBad a)
-    0
+    nilNode
     (if (lspShapeIsBad b)
-      0
+      nilNode
       (if (strEq (tyRender a) (tyRender b))
         a
-        0))))
+        nilNode))))
 
 ; A block's shape is its last expression's.
-(pub :: lspShapeBegin (-> Ints Ints Ints Int Int))
+(pub :: lspShapeBegin (-> (Vec ASTNode) Ints (Vec ASTNode) Int ASTNode))
 (pub fn (lspShapeBegin decls occs xs fuel)
   (if (== (as xs Int) 0)
-    0
+    nilNode
     (if (== (vecLen xs) 0)
-      0
+      nilNode
       (lspShapeOf decls occs (vecGet xs (- (vecLen xs) 1)) fuel))))
 
 ; A `match`'s shape: every arm body's, when they agree.
-(pub :: lspShapeMatch (-> Ints Ints Ints Int Int))
+(pub :: lspShapeMatch (-> (Vec ASTNode) Ints (Vec ASTNode) Int ASTNode))
 (pub fn (lspShapeMatch decls occs arms fuel)
   (if (== (as arms Int) 0)
-    0
+    nilNode
     (if (== (vecLen arms) 0)
-      0
+      nilNode
       (lspShapeMatchIn decls occs arms fuel 1 (lspShapeArmBody decls occs (vecGet arms 0) fuel)))))
 
-(pub :: lspShapeArmBody (-> Ints Ints Int Int Int))
+(pub :: lspShapeArmBody (-> (Vec ASTNode) Ints ASTNode Int ASTNode))
 (pub fn (lspShapeArmBody decls occs arm fuel)
-  (if (== arm 0)
-    0
+  (if (nodeSame arm nilNode)
+    nilNode
     (if (!= (nodeTag arm) TAG_M_ARM)
-      0
-      (lspShapeOf decls occs (nodeB arm) fuel))))
+      nilNode
+      (lspShapeOf decls occs (nodeBChild arm) fuel))))
 
-(pub :: lspShapeMatchIn (-> Ints Ints Ints Int Int Int Int))
+(pub :: lspShapeMatchIn (-> (Vec ASTNode) Ints (Vec ASTNode) Int Int ASTNode ASTNode))
 (pub fn (lspShapeMatchIn decls occs arms fuel i acc)
   (if (>= i (vecLen arms))
     acc
     {
       (let j (lspShapeJoin acc (lspShapeArmBody decls occs (vecGet arms i) fuel)))
-      (if (== j 0)
-        0
+      (if (nodeSame j nilNode)
+        nilNode
         (lspShapeMatchIn decls occs arms fuel (+ i 1) j))
     }))
 
@@ -8366,27 +8376,27 @@
 ; document's signature first, so a declaration shadows a builtin
 ; of the same spelling; then the builtin table; then, for an
 ; upcased head, the struct or constructor the name declares.
-(pub :: lspShapeApp (-> Ints Ints Int Int Int))
+(pub :: lspShapeApp (-> (Vec ASTNode) Ints ASTNode Int ASTNode))
 (pub fn (lspShapeApp decls occs e fuel)
   {
     (let args vecNew)
     {
       (let h (lspShapeSpine e args))
       (if (!= (nodeTag h) TAG_E_VAR)
-        0
+        nilNode
         {
           (let name (nodeAName h))
           (if (lspShapeQualified name)
-            0
+            nilNode
             {
               (let sig (lspFindSig decls name (- (vecLen decls) 1)))
-              (if (!= sig 0)
-                (lspShapeApplyArrow (nodeTy sig) (vecLen args))
+              (if (! (nodeSame sig nilNode))
+                (lspShapeApplyArrow (nodeTyChild sig) (vecLen args))
                 (if (!= (lspShapeBuiltinRes name) 0)
                   (lspShapeBuiltinTy name (vecLen args))
                   (if (== (lspIsUpperStart name) 1)
                     (lspShapeUpCon decls occs name args fuel)
-                    0)))
+                    nilNode)))
             })
         })
     }
@@ -8395,23 +8405,23 @@
 ; An upcased head: a struct built positionally, or a constructor
 ; of the `data` that declares it - verified, not spelled: a name
 ; that is neither answers unknown.
-(pub :: lspShapeUpCon (-> Ints Ints String Ints Int Int))
+(pub :: lspShapeUpCon (-> (Vec ASTNode) Ints String (Vec ASTNode) Int ASTNode))
 (pub fn (lspShapeUpCon decls occs name args fuel)
   {
     (let d (lspFindTypeDecl decls name (- (vecLen decls) 1)))
-    (if (&& (!= d 0) (== (nodeTag d) TAG_D_STRUCT))
-      (lspShapeCon decls occs name (lspShapeTyParams d) (lspShapeFieldTys (nodeBVec d) 0 vecNew)
-        args fuel)
+    (if (&& (! (nodeSame d nilNode)) (== (nodeTag d) TAG_D_STRUCT))
+      (lspShapeCon decls occs name (lspShapeTyParams d)
+        (lspShapeFieldTys (nodeBChildren d) 0 vecNew) args fuel)
       {
         (let dat (lspFindCtorData decls name (- (vecLen decls) 1)))
-        (if (== dat 0)
-          0
+        (if (nodeSame dat nilNode)
+          nilNode
           {
             (let c (lspCtorNodeOf dat name))
-            (if (== c 0)
-              0
-              (lspShapeCon decls occs (nodeAName dat) (lspShapeTyParams dat) (nodeTyVec c) args
-                fuel))
+            (if (nodeSame c nilNode)
+              nilNode
+              (lspShapeCon decls occs (nodeAName dat) (lspShapeTyParams dat) (nodeTyChildren c)
+                args fuel))
           })
       })
   })
@@ -8422,37 +8432,37 @@
 ; call result - so a call result reaches its field here where
 ; `lspFieldBaseStruct` answers null; that function's own
 ; migration onto this walk is the next slice.
-(pub :: lspShapeField (-> Ints Ints Int Int Int))
+(pub :: lspShapeField (-> (Vec ASTNode) Ints ASTNode Int ASTNode))
 (pub fn (lspShapeField decls occs e fuel)
   {
-    (let b (lspShapeOf decls occs (nodeA e) fuel))
+    (let b (lspShapeOf decls occs (nodeAChild e) fuel))
     (if (lspShapeIsBad b)
-      0
+      nilNode
       (if (!= (nodeTag b) TAG_T_CON)
-        0
+        nilNode
         {
           (let d (lspFindTypeDecl decls (nodeAName b) (- (vecLen decls) 1)))
-          (if (|| (== d 0) (!= (nodeTag d) TAG_D_STRUCT))
-            0
+          (if (|| (nodeSame d nilNode) (!= (nodeTag d) TAG_D_STRUCT))
+            nilNode
             {
-              (let f (lspStructFieldNode (nodeBVec d) (nodeBName e) 0))
-              (if (== f 0)
-                0
+              (let f (lspStructFieldNode (nodeBChildren d) (nodeBName e) 0))
+              (if (nodeSame f nilNode)
+                nilNode
                 {
-                  (let ft (nodeTy f))
+                  (let ft (nodeTyChild f))
                   (if (lspShapeIsBad ft)
-                    0
+                    nilNode
                     {
                       (let ps (lspShapeTyParams d))
                       {
-                        (let raw (nodeBVec b))
+                        (let raw (nodeBChildren b))
                         {
                           (let as
                             (if (== (as raw Int) 0)
                               vecNew
                               raw))
                           (if (!= (vecLen ps) (vecLen as))
-                            0
+                            nilNode
                             (lspShapeSubst ft ps as))
                         }
                       }
@@ -8468,10 +8478,10 @@
 ; evaluates to 0, the checker's rule as much as the emitter's.
 ; Anything else - a `lambda`, a loop, a form this slice does not
 ; read - is unknown.
-(pub :: lspShapeOf (-> Ints Ints Int Int Int))
+(pub :: lspShapeOf (-> (Vec ASTNode) Ints ASTNode Int ASTNode))
 (pub fn (lspShapeOf decls occs e fuel)
-  (if (== e 0)
-    0
+  (if (nodeSame e nilNode)
+    nilNode
     {
       (let tag (nodeTag e))
       (if (== tag TAG_E_INT)
@@ -8489,46 +8499,46 @@
                 (if (== tag TAG_E_APP)
                   (lspShapeApp decls occs e fuel)
                   (if (== tag TAG_E_IF)
-                    (lspShapeJoin (lspShapeOf decls occs (nodeB e) fuel)
-                      (lspShapeOf decls occs (nodeC e) fuel))
+                    (lspShapeJoin (lspShapeOf decls occs (nodeBChild e) fuel)
+                      (lspShapeOf decls occs (nodeCChild e) fuel))
                     (if (== tag TAG_E_BEGIN)
-                      (lspShapeBegin decls occs (nodeAVec e) fuel)
+                      (lspShapeBegin decls occs (nodeAChildren e) fuel)
                       (if (|| (== tag TAG_E_LET) (== tag TAG_E_LETM))
-                        (lspShapeOf decls occs (nodeC e) fuel)
+                        (lspShapeOf decls occs (nodeCChild e) fuel)
                         (if (== tag TAG_E_MATCH)
-                          (lspShapeMatch decls occs (nodeBVec e) fuel)
+                          (lspShapeMatch decls occs (nodeBChildren e) fuel)
                           (if (== tag TAG_E_FIELD)
                             (lspShapeField decls occs e fuel)
                             (if (|| (== tag TAG_E_SET) (== tag TAG_E_SETF))
                               mkIntTy
-                              0))))))))))))
+                              nilNode))))))))))))
     }))
 
 ; A binder's shape: a parameter's from its signature, a `let`'s
 ; from its value. A lambda parameter or pattern variable carries
 ; no value to read - unknown, until the call sites that could
 ; type them are a slice of their own.
-(pub :: lspShapeOfBinder (-> Ints Ints Int Int))
+(pub :: lspShapeOfBinder (-> (Vec ASTNode) Ints Int ASTNode))
 (pub fn (lspShapeOfBinder decls occs b)
   (if (== b 0)
-    0
+    nilNode
     {
       (let bkind (memGetWord b 4))
       (if (== bkind NAV_B_PARAM)
         {
           (let t (lspShapeParamTy decls (memGetWordStr b 5) (memGetWord b 6)))
           (if (lspShapeIsBad t)
-            0
+            nilNode
             t)
         }
         (if (== bkind NAV_B_LET)
           {
-            (let v (memGetWord b 6))
-            (if (== v 0)
-              0
+            (let v (readAstNode b 6))
+            (if (nodeSame v nilNode)
+              nilNode
               (lspShapeOf decls occs v 16))
           }
-          0))
+          nilNode))
     }))
 
 ; A `let`'s hover code: the binding pair, with the value's shape
@@ -8536,7 +8546,7 @@
 ; type second, because the binding is the answer and the type
 ; annotates it; an unknown shape leaves the pair exactly as it
 ; was.
-(pub :: lspShapeLetCode (-> String Ints Ints Int Int String String))
+(pub :: lspShapeLetCode (-> String (Vec ASTNode) Ints Int Int String String))
 (pub fn (lspShapeLetCode src decls occs b at name)
   {
     (let pair (lspClampLines (lspFormText src (lspNearestOpen src at)) 40))
@@ -8560,7 +8570,7 @@
 ;             arrow at that position, else `x`
 ;   lambda param, pattern variable
 ;             the name, then the line it is bound on
-(pub :: lspNavLocalHover (-> String Ints Ints Int Int))
+(pub :: lspNavLocalHover (-> String (Vec ASTNode) Ints Int Int))
 (pub fn (lspNavLocalHover src decls ix wsp)
   {
     (let occs (lspNavOccurrences src decls))
@@ -8617,11 +8627,11 @@
 ; the arrow reaches position `k`; the bare name otherwise. The type is
 ; rendered from the tree rather than sliced, because a signature's
 ; type nodes carry no spans.
-(pub :: lspNavParamCode (-> Ints String String Int String))
+(pub :: lspNavParamCode (-> (Vec ASTNode) String String Int String))
 (pub fn (lspNavParamCode decls owner name k)
   {
     (let t (lspShapeParamTy decls owner k))
-    (if (== t 0)
+    (if (nodeSame t nilNode)
       name
       (concat name (concat " : " (tyRender t))))
   })
@@ -8702,11 +8712,11 @@
                   loc
                   {
                     (let s (lspFindSig decls w (- (vecLen decls) 1)))
-                    (if (!= s 0)
+                    (if (! (nodeSame s nilNode))
                       (lspNavLocOf uri src (nodeSpan s))
                       {
                         (let d (lspFindDecl decls w (- (vecLen decls) 1)))
-                        (if (!= d 0)
+                        (if (! (nodeSame d nilNode))
                           (lspNavLocOf uri src (nodeSpan d))
                           ; Step 3a: a constructor. It is not written
                           ; twice, so there is no `(:: ...)` step 2
@@ -8746,7 +8756,7 @@
 ; comparison is against `bareOf`, because an imported name is mangled
 ; (`Vec$vecPush`) and `resolveImports` mangles a signature and its
 ; definition the same way.
-(pub :: lspDeclarationImported (-> LspWorkspace String String Ints String Int))
+(pub :: lspDeclarationImported (-> LspWorkspace String String (Vec ASTNode) String Int))
 ;@axiom:effect(io)
 (pub fn (lspDeclarationImported workspace path src decls w)
   {
@@ -8754,15 +8764,15 @@
     (if (== r 0)
       jsonNull
       {
-        (let allDecls (memGetWordVec r 0))
+        (let allDecls (readAstNodes r 0))
         (let units (memGetWordVec r 1))
         {
           (let s (lspFindImportedSig allDecls w (- (vecLen allDecls) 1)))
-          (if (!= s 0)
+          (if (! (nodeSame s nilNode))
             (lspUnitLocation units s)
             {
               (let d (lspFindImported allDecls w (- (vecLen allDecls) 1)))
-              (if (!= d 0)
+              (if (! (nodeSame d nilNode))
                 (lspUnitLocation units d)
                 (lspCtorDefinitionImported allDecls units w))
             })
@@ -8775,10 +8785,10 @@
 ; bytes rather than this document's. 0 for "no declaration", and a
 ; declaration the resolver did not attribute to a unit, which is what
 ; `lspUnitOf`'s -1 means.
-(pub :: lspUnitLocation (-> Ints Int Int))
+(pub :: lspUnitLocation (-> Ints ASTNode Int))
 ;@axiom:effect(io)
 (pub fn (lspUnitLocation units d)
-  (if (== d 0)
+  (if (nodeSame d nilNode)
     jsonNull
     {
       (let u (lspUnitOf units (nodeModule d)))
@@ -8792,10 +8802,10 @@
 
 ; The last `(:: name T)` the MERGED list carries for `name`, under a
 ; bare comparison - `lspFindSig` with `lspFindImported`'s two rules.
-(pub :: lspFindImportedSig (-> Ints String Int Int))
+(pub :: lspFindImportedSig (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindImportedSig decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_SIG)
@@ -8808,10 +8818,10 @@
 ; hierarchy asks about functions and nothing else - a `data`, a
 ; `struct` and a macro have no body to call out of - so this is
 ; `lspFindDecl` narrowed to TAG_D_FN.
-(pub :: lspFindFn (-> Ints String Int Int))
+(pub :: lspFindFn (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindFn decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_FN) (&& (strEq (nodeAName d) name) (!= (nodeSpan d) 0)))
@@ -8819,10 +8829,10 @@
         (lspFindFn decls name (- i 1)))
     }))
 
-(pub :: lspFindImportedFn (-> Ints String Int Int))
+(pub :: lspFindImportedFn (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindImportedFn decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_FN)
@@ -8981,7 +8991,7 @@
 ; Every call site in one document, as the occurrence records
 ; themselves - word 0 the callee's bare name, word 1 its span, word 5
 ; the caller.
-(pub :: lspChSites (-> String Ints Ints))
+(pub :: lspChSites (-> String (Vec ASTNode) Ints))
 ;@axiom:effect(unsafe)
 (pub fn (lspChSites src decls)
   {
@@ -9014,7 +9024,7 @@
 ; matching `)`, both found by the scanner every other bracket question
 ; here uses. The protocol requires the second to contain the first,
 ; and a form contains its own name.
-(pub :: lspChItem (-> String Ints String Int Int))
+(pub :: lspChItem (-> String Ints String ASTNode Int))
 (pub fn (lspChItem src ix uri d)
   {
     (let fs (lspFormStart src (spanStart (nodeSpan d))))
@@ -9051,7 +9061,7 @@
                 jsonNull
                 {
                   (let d (lspFindFn decls w (- (vecLen decls) 1)))
-                  (if (== d 0)
+                  (if (nodeSame d nilNode)
                     jsonNull
                     (jsonArrPush jsonArr (lspChItem src ix uri d)))
                 }))
@@ -9081,7 +9091,7 @@
               0
               {
                 (let d (lspFindFn decls name (- (vecLen decls) 1)))
-                (if (== d 0)
+                (if (nodeSame d nilNode)
                   0
                   {
                     (let r (memAlloc 40))
@@ -9113,7 +9123,7 @@
         (let name (memGetWordStr s 1))
         (let out jsonArr)
         {
-          (lspChIncomingIn out uri (memGetWordStr s 2) (memGetWordVec s 3) name 0)
+          (lspChIncomingIn out uri (memGetWordStr s 2) (readAstNodes s 3) name 0)
           (lspChIncomingImporters workspace out uri name uris texts)
           out
         }
@@ -9125,7 +9135,7 @@
 ; document that imports it, where it resolves to `?name` - a document
 ; that declares its own `name` shadows the import and its sites belong
 ; to that declaration instead, which is exactly what the key says.
-(pub :: lspChIncomingIn (-> Int String String Ints String Int Int))
+(pub :: lspChIncomingIn (-> Int String String (Vec ASTNode) String Int Int))
 (pub fn (lspChIncomingIn out ouri osrc odecls name foreign)
   {
     (let want
@@ -9153,7 +9163,7 @@
           {
             {
               (let d (lspFindFn odecls (memGetWordStr g 0) (- (vecLen odecls) 1)))
-              (if (! (== d 0))
+              (if (! (nodeSame d nilNode))
                 (jsonArrPush out
                   (jsonObjPut (jsonObjPut jsonObj "from" (lspChItem osrc oix ouri d)) "fromRanges"
                     (lspChRanges osrc oix (memGetWordVec g 1)))))
@@ -9178,7 +9188,7 @@
           (let pair (vecGet imps i))
           {
             (lspChIncomingIn out (vecGetStr uris (memGetWord pair 0))
-              (vecGetStr texts (memGetWord pair 0)) (memGetWordVec pair 1) name 1)
+              (vecGetStr texts (memGetWord pair 0)) (readAstNodes pair 1) name 1)
             (set i (+ i 1))
           }
         })
@@ -9252,7 +9262,7 @@
         (let uri (memGetWordStr s 0))
         (let name (memGetWordStr s 1))
         (let src (memGetWordStr s 2))
-        (let decls (memGetWordVec s 3))
+        (let decls (readAstNodes s 3))
         {
           (let ix (lspLineIndex src))
           (let sites (lspChSites src decls))
@@ -9277,7 +9287,7 @@
                 {
                   {
                     (let d (lspFindFn decls (memGetWordStr g 0) (- (vecLen decls) 1)))
-                    (if (!= d 0)
+                    (if (! (nodeSame d nilNode))
                       (jsonArrPush out
                         (jsonObjPut (jsonObjPut jsonObj "to" (lspChItem src ix uri d)) "fromRanges"
                           (lspChRanges src ix (memGetWordVec g 1))))
@@ -9310,11 +9320,11 @@
 ;@axiom:effect(io)
 (pub fn (lspChImportedItem r name)
   {
-    (let allDecls (memGetWordVec r 0))
+    (let allDecls (readAstNodes r 0))
     (let units (memGetWordVec r 1))
     {
       (let d (lspFindImportedFn allDecls name (- (vecLen allDecls) 1)))
-      (if (== d 0)
+      (if (nodeSame d nilNode)
         0
         {
           (let u (lspUnitOf units (nodeModule d)))
@@ -9410,11 +9420,11 @@
 ; The head the subtype `d` constrains: its base type's constructor
 ; name, or "" when the base is not a bare-or-applied constructor -
 ; an arrow, a tuple, nothing nominal to resolve.
-(pub :: lspThBaseHead (-> Int String))
+(pub :: lspThBaseHead (-> ASTNode String))
 (pub fn (lspThBaseHead d)
   {
-    (let b (nodeB d))
-    (if (== b 0)
+    (let b (nodeBChild d))
+    (if (nodeSame b nilNode)
       ""
       (if (!= (nodeTag b) TAG_T_CON)
         ""
@@ -9423,7 +9433,7 @@
 
 ; The `detail` a type item carries: the declaration kind, and for a
 ; subtype the base it constrains.
-(pub :: lspThDetail (-> Int String))
+(pub :: lspThDetail (-> ASTNode String))
 (pub fn (lspThDetail d)
   {
     (let tag (nodeTag d))
@@ -9453,10 +9463,10 @@
 
 ; The LAST type declaration of `name` in `decls` - `lspFindDecl`'s
 ; rule, over the type kinds - or 0.
-(pub :: lspThFindType (-> Ints String Int Int))
+(pub :: lspThFindType (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspThFindType decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (lspThIsTypeTag (nodeTag d)) (&& (strEq (nodeAName d) name) (!= (nodeSpan d) 0)))
@@ -9466,10 +9476,10 @@
 
 ; The same over the MERGED declaration list: a name this document
 ; imported, found mangled in the module that declares it.
-(pub :: lspThFindImportedType (-> Ints String Int Int))
+(pub :: lspThFindImportedType (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspThFindImportedType decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (lspThIsTypeTag (nodeTag d))
@@ -9483,7 +9493,7 @@
 ; and `range` is the whole form - `lspChItem`'s rule, for its reason.
 ; The name is the BARE one, so an item out of an importing document
 ; re-resolves in the file that declares it.
-(pub :: lspThItem (-> String Ints String Int Int))
+(pub :: lspThItem (-> String Ints String ASTNode Int))
 (pub fn (lspThItem src ix uri d)
   {
     (let fs (lspFormStart src (spanStart (nodeSpan d))))
@@ -9517,7 +9527,7 @@
 ; the `Int` of `(subtype Positive is Int range 1..10)` - or 0. The
 ; first identifier after the `is` that spells `head`; the parse
 ; guarantees both are there, so 0 is a shape this never answers on.
-(pub :: lspThBaseSpan (-> String Int String Int))
+(pub :: lspThBaseSpan (-> String ASTNode String Int))
 (pub fn (lspThBaseSpan src d head)
   (if (|| (== (nodeSpan d) 0) (== (strLen head) 0))
     0
@@ -9551,11 +9561,11 @@
 ;@axiom:effect(io)
 (pub fn (lspThImportedItem r name)
   {
-    (let allDecls (memGetWordVec r 0))
+    (let allDecls (readAstNodes r 0))
     (let units (memGetWordVec r 1))
     {
       (let d (lspThFindImportedType allDecls name (- (vecLen allDecls) 1)))
-      (if (== d 0)
+      (if (nodeSame d nilNode)
         0
         {
           (let u (lspUnitOf units (nodeModule d)))
@@ -9604,7 +9614,7 @@
                       jsonNull
                       {
                         (let d (lspThFindType decls w (- (vecLen decls) 1)))
-                        (if (!= d 0)
+                        (if (! (nodeSame d nilNode))
                           (jsonArrPush jsonArr (lspThItem src ix uri d))
                           {
                             (let r (lspResolveFor workspace (lspUriToPath uri) src decls))
@@ -9654,7 +9664,7 @@
               0
               {
                 (let d (lspThFindType decls name (- (vecLen decls) 1)))
-                (if (|| (!= d 0) (lspThBuiltin name))
+                (if (|| (! (nodeSame d nilNode)) (lspThBuiltin name))
                   {
                     (let r (memAlloc 40))
                     {
@@ -9685,8 +9695,8 @@
     (if (== s 0)
       jsonNull
       {
-        (let d (memGetWord s 4))
-        (if (|| (== d 0) (!= (nodeTag d) TAG_D_SUBTYPE))
+        (let d (readAstNode s 4))
+        (if (|| (nodeSame d nilNode) (!= (nodeTag d) TAG_D_SUBTYPE))
           jsonArr
           {
             (let h (lspThBaseHead d))
@@ -9695,10 +9705,10 @@
               {
                 (let uri (memGetWordStr s 0))
                 (let src (memGetWordStr s 2))
-                (let decls (memGetWordVec s 3))
+                (let decls (readAstNodes s 3))
                 {
                   (let dd (lspThFindType decls h (- (vecLen decls) 1)))
-                  (if (!= dd 0)
+                  (if (! (nodeSame dd nilNode))
                     (jsonArrPush jsonArr (lspThItem src (lspLineIndex src) uri dd))
                     {
                       (let r (lspResolveFor workspace (lspUriToPath uri) src decls))
@@ -9742,7 +9752,7 @@
         (let out jsonArr)
         (let mut i 0)
         {
-          (lspThSubtypesIn out uri (memGetWordStr s 2) (memGetWordVec s 3) name)
+          (lspThSubtypesIn out uri (memGetWordStr s 2) (readAstNodes s 3) name)
           (while (< i (vecLen uris))
             {
               (if (! (strEq (vecGetStr uris i) uri))
@@ -9763,7 +9773,7 @@
 
 ; Every `subtype` of `osrc` whose base head is `name`, as items at
 ; `ouri`, in declaration order.
-(pub :: lspThSubtypesIn (-> Int String String Ints String Int))
+(pub :: lspThSubtypesIn (-> Int String String (Vec ASTNode) String Int))
 (pub fn (lspThSubtypesIn out ouri osrc odecls name)
   {
     (let oix (lspLineIndex osrc))
@@ -10177,7 +10187,7 @@
     (if (== (memGetWord pr 0) 0)
       jsonNull
       {
-        (let decls (memGetWordVec pr 1))
+        (let decls (readAstNodes pr 1))
         (let ix (lspLineIndex src))
         {
           (let o (lspViewCallAt src (lspOffsetOf src ix (jsonGet params "position"))))
@@ -10235,7 +10245,7 @@
 ; Whether a `fn` of this document declares its name at byte `off` -
 ; the header `(add x y)` of `(fn (add x y) ...)` opens with the name
 ; whose span the declaration carries.
-(pub :: lspViewIsFnHeader (-> Ints Int Bool))
+(pub :: lspViewIsFnHeader (-> (Vec ASTNode) Int Bool))
 (pub fn (lspViewIsFnHeader decls off)
   {
     (let n (vecLen decls))
@@ -10297,17 +10307,17 @@
 
 ; This document's answer for `head`: its `fn` of that name, else a
 ; constructor of one of its `data` declarations, else 0.
-(pub :: lspViewSigLocal (-> String Ints String Int))
+(pub :: lspViewSigLocal (-> String (Vec ASTNode) String Int))
 (pub fn (lspViewSigLocal src decls head)
   {
     (let d (lspFindDecl decls head (- (vecLen decls) 1)))
-    (if (if (!= d 0)
+    (if (if (! (nodeSame d nilNode))
       (== (nodeTag d) TAG_D_FN)
       false)
       (lspViewSigFn src decls d "")
       {
         (let c (lspViewFindCtor decls head 0))
-        (if (== c 0)
+        (if (nodeSame c nilNode)
           0
           (lspViewSigCtor c))
       })
@@ -10316,7 +10326,7 @@
 ; The second lookup, over the merged list: an imported `fn`, read in
 ; the unit that declares it so the type and the paragraph are its
 ; own text; else an imported constructor.
-(pub :: lspViewSigImported (-> LspWorkspace String String Ints String Int))
+(pub :: lspViewSigImported (-> LspWorkspace String String (Vec ASTNode) String Int))
 ;@axiom:effect(io)
 (pub fn (lspViewSigImported workspace path src decls head)
   {
@@ -10324,11 +10334,11 @@
     (if (== r 0)
       0
       {
-        (let allDecls (memGetWordVec r 0))
+        (let allDecls (readAstNodes r 0))
         (let units (memGetWordVec r 1))
         {
           (let d (lspFindImported allDecls head (- (vecLen allDecls) 1)))
-          (if (if (!= d 0)
+          (if (if (! (nodeSame d nilNode))
             (== (nodeTag d) TAG_D_FN)
             false)
             {
@@ -10342,7 +10352,7 @@
             }
             {
               (let c (lspViewFindCtor allDecls head 1))
-              (if (== c 0)
+              (if (nodeSame c nilNode)
                 0
                 (lspViewSigCtor c))
             })
@@ -10354,15 +10364,15 @@
 ; `decls`: this document's own when `imported` is 0, the imported
 ; ones alone when it is 1 - the merged list carries both, and the
 ; local ones were asked first.
-(pub :: lspViewFindCtor (-> Ints String Int Int))
+(pub :: lspViewFindCtor (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspViewFindCtor decls name imported)
   {
     (let n (vecLen decls))
     (let mut i 0)
-    (let mut found 0)
+    (let mut found nilNode)
     {
       (while (if (< i n)
-        (== found 0)
+        (nodeSame found nilNode)
         false)
         {
           (let d (vecGet decls i))
@@ -10372,7 +10382,7 @@
                 (!= (nodeModule d) 0)
                 (== (nodeModule d) 0))
               false)
-              (set found (lspViewCtorIn (nodeBVec d) name)))
+              (set found (lspViewCtorIn (nodeBChildren d) name)))
             (set i (+ i 1))
           }
         })
@@ -10380,15 +10390,15 @@
     }
   })
 
-(pub :: lspViewCtorIn (-> Ints String Int))
+(pub :: lspViewCtorIn (-> (Vec ASTNode) String ASTNode))
 (pub fn (lspViewCtorIn ctors name)
   {
     (let n (vecLen ctors))
     (let mut i 0)
-    (let mut found 0)
+    (let mut found nilNode)
     {
       (while (if (< i n)
-        (== found 0)
+        (nodeSame found nilNode)
         false)
         {
           (if (strEq (nodeAName (vecGet ctors i)) name)
@@ -10406,11 +10416,11 @@
 ; because `resolveImports` mangles a `::` and its `fn` alike. `origin`
 ; names the module of an imported one, after the type, so the label
 ; still reads as the call.
-(pub :: lspViewSigFn (-> String Ints Int String Int))
+(pub :: lspViewSigFn (-> String (Vec ASTNode) ASTNode String Int))
 (pub fn (lspViewSigFn dsrc ddecls d origin)
   {
     (let sig (lspFindSig ddecls (nodeAName d) (- (vecLen ddecls) 1)))
-    (let ps (nodeBVec d))
+    (let ps (nodeBChildren d))
     (let starts vecNew)
     (let ends vecNew)
     (let mut label (concat "(" (bareOf (nodeAName d))))
@@ -10425,7 +10435,7 @@
           (set i (+ i 1))
         })
       (set label (concat label ")"))
-      (if (!= sig 0)
+      (if (! (nodeSame sig nilNode))
         (set label (concat (concat label " : ") (lspSigType dsrc sig)))
         label)
       (if (> (strLen origin) 0)
@@ -10438,11 +10448,11 @@
 ; The paragraph above the declaration, read where hover reads it: at
 ; the `::` when the `fn` has one, because that is where this language
 ; puts the comment, and at the `fn` itself otherwise.
-(pub :: lspViewSigDoc (-> String Ints Int Int String))
+(pub :: lspViewSigDoc (-> String (Vec ASTNode) ASTNode ASTNode String))
 (pub fn (lspViewSigDoc dsrc ddecls d sig)
   {
     (let at
-      (if (== sig 0)
+      (if (nodeSame sig nilNode)
         d
         sig))
     (if (== (nodeSpan at) 0)
@@ -10459,10 +10469,10 @@
 ; A constructor: `(Circle Int)`, each field type rendered by the
 ; checker's own printer and labelled as a parameter, so the client
 ; bolds the field being written.
-(pub :: lspViewSigCtor (-> Int Int))
+(pub :: lspViewSigCtor (-> ASTNode Int))
 (pub fn (lspViewSigCtor c)
   {
-    (let tys (nodeTyVec c))
+    (let tys (nodeTyChildren c))
     (let starts vecNew)
     (let ends vecNew)
     (let mut label (concat "(" (nodeAName c)))
@@ -10544,7 +10554,7 @@
 (pub fn (LSP_VIEW_IDX_SLOTS)
   1024)
 
-(pub :: lspViewIdxNew LspBuckets)
+(pub :: lspViewIdxNew LspNodeBuckets)
 (pub fn (lspViewIdxNew)
   (lspBucketsNew LSP_VIEW_IDX_SLOTS))
 
@@ -10567,7 +10577,7 @@
     }
   })
 
-(pub :: lspViewIdxAdd (-> LspBuckets String Int Int))
+(pub :: lspViewIdxAdd (-> LspNodeBuckets String ASTNode Int))
 (pub fn (lspViewIdxAdd idx name node)
   {
     (let slot (lspViewIdxSlot name))
@@ -10583,34 +10593,36 @@
           }
           (vecGet idx slot)))
       {
-        (vecPushStr bucket name)
-        (vecPush bucket node)
+        (vecPush bucket (LspNamedNode :name name :node node))
         0
       }
     }
   })
 
-(pub :: lspViewIdxFind (-> LspBuckets String Int))
+(pub :: lspViewIdxFind (-> LspNodeBuckets String ASTNode))
 (pub fn (lspViewIdxFind idx name)
   {
     (let bucket (vecGet idx (lspViewIdxSlot name)))
     (if (lspBucketMissing bucket)
-      0
+      nilNode
       {
         (let n (vecLen bucket))
         (let mut i 0)
-        (let mut local 0)
-        (let mut other 0)
+        (let mut local nilNode)
+        (let mut other nilNode)
         {
           (while (< i n)
             {
-              (if (strEq (vecGetStr bucket i) name)
-                (if (== (nodeModule (vecGet bucket (+ i 1))) 0)
-                  (set local (vecGet bucket (+ i 1)))
-                  (set other (vecGet bucket (+ i 1)))))
-              (set i (+ i 2))
+              {
+                (let entry (vecGet bucket i))
+                (if (strEq entry.name name)
+                  (if (== (nodeModule entry.node) 0)
+                    (set local entry.node)
+                    (set other entry.node)))
+              }
+              (set i (+ i 1))
             })
-          (if (!= local 0)
+          (if (! (nodeSame local nilNode))
             local
             other)
         }
@@ -10620,7 +10632,7 @@
 ; The `fn` declarations a call can name, by bare name: this document's
 ; and, when its imports resolve, every module's. A failed preflight -
 ; a half-typed import - is this document alone.
-(pub :: lspViewFnIndexFor (-> LspWorkspace String String Ints LspBuckets))
+(pub :: lspViewFnIndexFor (-> LspWorkspace String String (Vec ASTNode) LspNodeBuckets))
 ;@axiom:effect(io)
 (pub fn (lspViewFnIndexFor workspace path src decls)
   {
@@ -10628,10 +10640,10 @@
     (lspViewFnIndex
       (if (== r 0)
         decls
-        (memGetWordVec r 0)))
+        (readAstNodes r 0)))
   })
 
-(pub :: lspViewFnIndex (-> Ints LspBuckets))
+(pub :: lspViewFnIndex (-> (Vec ASTNode) LspNodeBuckets))
 (pub fn (lspViewFnIndex list)
   {
     (let idx lspViewIdxNew)
@@ -10654,7 +10666,7 @@
 ; The `::` signatures of this document, by name, for the header hints
 ; - the same question `lspFindSig` answers, asked once per `fn` rather
 ; than by a walk per `fn`.
-(pub :: lspViewSigIndex (-> Ints LspBuckets))
+(pub :: lspViewSigIndex (-> (Vec ASTNode) LspNodeBuckets))
 (pub fn (lspViewSigIndex decls)
   {
     (let idx lspViewIdxNew)
@@ -10711,7 +10723,7 @@
       ; declarations the range meets, so `(fn (apply k v) (k
       ; v))` beside a top-level `k` labels nothing.
       {
-        (let decls (memGetWordVec pr 1))
+        (let decls (readAstNodes pr 1))
         (let ix (lspLineIndex src))
         (let n (strLen src))
         (let range (jsonGet params "range"))
@@ -10743,7 +10755,7 @@
                         {
                           (lspViewHintsHeader out src ix d (lspViewIdxFind sigs (nodeAName d)) rs
                             re)
-                          (lspViewHintsExpr out src ix fns locals decls occs (nodeC d) rs re)
+                          (lspViewHintsExpr out src ix fns locals decls occs (nodeCChild d) rs re)
                         })
                     })
                   (set i (+ i 1))
@@ -10756,7 +10768,7 @@
   })
 
 ; Where the declaration after `i` begins, or the document length.
-(pub :: lspViewNextDeclStart (-> Ints Int Int Int))
+(pub :: lspViewNextDeclStart (-> (Vec ASTNode) Int Int Int))
 (pub fn (lspViewNextDeclStart decls i n)
   {
     (let mut j (+ i 1))
@@ -10781,9 +10793,9 @@
 ; byte before the name must be the header's own `(`: the bare nullary
 ; form `(fn answer 42)` has no parameter list, and its `42` is not a
 ; parameter however identifier-shaped its digits are.
-(pub :: lspViewHintsHeader (-> Int String Ints Int Int Int Int Int))
+(pub :: lspViewHintsHeader (-> Int String Ints ASTNode ASTNode Int Int Int))
 (pub fn (lspViewHintsHeader out src ix d sig rs re)
-  (if (if (== sig 0)
+  (if (if (nodeSame sig nilNode)
     true
     (if (== (nodeTy sig) 0)
       true
@@ -10792,7 +10804,7 @@
         true)))
     0
     {
-      (let ty (nodeTy sig))
+      (let ty (nodeTyChild sig))
       (let n (strLen src))
       (let mut i (spanEnd (nodeSpan d)))
       (let mut k 0)
@@ -10816,8 +10828,8 @@
                     (let e (skipIdent src i n))
                     {
                       {
-                        (let pt (nthParamTy ty k 0))
-                        (if (if (!= pt 0)
+                        (let pt (nthParamTy ty k nilNode))
+                        (if (if (! (nodeSame pt nilNode))
                           (!= (nodeTag pt) TAG_T_ERR)
                           false)
                           (lspViewHint out src ix e (concat ": " (tyRender pt)) 1 0 rs re))
@@ -10855,12 +10867,12 @@
 
 ; The final result of an arrow type: `(-> Int Int Bool)` folds to
 ; `Int -> (Int -> Bool)`, so the result is the last `nodeB`.
-(pub :: lspViewResultTy (-> Int Int))
+(pub :: lspViewResultTy (-> ASTNode ASTNode))
 (pub fn (lspViewResultTy ty)
-  (if (if (!= ty 0)
+  (if (if (! (nodeSame ty nilNode))
     (== (nodeTag ty) TAG_T_ARR)
     false)
-    (lspViewResultTy (nodeB ty))
+    (lspViewResultTy (nodeBChild ty))
     ty))
 
 ; One InlayHint at byte `off`, appended only when `off` is inside the
@@ -10914,9 +10926,10 @@
       ((None) 0)
       ((Some _) 1))))
 
-(pub :: lspViewHintsExpr (-> Int String Ints LspBuckets LspBuckets Ints Ints Int Int Int Int))
+(pub :: lspViewHintsExpr
+  (-> Int String Ints LspNodeBuckets LspBuckets (Vec ASTNode) Ints ASTNode Int Int Int))
 (pub fn (lspViewHintsExpr out src ix fns locals decls occs e rs re)
-  (if (== e 0)
+  (if (nodeSame e nilNode)
     0
     {
       (let tag (nodeTag e))
@@ -10930,58 +10943,61 @@
             ; occurrence walk that skips them: a hint on a name no one
             ; wrote is noise about the compiler's innards.
             {
-              (let t (lspShapeOf decls occs (nodeB e) 16))
+              (let t (lspShapeOf decls occs (nodeBChild e) 16))
               (if (! (lspShapeIsBad t))
                 (if (! (== (lspSkipHintName (nodeAName e)) 1))
                   (lspViewHint out src ix (spanEnd (nodeSpan e)) (concat ": " (tyRender t)) 1 0 rs
                     re)))
             }
-            (lspViewHintsExpr out src ix fns locals decls occs (nodeB e) rs re)
-            (lspViewHintsExpr out src ix fns locals decls occs (nodeC e) rs re)
+            (lspViewHintsExpr out src ix fns locals decls occs (nodeBChild e) rs re)
+            (lspViewHintsExpr out src ix fns locals decls occs (nodeCChild e) rs re)
           }
           (if (== tag TAG_E_IF)
             {
-              (lspViewHintsExpr out src ix fns locals decls occs (nodeA e) rs re)
-              (lspViewHintsExpr out src ix fns locals decls occs (nodeB e) rs re)
-              (lspViewHintsExpr out src ix fns locals decls occs (nodeC e) rs re)
+              (lspViewHintsExpr out src ix fns locals decls occs (nodeAChild e) rs re)
+              (lspViewHintsExpr out src ix fns locals decls occs (nodeBChild e) rs re)
+              (lspViewHintsExpr out src ix fns locals decls occs (nodeCChild e) rs re)
             }
             (if (== tag TAG_E_LAM)
-              (lspViewHintsExpr out src ix fns locals decls occs (nodeB e) rs re)
+              (lspViewHintsExpr out src ix fns locals decls occs (nodeBChild e) rs re)
               (if (== tag TAG_E_BEGIN)
-                (lspViewHintsVec out src ix fns locals decls occs (nodeAVec e) rs re)
+                (lspViewHintsVec out src ix fns locals decls occs (nodeAChildren e) rs re)
                 (if (|| (== tag TAG_E_WHILE) (== tag TAG_E_REGION))
                   (if (== tag TAG_E_REGION)
-                    (lspViewHintsExpr out src ix fns locals decls occs (nodeB e) rs re)
+                    (lspViewHintsExpr out src ix fns locals decls occs (nodeBChild e) rs re)
                     {
-                      (lspViewHintsExpr out src ix fns locals decls occs (nodeA e) rs re)
-                      (lspViewHintsVec out src ix fns locals decls occs (nodeBVec e) rs re)
+                      (lspViewHintsExpr out src ix fns locals decls occs (nodeAChild e) rs re)
+                      (lspViewHintsVec out src ix fns locals decls occs (nodeBChildren e) rs re)
                     })
                   (if (== tag TAG_E_MATCH)
                     {
-                      (lspViewHintsExpr out src ix fns locals decls occs (nodeA e) rs re)
-                      (lspViewHintsArms out src ix fns locals decls occs (nodeBVec e) rs re)
+                      (lspViewHintsExpr out src ix fns locals decls occs (nodeAChild e) rs re)
+                      (lspViewHintsArms out src ix fns locals decls occs (nodeBChildren e) rs re)
                     }
                     ; `cond` is AX2004: the parser builds none, so
                     ; no arm hints one. A variadic `if` arrives as
                     ; nested `if`s.
                     (if (== tag TAG_E_SET)
-                      (lspViewHintsExpr out src ix fns locals decls occs (nodeB e) rs re)
+                      (lspViewHintsExpr out src ix fns locals decls occs (nodeBChild e) rs re)
                       (if (|| (== tag TAG_E_FIELD) (== tag TAG_E_TRY))
-                        (lspViewHintsExpr out src ix fns locals decls occs (nodeA e) rs re)
+                        (lspViewHintsExpr out src ix fns locals decls occs (nodeAChild e) rs re)
                         (if (== tag TAG_E_SETF)
                           {
-                            (lspViewHintsExpr out src ix fns locals decls occs (nodeA e) rs re)
-                            (lspViewHintsExpr out src ix fns locals decls occs (nodeC e) rs re)
+                            (lspViewHintsExpr out src ix fns locals decls occs (nodeAChild e) rs re)
+                            (lspViewHintsExpr out src ix fns locals decls occs (nodeCChild e) rs re)
                           }
                           (if (== tag TAG_E_HANDLE)
                             {
-                              (lspViewHintsExpr out src ix fns locals decls occs (nodeA e) rs re)
-                              (lspViewHintsExpr out src ix fns locals decls occs (nodeC e) rs re)
+                              (lspViewHintsExpr out src ix fns locals decls occs (nodeAChild e) rs
+                                re)
+                              (lspViewHintsExpr out src ix fns locals decls occs (nodeCChild e) rs
+                                re)
                             }
                             0)))))))))))
     }))
 
-(pub :: lspViewHintsVec (-> Int String Ints LspBuckets LspBuckets Ints Ints Ints Int Int Int))
+(pub :: lspViewHintsVec
+  (-> Int String Ints LspNodeBuckets LspBuckets (Vec ASTNode) Ints (Vec ASTNode) Int Int Int))
 (pub fn (lspViewHintsVec out src ix fns locals decls occs xs rs re)
   (if (== (as xs Int) 0)
     0
@@ -11000,7 +11016,8 @@
 ; The arms of a `match` (bodies alone - the pattern is not a call).
 ; (`cond` clauses used to walk here too, tests included; `cond` is
 ; AX2004 now, so the flag that distinguished them is gone with it.)
-(pub :: lspViewHintsArms (-> Int String Ints LspBuckets LspBuckets Ints Ints Ints Int Int Int))
+(pub :: lspViewHintsArms
+  (-> Int String Ints LspNodeBuckets LspBuckets (Vec ASTNode) Ints (Vec ASTNode) Int Int Int))
 (pub fn (lspViewHintsArms out src ix fns locals decls occs arms rs re)
   (if (== (as arms Int) 0)
     0
@@ -11012,7 +11029,7 @@
             (let arm (vecGet arms i))
             {
               (if (== (nodeTag arm) TAG_M_ARM)
-                (lspViewHintsExpr out src ix fns locals decls occs (nodeB arm) rs re))
+                (lspViewHintsExpr out src ix fns locals decls occs (nodeBChild arm) rs re))
               (set i (+ i 1))
             }
           })
@@ -11025,7 +11042,8 @@
 ; variable is a call; any other head - a lambda, a nested form - is
 ; walked as an expression. Every argument is walked afterwards, since
 ; each may hold calls of its own.
-(pub :: lspViewHintsApp (-> Int String Ints LspBuckets LspBuckets Ints Ints Int Int Int Int))
+(pub :: lspViewHintsApp
+  (-> Int String Ints LspNodeBuckets LspBuckets (Vec ASTNode) Ints ASTNode Int Int Int))
 (pub fn (lspViewHintsApp out src ix fns locals decls occs e rs re)
   {
     (let args vecNew)
@@ -11033,8 +11051,8 @@
     {
       (while (== (nodeTag h) TAG_E_APP)
         {
-          (vecPush args (nodeB h))
-          (set h (nodeA h))
+          (vecPush args (nodeBChild h))
+          (set h (nodeAChild h))
         })
       (lspViewReverse args)
       (if (== (nodeTag h) TAG_E_VAR)
@@ -11044,7 +11062,7 @@
     }
   })
 
-(pub :: lspViewReverse (-> Ints Int))
+(pub :: lspViewReverse (-> (Vec ASTNode) Int))
 (pub fn (lspViewReverse v)
   {
     (let mut i 0)
@@ -11067,21 +11085,22 @@
 ; The hints for one call: the declaration's parameter names, each at
 ; the start of the item the bytes hold at that position, for as many
 ; arguments as the call has and the declaration names.
-(pub :: lspViewHintsCall (-> Int String Ints LspBuckets LspBuckets Int Ints Int Int Int))
+(pub :: lspViewHintsCall
+  (-> Int String Ints LspNodeBuckets LspBuckets ASTNode (Vec ASTNode) Int Int Int))
 (pub fn (lspViewHintsCall out src ix fns locals head args rs re)
   ; A head that is a local is not a call to the `fn` it is
   ; spelled like; the walk that knows the scopes says which.
   {
     (let d
       (if (== (nodeSpan head) 0)
-        0
+        nilNode
         (if (lspNavLocalIndexHas locals (spanStart (nodeSpan head)))
-          0
+          nilNode
           (lspViewIdxFind fns (bareOf (nodeAName head))))))
-    (if (== d 0)
+    (if (nodeSame d nilNode)
       0
       {
-        (let ps (nodeBVec d))
+        (let ps (nodeBChildren d))
         (let n (strLen src))
         (let mut i (lspViewIdentEnd src (spanStart (nodeSpan head)) n))
         (let mut a 0)
@@ -11114,9 +11133,9 @@
       })
   })
 
-(pub :: lspViewSameName (-> Int String Bool))
+(pub :: lspViewSameName (-> ASTNode String Bool))
 (pub fn (lspViewSameName arg name)
-  (if (== arg 0)
+  (if (nodeSame arg nilNode)
     false
     (if (== (nodeTag arg) TAG_E_VAR)
       (strEq (nodeAName arg) name)
@@ -11493,7 +11512,7 @@
     (if (== (memGetWord pr 0) 0)
       jsonArr
       {
-        (let decls (memGetWordVec pr 1))
+        (let decls (readAstNodes pr 1))
         (let ix (lspLineIndex src))
         (let n (strLen src))
         (let tcode (checkedTargetCode hostTarget))
@@ -11570,7 +11589,7 @@
                 (let pr (lspParse src))
                 (if (! (== (memGetWord pr 0) 0))
                   {
-                    (let decls (memGetWordVec pr 1))
+                    (let decls (readAstNodes pr 1))
                     {
                       (lspViewSymsLocal out seen query uri src decls)
                       (lspViewSymsImported workspace out seen query (lspUriToPath uri) src decls)
@@ -11584,7 +11603,7 @@
     }
   })
 
-(pub :: lspViewSymsLocal (-> Int Strings String String String Ints Int))
+(pub :: lspViewSymsLocal (-> Int Strings String String String (Vec ASTNode) Int))
 (pub fn (lspViewSymsLocal out seen query uri src decls)
   {
     (let ix (lspLineIndex src))
@@ -11603,7 +11622,7 @@
                 (lspViewSymOffer out seen query uri src ix (nodeAName d) (lspSymKind (nodeTag d))
                   (nodeSpan d) "")
                 (if (== (nodeTag d) TAG_D_DATA)
-                  (lspViewSymCtors out seen query uri src ix (nodeBVec d) ""))
+                  (lspViewSymCtors out seen query uri src ix (nodeBChildren d) ""))
               })
             (set i (+ i 1))
           }
@@ -11616,7 +11635,7 @@
 ; up and before its URI and line index are built - the cheap question
 ; first, as `lspComplWants` asks it - and a unit's URI and index are
 ; made once, when it first has a symbol to place.
-(pub :: lspViewSymsImported (-> LspWorkspace Int Strings String String String Ints Int))
+(pub :: lspViewSymsImported (-> LspWorkspace Int Strings String String String (Vec ASTNode) Int))
 ;@axiom:effect(io)
 (pub fn (lspViewSymsImported workspace out seen query path src decls)
   {
@@ -11624,7 +11643,7 @@
     (if (== r 0)
       0
       {
-        (let allDecls (memGetWordVec r 0))
+        (let allDecls (readAstNodes r 0))
         (let units (memGetWordVec r 1))
         (let n (vecLen allDecls))
         (let uuris vecNew)
@@ -11660,7 +11679,7 @@
                                 (lspSymKind (nodeTag d)) (nodeSpan d) (memGetWordStr unit 2))
                               (if (== (nodeTag d) TAG_D_DATA)
                                 (lspViewSymCtors out seen query (vecGetStr uuris u)
-                                  (memGetWordStr unit 1) (vecGetVec uixs u) (nodeBVec d)
+                                  (memGetWordStr unit 1) (vecGetVec uixs u) (nodeBChildren d)
                                   (memGetWordStr unit 2)))
                             }
                           })
@@ -11676,15 +11695,15 @@
 
 ; Whether a declaration has anything to list for `query`: its own
 ; name, or - for a `data` - one of its constructors' names.
-(pub :: lspViewDeclWants (-> Int String String Bool))
+(pub :: lspViewDeclWants (-> ASTNode String String Bool))
 (pub fn (lspViewDeclWants d bare query)
   (if (lspStrHasFold bare query)
     true
     (if (== (nodeTag d) TAG_D_DATA)
-      (lspViewCtorsWant (nodeBVec d) query)
+      (lspViewCtorsWant (nodeBChildren d) query)
       false)))
 
-(pub :: lspViewCtorsWant (-> Ints String Bool))
+(pub :: lspViewCtorsWant (-> (Vec ASTNode) String Bool))
 (pub fn (lspViewCtorsWant ctors query)
   {
     (let mut i 0)
@@ -11714,7 +11733,7 @@
     }
     0))
 
-(pub :: lspViewSymCtors (-> Int Strings String String String Ints Ints String Int))
+(pub :: lspViewSymCtors (-> Int Strings String String String Ints (Vec ASTNode) String Int))
 (pub fn (lspViewSymCtors out seen query uri src ix ctors container)
   {
     (let mut i 0)
@@ -11940,7 +11959,7 @@
 ; `expAttachFrames` wants. The checker is NOT run here: one caller
 ; refuses to run it and the other decides after reading word 2.
 ; ------------------------------------------------------------------
-(pub :: lspFixExpand (-> LspWorkspace String String Ints Int))
+(pub :: lspFixExpand (-> LspWorkspace String String (Vec ASTNode) Int))
 ;@axiom:effect(io)
 (pub fn (lspFixExpand workspace path src decls)
   {
@@ -11948,7 +11967,7 @@
     (if (== r 0)
       0
       {
-        (let allDecls (memGetWordVec r 0))
+        (let allDecls (readAstNodes r 0))
         (let units (memGetWordVec r 1))
         (let ftbl vecNew)
         (let eds vecNew)
@@ -12027,7 +12046,7 @@
     (if (== (memGetWord pr 0) 0)
       jsonArr
       {
-        (let decls (memGetWordVec pr 1))
+        (let decls (readAstNodes pr 1))
         (let ix (lspLineIndex src))
         {
           (let want (lspRangeSpan src ix (jsonGet params "range")))
@@ -12047,7 +12066,7 @@
                       (let tc
                         (if (> (countErrorDiags eds) 0)
                           0
-                          (checkModuleTc decls (memGetWordVec ex 0) (memGetWordVec ex 1))))
+                          (checkModuleTc decls (readAstNodes ex 0) (memGetWordVec ex 1))))
                       {
                         (let ds
                           (if (== tc 0)
@@ -12066,7 +12085,7 @@
                           (if (! (== tc 0))
                             (lspSigAssists out decls rawVis (lspViewSigIndex decls)
                               (lspFixEntryIndex (tcFnsVec tc)) src uri ix want))
-                          (lspNameAssists out ds src uri ix want decls path (memGetWordVec ex 0)
+                          (lspNameAssists out ds src uri ix want decls path (readAstNodes ex 0)
                             (memGetWordVec ex 1))
                           (lspLintAssists out src uri ix decls lintRecs want)
                           (lspUnhandledAssists out ds src uri ix want decls)
@@ -12184,7 +12203,7 @@
 ; after; a product that overwrote an invocation is at an index this
 ; list marks -1, so no assist is offered for a generated fn - its
 ; "form" would be the invocation's.
-(pub :: lspWrittenVis (-> Ints Ints))
+(pub :: lspWrittenVis (-> (Vec ASTNode) Ints))
 (pub fn (lspWrittenVis decls)
   {
     (let out vecNew)
@@ -12219,7 +12238,8 @@
 ; every signature grouped at the top (2,000 walks of 4,000
 ; declarations) and 1.87x with no signatures at all (2,000 walks of
 ; the checker's table), against 0.72x for a one-line range.
-(pub :: lspSigAssists (-> Int Ints Ints LspBuckets LspBuckets String String Ints Int Int))
+(pub :: lspSigAssists
+  (-> Int (Vec ASTNode) Ints LspNodeBuckets LspBuckets String String Ints Int Int))
 (pub fn (lspSigAssists out decls rawVis sigs entries src uri ix want)
   {
     (let n (vecLen rawVis))
@@ -12234,12 +12254,12 @@
               {
                 (let o (lspFormStart src (spanStart (nodeSpan d))))
                 (if (&& (<= o (spanEnd want)) (>= (lspFormEnd src o) (spanStart want)))
-                  (if (! (!= (lspViewIdxFind sigs (nodeAName d)) 0))
+                  (if (! (! (nodeSame (lspViewIdxFind sigs (nodeAName d)) nilNode)))
                     {
                       (let e (lspFixEntryFind entries (nodeAName d)))
                       (if (! (== e 0))
                         {
-                          (let ty (memGetWord e 1))
+                          (let ty (readAstNode e 1))
                           (if (lspTyKnown ty)
                             (jsonArrPush out (lspSigAssistJson d vis ty src uri ix o)))
                         })
@@ -12260,13 +12280,22 @@
 (pub :: lspFixEntryIndex (-> Ints LspBuckets))
 (pub fn (lspFixEntryIndex fns)
   {
-    (let idx lspViewIdxNew)
+    (let idx (lspBucketsNew LSP_VIEW_IDX_SLOTS))
     (let n (vecLen fns))
     (let mut i 0)
     {
       (while (< i n)
         {
-          (lspViewIdxAdd idx (memGetWordStr (vecGet fns i) 0) (vecGet fns i))
+          {
+            (let entry (vecGet fns i))
+            (let name (memGetWordStr entry 0))
+            (let slot (lspViewIdxSlot name))
+            (if (lspBucketMissing (vecGet idx slot))
+              (vecSet idx slot vecNew))
+            (let bucket (vecGet idx slot))
+            (vecPushStr bucket name)
+            (vecPush bucket entry)
+          }
           (set i (+ i 1))
         })
       idx
@@ -12302,7 +12331,7 @@
 ; found by its column-zero rule, and is where this language writes a
 ; `::`: between the paragraph and the `fn`, so hover's paragraph rule
 ; keeps working on the result.
-(pub :: lspSigAssistJson (-> Int Int Int String String Ints Int Int))
+(pub :: lspSigAssistJson (-> ASTNode Int ASTNode String String Ints Int Int))
 (pub fn (lspSigAssistJson d vis ty src uri ix o)
   {
     (let name (nodeAName d))
@@ -12429,7 +12458,7 @@
 ; The lint walk's live records over this request's source: the same
 ; records `lspLintDoc` publishes, minus the suppressed ones, so an
 ; assist is never offered for a Hint the client cannot see.
-(pub :: lspLintRecs (-> String Ints Ints))
+(pub :: lspLintRecs (-> String (Vec ASTNode) Ints))
 (pub fn (lspLintRecs src decls)
   {
     (let lx (lspLintContext src))
@@ -12465,10 +12494,10 @@
 ; that name with a span, or 0. Suppression is by name, so which
 ; same-named half wins does not matter; the lint's span is in any
 ; case inside the owner's body, which follows every same-named head.
-(pub :: lspLintOwnerDecl (-> Ints String Int Int))
+(pub :: lspLintOwnerDecl (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspLintOwnerDecl decls owner i)
   (if (>= i (vecLen decls))
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (strEq (nodeAName d) owner) (!= (nodeSpan d) 0))
@@ -12481,7 +12510,7 @@
 ; before `lspFixExpand` rewrites it, for `lspCheckDoc`'s reason: a walk
 ; over what expansion made is a walk over a DAG, and one nested macro
 ; made it 2^115 paths long.
-(pub :: lspLintAssists (-> Int String String Ints Ints Ints Int Int))
+(pub :: lspLintAssists (-> Int String String Ints (Vec ASTNode) Ints Int Int))
 (pub fn (lspLintAssists out src uri ix decls recs want)
   {
     (let seen vecNew)
@@ -12511,7 +12540,8 @@
 ; One suppression per (owner, code): the tag line above the owner
 ; declaration's first line. No action when the owner is nowhere to
 ; be found, which a macro-generated name would be.
-(pub :: lspNolintOffer (-> Int String String Ints Ints Int String String Int String Strings Int))
+(pub :: lspNolintOffer
+  (-> Int String String Ints (Vec ASTNode) Int String String Int String Strings Int))
 (pub fn (lspNolintOffer out src uri ix decls want code owner sp msg seen)
   {
     (let key (concat owner (concat "$" code)))
@@ -12519,7 +12549,7 @@
       0
       {
         (let d (lspLintOwnerDecl decls owner 0))
-        (if (== d 0)
+        (if (nodeSame d nilNode)
           0
           {
             (vecPush seen key)
@@ -12628,10 +12658,10 @@
 ; This document's `(effect E ...)` declaration, or 0. Only this
 ; document's: an effect from another module gets no action, for the
 ; reason the banner gives.
-(pub :: lspFindEffect (-> Ints String Int Int))
+(pub :: lspFindEffect (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindEffect decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_EFFECT) (&& (strEq (nodeAName d) name) (!= (nodeSpan d) 0)))
@@ -12641,12 +12671,12 @@
 
 ; Whether the declaration already carries a tag of that key, by the
 ; tag content's head - `unhandled(abort)` starts with `unhandled`.
-(pub :: lspDeclHasTagKey (-> Int String Bool))
+(pub :: lspDeclHasTagKey (-> ASTNode String Bool))
 (pub fn (lspDeclHasTagKey d key)
-  (if (== (memGetWord d 7) 0)
+  (if (== (nodeAxtagsWord d) 0)
     false
     {
-      (let tags (memGetWordVec d 7))
+      (let tags (nodeAxtagsWords d))
       (let mut i 0)
       (let mut out false)
       {
@@ -12663,7 +12693,7 @@
 
 ; One acknowledge per AX3053 the request meets, where this document
 ; declares the effect and carries no `unhandled` tag on it.
-(pub :: lspUnhandledAssists (-> Int Ints String String Ints Int Ints Int))
+(pub :: lspUnhandledAssists (-> Int Ints String String Ints Int (Vec ASTNode) Int))
 (pub fn (lspUnhandledAssists out ds src uri ix want decls)
   {
     (let n (vecLen ds))
@@ -12682,7 +12712,7 @@
                   (if (! (>= (strVecIdx seen eff) 0))
                     {
                       (let ed (lspFindEffect decls eff (- (vecLen decls) 1)))
-                      (if (! (== ed 0))
+                      (if (! (nodeSame ed nilNode))
                         (if (! (lspDeclHasTagKey ed "unhandled"))
                           {
                             (vecPush seen eff)
@@ -12734,7 +12764,8 @@
 ; E)) S')` with `x` for `E` in `S'`. What this changes on purpose: the
 ; item now runs before whatever the statement evaluated ahead of it.
 ; ------------------------------------------------------------------
-(pub :: lspNameAssists (-> Int Ints String String Ints Int Ints String Ints Ints Int))
+(pub :: lspNameAssists
+  (-> Int Ints String String Ints Int (Vec ASTNode) String (Vec ASTNode) Ints Int))
 ;@axiom:effect(io)
 (pub fn (lspNameAssists out ds src uri ix want decls path allDecls units)
   {
@@ -12787,7 +12818,7 @@
 ; The name AX3001 reports is the reference's own bytes; a qualified
 ; `Mod::name` spans its first segment alone, and names its module
 ; already, so it is not this assist's question.
-(pub :: lspImportAssists (-> Int Int String String Ints Ints String Strings Int))
+(pub :: lspImportAssists (-> Int Int String String Ints (Vec ASTNode) String Strings Int))
 ;@axiom:effect(io)
 (pub fn (lspImportAssists out d src uri ix decls path seen)
   {
@@ -12819,7 +12850,7 @@
 
 ; One action per (module, name), whatever the number of diagnostics
 ; that asked for it - a whole-document range meets every one.
-(pub :: lspImportOffer (-> Int Int String String Ints Ints String String Strings Int))
+(pub :: lspImportOffer (-> Int Int String String Ints (Vec ASTNode) String String Strings Int))
 (pub fn (lspImportOffer out d src uri ix decls mod name seen)
   {
     (let key (concat mod (concat "$" name)))
@@ -12842,12 +12873,12 @@
 ; existing list, else a new import line after the last one, else the
 ; first line of the file. A module imported WITHOUT a list already
 ; exports everything it can, so there is nothing to write - 0.
-(pub :: lspImportEdit (-> String String Ints Ints String String Int))
+(pub :: lspImportEdit (-> String String Ints (Vec ASTNode) String String Int))
 (pub fn (lspImportEdit src uri ix decls mod name)
   {
     (let imp (lspFixFindImport decls mod (- (vecLen decls) 1)))
-    (if (!= imp 0)
-      (if (== (vecLen (nodeBVec imp)) 0)
+    (if (! (nodeSame imp nilNode))
+      (if (== (vecLen (nodeBNames imp)) 0)
         0
         {
           (let o (lspFormStart src (spanStart (nodeSpan imp))))
@@ -12864,7 +12895,7 @@
         })
       {
         (let last (lspFixLastImport decls (- (vecLen decls) 1)))
-        (if (== last 0)
+        (if (nodeSame last nilNode)
           (lspFixInsert uri src ix 0 (concat (lspFixImportLine mod name) "\n"))
           (lspFixInsert uri src ix (lspFormEnd src (lspFormStart src (spanStart (nodeSpan last))))
             (concat "\n" (lspFixImportLine mod name))))
@@ -12876,10 +12907,10 @@
   (concat (concat "(import " mod) (concat (concat " (" name) "))")))
 
 ; This document's import of `mod`, last wins, or 0.
-(pub :: lspFixFindImport (-> Ints String Int Int))
+(pub :: lspFixFindImport (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFixFindImport decls mod i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_IMPORT) (&& (!= (nodeSpan d) 0) (strEq (nodeAName d) mod)))
@@ -12887,10 +12918,10 @@
         (lspFixFindImport decls mod (- i 1)))
     }))
 
-(pub :: lspFixLastImport (-> Ints Int Int))
+(pub :: lspFixLastImport (-> (Vec ASTNode) Int ASTNode))
 (pub fn (lspFixLastImport decls i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_IMPORT) (!= (nodeSpan d) 0))
@@ -13026,7 +13057,7 @@
               (let pr (parseModuleWith (lex text) (scanAxtags text)))
               (if (== (memGetWord pr 0) 0)
                 0
-                (if (lspFixDeclaresPub (memGetWordVec pr 1) name)
+                (if (lspFixDeclaresPub (readAstNodes pr 1) name)
                   {
                     (vecPush found mod)
                     0
@@ -13103,7 +13134,7 @@
 ; `pub` trait with a method of it. Measured: a `pub ::` beside a
 ; private `fn` does not export the fn, so a signature alone is not
 ; counted.
-(pub :: lspFixDeclaresPub (-> Ints String Bool))
+(pub :: lspFixDeclaresPub (-> (Vec ASTNode) String Bool))
 (pub fn (lspFixDeclaresPub decls name)
   {
     (let n (vecLen decls))
@@ -13125,7 +13156,7 @@
     }
   })
 
-(pub :: lspFixDeclNames (-> Int String Bool))
+(pub :: lspFixDeclNames (-> ASTNode String Bool))
 (pub fn (lspFixDeclNames d name)
   {
     (let tag (nodeTag d))
@@ -13133,16 +13164,17 @@
           (|| (== tag TAG_D_MACRO) (|| (== tag TAG_D_STRUCT) (== tag TAG_D_ALIAS))))
       (strEq (nodeAName d) name)
       (if (== tag TAG_D_DATA)
-        (>= (lspCtorIndex (nodeBVec d) name 0) 0)
+        (>= (lspCtorIndex (nodeBChildren d) name 0) 0)
         (if (== tag TAG_D_EXTERN)
-          (== (strVecHas (nodeBVec d) name) 1)
+          (== (strVecHas (nodeBChildren d) name) 1)
           false)))
   })
 
 ; ------------------------------------------------------------------
 ; `pub` for an AX3023 name.
 ; ------------------------------------------------------------------
-(pub :: lspPublicAssist (-> Int Int String String Ints Ints Ints Ints Strings Int))
+(pub :: lspPublicAssist
+  (-> Int Int String String Ints (Vec ASTNode) (Vec ASTNode) Ints Strings Int))
 ;@axiom:effect(io)
 (pub fn (lspPublicAssist out d src uri ix decls allDecls units seen)
   {
@@ -13152,11 +13184,11 @@
       0
       {
         (let first (lspFixDeclIn allDecls a (lspFixAfterColons b) (- (vecLen allDecls) 1)))
-        (if (!= first 0)
+        (if (! (nodeSame first nilNode))
           (lspPublicOffer out d src uri ix decls allDecls units a (lspFixAfterColons b) first seen)
           {
             (let second (lspFixDeclIn allDecls b (lspFixAfterColons a) (- (vecLen allDecls) 1)))
-            (if (== second 0)
+            (if (nodeSame second nilNode)
               0
               (lspPublicOffer out d src uri ix decls allDecls units b (lspFixAfterColons a) second
                 seen))
@@ -13224,10 +13256,10 @@
 ; The declaration of bare `name` that module `mod` carries in the
 ; merged list, or 0. Over the outline's kinds, as `lspFindImported`
 ; is, and by the module's own stamp rather than the mangled prefix.
-(pub :: lspFixDeclIn (-> Ints String String Int Int))
+(pub :: lspFixDeclIn (-> (Vec ASTNode) String String Int ASTNode))
 (pub fn (lspFixDeclIn allDecls mod name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet allDecls i))
       (if (&& (!= (nodeModule d) 0)
@@ -13238,7 +13270,9 @@
         (lspFixDeclIn allDecls mod name (- i 1)))
     }))
 
-(pub :: lspPublicOffer (-> Int Int String String Ints Ints Ints Ints String String Int Strings Int))
+(pub :: lspPublicOffer
+  (-> Int Int String String Ints (Vec ASTNode) (Vec ASTNode) Ints String String ASTNode Strings
+    Int))
 ;@axiom:effect(io)
 (pub fn (lspPublicOffer out d src uri ix decls allDecls units mod name decl seen)
   {
@@ -13273,7 +13307,7 @@
                   (let sig (lspFindSig allDecls (nodeAName decl) (- (vecLen allDecls) 1)))
                   {
                     (jsonArrPush edits (lspFixTextEdit hsrc hix (+ o 1) "pub "))
-                    (if (! (== sig 0))
+                    (if (! (nodeSame sig nilNode))
                       {
                         (let so (lspFormStart hsrc (spanStart (nodeSpan sig))))
                         (if (! (strEq (lspViewHeadAt hsrc so) "pub"))
@@ -13297,7 +13331,7 @@
 ; ------------------------------------------------------------------
 ; Extract to `let`.
 ; ------------------------------------------------------------------
-(pub :: lspExtractAction (-> String String Ints Ints Int Int))
+(pub :: lspExtractAction (-> String String (Vec ASTNode) Ints Int Int))
 (pub fn (lspExtractAction src uri decls ix want)
   {
     (let sel (lspFixTrim src want))
@@ -13367,22 +13401,22 @@
 
 ; The `(` of the top-level form holding [ws, we), when that form is a
 ; `fn` declaration of this document; -1 otherwise.
-(pub :: lspFixFnFormAt (-> String Ints Int Int Int))
+(pub :: lspFixFnFormAt (-> String (Vec ASTNode) Int Int Int))
 (pub fn (lspFixFnFormAt src decls ws we)
   {
     (let o (lspFormStart src ws))
     {
       (let e (lspFormEnd src o))
-      (if (|| (> we e) (== (lspFixFnDeclIn decls o e 0) 0))
+      (if (|| (> we e) (nodeSame (lspFixFnDeclIn decls o e 0) nilNode))
         (- 0 1)
         o)
     }
   })
 
-(pub :: lspFixFnDeclIn (-> Ints Int Int Int Int))
+(pub :: lspFixFnDeclIn (-> (Vec ASTNode) Int Int Int ASTNode))
 (pub fn (lspFixFnDeclIn decls o e i)
   (if (>= i (vecLen decls))
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_FN)
@@ -13429,7 +13463,7 @@
     }
   })
 
-(pub :: lspExtractIn (-> String String Ints Ints Int Int Int Int Int))
+(pub :: lspExtractIn (-> String String (Vec ASTNode) Ints Int Int Int Int Int))
 (pub fn (lspExtractIn src uri decls ix ws we bs be)
   {
     (let chain vecNew)
@@ -13759,7 +13793,7 @@
     (if (== (memGetWord pr 0) 0)
       jsonNull
       {
-        (let decls (memGetWordVec pr 1))
+        (let decls (readAstNodes pr 1))
         (let ix (lspLineIndex src))
         {
           (let off (lspOffsetOf src ix (jsonGet params "position")))
@@ -13771,13 +13805,13 @@
                 (let w (strSlice src (spanStart wsp) (- (spanEnd wsp) (spanStart wsp))))
                 {
                   (let t (lspLocalTypeOf src decls off w))
-                  (if (!= t 0)
+                  (if (! (nodeSame t nilNode))
                     (lspTypeLocation workspace (lspUriToPath uri) src uri decls "" t)
                     {
                       (let dat (lspFindCtorData decls w (- (vecLen decls) 1)))
-                      (if (!= dat 0)
+                      (if (! (nodeSame dat nilNode))
                         (lspLocationJson uri src (nodeSpan dat))
-                        (lspTypeLocation workspace (lspUriToPath uri) src uri decls w 0))
+                        (lspTypeLocation workspace (lspUriToPath uri) src uri decls w nilNode))
                     })
                 }
               })
@@ -13789,22 +13823,22 @@
 ; The type node this document alone can answer for the word at `off`:
 ; a parameter in the header the cursor is in, else a signed `fn`'s
 ; result. 0 when neither.
-(pub :: lspLocalTypeOf (-> String Ints Int String Int))
+(pub :: lspLocalTypeOf (-> String (Vec ASTNode) Int String ASTNode))
 (pub fn (lspLocalTypeOf src decls off w)
   {
     (let p (lspParamTypeAt src decls off w))
-    (if (!= p 0)
+    (if (! (nodeSame p nilNode))
       p
       {
         (let d (lspFindDecl decls w (- (vecLen decls) 1)))
-        (if (&& (!= d 0) (== (nodeTag d) TAG_D_FN))
+        (if (&& (! (nodeSame d nilNode)) (== (nodeTag d) TAG_D_FN))
           {
             (let sig (lspFindSig decls w (- (vecLen decls) 1)))
-            (if (== sig 0)
-              0
-              (lspArrowResult (nodeTy sig)))
+            (if (nodeSame sig nilNode)
+              nilNode
+              (lspArrowResult (nodeTyChild sig)))
           }
-          0)
+          nilNode)
       })
   })
 
@@ -13814,14 +13848,14 @@
 ; the parameter list is that paren's form - so a cursor inside it is
 ; on a parameter and nowhere else. Its index is the parameter's
 ; position in the fn's own list, which is what `nthParamTy` counts.
-(pub :: lspParamTypeAt (-> String Ints Int String Int))
+(pub :: lspParamTypeAt (-> String (Vec ASTNode) Int String ASTNode))
 (pub fn (lspParamTypeAt src decls off w)
   {
     (let n (vecLen decls))
     (let mut i 0)
-    (let mut found 0)
+    (let mut found nilNode)
     {
-      (while (&& (< i n) (== found 0))
+      (while (&& (< i n) (nodeSame found nilNode))
         {
           (let d (vecGet decls i))
           {
@@ -13831,12 +13865,12 @@
                 (let hs (lspHeaderOpen src (spanStart (nodeSpan d))))
                 (if (&& (>= hs 0) (< off (lspFormEnd src hs)))
                   {
-                    (let k (strVecIdx (nodeBVec d) w))
+                    (let k (strVecIdx (nodeBChildren d) w))
                     (if (! (< k 0))
                       {
                         (let sig (lspFindSig decls (nodeAName d) (- (vecLen decls) 1)))
-                        (if (! (== sig 0))
-                          (set found (nthParamTy (nodeTy sig) k 0)))
+                        (if (! (nodeSame sig nilNode))
+                          (set found (nthParamTy (nodeTyChild sig) k nilNode)))
                       })
                   })
               })
@@ -13868,28 +13902,28 @@
 
 ; The RESULT of an arrow chain: `(-> A B C)` answers `C`, and a type
 ; that is not an arrow answers itself - `(:: main Int)`'s `Int`.
-(pub :: lspArrowResult (-> Int Int))
+(pub :: lspArrowResult (-> ASTNode ASTNode))
 (pub fn (lspArrowResult t)
-  (if (== t 0)
-    0
+  (if (nodeSame t nilNode)
+    nilNode
     (if (== (nodeTag t) TAG_T_ARR)
-      (lspArrowResult (nodeB t))
+      (lspArrowResult (nodeBChild t))
       t)))
 
 ; The `data` declaring constructor `name` in this document, or 0.
-(pub :: lspFindCtorData (-> Ints String Int Int))
+(pub :: lspFindCtorData (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindCtorData decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_DATA)
-            (&& (!= (nodeSpan d) 0) (!= (lspCtorIndex (nodeBVec d) name 0) (- 0 1))))
+            (&& (!= (nodeSpan d) 0) (!= (lspCtorIndex (nodeBChildren d) name 0) (- 0 1))))
         d
         (lspFindCtorData decls name (- i 1)))
     }))
 
-(pub :: lspCtorIndex (-> Ints String Int Int))
+(pub :: lspCtorIndex (-> (Vec ASTNode) String Int Int))
 (pub fn (lspCtorIndex ctors name i)
   (if (>= i (vecLen ctors))
     (- 0 1)
@@ -13941,15 +13975,15 @@
 ; The imported `data` declaring constructor `name`, or 0. The module
 ; filter is on the DATA, which is the node `resolveImports`
 ; attributes; the constructors inside it carry no module of their own.
-(pub :: lspFindCtorDataImported (-> Ints String Int Int))
+(pub :: lspFindCtorDataImported (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindCtorDataImported decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (== (nodeTag d) TAG_D_DATA)
             (&& (!= (nodeModule d) 0)
-              (&& (!= (nodeSpan d) 0) (!= (lspCtorIndex (nodeBVec d) name 0) (- 0 1)))))
+              (&& (!= (nodeSpan d) 0) (!= (lspCtorIndex (nodeBChildren d) name 0) (- 0 1)))))
         d
         (lspFindCtorDataImported decls name (- i 1)))
     }))
@@ -13957,26 +13991,26 @@
 ; The constructor node `name` names inside `dat`, or 0 - and 0 also
 ; for one whose name carries no span, which is what the parser
 ; recovers from a half-written form.
-(pub :: lspCtorNodeOf (-> Int String Int))
+(pub :: lspCtorNodeOf (-> ASTNode String ASTNode))
 (pub fn (lspCtorNodeOf dat name)
-  (if (== dat 0)
-    0
+  (if (nodeSame dat nilNode)
+    nilNode
     {
-      (let c (lspViewCtorIn (nodeBVec dat) name))
-      (if (== c 0)
-        0
+      (let c (lspViewCtorIn (nodeBChildren dat) name))
+      (if (nodeSame c nilNode)
+        nilNode
         (if (== (nodeSpan c) 0)
-          0
+          nilNode
           c))
     }))
 
 ; A Location on the constructor `name` this document declares, or 0
 ; for "the word is not one of ours".
-(pub :: lspCtorDefinition (-> String String Ints String Int))
+(pub :: lspCtorDefinition (-> String String (Vec ASTNode) String Int))
 (pub fn (lspCtorDefinition src uri decls name)
   {
     (let c (lspCtorNodeOf (lspFindCtorData decls name (- (vecLen decls) 1)) name))
-    (if (== c 0)
+    (if (nodeSame c nilNode)
       0
       (lspNavLocOf uri src (nodeSpan c)))
   })
@@ -13987,14 +14021,14 @@
 ; in - `lspViewSymCtors` publishes constructors through exactly this
 ; pair. `jsonNull` on a miss, and on a `data` the resolver did not
 ; attribute to a unit, because this is the end of the chain.
-(pub :: lspCtorDefinitionImported (-> Ints Ints String Int))
+(pub :: lspCtorDefinitionImported (-> (Vec ASTNode) Ints String Int))
 ;@axiom:effect(io)
 (pub fn (lspCtorDefinitionImported allDecls units name)
   {
     (let dat (lspFindCtorDataImported allDecls name (- (vecLen allDecls) 1)))
     {
       (let c (lspCtorNodeOf dat name))
-      (if (== c 0)
+      (if (nodeSame c nilNode)
         jsonNull
         {
           (let u (lspUnitOf units (nodeModule dat)))
@@ -14012,7 +14046,7 @@
 ; The line hover puts under the fence. The `data`'s name is BARE, for
 ; the reason `lspViewSigCtor` reads a bare one: an imported `data` is
 ; `Shapes$Shape` in the merged list and nobody writes it that way.
-(pub :: lspCtorNote (-> Int String String))
+(pub :: lspCtorNote (-> ASTNode String String))
 (pub fn (lspCtorNote dat name)
   (concat (concat (concat "constructor `" name) "` of `") (concat (bareOf (nodeAName dat)) "`")))
 
@@ -14020,11 +14054,11 @@
 ; of the DECLARING file, the module named, and the note saying which
 ; constructor. `range` is still the word in the document being edited,
 ; which is a different file - the same split `lspHoverImported` makes.
-(pub :: lspHoverCtorImported (-> Ints Ints String Int Int))
+(pub :: lspHoverCtorImported (-> (Vec ASTNode) Ints String Int Int))
 (pub fn (lspHoverCtorImported allDecls units name range)
   {
     (let dat (lspFindCtorDataImported allDecls name (- (vecLen allDecls) 1)))
-    (if (== (lspCtorNodeOf dat name) 0)
+    (if (nodeSame (lspCtorNodeOf dat name) nilNode)
       jsonNull
       {
         (let u (lspUnitOf units (nodeModule dat)))
@@ -14042,12 +14076,12 @@
 ; span, in the file that declares it. This is the ONE request whose
 ; answer is the declaration rather than the constructor, because the
 ; type of `Circle` is `Shape`.
-(pub :: lspTypeCtorImported (-> Ints Ints String Int))
+(pub :: lspTypeCtorImported (-> (Vec ASTNode) Ints String Int))
 ;@axiom:effect(io)
 (pub fn (lspTypeCtorImported allDecls units name)
   {
     (let dat (lspFindCtorDataImported allDecls name (- (vecLen allDecls) 1)))
-    (if (== (lspCtorNodeOf dat name) 0)
+    (if (nodeSame (lspCtorNodeOf dat name) nilNode)
       jsonNull
       {
         (let u (lspUnitOf units (nodeModule dat)))
@@ -14066,10 +14100,10 @@
 (pub fn (lspIsTypeDecl tag)
   (|| (== tag TAG_D_DATA) (|| (== tag TAG_D_STRUCT) (== tag TAG_D_ALIAS))))
 
-(pub :: lspFindTypeDecl (-> Ints String Int Int))
+(pub :: lspFindTypeDecl (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindTypeDecl decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (lspIsTypeDecl (nodeTag d)) (&& (strEq (nodeAName d) name) (!= (nodeSpan d) 0)))
@@ -14081,10 +14115,10 @@
 ; in. Type names are NOT mangled by `resolveImports` - a `data` keeps
 ; its bare name in every module - so the comparison is exact rather
 ; than through `bareOf`.
-(pub :: lspFindTypeImported (-> Ints String Int Int))
+(pub :: lspFindTypeImported (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (lspFindTypeImported decls name i)
   (if (< i 0)
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (&& (lspIsTypeDecl (nodeTag d))
@@ -14102,12 +14136,12 @@
 ; declarations are asked first, which is the language's shadowing rule
 ; and `lspDefinition`'s order; the imports are resolved only when they
 ; have to be, and once, whichever of the two questions is being asked.
-(pub :: lspTypeLocation (-> LspWorkspace String String String Ints String Int Int))
+(pub :: lspTypeLocation (-> LspWorkspace String String String (Vec ASTNode) String ASTNode Int))
 ;@axiom:effect(io)
 (pub fn (lspTypeLocation workspace path src uri decls w t)
   {
     (let local
-      (if (== t 0)
+      (if (nodeSame t nilNode)
         0
         (lspTypeLocalOf src uri decls t)))
     (if (!= local 0)
@@ -14116,13 +14150,13 @@
   })
 
 ; A `TAG_T_CON` naming a declaration in this document, or 0.
-(pub :: lspTypeLocalOf (-> String String Ints Int Int))
+(pub :: lspTypeLocalOf (-> String String (Vec ASTNode) ASTNode Int))
 (pub fn (lspTypeLocalOf src uri decls t)
   (if (!= (nodeTag t) TAG_T_CON)
     0
     {
       (let d (lspFindTypeDecl decls (nodeAName t) (- (vecLen decls) 1)))
-      (if (== d 0)
+      (if (nodeSame d nilNode)
         0
         (lspLocationJson uri src (nodeSpan d)))
     }))
@@ -14130,7 +14164,8 @@
 ; The import preamble of `lspDefinitionImported`, verbatim, and then
 ; the two lookups it can answer: the result type of an imported signed
 ; `fn` when `t` is 0, and the module declaring a type name.
-(pub :: lspTypeLocationImported (-> LspWorkspace String String String Ints String Int Int))
+(pub :: lspTypeLocationImported
+  (-> LspWorkspace String String String (Vec ASTNode) String ASTNode Int))
 ;@axiom:effect(io)
 (pub fn (lspTypeLocationImported workspace path src uri decls w given)
   {
@@ -14138,24 +14173,24 @@
     (if (== r 0)
       jsonNull
       {
-        (let allDecls (memGetWordVec r 0))
+        (let allDecls (readAstNodes r 0))
         (let units (memGetWordVec r 1))
         {
           (let t
-            (if (!= given 0)
+            (if (! (nodeSame given nilNode))
               given
               {
                 (let d (lspFindImported allDecls w (- (vecLen allDecls) 1)))
-                (if (&& (!= d 0) (== (nodeTag d) TAG_D_FN))
+                (if (&& (! (nodeSame d nilNode)) (== (nodeTag d) TAG_D_FN))
                   {
                     (let sig (lspFindSig allDecls (nodeAName d) (- (vecLen allDecls) 1)))
-                    (if (== sig 0)
-                      0
-                      (lspArrowResult (nodeTy sig)))
+                    (if (nodeSame sig nilNode)
+                      nilNode
+                      (lspArrowResult (nodeTyChild sig)))
                   }
-                  0)
+                  nilNode)
               }))
-          (if (== t 0)
+          (if (nodeSame t nilNode)
             ; The last thing `w` can be: a constructor an import
             ; brought in, whose TYPE is the `data` that declares it.
             ; `lspTypeDefinition` asks the same question of this
@@ -14172,7 +14207,7 @@
                   local
                   {
                     (let d (lspFindTypeImported allDecls (nodeAName t) (- (vecLen allDecls) 1)))
-                    (if (== d 0)
+                    (if (nodeSame d nilNode)
                       jsonNull
                       {
                         (let u (lspUnitOf units (nodeModule d)))
@@ -14214,7 +14249,7 @@
     (if (== (memGetWord pr 0) 0)
       jsonArr
       {
-        (let decls (memGetWordVec pr 1))
+        (let decls (readAstNodes pr 1))
         (let out jsonArr)
         (let ix (lspLineIndex src))
         (let n (vecLen (memGetWordVec pr 1)))
@@ -14226,7 +14261,7 @@
               {
                 (if (! (== (nodeSpan d) 0))
                   (if (&& (== (nodeTag d) TAG_D_FN)
-                        (&& (strEq (nodeAName d) "main") (== (vecLen (nodeBVec d)) 0)))
+                        (&& (strEq (nodeAName d) "main") (== (vecLen (nodeBNames d)) 0)))
                     (jsonArrPush out
                       (lspLensJson (lspRangeIx src ix (nodeSpan d)) "▶ Run" "axiom.run"
                         (jsonArrPush jsonArr (jsonStr (lspUriToPath uri)))))
@@ -14296,16 +14331,16 @@
     (if (== (memGetWord pr 0) 0)
       "[]"
       {
-        (let calls (lspGenCallSites (memGetWordVec pr 1)))
+        (let calls (lspGenCallSites (readAstNodes pr 1)))
         (if (== (vecLen calls) 0)
           "[]"
-          (jsonWrite (lspGenEntries workspace path src (memGetWordVec pr 1) calls)))
+          (jsonWrite (lspGenEntries workspace path src (readAstNodes pr 1) calls)))
       })
   })
 
 ; Indices of the top-level declarations that are macro invocations
 ; with a span to answer at.
-(pub :: lspGenCallSites (-> Ints Ints))
+(pub :: lspGenCallSites (-> (Vec ASTNode) Ints))
 ;@axiom:effect(unsafe)
 (pub fn (lspGenCallSites decls)
   {
@@ -14348,7 +14383,7 @@
 ; One JSON object per generated name, first invocation winning: the
 ; temporary list merges one call's own products (`::` preferred),
 ; then merges into the answer by name.
-(pub :: lspGenEntries (-> LspWorkspace String String Ints Ints Int))
+(pub :: lspGenEntries (-> LspWorkspace String String (Vec ASTNode) Ints Int))
 ;@axiom:effect(io)
 (pub fn (lspGenEntries workspace path src decls calls)
   {
@@ -14368,7 +14403,7 @@
 ; One call's products, attributed the way `lspExpandAt` attributes
 ; them: the isolated list is resolved AND expanded together, because
 ; the resolution is handle-bound to the list it ran on.
-(pub :: lspGenOneCall (-> LspWorkspace String String Ints Int Ints Int))
+(pub :: lspGenOneCall (-> LspWorkspace String String (Vec ASTNode) Int Ints Int))
 ;@axiom:effect(io)
 (pub fn (lspGenOneCall workspace path src decls idx out)
   {
@@ -14376,7 +14411,7 @@
     (if (== (memGetWord pr2 0) 0)
       0
       {
-        (let decls2 (lspKeepOneCall (memGetWordVec pr2 1) idx))
+        (let decls2 (lspKeepOneCall (readAstNodes pr2 1) idx))
         {
           (let before (lspDeclHandles decls2))
           (let wasCall (lspDeclIsCall decls2))
@@ -14395,7 +14430,7 @@
 ; Every product of this one call into the answer: the invocation's
 ; own span and macro name travel with each, from the ORIGINAL list,
 ; whose handles the expansion never touched.
-(pub :: lspGenCollect (-> String Ints Int Ints Ints Ints Ints Ints Int))
+(pub :: lspGenCollect (-> String (Vec ASTNode) Int (Vec ASTNode) (Vec ASTNode) Ints Ints Ints Int))
 (pub fn (lspGenCollect src decls idx decls2 before wasCall gens out)
   {
     (let site (vecGet decls idx))
@@ -14430,7 +14465,7 @@
 ; `fn`'s first line, and a product with no name to look up by is left
 ; out. `tmp` holds (name, code) pairs, `tsig` whether the code is a
 ; `::` rendering.
-(pub :: lspGenTempMerge (-> Ints Ints Int Int))
+(pub :: lspGenTempMerge (-> Ints Ints ASTNode Int))
 (pub fn (lspGenTempMerge tmp tsig g)
   {
     (let nm (nodeAName g))
@@ -14687,7 +14722,7 @@
     (if (== (memGetWord pr 0) 0)
       jsonNull
       {
-        (let decls (memGetWordVec pr 1))
+        (let decls (readAstNodes pr 1))
         (let ix (lspLineIndex src))
         {
           (let site (lspMacroSiteAt src decls (lspOffsetOf src ix (jsonGet params "position"))))
@@ -14703,7 +14738,7 @@
 ; comparison; the form is scanned only for a name the cursor is not
 ; on. An index rather than the node, because the same position in the
 ; fresh parse is how the invocation is found again.
-(pub :: lspMacroSiteAt (-> String Ints Int Int))
+(pub :: lspMacroSiteAt (-> String (Vec ASTNode) Int Int))
 (pub fn (lspMacroSiteAt src decls off)
   {
     (let n (vecLen decls))
@@ -14733,7 +14768,7 @@
 ; The fresh parse's entry list with every top-level invocation but the
 ; one at `idx` left out, so what phase D makes of it is one
 ; invocation's expansion.
-(pub :: lspKeepOneCall (-> Ints Int Ints))
+(pub :: lspKeepOneCall (-> (Vec ASTNode) Int (Vec ASTNode)))
 ;@axiom:effect(unsafe)
 (pub fn (lspKeepOneCall decls2 idx)
   {
@@ -14752,7 +14787,7 @@
     }
   })
 
-(pub :: lspExpandAt (-> LspWorkspace String String Ints Int Int))
+(pub :: lspExpandAt (-> LspWorkspace String String (Vec ASTNode) Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (lspExpandAt workspace path src decls idx)
@@ -14767,8 +14802,8 @@
         {
           (let decls2
             (if byCall
-              (lspKeepOneCall (memGetWordVec pr2 1) idx)
-              (memGetWordVec pr2 1)))
+              (lspKeepOneCall (readAstNodes pr2 1) idx)
+              (readAstNodes pr2 1)))
           {
             (let before (lspDeclHandles decls2))
             (let wasCall (lspDeclIsCall decls2))
@@ -14811,7 +14846,7 @@
 ; The handles the list holds before expansion, in order, and which of
 ; them are invocations - the two facts identity is judged against
 ; afterwards.
-(pub :: lspDeclHandles (-> Ints Ints))
+(pub :: lspDeclHandles (-> (Vec ASTNode) (Vec ASTNode)))
 (pub fn (lspDeclHandles decls)
   {
     (let out vecNew)
@@ -14827,7 +14862,7 @@
     }
   })
 
-(pub :: lspDeclIsCall (-> Ints Ints))
+(pub :: lspDeclIsCall (-> (Vec ASTNode) Ints))
 (pub fn (lspDeclIsCall decls)
   {
     (let out vecNew)
@@ -14852,7 +14887,7 @@
 ; form or an invocation still waiting. Under an invocation everything
 ; generated is its own (the list was cut down to it); under a
 ; declaration, what `gens` attributes to that macro.
-(pub :: lspIsProductOf (-> Int Int Ints Ints Ints String Bool Bool))
+(pub :: lspIsProductOf (-> ASTNode Int (Vec ASTNode) Ints Ints String Bool Bool))
 (pub fn (lspIsProductOf g i before wasCall gens macName byCall)
   (if (|| (== (nodeTag g) TAG_NIL) (== (nodeTag g) TAG_D_MACROCALL))
     false
@@ -14860,7 +14895,7 @@
       (let fresh
         (if (>= i (vecLen before))
           true
-          (if (!= (vecGet before i) g)
+          (if (! (nodeSame (vecGet before i) g))
             true
             (== (vecGet wasCall i) 1))))
       (if (lspNavNot fresh)
@@ -15154,14 +15189,14 @@
 ;
 ; `ren` is 0, or a flat Vec of (old, new) variable spellings the
 ; writer substitutes - what the assist needs, see `lspFreshRenames`.
-(pub :: lspRenderType (-> Int String))
+(pub :: lspRenderType (-> ASTNode String))
 ;@axiom:effect(unsafe)
 (pub fn (lspRenderType t)
   (lspRenderTypeR t (as 0 (Vec Int))))
 
-(pub :: lspRenderTypeR (-> Int (Vec a) String))
+(pub :: lspRenderTypeR (-> ASTNode (Vec a) String))
 (pub fn (lspRenderTypeR t ren)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     "{unknown}"
     {
       (let tag (nodeTag t))
@@ -15170,34 +15205,34 @@
           "_"
           (lspRenamed ren (nodeAName t)))
         (if (== tag TAG_T_CON)
-          (if (== (vecLen (nodeBVec t)) 0)
+          (if (== (vecLen (nodeBChildren t)) 0)
             (nodeAName t)
-            (concat (concat (concat "(" (nodeAName t)) (lspRenderTypes (nodeBVec t) 0 " " ren))
-              ")"))
+            (concat
+              (concat (concat "(" (nodeAName t)) (lspRenderTypes (nodeBChildren t) 0 " " ren)) ")"))
           (if (== tag TAG_T_ARR)
             (concat (concat "(->" (lspRenderArrow t ren)) ")")
             (if (== tag TAG_T_TUP)
-              (concat (concat "(" (lspRenderTypes (nodeAVec t) 0 "" ren)) ")")
+              (concat (concat "(" (lspRenderTypes (nodeAChildren t) 0 "" ren)) ")")
               (if (== tag TAG_T_PTR)
-                (concat (concat "(* " (lspRenderTypeR (nodeA t) ren)) ")")
+                (concat (concat "(* " (lspRenderTypeR (nodeAChild t) ren)) ")")
                 "{unknown}")))))
     }))
 
 ; The parameters and result of an arrow chain, each preceded by a
 ; space; the first element of a tuple gets none.
-(pub :: lspRenderTypes (-> Ints Int String (Vec a) String))
+(pub :: lspRenderTypes (-> Nodes Int String (Vec a) String))
 (pub fn (lspRenderTypes tys i lead ren)
   (if (>= i (vecLen tys))
     ""
     (concat (concat lead (lspRenderTypeR (vecGet tys i) ren))
       (lspRenderTypes tys (+ i 1) " " ren))))
 
-(pub :: lspRenderArrow (-> Int (Vec a) String))
+(pub :: lspRenderArrow (-> ASTNode (Vec a) String))
 (pub fn (lspRenderArrow t ren)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     " {unknown}"
     (if (== (nodeTag t) TAG_T_ARR)
-      (concat (concat " " (lspRenderTypeR (nodeA t) ren)) (lspRenderArrow (nodeB t) ren))
+      (concat (concat " " (lspRenderTypeR (nodeAChild t) ren)) (lspRenderArrow (nodeBChild t) ren))
       (concat " " (lspRenderTypeR t ren)))))
 
 (pub :: lspRenamed (-> (Vec a) String String))
@@ -15221,7 +15256,7 @@
 ; prints `(Int -> (a -> a))`. So each such variable is written as the
 ; first letter no variable of the type already uses, in order of
 ; appearance. Answers 0 when there is nothing to rename.
-(pub :: lspFreshRenames (-> Int Strings))
+(pub :: lspFreshRenames (-> ASTNode Strings))
 ;@axiom:effect(unsafe)
 (pub fn (lspFreshRenames ty)
   {
@@ -15259,9 +15294,9 @@
   })
 
 ; Every named type variable of `ty`, in order of appearance.
-(pub :: lspTyVarNames (-> Int Strings Int))
+(pub :: lspTyVarNames (-> ASTNode Strings Int))
 (pub fn (lspTyVarNames t out)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     0
     {
       (let tag (nodeTag t))
@@ -15275,20 +15310,20 @@
         (if (|| (== tag TAG_T_CON) (== tag TAG_T_TUP))
           (lspTyVarNamesIn
             (if (== tag TAG_T_CON)
-              (nodeBVec t)
-              (nodeAVec t))
+              (nodeBChildren t)
+              (nodeAChildren t))
             out 0)
           (if (== tag TAG_T_ARR)
             {
-              (lspTyVarNames (nodeA t) out)
-              (lspTyVarNames (nodeB t) out)
+              (lspTyVarNames (nodeAChild t) out)
+              (lspTyVarNames (nodeBChild t) out)
             }
             (if (== tag TAG_T_PTR)
-              (lspTyVarNames (nodeA t) out)
+              (lspTyVarNames (nodeAChild t) out)
               0))))
     }))
 
-(pub :: lspTyVarNamesIn (-> Ints Strings Int Int))
+(pub :: lspTyVarNamesIn (-> (Vec ASTNode) Strings Int Int))
 (pub fn (lspTyVarNamesIn tys out i)
   (if (>= i (vecLen tys))
     0
@@ -15299,26 +15334,26 @@
 
 ; Whether every part of a type is known: no 0, no poison, no nameless
 ; variable. What the assist refuses to write.
-(pub :: lspTyKnown (-> Int Bool))
+(pub :: lspTyKnown (-> ASTNode Bool))
 (pub fn (lspTyKnown t)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     false
     {
       (let tag (nodeTag t))
       (if (== tag TAG_T_VAR)
         (> (strLen (nodeAName t)) 0)
         (if (== tag TAG_T_CON)
-          (lspTysKnown (nodeBVec t) 0)
+          (lspTysKnown (nodeBChildren t) 0)
           (if (== tag TAG_T_ARR)
-            (&& (lspTyKnown (nodeA t)) (lspTyKnown (nodeB t)))
+            (&& (lspTyKnown (nodeAChild t)) (lspTyKnown (nodeBChild t)))
             (if (== tag TAG_T_TUP)
-              (lspTysKnown (nodeAVec t) 0)
+              (lspTysKnown (nodeAChildren t) 0)
               (if (== tag TAG_T_PTR)
-                (lspTyKnown (nodeA t))
+                (lspTyKnown (nodeAChild t))
                 false)))))
     }))
 
-(pub :: lspTysKnown (-> Ints Int Bool))
+(pub :: lspTysKnown (-> (Vec ASTNode) Int Bool))
 (pub fn (lspTysKnown tys i)
   (if (>= i (vecLen tys))
     true
@@ -15328,9 +15363,9 @@
 
 ; An expression, at column `ind`; its continuation lines are indented
 ; from there and its children are rendered at `ind + 2`.
-(pub :: lspRenderExpr (-> Int Int String))
+(pub :: lspRenderExpr (-> ASTNode Int String))
 (pub fn (lspRenderExpr e ind)
-  (if (== e 0)
+  (if (nodeSame e nilNode)
     "(syntax/unrenderable 0)"
     {
       (let tag (nodeTag e))
@@ -15354,48 +15389,50 @@
                       (lspRenderLet e ind)
                       (if (== tag TAG_E_IF)
                         (lspRenderForm
-                          (lspParts4 "if" (lspRenderExpr (nodeA e) (+ ind 2))
-                            (lspRenderExpr (nodeB e) (+ ind 2)) (lspRenderExpr (nodeC e) (+ ind 2)))
+                          (lspParts4 "if" (lspRenderExpr (nodeAChild e) (+ ind 2))
+                            (lspRenderExpr (nodeBChild e) (+ ind 2))
+                            (lspRenderExpr (nodeCChild e) (+ ind 2)))
                           ind)
                         (if (== tag TAG_E_BEGIN)
-                          (lspRenderBlock (nodeAVec e) ind)
+                          (lspRenderBlock (nodeAChildren e) ind)
                           (if (== tag TAG_E_MATCH)
                             (lspRenderMatch e ind)
                             (lspRenderExprMore e tag ind))))))))))))
     }))
 
 ; The second half of the dispatch: the forms a body meets less often.
-(pub :: lspRenderExprMore (-> Int Int Int String))
+(pub :: lspRenderExprMore (-> ASTNode Int Int String))
 ; `cond` is AX2004: the parser builds none, so no arm renders one.
 ; A variadic `if` arrives as nested `if`s and renders through the
 ; `if` arm of `lspRenderExpr`.
 (pub fn (lspRenderExprMore e tag ind)
   (if (== tag TAG_E_SET)
     (lspRenderForm
-      (lspParts3 "set" (lspRenderName (nodeAName e)) (lspRenderExpr (nodeB e) (+ ind 2))) ind)
+      (lspParts3 "set" (lspRenderName (nodeAName e)) (lspRenderExpr (nodeBChild e) (+ ind 2))) ind)
     (if (|| (== tag TAG_E_WHILE) (== tag TAG_E_REGION))
       (if (== tag TAG_E_REGION)
         (lspRenderForm
-          (lspParts3 "region" (lspRenderName (nodeAName e)) (lspRenderExpr (nodeB e) (+ ind 2)))
+          (lspParts3 "region" (lspRenderName (nodeAName e))
+            (lspRenderExpr (nodeBChild e) (+ ind 2)))
           ind)
         (concat
-          (concat (concat "(while " (lspRenderExpr (nodeA e) (+ ind 2)))
-            (lspRenderLines (nodeBVec e) (+ ind 2)))
+          (concat (concat "(while " (lspRenderExpr (nodeAChild e) (+ ind 2)))
+            (lspRenderLines (nodeBChildren e) (+ ind 2)))
           ")"))
       (if (== tag TAG_E_TRY)
-        (concat (lspRenderExpr (nodeA e) ind) "?")
+        (concat (lspRenderExpr (nodeAChild e) ind) "?")
         (if (== tag TAG_E_FIELD)
-          (concat (concat (lspRenderExpr (nodeA e) ind) ".") (nodeBName e))
+          (concat (concat (lspRenderExpr (nodeAChild e) ind) ".") (nodeBName e))
           (if (== tag TAG_E_SETF)
             (lspRenderForm
               (lspParts3 "set"
-                (concat (concat (lspRenderExpr (nodeA e) (+ ind 2)) ".") (nodeBName e))
-                (lspRenderExpr (nodeC e) (+ ind 2)))
+                (concat (concat (lspRenderExpr (nodeAChild e) (+ ind 2)) ".") (nodeBName e))
+                (lspRenderExpr (nodeCChild e) (+ ind 2)))
               ind)
             (if (== tag TAG_E_HANDLE)
               (lspRenderHandle e ind)
               (if (== tag TAG_E_QUOTE)
-                (lspRenderForm (lspParts2 "quote" (lspRenderExpr (nodeA e) (+ ind 2))) ind)
+                (lspRenderForm (lspParts2 "quote" (lspRenderExpr (nodeAChild e) (+ ind 2))) ind)
                 (if (== tag TAG_P_CON0)
                   (concat (concat "(" (lspRenderName (nodeAName e))) ")")
                   (if (== tag TAG_P_CONNAMED)
@@ -15438,7 +15475,7 @@
   })
 
 ; Every expression of `es` rendered onto `parts`, at `ind`.
-(pub :: lspPartsExprs (-> Strings Ints Int Int Strings))
+(pub :: lspPartsExprs (-> Strings (Vec ASTNode) Int Int Strings))
 (pub fn (lspPartsExprs parts es i ind)
   (if (>= i (vecLen es))
     parts
@@ -15450,20 +15487,20 @@
 ; An application spine, flattened back to `(f a b)`: `(f x y)` parses
 ; to App(App(f, x), y), so the arguments come off the spine in reverse
 ; and the head is what is left when the tags run out.
-(pub :: lspRenderApp (-> Int Int String))
+(pub :: lspRenderApp (-> ASTNode Int String))
 (pub fn (lspRenderApp e ind)
   {
     (let rev vecNew)
     (let labels
       (if (!= (nodeFieldNames e) 0)
-        (nodeFieldNamesVec e)
+        (nodeFieldNamesNames e)
         vecNew))
     (let mut h e)
     {
       (while (== (nodeTag h) TAG_E_APP)
         {
-          (vecPush rev (nodeB h))
-          (set h (nodeA h))
+          (vecPush rev (nodeBChild h))
+          (set h (nodeAChild h))
         })
       {
         (let parts vecNew)
@@ -15488,26 +15525,26 @@
 
 ; `(lambda (x y) body)`: the curried chain of one-parameter lambdas
 ; re-merged, and a zero-parameter one written `()`.
-(pub :: lspRenderLam (-> Int Int String))
+(pub :: lspRenderLam (-> ASTNode Int String))
 (pub fn (lspRenderLam e ind)
   {
     (let names vecNew)
     (let mut body e)
     {
-      (while (&& (== (nodeTag body) TAG_E_LAM) (== (vecLen (nodeAVec body)) 1))
+      (while (&& (== (nodeTag body) TAG_E_LAM) (== (vecLen (nodeANames body)) 1))
         {
-          (vecPush names (vecGetStr (nodeAVec body) 0))
-          (set body (nodeB body))
+          (vecPush names (vecGetStr (nodeANames body) 0))
+          (set body (nodeBChild body))
         })
       (if (== (vecLen names) 0)
-        (set body (nodeB e)))
+        (set body (nodeBChild e)))
       (concat
         (concat (concat (concat "(lambda (" (lspJoinNames names 0)) ")\n") (lspPad (+ ind 2)))
         (concat (lspRenderExpr body (+ ind 2)) ")"))
     }
   })
 
-(pub :: lspJoinNames (-> (Vec a) Int String))
+(pub :: lspJoinNames (-> Names Int String))
 (pub fn (lspJoinNames names i)
   (if (>= i (vecLen names))
     ""
@@ -15518,7 +15555,7 @@
       (concat (lspRenderName (vecGetStr names i)) (lspJoinNames names (+ i 1))))))
 
 ; Lowered lets render as locals in one enclosing brace block.
-(pub :: lspRenderLet (-> Int Int String))
+(pub :: lspRenderLet (-> ASTNode Int String))
 (pub fn (lspRenderLet e ind)
   {
     (let parts vecNew)
@@ -15536,9 +15573,9 @@
                 "(let "))
             (vecPush parts (lspRenderName (nodeAName body)))
             (vecPush parts " ")
-            (vecPush parts (lspRenderExpr (nodeB body) (+ ind 2)))
+            (vecPush parts (lspRenderExpr (nodeBChild body) (+ ind 2)))
             (vecPush parts ")")
-            (set body (nodeC body))
+            (set body (nodeCChild body))
           })
         (vecPush parts "\n")
         (vecPush parts (lspPad (+ ind 2)))
@@ -15562,13 +15599,13 @@
       (concat (vecGetStr xs i) (lspJoinStrs xs (+ i 1) sep)))))
 
 ; `{ }`: one expression per line.
-(pub :: lspRenderBlock (-> Ints Int String))
+(pub :: lspRenderBlock (-> (Vec ASTNode) Int String))
 (pub fn (lspRenderBlock es ind)
   (concat (concat "{" (lspRenderLines es (+ ind 2))) (concat "\n" (concat (lspPad ind) "}"))))
 
 ; Each of `es` on a line of its own at `ind`, every line led by its
 ; newline so the caller's opener stays on the caller's line.
-(pub :: lspRenderLines (-> Ints Int String))
+(pub :: lspRenderLines (-> (Vec ASTNode) Int String))
 (pub fn (lspRenderLines es ind)
   {
     (let parts vecNew)
@@ -15584,20 +15621,20 @@
     }
   })
 
-(pub :: lspRenderMatch (-> Int Int String))
+(pub :: lspRenderMatch (-> ASTNode Int String))
 (pub fn (lspRenderMatch e ind)
   (concat
-    (concat (concat "(match " (lspRenderExpr (nodeA e) (+ ind 2)))
-      (lspRenderLines (nodeBVec e) (+ ind 2)))
+    (concat (concat "(match " (lspRenderExpr (nodeAChild e) (+ ind 2)))
+      (lspRenderLines (nodeBChildren e) (+ ind 2)))
     ")"))
 
 ; One arm, `(pattern body)` - a `match` arm - with the body on its
 ; own line when it spans lines.
-(pub :: lspRenderArm (-> Int Int String))
+(pub :: lspRenderArm (-> ASTNode Int String))
 (pub fn (lspRenderArm arm ind)
   {
-    (let pat (lspRenderExpr (nodeA arm) (+ ind 2)))
-    (let body (lspRenderExpr (nodeB arm) (+ ind 2)))
+    (let pat (lspRenderExpr (nodeAChild arm) (+ ind 2)))
+    (let body (lspRenderExpr (nodeBChild arm) (+ ind 2)))
     (concat
       (concat (concat "(" pat)
         (if (lspHasNl body)
@@ -15608,21 +15645,21 @@
 
 ; `(handle body (Effect...) handler)`, the effect list left out when
 ; it is empty - the parser reads it as optional.
-(pub :: lspRenderHandle (-> Int Int String))
+(pub :: lspRenderHandle (-> ASTNode Int String))
 ;@axiom:effect(unsafe)
 (pub fn (lspRenderHandle e ind)
   {
-    (let parts (lspParts2 "handle" (lspRenderExpr (nodeA e) (+ ind 2))))
+    (let parts (lspParts2 "handle" (lspRenderExpr (nodeAChild e) (+ ind 2))))
     {
-      (if (> (vecLen (nodeBVec e)) 0)
-        (vecPush parts (concat (concat "(" (lspJoinExprs (nodeBVec e) 0 ind)) ")"))
+      (if (> (vecLen (nodeBChildren e)) 0)
+        (vecPush parts (concat (concat "(" (lspJoinExprs (nodeBChildren e) 0 ind)) ")"))
         (as 0 (Vec String)))
-      (vecPush parts (lspRenderExpr (nodeC e) (+ ind 2)))
+      (vecPush parts (lspRenderExpr (nodeCChild e) (+ ind 2)))
       (lspRenderForm parts ind)
     }
   })
 
-(pub :: lspJoinExprs (-> Ints Int Int String))
+(pub :: lspJoinExprs (-> (Vec ASTNode) Int Int String))
 (pub fn (lspJoinExprs es i ind)
   (if (>= i (vecLen es))
     ""
@@ -15634,11 +15671,11 @@
 
 ; `(Rect { w = p, h = q })`: field names in `b`, sub-patterns aligned
 ; in `c`.
-(pub :: lspRenderConNamed (-> Int Int String))
+(pub :: lspRenderConNamed (-> ASTNode Int String))
 (pub fn (lspRenderConNamed e ind)
   {
-    (let names (nodeBVec e))
-    (let pats (nodeCVec e))
+    (let names (nodeBChildren e))
+    (let pats (nodeCChildren e))
     (let parts vecNew)
     (let mut i 0)
     {
@@ -15662,16 +15699,16 @@
 ; `(syntax/for (x xs) ...)` in either position: the binding form is
 ; the expression the parser stored, the elements are arms or
 ; declarations by the node's tag.
-(pub :: lspRenderSynFor (-> Int Int String))
+(pub :: lspRenderSynFor (-> ASTNode Int String))
 (pub fn (lspRenderSynFor e ind)
-  (concat (concat "(syntax/for " (lspRenderExpr (nodeB e) (+ ind 2)))
+  (concat (concat "(syntax/for " (lspRenderExpr (nodeBChild e) (+ ind 2)))
     (concat
       (if (== (nodeTag e) TAG_M_FOR)
-        (lspRenderLines (nodeCVec e) (+ ind 2))
-        (lspRenderDeclLines (nodeCVec e) (+ ind 2)))
+        (lspRenderLines (nodeCChildren e) (+ ind 2))
+        (lspRenderDeclLines (nodeCChildren e) (+ ind 2)))
       ")")))
 
-(pub :: lspRenderDeclLines (-> Ints Int String))
+(pub :: lspRenderDeclLines (-> (Vec ASTNode) Int String))
 (pub fn (lspRenderDeclLines ds ind)
   {
     (let parts vecNew)
@@ -15691,11 +15728,11 @@
 ; rule-form macro's template - with its `;@axiom:` lines above it,
 ; each as the scanner stored it (`AxtagEnt`, word 1 the text after
 ; the prefix), and `pub` from `nodeVis`.
-(pub :: lspRenderDecl (-> Int Int String))
+(pub :: lspRenderDecl (-> ASTNode Int String))
 (pub fn (lspRenderDecl d ind)
-  (if (== d 0)
+  (if (nodeSame d nilNode)
     "; unrenderable declaration (no node)"
-    (concat (lspRenderAxtags (nodeAxtagsVec d) ind) (lspRenderDeclBody d ind))))
+    (concat (lspRenderAxtags (nodeAxtagsWords d) ind) (lspRenderDeclBody d ind))))
 
 (pub :: lspRenderAxtags (-> Ints Int String))
 (pub fn (lspRenderAxtags tags ind)
@@ -15717,7 +15754,7 @@
       }
     }))
 
-(pub :: lspPubOf (-> Int String))
+(pub :: lspPubOf (-> ASTNode String))
 (pub fn (lspPubOf d)
   (if (== (nodeVis d) 1)
     "(pub "
@@ -15727,7 +15764,7 @@
 ; (`collectStructMarkers`), or "" for a struct with none. A generated
 ; `(struct Chan word shared ...)` rendered without them would show a
 ; heap struct where the program has a sealed word.
-(pub :: lspStructMarkers (-> Int String))
+(pub :: lspStructMarkers (-> ASTNode String))
 (pub fn (lspStructMarkers d)
   {
     (let ms (structMarkers d))
@@ -15743,49 +15780,49 @@
     }
   })
 
-(pub :: lspRenderDeclBody (-> Int Int String))
+(pub :: lspRenderDeclBody (-> ASTNode Int String))
 (pub fn (lspRenderDeclBody d ind)
   {
     (let tag (nodeTag d))
     (if (== tag TAG_D_FN)
       (concat
         (concat (concat (concat (lspPubOf d) "fn (") (lspRenderDeclName (nodeAName d)))
-          (concat (lspParamsOf (nodeBVec d)) ")\n"))
-        (concat (lspPad (+ ind 2)) (concat (lspRenderExpr (nodeC d) (+ ind 2)) ")")))
+          (concat (lspParamsOf (nodeBNames d)) ")\n"))
+        (concat (lspPad (+ ind 2)) (concat (lspRenderExpr (nodeCChild d) (+ ind 2)) ")")))
       (if (== tag TAG_D_SIG)
         (concat (concat (concat (lspPubOf d) ":: ") (lspRenderDeclName (nodeAName d)))
-          (concat (concat " " (lspRenderType (nodeTy d))) ")"))
+          (concat (concat " " (lspRenderType (nodeTyChild d))) ")"))
         (if (== tag TAG_D_DATA)
           (lspRenderData d ind)
           (if (== tag TAG_D_STRUCT)
             (concat
               (concat (concat (lspPubOf d) "struct ")
                 (concat (lspRenderDeclName (nodeAName d)) (lspStructMarkers d)))
-              (concat (lspRenderFields (nodeBVec d) (+ ind 2)) ")"))
+              (concat (lspRenderFields (nodeBChildren d) (+ ind 2)) ")"))
             (if (== tag TAG_D_MACRO)
               (lspRenderMacro d ind)
               (if (== tag TAG_D_IMPORT)
                 (concat (concat "(import " (nodeAName d))
                   (concat
-                    (if (== (vecLen (nodeBVec d)) 0)
+                    (if (== (vecLen (nodeBNames d)) 0)
                       ""
-                      (concat (concat " (" (lspJoinNames (nodeBVec d) 0)) ")"))
+                      (concat (concat " (" (lspJoinNames (nodeBNames d) 0)) ")"))
                     ")"))
                 (if (== tag TAG_D_ALIAS)
                   (concat (concat (concat (lspPubOf d) "type ") (lspRenderDeclName (nodeAName d)))
-                    (concat (concat (lspTyvarsOf (nodeCVec d)) " = ")
-                      (concat (lspRenderType (nodeB d)) ")")))
+                    (concat (concat (lspTyvarsOf (nodeCNames d)) " = ")
+                      (concat (lspRenderType (nodeBChild d)) ")")))
                   (lspRenderDeclMore d tag ind))))))))
   })
 
-(pub :: lspRenderDeclMore (-> Int Int Int String))
+(pub :: lspRenderDeclMore (-> ASTNode Int Int String))
 (pub fn (lspRenderDeclMore d tag ind)
   (if (== tag TAG_D_EXTERN)
     (concat (concat (concat (lspPubOf d) "extern \"") (concat (nodeAName d) "\""))
-      (concat (lspRenderExternItems (nodeCVec d) (+ ind 2)) ")"))
+      (concat (lspRenderExternItems (nodeCChildren d) (+ ind 2)) ")"))
     (if (== tag TAG_D_MACROCALL)
       (lspRenderForm
-        (lspPartsExprs (lspParts1 (lspRenderName (nodeAName d))) (nodeBVec d) 0 (+ ind 2)) ind)
+        (lspPartsExprs (lspParts1 (lspRenderName (nodeAName d))) (nodeBChildren d) 0 (+ ind 2)) ind)
       (if (== tag TAG_D_SYNFOR)
         (lspRenderSynFor d ind)
         (if (== tag TAG_D_EFFECT)
@@ -15804,7 +15841,7 @@
   })
 
 ; ` x y` for a parameter list, "" for none.
-(pub :: lspParamsOf (-> Ints String))
+(pub :: lspParamsOf (-> Names String))
 (pub fn (lspParamsOf names)
   (if (== (vecLen names) 0)
     ""
@@ -15812,7 +15849,7 @@
 
 ; ` (a b)` for a `data`'s type parameters; ` a b` bare for a `type`
 ; or `trait`, which is what their parsers read; "" for none.
-(pub :: lspTyvarsOf (-> Ints String))
+(pub :: lspTyvarsOf (-> Names String))
 (pub fn (lspTyvarsOf tvs)
   (if (== (as tvs Int) 0)
     ""
@@ -15823,17 +15860,17 @@
 ; `(data Name (a) ctor...)`: each constructor on its own line, a struct
 ; variant with its named fields, a positional one with its field
 ; types.
-(pub :: lspRenderData (-> Int Int String))
+(pub :: lspRenderData (-> ASTNode Int String))
 (pub fn (lspRenderData d ind)
   {
-    (let ctors (nodeBVec d))
+    (let ctors (nodeBChildren d))
     (let parts vecNew)
     (let mut i 0)
     {
       (vecPush parts (concat (concat (lspPubOf d) "data ") (lspRenderDeclName (nodeAName d))))
       (if (! (== (nodeTy d) 0))
-        (if (! (== (vecLen (nodeTyVec d)) 0))
-          (vecPush parts (concat (concat " (" (lspJoinStrs (nodeTyVec d) 0 " ")) ")"))))
+        (if (! (== (vecLen (nodeTyNames d)) 0))
+          (vecPush parts (concat (concat " (" (lspJoinStrs (nodeTyNames d) 0 " ")) ")"))))
       (while (< i (vecLen ctors))
         {
           (vecPush parts (concat (concat "\n" (lspPad (+ ind 2))) (lspRenderCtor (vecGet ctors i))))
@@ -15844,15 +15881,15 @@
     }
   })
 
-(pub :: lspRenderCtor (-> Int String))
+(pub :: lspRenderCtor (-> ASTNode String))
 ;@axiom:effect(unsafe)
 (pub fn (lspRenderCtor c)
   {
     (let tys
       (if (== (nodeTy c) 0)
         vecNew
-        (nodeTyVec c)))
-    (let names (nodeFieldNamesVec c))
+        (nodeTyChildren c)))
+    (let names (nodeFieldNamesNames c))
     (if (&& (!= (as names Int) 0) (> (vecLen names) 0))
       (concat (concat (concat "(" (lspRenderDeclName (nodeAName c))) " {")
         (concat (lspRenderNamedFields names tys 0) " })"))
@@ -15860,7 +15897,7 @@
         (concat (lspRenderTypes tys 0 " " (as 0 (Vec Int))) ")")))
   })
 
-(pub :: lspRenderNamedFields (-> Ints Ints Int String))
+(pub :: lspRenderNamedFields (-> Names Nodes Int String))
 (pub fn (lspRenderNamedFields names tys i)
   (if (>= i (vecLen names))
     ""
@@ -15902,7 +15939,7 @@
 ; The bare arm survives for a field whose type really is 0. The
 ; checker reads a 0 as the wildcard, and `(name)` parses back to the
 ; same wildcard where `{unknown}` parses to nothing.
-(pub :: lspRenderFields (-> Ints Int String))
+(pub :: lspRenderFields (-> (Vec ASTNode) Int String))
 (pub fn (lspRenderFields fields ind)
   {
     (let parts vecNew)
@@ -15915,8 +15952,8 @@
           {
             (vecPush parts
               (concat (concat (concat "\n" (lspPad ind)) (concat "(" (nodeAName f)))
-                (if (lspTyKnown (nodeTy f))
-                  (concat (concat " : " (lspRenderType (nodeTy f))) ")")
+                (if (lspTyKnown (nodeTyChild f))
+                  (concat (concat " : " (lspRenderType (nodeTyChild f))) ")")
                   ")")))
             (set i (+ i 1))
           }
@@ -15926,7 +15963,7 @@
   })
 
 ; `(name :: Type (symbol "s"))` per extern item, one per line.
-(pub :: lspRenderExternItems (-> Ints Int String))
+(pub :: lspRenderExternItems (-> (Vec ASTNode) Int String))
 (pub fn (lspRenderExternItems items ind)
   {
     (let parts vecNew)
@@ -15939,7 +15976,7 @@
           {
             (vecPush parts
               (concat (concat (concat "\n" (lspPad ind)) (concat "(" (nodeAName it)))
-                (concat (concat " :: " (lspRenderType (nodeB it)))
+                (concat (concat " :: " (lspRenderType (nodeBChild it)))
                   (concat (concat " (symbol \"" (nodeCName it)) "\"))"))))
             (set i (+ i 1))
           }
@@ -15954,15 +15991,15 @@
 ; stored it - each rule's slot 0 its parameter names, slot 1 its
 ; template declarations and slot 6 its template expression, one of the
 ; two shown.
-(pub :: lspRenderMacro (-> Int Int String))
+(pub :: lspRenderMacro (-> ASTNode Int String))
 (pub fn (lspRenderMacro d ind)
   (if (!= (nodeC d) 0)
     (concat
       (concat (concat (concat (lspPubOf d) "macro (") (lspRenderName (nodeAName d)))
-        (concat (lspParamsOf (nodeBVec d)) ")\n"))
-      (concat (lspPad (+ ind 2)) (concat (lspRenderExpr (nodeC d) (+ ind 2)) ")")))
+        (concat (lspParamsOf (nodeBNames d)) ")\n"))
+      (concat (lspPad (+ ind 2)) (concat (lspRenderExpr (nodeCChild d) (+ ind 2)) ")")))
     {
-      (let rules (memGetWordVec d 9))
+      (let rules (nodeFieldNamesRows d))
       (let parts vecNew)
       (let mut i 0)
       {
@@ -15971,22 +16008,19 @@
           false
           (< i (vecLen rules)))
           {
-            (let rule (vecGet rules i))
-            {
-              (vecPush parts
-                (concat
-                  (concat (concat "\n" (lspPad (+ ind 2)))
-                    (concat "((" (lspRenderName (nodeAName d))))
-                  (concat (lspParamsOf (vecGet rule 0)) ")")))
-              (vecPush parts
-                (concat
-                  (if (> (vecLen (vecGet rule 1)) 0)
-                    (lspRenderDeclLines (vecGet rule 1) (+ ind 4))
-                    (concat (concat "\n" (lspPad (+ ind 4)))
-                      (lspRenderExpr (ruleExprAt (memGetWordVec d 9) i) (+ ind 4))))
-                  ")"))
-              (set i (+ i 1))
-            }
+            (vecPush parts
+              (concat
+                (concat (concat "\n" (lspPad (+ ind 2)))
+                  (concat "((" (lspRenderName (nodeAName d))))
+                (concat (lspParamsOf (ruleParamsAt rules i)) ")")))
+            (vecPush parts
+              (concat
+                (if (> (vecLen (ruleDeclsAt rules i)) 0)
+                  (lspRenderDeclLines (ruleDeclsAt rules i) (+ ind 4))
+                  (concat (concat "\n" (lspPad (+ ind 4)))
+                    (lspRenderExpr (ruleExprAt rules i) (+ ind 4))))
+                ")"))
+            (set i (+ i 1))
           })
         (vecPush parts ")")
         (catStrs parts)
@@ -16744,7 +16778,7 @@
 ; previous token's on the same line plus the units between them, so a
 ; line of many tokens is walked once and not once per token.
 ; ------------------------------------------------------------------
-(pub :: lspHlState (-> String Ints Ints Int))
+(pub :: lspHlState (-> String Ints (Vec ASTNode) Int))
 (pub fn (lspHlState src ix decls)
   {
     (let st (memAlloc 128))
@@ -17154,7 +17188,7 @@
 ; name - so a top-level key learns whether it is a `fn`, a type or a
 ; macro in one bucket rather than one walk of the declaration list
 ; per identifier.
-(pub :: lspHlKinds (-> Ints LspBuckets))
+(pub :: lspHlKinds (-> Nodes LspNodeBuckets))
 (pub fn (lspHlKinds decls)
   {
     (let idx lspViewIdxNew)
@@ -17166,7 +17200,7 @@
           {
             (if (|| (lspNavIsNamedDecl d)
                   (&& (== (nodeTag d) TAG_D_SIG)
-                    (&& (!= (nodeSpan d) 0) (== (lspViewIdxFind idx (nodeAName d)) 0))))
+                    (&& (!= (nodeSpan d) 0) (nodeSame (lspViewIdxFind idx (nodeAName d)) nilNode))))
               (lspViewIdxAdd idx (nodeAName d) d))
             (set i (+ i 1))
           }
@@ -17802,13 +17836,13 @@
   {
     (let d
       (if (== (memGetWord st 13) 0)
-        0
+        nilNode
         (lspViewIdxFind (memGetWordVec st 13) key)))
     (let declm
       (if (|| (== role NAV_DECL) (== role NAV_DECL_SIG))
         SEM_M_DECL
         0))
-    (if (== d 0)
+    (if (nodeSame d nilNode)
       (lspHlPack
         (if (|| (== role NAV_DECL_SIG) head)
           SEM_FUNCTION
