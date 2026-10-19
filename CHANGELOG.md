@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- Darwin backtrace tables use relative addresses in read-only text.
+  Minimal executables avoid an extra 16 KiB data segment while retaining
+  named stack traces. Tested by `scripts/check-backtrace.sh` and
+  `scripts/check-embedded.sh`.
+
 - Released payloads above 64 KiB use reusable power-of-two capacity
   classes. Large leaves, mapped records and arrays preserve their
   ownership maps, are scrubbed on reuse and count both headers in

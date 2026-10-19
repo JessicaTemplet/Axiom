@@ -14186,24 +14186,41 @@
   (if (>= i (vecLen names))
     cg
     {
-      {
-        (let spell (vecGetStr names i))
-        {
-          (let body (symtabBody spell))
-          (emitLine cg
-            (concat
-              (concat "  i64 ptrtoint (ptr @"
-                (concat spell " to i64), i64 ptrtoint (ptr @__axiom_symn_"))
-              (concat (fmtInt i)
-                (concat " to i64), i64 "
+      (let spell (vecGetStr names i))
+      (let body (symtabBody spell))
+      (emitLine cg
+        (concat "  i64 "
+          (concat (btStoredAddress cg spell)
+            (concat ", i64 "
+              (concat (btStoredAddress cg (concat "__axiom_symn_" (fmtInt i)))
+                (concat ", i64 "
                   (concat (fmtInt (symtabBodyBytes body 0 0))
                     (if (< (+ i 1) (vecLen names))
                       ","
-                      ""))))))
-        }
-      }
+                      ""))))))))
       (emitSymRows cg names (+ i 1))
     }))
+
+; Mach-O's relative table has no dynamic relocations. Keeping it in
+; read-only text avoids a page-sized data segment in small executables.
+(:: btRelative (-> Int Bool))
+(fn (btRelative cg)
+  (|| (== (memGetWord cg 26) 0) (== (memGetWord cg 26) 1)))
+
+(:: btStoredAddress (-> Int String String))
+(fn (btStoredAddress cg sym)
+  {
+    (let address (concat "ptrtoint (ptr @" (concat sym " to i64)")))
+    (if (btRelative cg)
+      (concat "sub (i64 " (concat address ", i64 ptrtoint (ptr @__axiom_symtab to i64))"))
+      address)
+  })
+
+(:: btTableSection (-> Int String))
+(fn (btTableSection cg)
+  (if (btRelative cg)
+    ", section \"__TEXT,__const\""
+    ""))
 
 (pub :: emitSymbolTable (-> Int Ints Int))
 (pub fn (emitSymbolTable cg names)
@@ -14223,7 +14240,7 @@
           (emitLine cg
             (concat "@__axiom_symtab = internal constant [" (concat (fmtInt (* 3 n)) " x i64] [")))
           (emitSymRows cg names 0)
-          (emitLine cg "]")
+          (emitLine cg (concat "]" (btTableSection cg)))
         })
       (emitLine cg (concat "@__axiom_symtab_n = internal constant i64 " (concat (fmtInt n) "")))
       cg
@@ -14738,12 +14755,23 @@
           (emitLine cg
             (concat "  %pa = getelementptr ["
               (concat sz " x i64], ptr @__axiom_symtab, i64 0, i64 %i3")))
-          (emitLine cg "  %a = load i64, ptr %pa")
+          (if (btRelative cg)
+            {
+              (emitLine cg "  %aoff = load i64, ptr %pa")
+              (emitLine cg "  %symbase = ptrtoint ptr @__axiom_symtab to i64")
+              (emitLine cg "  %a = add i64 %symbase, %aoff")
+            }
+            (emitLine cg "  %a = load i64, ptr %pa"))
           (emitLine cg "  %j1 = add i64 %i3, 1")
           (emitLine cg
             (concat "  %pn = getelementptr ["
               (concat sz " x i64], ptr @__axiom_symtab, i64 0, i64 %j1")))
-          (emitLine cg "  %nm = load i64, ptr %pn")
+          (if (btRelative cg)
+            {
+              (emitLine cg "  %nmoff = load i64, ptr %pn")
+              (emitLine cg "  %nm = add i64 %symbase, %nmoff")
+            }
+            (emitLine cg "  %nm = load i64, ptr %pn"))
           (emitLine cg "  %j2 = add i64 %i3, 2")
           (emitLine cg
             (concat "  %pl = getelementptr ["
@@ -14986,7 +15014,13 @@
     ; printed with the same confidence as a right one. Measured at
     ; `--opt 0` before this existed: a trailing `at __axiom_user_main`
     ; under `at main`, naming a frame that is not on the stack.
-    (emitLine cg "  %ma = load i64, ptr @__axiom_bt_mainaddr")
+    (if (&& (btRelative cg) (symtabHas names (targetEntryName (memGetWord cg 26)) 0))
+      {
+        (emitLine cg "  %maoff = load i64, ptr @__axiom_bt_mainaddr")
+        (emitLine cg "  %mbase = ptrtoint ptr @__axiom_symtab to i64")
+        (emitLine cg "  %ma = add i64 %mbase, %maoff")
+      }
+      (emitLine cg "  %ma = load i64, ptr @__axiom_bt_mainaddr"))
     (emitLine cg "  %ismain = icmp eq i64 %at, %ma")
     (emitLine cg "  %ismain0 = xor i1 %ismain, true")
     (emitLine cg "  %d1 = add i64 %d, 1")
@@ -15089,8 +15123,8 @@
       ; one place the spelling lives.
       (emitLine cg
         (if (symtabHas names (targetEntryName (memGetWord cg 26)) 0)
-          (concat "@__axiom_bt_mainaddr = internal constant i64 ptrtoint (ptr @"
-            (concat (targetEntryName (memGetWord cg 26)) " to i64)"))
+          (concat "@__axiom_bt_mainaddr = internal constant i64 "
+            (concat (btStoredAddress cg (targetEntryName (memGetWord cg 26))) (btTableSection cg)))
           "@__axiom_bt_mainaddr = internal constant i64 -1"))
       (emitLine cg "")
       (emitBtName cg n ln)
