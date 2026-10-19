@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- Guarded task stacks reinstall signal state after `fork`, reusing
+  their mapped alternate stack. A task overflow reports status 86
+  and a backtrace in both concurrency lowerings. Tested by
+  `tests/stdlib/920-task-stack.ax` and `scripts/check-task.sh`.
+
 - Effect inference charges closure construction to its creation site,
   including an immediately called closure or an ignored callback.
   `restrict(no-alloc)` refuses these allocations. Tested by

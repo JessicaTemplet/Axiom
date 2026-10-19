@@ -6774,8 +6774,11 @@ thunk returns. A task's child runs the task on one, so its stack is its
 budget, independently of the thread that forked it. Native POSIX
 worker stacks follow `MM-EXEC-6d`.
 
-The first call on a thread installs a 64 KiB alternate signal stack and
-a handler for `SIGSEGV` and `SIGBUS`. A fault in the guard writes `axiom:
+Each thread maps a 64 KiB alternate signal stack and installs handlers
+for `SIGSEGV` and `SIGBUS`. Every stack switch reinstalls the kernel
+signal state, including in a forked child, while reusing the mapping.
+
+A fault in the guard writes `axiom:
 stack overflow: the fault address is in the guard below a mapped stack`
 and exits 86 after a bounded backtrace from the interrupted frame.
 Any other fault retains its signal status. The thunk runs with no
@@ -6814,9 +6817,9 @@ from the caller and from a pool started inside a `parallel` binding.
   bytes back;
 - four ablations, each red: the budget never checked, the cap never
   set, a region around each spawn again, and the task run on the stack
-  its process forked with. On Darwin that last one fails the pool
-  inside a `--threads` binding too, whose thread stack can't hold the
-  task.
+  its process forked with. Under a 512 KiB native stack limit, an
+  intact task budget holds the deep task, and removing that budget
+  makes the pool inside a `--threads` binding fail too.
 
 ---
 
