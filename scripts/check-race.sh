@@ -18,8 +18,9 @@
 #     `__axiom_arena_unmap_thread` in the locked program before this
 #     routing. The numbers come from the tree's own
 #     `stdlib/Sys/Platform.*.ax`;
-#   - `Sys$sysWaitWordTimeout` is kept out of line (`noinline`), the one
-#     function the suppression list names (below);
+#   - `Sys$sysWaitWordTimeout` stays out of line (`noinline`) for the
+#     suppression list. `axiom_release` also stays out of line so the
+#     lend-removal ablation can require an ownership-count race at -O2;
 #   - `opt -O<n>` when n > 0, LLVM's `tsan-module,function(tsan)` passes,
 #     `llc -O<n> -relocation-model=pic`, and a `clang -fsanitize=thread`
 #     link. The runtime is LLVM's (`libclang_rt.tsan*`).
@@ -93,7 +94,7 @@
 #     forks), are outside it. The same mutex and channel code runs in
 #     both lowerings.
 #   - The instrumented build is not the shipped build: `mmap` and
-#     `munmap` go through the C library, one function is not inlined,
+#     `munmap` go through the C library, two functions are not inlined,
 #     and every access calls into the TSan runtime.
 #   - TSan checks data races, not the atomics' ordering: a seq_cst
 #     outcome the memory model forbids is scripts/check-atomics.sh's
@@ -222,6 +223,12 @@ bare = [d for d in re.findall(r"^define [^\n]*", s, flags=re.M) if not re.search
 if groups == 0 or bare:
     sys.exit("attribute groups %d, definitions outside one %d" % (groups, len(bare)))
 s, kept = re.subn(r"^(define [^\n]*@%s\([^\n]*\)) (#\d+)" % re.escape(keep), r"\1 noinline \2", s, flags=re.M)
+# Production release is alwaysinline (#1). Keep this attribution point
+# in both intact and ablated runs; all its accesses are still instrumented.
+s, released = re.subn(r"^(define [^\n]*@axiom_release\([^\n]*\)) #1", r"\1 noinline #0", s, flags=re.M)
+if released != 1:
+    sys.exit("wanted one alwaysinline ownership release, found %d" % released)
+
 call = re.compile(r'call i64 asm sideeffect "((?:[^"\\]|\\.)*)", "((?:[^"\\]|\\.)*)"\('
                   r'(i64 [^,()]+), (i64 [^,()]+), (i64 [^,()]+), (i64 [^,()]+), '
                   r'(i64 [^,()]+), (i64 [^,()]+), (i64 [^,()]+)\)')
@@ -283,7 +290,7 @@ raw:
 }}
 '''
 open(dst, "w", encoding="utf-8").write(s)
-print("groups %d syscalls %d mmap %d munmap %d noinline %d" % (groups, calls, maps, unmaps, kept))
+print("groups %d syscalls %d mmap %d munmap %d noinline %d release-attribution %d" % (groups, calls, maps, unmaps, kept, released))
 PY
 
 # The reports, read by stack rather than by count alone.
@@ -342,7 +349,7 @@ PY
 # build <out> <source> <level> [stdlib]: the instrumented executable.
 build() {
   local out="$1" src="$2" lvl="$3" lib="${4:-$repo_root/stdlib}"
-  (cd "$repo_root" && AXIOM_STDLIB="$lib" "$axc" emit-llvm --threads "$src" -o "$out.ll") > "$out.log" 2>&1 || return 1
+  (cd "$repo_root" && AXIOM_STDLIB="$lib" "$axc" --diagnostic-format=ai emit-llvm --threads "$src" -o "$out.ll") > "$out.log" 2>&1 || return 1
   from_ll "$out" "$out.ll" "$lvl"
 }
 # from_ll <out> <ll> <level>
