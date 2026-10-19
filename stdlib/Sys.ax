@@ -753,7 +753,9 @@
 ;; id is not portable: 1 on Linux, and on FreeBSD 4, where 1 is
 ;; CLOCK_VIRTUAL, the process's CPU time. That one was a literal here
 ;; until 2026-08-29, and a clock that measures CPU time never runs
-;; backwards either, so nothing would have caught it.
+;; backwards either, so nothing would have caught it. A target with no
+;; clock call (`sysClockNum` 0: Windows and bare metal) answers `Err`
+;; 78, as `sysNowRealtimeNanos` and `sysNowMonotonic` do.
 ;
 ; SO ITS CLOCK CLASS DIFFERS BY PLATFORM, and that is a hazard rather
 ; than a detail. A duration computed from two of these is monotonic on
@@ -774,19 +776,21 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (sysNowMicros buf)
-  (if (== clockIsGettimeofday 1)
-    {
-      (let r (__syscall3 sysClockNum buf 0 0))
-      (if (< r 0)
-        (Err (mkError (- 0 r) "sysNowMicros"))
-        (Ok (+ (* (memGetWord buf 0) 1000000) (& (memGetWord buf 1) 4294967295))))
-    }
-    {
-      (let r (__syscall3 sysClockNum clockMonotonicId buf 0))
-      (if (< r 0)
-        (Err (mkError (- 0 r) "sysNowMicros"))
-        (Ok (+ (* (memGetWord buf 0) 1000000) (/ (memGetWord buf 1) 1000))))
-    }))
+  (if (== sysClockNum 0)
+    (Err (mkError 78 "sysNowMicros"))
+    (if (== clockIsGettimeofday 1)
+      {
+        (let r (__syscall3 sysClockNum buf 0 0))
+        (if (< r 0)
+          (Err (mkError (- 0 r) "sysNowMicros"))
+          (Ok (+ (* (memGetWord buf 0) 1000000) (& (memGetWord buf 1) 4294967295))))
+      }
+      {
+        (let r (__syscall3 sysClockNum clockMonotonicId buf 0))
+        (if (< r 0)
+          (Err (mkError (- 0 r) "sysNowMicros"))
+          (Ok (+ (* (memGetWord buf 0) 1000000) (/ (memGetWord buf 1) 1000))))
+      })))
 
 ; The arm64 virtual counter and its frequency in hertz, which the
 ; system sets at boot (24 MHz on Apple silicon). `isb` keeps the read
