@@ -176,7 +176,7 @@ a1c="$(linecol "$fx" 'b2 n)))')"
 mnl="$(lineno "$fx" 'a1 (- sysArgc 1)))')"
 mnc="$(linecol "$fx" 'a1 (- sysArgc 1)))')"
 
-# Eight frames: `__axiom_user_main` is the compiler's rename of the
+# Eleven frames: `__axiom_user_main` is the compiler's rename of the
 # user's `main`, and `main` is the argv wrapper around it. Both are real
 # frames and both are named, so the trace hides nothing from the reader.
 # Runtime frames stay bare, having no source node. Every user frame
@@ -191,6 +191,9 @@ axiom: backtrace (most recent call first)
   at b2 $fxb:$b2l:$b2c
   at a1 $fxb:$a1l:$a1c
   at __axiom_user_main $fxb:$mnl:$mnc
+  at __axiom_program_main
+  at __axiom_stack_run_code
+  at __axiom_program_run
   at main
 TRACE
 
@@ -471,13 +474,14 @@ stated="$(sed -n 's/^@__axiom_symtab_n = internal constant i64 //p' "$work/chain
 # the function before it. The table must hold every `define`: lifted
 # lambdas, thunks, the argv wrapper and the runtime helpers included.
 #
-# `defines` also counts the walker's own three, which are emitted after
+# `defines` also counts the walker's own four, which are emitted after
 # the table and are not in it. `@__axiom_backtrace` never appears as a
 # frame, since the first return address it reads is its caller's.
-# `@__axiom_bt_name` returns before anything is read, and
+# `@__axiom_backtrace_from` performs the shared walk and is not itself
+# on the interrupted chain. `@__axiom_bt_name` returns before any read, and
 # `@__axiom_lineinit` fills the address array before the walk starts.
-want "every define is in the table, but for the walker's own three" \
-      "$((defines - 3))" "$rows"
+want "every define is in the table, but for the walker's own four" \
+      "$((defines - 4))" "$rows"
 want "the table states its own row count" "$rows" "$stated"
 
 # The table must not be empty or degenerate, since an empty table

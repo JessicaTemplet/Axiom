@@ -36,7 +36,7 @@
 (import pkg)
 (import obfuscate)
 
-(:: emitBinaryIr (-> Decls Names Names Int String))
+(:: emitBinaryIr (-> (Vec ASTNode) Names Names Int String))
 ;@axiom:effect(io)
 ;@axiom:effect(entropy)
 (fn (emitBinaryIr decls bares fulls target)
@@ -297,7 +297,7 @@
 ; been deleted, blaming a native tool for the program's own omission.
 ; AX4001 has been in the code table and in `axiom explain` the whole
 ; time, with no site constructing it.
-(pub :: declsHaveMain (-> Ints Bool))
+(pub :: declsHaveMain (-> (Vec ASTNode) Bool))
 (pub fn (declsHaveMain ds)
   (declsHaveMainFrom ds 0))
 
@@ -306,7 +306,7 @@
 ; frame(s) naming the macro, with the declaration's span and unit
 ; (macro-system.md MAC-DIAG-4). One expression, so the two call shapes
 ; below swap in without moving any parentheses around them.
-(:: checkWithFrames (-> Decls Decls Units Frames Diags))
+(:: checkWithFrames (-> (Vec ASTNode) (Vec ASTNode) Units Frames Diags))
 (fn (checkWithFrames decls allDecls units ftbl)
   ; A warning a `;@axiom:nolint(...)` tag quiets is dropped here, for
   ; `check`, `build` and `run` alike (`nolintQuietDiags`); the
@@ -322,7 +322,7 @@
 ; Binding accessors are generated from checked nominal types, then
 ; checked with the module. This preserves aliases and module identities
 ; across both the archive and the Rust file.
-(:: checkWithBindingShims (-> Decls Decls Units Frames Ints Diags))
+(:: checkWithBindingShims (-> (Vec ASTNode) (Vec ASTNode) Units Frames Names Diags))
 ;@axiom:effect(io)
 (fn (checkWithBindingShims decls allDecls units ftbl pubNames)
   (if (== (strLen (flagValue "--emit-rust-binding" 1)) 0)
@@ -367,14 +367,14 @@
       }
     }))
 
-(:: attachTcFrames (-> Ints Int Ints Ints Ints))
+(:: attachTcFrames (-> (Vec ASTNode) Int Ints Ints Ints))
 (fn (attachTcFrames decls tc ftbl units)
   {
     (expAttachFrames (tcOutVec tc) ftbl units)
     (nolintQuietDiags decls (tcOutVec tc))
   })
 
-(pub :: declsHaveMainFrom (-> Ints Int Bool))
+(pub :: declsHaveMainFrom (-> (Vec ASTNode) Int Bool))
 (pub fn (declsHaveMainFrom ds i)
   (if (>= i (vecLen ds))
     false
@@ -469,7 +469,7 @@
     0
   })
 
-(:: timedResolve (-> Decls Names Names Ints Int String Units Int Decls))
+(:: timedResolve (-> (Vec ASTNode) Names Names Ints Int String Units Int (Vec ASTNode)))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
@@ -482,7 +482,7 @@
     }
   })
 
-(:: timedExpand (-> Decls Decls Diags Frames Units Names Names Ints Ints))
+(:: timedExpand (-> (Vec ASTNode) (Vec ASTNode) Diags Frames Units Names Names Ints Ints))
 ;@axiom:effect(io)
 (fn (timedExpand entryDecls decls out frames units bares fulls mods)
   {
@@ -494,7 +494,7 @@
     }
   })
 
-(:: timedCheck (-> Decls Decls Units Frames Ints Diags))
+(:: timedCheck (-> Nodes Nodes Units Frames Names Diags))
 ;@axiom:effect(io)
 (fn (timedCheck decls allDecls units ftbl pubNames)
   {
@@ -649,14 +649,14 @@
               ; programs `build` could not compile - see the header
               ; of `self_host/expand.ax` for what that cost.
               {
-                (let decls (memGetWordVec pr 1))
+                (let decls (readAstNodes pr 1))
                 {
                   (let tcode (checkedTargetCode tname))
-                  (let pubFns (rbPubNames (memGetWordVec pr 1)))
+                  (let pubFns (rbPubNames (readAstNodes pr 1)))
                   (let _bindingVec
                     (if (> (strLen (flagValue "--emit-rust-binding" 1)) 0)
                       (vecPush decls (mkDImportAt "Vec" vecNew 0))
-                      (as 0 (Vec Int))))
+                      (as 0 Nodes)))
                   (let bares vecNew)
                   (let fulls vecNew)
                   (let mods vecNew)
@@ -872,10 +872,10 @@
                                                     {
                                                       (let v vecNew)
                                                       {
-                                                        (vecPush v (as "--edition" Int))
-                                                        (vecPush v (as "2021" Int))
-                                                        (vecPush v (as "--quiet" Int))
-                                                        (vecPush v (as bp Int))
+                                                        (vecPush v "--edition")
+                                                        (vecPush v "2021")
+                                                        (vecPush v "--quiet")
+                                                        (vecPush v bp)
                                                         v
                                                       }
                                                     })
@@ -1050,10 +1050,10 @@
 
 ; How many parameters a declaration takes, where a `fn` with none has
 ; an empty list and a node that is not a `fn` has no list at all.
-(pub :: testArity (-> Int Int))
+(pub :: testArity (-> ASTNode Int))
 (pub fn (testArity d)
   {
-    (let p (nodeBVec d))
+    (let p (nodeBChildren d))
     (if (== (as p Int) 0)
       0
       (vecLen p))
@@ -1064,7 +1064,7 @@
 ; the other direction - this repository has a single digit of tests
 ; per file, so an index would be machinery for a list that fits on one
 ; screen.
-(pub :: testExpectFailSig (-> Ints String Int Int))
+(pub :: testExpectFailSig (-> (Vec ASTNode) String Int Int))
 (pub fn (testExpectFailSig decls name i)
   (if (>= i (vecLen decls))
     0
@@ -1084,7 +1084,7 @@
 ; declaration group, and a tag one half out of place must not be a
 ; silently ignored one - this runner's whole discipline is that
 ; nothing about a test is skipped without saying so.
-(pub :: testExpectFail (-> Ints Int Int))
+(pub :: testExpectFail (-> (Vec ASTNode) ASTNode Int))
 (pub fn (testExpectFail decls d)
   (if (== (declHasAxtag d "expect") 1)
     1
@@ -1114,7 +1114,7 @@
 ; Declaration order rather than sorted, because a file is read top to
 ; bottom and a report that reorders makes the reader find each test
 ; twice.
-(pub :: testCollect (-> Ints String String Ints))
+(pub :: testCollect (-> (Vec ASTNode) String String Ints))
 ;@axiom:effect(io)
 (pub fn (testCollect decls file filter)
   {
@@ -1152,7 +1152,7 @@
 ; `testCollect` refuses a `test` that takes parameters. A hook that
 ; took parameters would never be run correctly, and silently ignoring
 ; it is the defect this runner exists to prevent.
-(pub :: testHookKind (-> Ints String Int Int))
+(pub :: testHookKind (-> (Vec ASTNode) String Int Int))
 (pub fn (testHookKind decls want i)
   (if (>= i (vecLen decls))
     0
@@ -1320,7 +1320,7 @@
               1
             }
             {
-              (let decls (memGetWordVec pr 1))
+              (let decls (readAstNodes pr 1))
               {
                 (let names (testCollect decls file filter))
                 (if (== (vecLen names) 0)
@@ -1956,8 +1956,8 @@
     {
       (let args vecNew)
       {
-        (vecPush args (as "-rf" Int))
-        (vecPush args (as tmp Int))
+        (vecPush args "-rf")
+        (vecPush args tmp)
         (runTool "rm" args)
       }
     }
@@ -1974,9 +1974,9 @@
   {
     (let args vecNew)
     {
-      (vecPush args (as "clone" Int))
-      (vecPush args (as url Int))
-      (vecPush args (as dest Int))
+      (vecPush args "clone")
+      (vecPush args url)
+      (vecPush args dest)
       (runTool "git" args)
     }
   })
@@ -2259,7 +2259,7 @@
                                 ; list with exit 0. Only an E line
                                 ; empties stdout and fails.
                                 {
-                                  (let decls (memGetWordVec pr 1))
+                                  (let decls (readAstNodes pr 1))
                                   (let tcode (checkedTargetCode (targetArg hostTarget)))
                                   (let bares vecNew)
                                   (let fulls vecNew)

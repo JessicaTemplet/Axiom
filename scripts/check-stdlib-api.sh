@@ -120,6 +120,7 @@ stdlib/Tui/Edit.ax
 stdlib/Tui/Keys.ax
 stdlib/Tui/Term.ax
 stdlib/Utf8.ax
+stdlib/Uuid.ax
 stdlib/Vec.ax
 "
 mod_list="$(printf '%s' "$modules" | grep -v '^$')"

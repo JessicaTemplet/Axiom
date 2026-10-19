@@ -442,23 +442,23 @@ ablate "no-checking" typecheck.ax \
 # helper definitions ride in with it; the `(pub :: expLowerOne ...)`
 # signature above the anchor still covers the function it reopens.
 #
-# The guard reads a `TAG_E_BEGIN`'s statements through `nodeAVec`, and
-# `expHeadIsContract` takes the `(Vec Int)` it answers. It still asks
+# The guard reads a `TAG_E_BEGIN`'s statements through `nodeAChildren`, and
+# `expHeadIsContract` takes the `Nodes` it answers. It still asks
 # whether the body looks lowered, which keeps this a probe of section 6.
 ablate "guard-restored" expand.ax \
   "(pub fn (expLowerOne d tags)
   (if (== (vecLen tags) 0)
     0" \
-  "(pub :: expWasLowered (-> Int Int))
+  "(pub :: expWasLowered (-> ASTNode Int))
 
 (pub fn (expWasLowered b)
-  (if (== b 0)
+  (if (nodeSame b nilNode)
     0
     (if (== (nodeTag b) TAG_E_BEGIN)
-      (expHeadIsContract (nodeAVec b))
+      (expHeadIsContract (nodeAChildren b))
       (if (== (nodeTag b) TAG_E_LET)
         (if (strEq (nodeAName b) \"result\")
-          (expWasLowered (nodeC b))
+          (expWasLowered (nodeCChild b))
           0
         )
         0
@@ -467,7 +467,7 @@ ablate "guard-restored" expand.ax \
   )
 )
 
-(pub :: expHeadIsContract (-> (Vec Int) Int))
+(pub :: expHeadIsContract (-> Nodes Int))
 
 (pub fn (expHeadIsContract v)
   (if (== (vecLen v) 0)
@@ -486,7 +486,7 @@ ablate "guard-restored" expand.ax \
 )
 
 (pub fn (expLowerOne d tags)
-  (if (|| (== (vecLen tags) 0) (== (expWasLowered (nodeC d)) 1))
+  (if (|| (== (vecLen tags) 0) (== (expWasLowered (nodeCChild d)) 1))
     0" \
   section6
 

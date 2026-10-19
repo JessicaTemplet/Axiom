@@ -79,17 +79,22 @@ fixture="tests/stdlib/467-mutual-tail.ax"
 golden="tests/stdlib/467-mutual-tail.out"
 stack_kib=512
 
-# One run at a stack limit. Answers "ok", "signal:<rc>" or "other:<rc>".
+# One run at a stack limit. An overflow must carry its named trap and
+# an interrupted frame from the mutual recursion.
 run_at() {  # <binary> <kib>
-  local out rc
-  out="$( (ulimit -s "$2" 2>/dev/null || exit 200; "$1") 2>/dev/null )"
+  local out rc err
+  err="$work/$(basename "$1").stack.err"
+  out="$( (ulimit -s "$2" 2>/dev/null || exit 200; "$1") 2>"$err" )"
   rc=$?
   if [[ "$rc" -eq 200 ]]; then echo "unsettable"; return; fi
   if [[ "$rc" -eq 0 ]]; then
     if [[ "$out" == "$(cat "$golden")" ]]; then echo "ok"; else echo "other:0-wrong-output"; fi
     return
   fi
-  if [[ "$rc" -ge 128 ]]; then echo "signal:$rc"; return; fi
+  if [[ "$rc" -eq 86 ]] && grep -q '^axiom: stack overflow:' "$err" &&
+      grep -qE '  at (ev|od)( |$)' "$err"; then
+    echo "overflow:86"; return
+  fi
   echo "other:$rc"
 }
 
@@ -142,7 +147,7 @@ else
   fi
 fi
 
-echo "== 3. the ablation: the same IR without the marker dies by signal =="
+echo "== 3. the ablation: the same IR without the marker reports stack overflow =="
 sed 's/musttail call/call/' "$ll" > "$work/abl.ll"
 if grep -q musttail "$work/abl.ll"; then
   bad "the ablation left a musttail in the IR"
@@ -150,11 +155,11 @@ fi
 if llc -O0 -relocation-model=pic -filetype=obj "$work/abl.ll" -o "$work/abl.o" 2>"$work/abl.llc" && cc "$work/abl.o" -o "$work/abl" 2>"$work/abl.cc"; then
   r="$(run_at "$work/abl" "$stack_kib")"
   case "$r" in
-    signal:*) ok "without musttail the same program dies by ${r#signal:} under ${stack_kib} KiB - the marker is the mechanism" ;;
+    overflow:86) ok "without musttail the same program reports the named stack-overflow trap under ${stack_kib} KiB - the marker is the mechanism" ;;
     ok)       bad "without musttail the program still answers under ${stack_kib} KiB - the fixture is not deep enough to need the guarantee" ;;
     *)        bad "the ablated program: $r" ;;
   esac
-  # That it is the STACK it dies of is established by assertion 1: the
+  # The named trap and interrupted frame establish the overflow; the
   # same IR, marker kept, answered under the same limit. Ten million
   # frames cannot be given room to prove it the other way round - the
   # chain needs hundreds of megabytes, more than `ulimit -s` will grant

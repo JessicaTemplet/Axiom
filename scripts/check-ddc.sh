@@ -24,10 +24,10 @@
 #       built), so it can't be one that accepts everything.
 #   P2  A seed-only codegen defect, planted in the emitted IR where a
 #       backdoored seed would carry it: `020-cmp-boundary.ax` is
-#       emitted, its one `icmp sgt` flipped to `icmp sge`, and both IRs
+#       emitted, its main body's `icmp sgt` flipped to `icmp sge`, and both IRs
 #       built and run. The honest binary must answer 42 and the
 #       tampered one must not. If a codegen change moves the count of
-#       `icmp sgt` off one, the probe fails: re-derive it.
+#       `icmp sgt` in that body off one, the probe fails: re-derive it.
 #   P3  Two emissions of the honest fixture must be byte-identical. A
 #       uniformly backdoored compiler passes this too, which is the gap
 #       P2 closes.
@@ -112,11 +112,20 @@ else
   if ! grep -q '^target triple' "$work/honest.ll" || (( $(wc -l <"$work/honest.ll") < 100 )); then
     fail "the honest emission is truncated ($(wc -l <"$work/honest.ll" | tr -d ' ') lines) - comparing it would pass on an empty file"
   else
-    nsgt="$(grep -c 'icmp sgt' "$work/honest.ll")"
-    if (( nsgt != 1 )); then
-      fail "the honest IR holds $nsgt 'icmp sgt' lines, not exactly one - the ablation's anchor moved, re-derive it"
+    if ! python3 - "$work/honest.ll" "$work/evil.ll" <<'PY'
+from pathlib import Path
+import re
+import sys
+ir = Path(sys.argv[1]).read_text()
+bodies = list(re.finditer(r'^define [^@\n]*@__axiom_user_main\([^\n]*\n(.*?)^}', ir, re.M | re.S))
+if len(bodies) != 1 or bodies[0][1].count('icmp sgt') != 1:
+    sys.exit("expected one user main body with exactly one 'icmp sgt'; re-derive the ablation")
+body = bodies[0]
+Path(sys.argv[2]).write_text(ir[:body.start(1)] + body[1].replace('icmp sgt', 'icmp sge') + ir[body.end(1):])
+PY
+    then
+      fail "the boundary comparison moved - the ablation's anchor must be re-derived"
     else
-      sed 's/icmp sgt/icmp sge/' "$work/honest.ll" > "$work/evil.ll"
       if cmp -s "$work/honest.ll" "$work/evil.ll"; then
         fail "the flip changed no byte - the ablation is measuring itself"
       else

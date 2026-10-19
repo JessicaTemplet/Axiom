@@ -119,7 +119,9 @@ cat > "$probe" <<'PROBE'
 
 (:: main Int)
 
-(fn (main) (+ (sysExitNum) (+ (sysWriteNum) (sysMmapNum))))
+(fn (main)
+  (+ (sysExitNum) (+ (sysWriteNum) (+ (sysMmapNum)
+    (+ (sysMunmapNum) (+ (sysGetPidNum) (sysKillNum)))))))
 PROBE
 
 # Compare one emitted module's two tables, printing one `ok`/`FAIL` line
@@ -131,8 +133,8 @@ PROBE
 # spare a command substitution, so a helper that exited non-zero on a
 # violation would end the gate before printing it.
 platform_table_report() {
-  local target="$1" ir="$2" platfile="$3"
-  awk -v target="$target" -v platfile="$platfile" '
+  local target="$1" ir="$2" platfile="$3" guarded="${4:-0}"
+  awk -v target="$target" -v platfile="$platfile" -v guarded="$guarded" '
     BEGIN {
       # syscall -> the `Sys.Platform` constant it must equal, and the
       # `self_host/codegen.ax` function carrying the emitted copy.
@@ -140,6 +142,33 @@ platform_table_report() {
       std_of["exit"]  = "sysExitNum";  cg_of["exit"]  = "targetExitNum"
       std_of["write"] = "sysWriteNum"; cg_of["write"] = "targetWriteNum"
       std_of["mmap"]  = "sysMmapNum"; cg_of["mmap"] = "targetMmapNum"
+      std_of["munmap"] = "sysMunmapNum"; cg_of["munmap"] = "targetMunmapNum"
+      std_of["getpid"] = "sysGetPidNum"; cg_of["getpid"] = "targetGetPidNum"
+      std_of["kill"] = "sysKillNum"; cg_of["kill"] = "targetKillNum"
+      std_of["mprotect"] = "-"; cg_of["mprotect"] = "targetMprotectNum"
+      std_of["sigaltstack"] = "-"; cg_of["sigaltstack"] = "targetSigAltStackNum"
+      std_of["sigaction"] = "-"; cg_of["sigaction"] = "targetSigActionNum"
+      std_of["getrlimit"] = "-"; cg_of["getrlimit"] = "targetGetrlimitNum"
+      # Kernel ABI values: Darwin sys/syscall.h, Linux unistd headers,
+      # and FreeBSD sys/syscall.h. These have no library counterpart.
+      if (target ~ /^darwin-/) {
+        abi["mprotect"] = 33554506; abi["sigaltstack"] = 33554485
+        abi["sigaction"] = 33554478; abi["getrlimit"] = 33554626
+      } else if (target == "linux-aarch64") {
+        abi["mprotect"] = 226; abi["sigaltstack"] = 132
+        abi["sigaction"] = 134; abi["getrlimit"] = 163
+      } else if (target == "linux-x86_64") {
+        abi["mprotect"] = 10; abi["sigaltstack"] = 131
+        abi["sigaction"] = 13; abi["getrlimit"] = 97
+      } else {
+        abi["mprotect"] = 74; abi["sigaltstack"] = 53
+        abi["sigaction"] = 416; abi["getrlimit"] = 194
+      }
+      floor_of["munmap"] = 2; floor_of["getpid"] = 1
+      floor_of["kill"] = 1; floor_of["mprotect"] = 1
+      floor_of["sigaltstack"] = 1; floor_of["sigaction"] = 2
+      floor_of["getrlimit"] = 1
+
 
       # The census of runtime syscall sites, as a floor. Three exits:
       # allocator OOM (status 70), an unhandled effect (71), division by
@@ -196,7 +225,16 @@ platform_table_report() {
       # mmap is the only one passing fd -1; a runtime write goes to fd 2
       # with a pointer behind it; an exit passes a status and six zeros.
       name = "?"
-      if (n == 7 && a[6] == "-1") {
+      if (fn == "__axiom_stack_fault" && $0 ~ /^  %pid = /) name = "getpid"
+      else if (fn == "__axiom_stack_fault" && $0 ~ /^  %k = /) name = "kill"
+      else if (fn == "__axiom_stack_arm" && $0 ~ /^  %sa = /) name = "sigaltstack"
+      else if (fn == "__axiom_stack_arm" && $0 ~ /^  %(segv|bus) = /) name = "sigaction"
+      else if (fn == "__axiom_stack_run_code" && $0 ~ /^  %g = /) name = "mprotect"
+      else if (fn == "__axiom_stack_run_code" && $0 ~ /^  %(u0|u) = /) name = "munmap"
+      else if (fn == "__axiom_program_stack_bytes" && $0 ~ /^  %rl = /) name = "getrlimit"
+      else if (fn == "__axiom_stack_disarm" && $0 ~ /^  %off = /) name = "sigaltstack"
+      else if (fn == "__axiom_stack_disarm" && $0 ~ /^  %unmapped = /) name = "munmap"
+      else if (n == 7 && a[6] == "-1") {
         name = "mmap"
       } else if (n == 7 && a[2] == "2" && substr(a[3], 1, 1) == "%") {
         name = "write"
@@ -277,10 +315,14 @@ platform_table_report() {
                target, conv, (target ~ /^(darwin|freebsd)-/) ? "BSD carry-and-negate" : "Linux -errno"
       # Fixed order: `for (x in array)` has none, and output that
       # reorders itself cannot be diffed.
-      nn = split("mmap exit write", ord, " ")
+      nn = split("mmap exit write munmap getpid kill mprotect sigaltstack sigaction getrlimit", ord, " ")
       for (i = 1; i <= nn; i++) {
         name = ord[i]
         sn = std_of[name]
+
+        # Archives borrow their hosts stack. Require entry-stack sites
+        # in the executable half, and check every site present in either.
+        if (!guarded && name !~ /^(mmap|exit|write)$/ && count[name] == 0) continue
 
         if (count[name] < floor_of[name]) {
           printf "FAIL [%s] %s: the emitted runtime has %d site(s), against a census of %d.\n", \
@@ -309,6 +351,10 @@ platform_table_report() {
         if (!split_ok) continue
 
         if (sn == "-") {
+          if (name in abi && first != abi[name]) {
+            printf "FAIL [%s] %s: the emitted runtime uses %s, kernel ABI is %s\n", target, name, first, abi[name]
+            continue
+          }
           # Emitted-only, and it must stay that way or start being
           # compared. If `Sys.Platform` grows a copy, fail until it is
           # mapped in std_of[] above.
@@ -631,6 +677,16 @@ for target in "${targets[@]}"; do
     windows-*) report="$(kernel32_table_report "$target" "$ir" "$(platform_file "$target")")" ;;
     *)
       report="$(platform_table_report "$target" "$ir" "$(platform_file "$target")")"
+      # Keep the whole archive census and separately require the native
+      # executable sites that initialise, guard and release its stacks.
+      entry_ir="$work/$target-entry.ll"
+      if "$axc" --target="$target" emit-llvm "$probe" -o "$entry_ir" >"$work/entry.log" 2>&1; then
+        report="$report
+$(platform_table_report "$target" "$entry_ir" "$(platform_file "$target")" 1)"
+      else
+        report="$report
+FAIL [$target]: guarded executable probe did not emit"
+      fi
       # The `parallel` runtime's four numbers come from a second module:
       # the staticlib probe spawns nothing, so that runtime is not in
       # it. A refusal to emit is a FAIL, not a skip, since all six POSIX
@@ -713,8 +769,8 @@ mutate_emitted_exits() {
 # target defaults to linux-aarch64; probe 8 names a BSD one.
 probe_failures=0
 probe_expects() {
-  local label="$1" mutated="$2" want="$3" tgt="${4:-linux-aarch64}" pf="${5:-$plat}" out
-  out="$(platform_table_report "$tgt" "$mutated" "$pf")"
+  local label="$1" mutated="$2" want="$3" tgt="${4:-linux-aarch64}" pf="${5:-$plat}" guarded="${6:-0}" out
+  out="$(platform_table_report "$tgt" "$mutated" "$pf" "$guarded")"
   if ! grep '^FAIL' <<< "$out" | grep -qE "$want"; then
     echo "FAIL negative probe: $label"
     echo "    expected a FAIL line matching: $want"
@@ -782,9 +838,8 @@ probe_expects "a platform module carrying the x86-64 mmap number on aarch64" \
   "$work/p6.ll" 'mmap: the emitted runtime uses 222 in @.*, Sys.Platform.sysMmapNum is 9'
 
 # 7. A syscall shape the classifier does not know is a FAIL, not a
-#    skip. The emitted runtime makes three kinds of call today, and a
-#    fourth must not slip past uncompared. The line below is an
-#    `openat`-shaped call, which matches none of the three.
+#    skip. The line below is an `openat`-shaped call, which matches
+#    none of the runtime syscall roles.
 awk '/asm sideeffect/ && !hit {
        print; hit = 1
        line = $0
@@ -821,6 +876,20 @@ else
   probe_expects "a Linux target whose syscall template negates" \
     "$work/p9.ll" 'negates on a Linux target'
 fi
+
+# 10. The executable-only stack ABI is checked independently of the
+#     three original archive syscall roles. Corrupt getrlimit, then
+#     remove it entirely: neither can pass as an absent optional site.
+entryreal="$work/linux-aarch64-entry.ll"
+awk '/^define / { in_limit = ($0 ~ /@__axiom_program_stack_bytes\(/) }
+     in_limit && /%rl = .*asm sideeffect/ { sub(/\(i64 163,/, "(i64 97,") }
+     { print }' "$entryreal" > "$work/p10.ll"
+probe_expects "the entry runtime carries the wrong getrlimit ABI number" \
+  "$work/p10.ll" 'getrlimit: the emitted runtime uses 97, kernel ABI is 163' linux-aarch64 "$plat" 1
+awk '/^define / { in_limit = ($0 ~ /@__axiom_program_stack_bytes\(/) }
+     !(in_limit && /%rl = .*asm sideeffect/)' "$entryreal" > "$work/p11.ll"
+probe_expects "the entry runtime loses its getrlimit site" \
+  "$work/p11.ll" 'getrlimit: the emitted runtime has 0 site\(s\), against a census of 1' linux-aarch64 "$plat" 1
 
 # ---------------------------------------------------------------
 # Negative probes for the Windows shape and the syscall-ABI agreement:

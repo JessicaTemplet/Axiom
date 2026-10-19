@@ -40,7 +40,7 @@ transport messages and the server's cache and worker events.
 
 ## Commands
 
-All four are in the command palette under *Axiom*. Run and Expand
+All commands are in the command palette under *Axiom*. Run and Expand
 macro are also in the editor title bar and the editor menu on an
 Axiom file, Run is in the explorer menu on a `.ax` file, and the
 status bar shows whether the server is running. Select it to restart
@@ -52,6 +52,35 @@ the server.
 | Axiom: Expand macro at cursor | Opens the expansion at the cursor in a new tab. The progress notification lets you cancel a long expansion. |
 | Axiom: Open the documentation | Runs `axiom doc` in a terminal. |
 | Axiom: Restart the language server | Stops and restarts `axiom lsp`. |
+| Axiom: Browse AXQLite database | Opens the database summary for the selected `.db`, `.axqlite` or `.axql` file. |
+| Axiom: Open database summary | Shows a database or table as text: header, schema and first rows. |
+| Axiom: Refresh databases | Rescans the workspace for databases. |
+
+Run and documentation commands open their own terminal, so they also
+work when your default shell is Nushell. Paths may contain spaces and
+apostrophes.
+
+## Browse a database
+
+The explorer's *Axiom databases* view lists every `.db`, `.axqlite`
+and `.axql` file in your workspace. Expand a database to see its
+tables, and a table to see its first hundred rows. *Axiom: Open
+database summary* shows the same content as a document, and opening a
+database with *Open With → AXQLite browser* shows it in a read-only
+tab. The extension reads the file itself, so browsing works with the
+server stopped. A `.db` file that is not AXQLite is refused with the
+reader's message. Query files (`.axql`) open as text.
+
+The preview shows up to 100 rows per table. Use the object list to
+jump to a table, filter the displayed rows, or expand *Schema* to see
+its declaration. Filtering searches the preview, so rows beyond that
+limit are not included. *Refresh* reads the file again after your
+program changes it. The preview is read only.
+
+With the *Axiom file icons* icon theme selected, databases and
+`.axql` files carry a database icon and `axiom.pkg` carries a package
+icon. Other icon themes can use the language icons for `.db`, `.axqlite`,
+`.axql` and `axiom.pkg` through their file associations.
 
 Snippets cover the shapes you write most: type `fn`, `main`, `let`,
 `letmut`, `match`, `data`, `struct`, `record` or `import` in a `.ax` file

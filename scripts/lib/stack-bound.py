@@ -248,6 +248,44 @@ ICMP_LINE = re.compile(r'^\s*%[\w.]+\s*=\s*icmp\b')
 CSTR = re.compile(r'(?<![\w$."])c"(?:[^"\\]|\\.)*"')
 
 
+def operand_count(text):
+    """Count top-level LLVM operands from an opening parenthesis.
+
+    Aggregate types and constant expressions contain their own commas;
+    quoted names and inline assembly may contain delimiters as text.
+    A variadic or unreadable signature keeps the target set unrestricted.
+    """
+    depth, quoted, escaped, commas, content = [], False, False, 0, False
+    for c in text:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == '"':
+                quoted = False
+            continue
+        if c == '"':
+            quoted = True
+            content = True
+        elif c in '([{<':
+            if depth:
+                content = True
+            depth.append(c)
+        elif c in ')]}>':
+            if not depth:
+                return None
+            depth.pop()
+            if not depth:
+                return None if '...' in text else commas + int(content)
+        elif depth == ['(']:
+            if c == ',':
+                commas += 1
+            elif not c.isspace():
+                content = True
+    return None
+
+
 class Module(object):
     def __init__(self):
         self.defines = []
@@ -255,6 +293,8 @@ class Module(object):
         self.edges = collections.defaultdict(set)
         self.musttail = collections.defaultdict(set)
         self.indirect = collections.Counter()
+        self.indirect_arities = collections.defaultdict(set)
+        self.arities = {}
         self.taken = set()
         self.unclassified = []
         self.fnnames = set()
@@ -272,10 +312,12 @@ def parse_ll(path):
             d = DEFINE.match(line)
             if d:
                 m.defines.append(d.group(1).strip('"'))
+                m.arities[d.group(1).strip('"')] = operand_count(line[d.end() - 1:])
                 continue
             d = DECLARE.match(line)
             if d:
                 m.declares.add(d.group(1).strip('"'))
+                m.arities[d.group(1).strip('"')] = operand_count(line[d.end() - 1:])
     m.fnnames = set(m.defines) | m.declares
 
     cur = None           # current function body, or None at module scope
@@ -338,6 +380,24 @@ def classify_line(m, line, lineno, cur, curglobal):
         if not callee.startswith("llvm.") and cur is not None:
             (m.musttail if kind == "musttail" else m.edges)[cur].add(callee)
 
+    # A function pointer passed to inline assembly may be called there.
+    # Treat explicit pointer operands as escapes and the assembly as an
+    # indirect call. Template text is excluded: an @name in assembly is
+    # not itself an LLVM operand. Unknown forms still fail closed below.
+    asm = re.search(r'\bcall\b.*?\basm(?:\s+sideeffect)?\s+"(?:[^"\\]|\\.)*",\s*"(?:[^"\\]|\\.)*"\((.*)\)', line)
+    if asm and cur is not None:
+        pointers = re.findall(r'(?:^|,)\s*ptr\s+(@(?:"[^"]+"|[\w.$]+)|%[\w.]+)', asm.group(1))
+        for raw in pointers:
+            if not raw.startswith('@'):
+                continue
+            name = raw[1:].strip('"')
+            consumed.append(name)
+            if name in m.fnnames:
+                m.taken.add(name)
+        if pointers:
+            m.indirect[cur] += 1
+            m.indirect_arities[cur].add(None)
+
     for raw in PTRTOINT_INSTR.findall(line):
         name = raw.strip('"')
         consumed.append(name)
@@ -358,8 +418,10 @@ def classify_line(m, line, lineno, cur, curglobal):
     for raw in BLOCKADDR.findall(line):
         consumed.append(raw.strip('"'))
 
-    if cur is not None and ICALL.search(line):
+    indirect = ICALL.search(line)
+    if cur is not None and indirect:
         m.indirect[cur] += 1
+        m.indirect_arities[cur].add(operand_count(line[indirect.end() - 1:]))
 
     # Any function @names left on this line are unaccounted for. Data
     # globals are skipped: nothing can be called through them.
@@ -490,7 +552,14 @@ def main():
     if n_indirect:
         if targets:
             for f in list(mod.indirect):
-                mod.edges[f].update(targets)
+                arities = mod.indirect_arities[f]
+                # An Axiom indirect call cannot supply a missing ABI
+                # argument. Extra arguments remain conservative: a
+                # callee may ignore them. Unknown assembly signatures
+                # retain the complete address-taken set.
+                mod.edges[f].update(t for t in targets
+                    if None in arities or mod.arities.get(t) is None
+                    or any(mod.arities[t] <= n for n in arities))
             if not args.quiet:
                 print("note: %d indirect site(s) resolved to the address-taken set"
                       % n_indirect)

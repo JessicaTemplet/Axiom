@@ -159,9 +159,11 @@ echo "== 3. the library's own sort, which is what found this =="
 # --------------------------------------------------------------------
 # `vecSortBy` and `vecSiftDownBy` are the real-library case, checked
 # against the tree's stdlib. Their generic element `a` can hold a
-# callable, so they keep the mark and still say `Mut` through `cmp`.
+# callable, so they keep the mark and their effects through `cmp`.
+# Sort also allocates its guarded comparator closure; sift allocates
+# nothing. The concrete signatures preserve those same effect rows.
 # Then the same bodies are checked with concrete `Int` signatures:
-# only that type change removes the mark, retaining `Mut` and `cmp`.
+# only that type change removes the mark, retaining the effects and `cmp`.
 mkdir -p "$work/lib"
 cat > "$work/lib/lib.ax" <<'AX'
 (import Vec)
@@ -186,6 +188,8 @@ AX
 
 for d in vecSortBy vecSiftDownBy; do
   row="$(grep -E "^F $d " "$work/librows" || true)"
+  effects=Mut
+  [[ "$d" != vecSortBy ]] || effects=Alloc,Mut
   checks=$((checks + 1))
   if [[ -z "$row" ]]; then
     echo "FAIL: $d is not in the stdlib symbol stream at all"
@@ -194,12 +198,13 @@ for d in vecSortBy vecSiftDownBy; do
     echo "FAIL: generic $d lost its lower bound; a comparator argument of type a can hold a function"
     echo "     $row"
     failed=$((failed + 1))
-  elif [[ "$row" != *"#effects=Mut"* || "$row" != *"#effect-params=cmp"* ]]; then
-    echo "FAIL: $d lost more than the marker - its row no longer says Mut through a transparent \`cmp\`"
+  elif ! grep -qE "(^| )#effects=$effects( |$)" <<<"$row" \
+      || ! grep -qE '(^| )#effect-params=cmp( |$)' <<<"$row"; then
+    echo "FAIL: $d lost more than the marker - its row no longer says $effects through a transparent \`cmp\`"
     echo "     $row"
     failed=$((failed + 1))
   else
-    echo "ok   generic $d: Mut, transparent in cmp, and a lower bound"
+    echo "ok   generic $d: $effects, transparent in cmp, and a lower bound"
   fi
 done
 
@@ -241,6 +246,8 @@ PY
 
 for d in vecSortBy vecSiftDownBy; do
   row="$(grep -E "^F $d " "$work/librows-int" || true)"
+  effects=Mut
+  [[ "$d" != vecSortBy ]] || effects=Alloc,Mut
   checks=$((checks + 1))
   if [[ -z "$row" ]]; then
     echo "FAIL: $d is not in the integer-specialised symbol stream"
@@ -250,12 +257,13 @@ for d in vecSortBy vecSiftDownBy; do
     echo "FAIL: integer-specialised $d still reads as a lower bound"
     echo "     $row"
     failed=$((failed + 1))
-  elif [[ "$row" != *"#effects=Mut"* || "$row" != *"#effect-params=cmp"* ]]; then
-    echo "FAIL: integer-specialised $d lost Mut or its transparent cmp parameter"
+  elif ! grep -qE "(^| )#effects=$effects( |$)" <<<"$row" \
+      || ! grep -qE '(^| )#effect-params=cmp( |$)' <<<"$row"; then
+    echo "FAIL: integer-specialised $d lost $effects or its transparent cmp parameter"
     echo "     $row"
     failed=$((failed + 1))
   else
-    echo "ok   integer-specialised $d: Mut, transparent in cmp, and complete"
+    echo "ok   integer-specialised $d: $effects, transparent in cmp, and complete"
   fi
 done
 

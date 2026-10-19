@@ -701,7 +701,7 @@ echo "== the primitives that PERFORM, against the effect each performs =="
 # compiler now says - which is exactly what a golden is for, and exactly
 # why the rule needs an assertion that is not a golden.
 prim_case() {  # <name> <call> <wanted effect>
-  printf '(:: probe (-> Int Int))\n\n(fn (probe n) %s)\n\n(:: main Int)\n\n(fn (main) 0)\n' "$2" \
+  printf '(:: identity (-> Int Int))\n(fn (identity x) x)\n\n(:: probe (-> Int Int))\n\n(fn (probe n) %s)\n\n(:: main Int)\n\n(fn (main) 0)\n' "$2" \
     > "$work/prim.ax"
   # The probe is deliberately UNTAGGED, so the two IO primitives make it
   # a program that does not compile (AX3042) and `symbols` exits 1. That
@@ -770,25 +770,25 @@ prim_case "__fence"                     "(__fence)"                            "
 # The `parallel` primitives (2026-09-03) reach the kernel - a fork or a
 # thread creation, and the wait or join that collects it - and carry `IO`
 # for the syscall primitives' reason: a `parallel` in a body claiming
-# `no-io` is refused exactly as a `__syscall3` there is. The thunk is a
-# lambda so the probe compiles; a lambda's own record is a constructor
-# allocation, which MM-EXEC-9a lists as invisible, so the rows carry no
-# `Alloc` - and would the day that changes, which is the right answer
-# then too. Starting a binding is also `Spawn`, and waiting for one is
-# `Block`: the two refinements of `IO` a caller must declare.
-prim_case "__par_spawn"                 "(__par_spawn (lambda (x) x) n)"       "IO,Spawn"
+# `no-io` is refused exactly as a `__syscall3` there is. A named,
+# single-argument function uses a static descriptor, keeping closure
+# creation out of this primitive measurement. The separate closure
+# control below must report Alloc. Starting a binding is also Spawn,
+# and waiting for one is Block: refinements a caller must declare.
+prim_case "__par_spawn"                 "(__par_spawn identity n)"       "IO,Spawn"
 # A task's own stack (MM-PAR-17) maps memory and sets signal actions
 # through the kernel, and calls its thunk where it is: `IO`, and
 # nothing more for a thunk that performs nothing.
-prim_case "__axiom_stack_run"           "(__axiom_stack_run n (lambda (x) x) 0)" "IO"
+prim_case "__axiom_stack_run"           "(__axiom_stack_run n identity 0)" "IO"
 # The syscall primitives themselves carry `IO` and, since R-B10's third
 # step, `Unsafe`: the kernel reads and writes this process's memory
 # through their arguments (MM-EXEC-9c). Before it, this row read `IO`
 # alone and a `no-unsafe` function could make `read(2)` write anywhere.
 prim_case "__syscall3"                  "(__syscall3 n 0 0 0)"                 "IO,Unsafe"
 prim_case "__syscall0"                  "(__syscall0 n)"                       "IO,Unsafe"
+prim_case "closure construction (control)" "((lambda (x) x) n)"                  "Alloc"
 prim_case "__par_join"                  "(__par_join n)"                       "Block,IO"
-prim_case "__thread_spawn"              "(__thread_spawn (lambda (x) x) n)"    "IO,Spawn"
+prim_case "__thread_spawn"              "(__thread_spawn identity n)"    "IO,Spawn"
 prim_case "__proc_join"                 "(__proc_join n)"                      "Block,IO"
 # THE CONTROLS, and they are what make the rows above mean anything. A
 # registration that gave EVERY primitive an effect would satisfy all of

@@ -471,10 +471,32 @@ IRQ_STACK_ENTRY = '__axiom_irq_entry'
 IRQ_DISPATCH = '__axiom_irq_dispatch'
 
 
+def scalar_abi(prefix, parameters):
+    """Read simple LLVM scalar signatures; unknown shapes stay unfiltered."""
+    result = re.search(r'\b(void|i\d+|float|double|ptr)\s*$', prefix)
+    if not result:
+        return None
+    args = []
+    for parameter in parameters.split(',') if parameters.strip() else []:
+        arg = re.fullmatch(r'\s*(i\d+|float|double|ptr)\b[^,(){}\[\]]*', parameter)
+        if not arg:
+            return None
+        args.append(arg[1])
+    return result[1], tuple(args)
+
+
+def indirect_targets(facts, caller, escaped):
+    signatures = facts['indirect_abis'].get(caller, {None})
+    if None in signatures:
+        return set(escaped)
+    return {target for target in escaped
+            if facts['function_abis'].get(target) is None or facts['function_abis'][target] in signatures}
+
+
 def ir_facts(ir):
     """From the post-`opt` IR: functions holding an indirect call, a
-    dynamically sized `alloca`, or inline assembly; and the functions
-    whose ADDRESS escapes - named anywhere but as a direct callee.
+    dynamically sized `alloca`, or inline assembly; scalar call ABIs;
+    and functions whose ADDRESS escapes - named beyond a direct callee.
 
     One table is excluded from the escape set, by name and under a
     checked condition: `@__axiom_symtab`, the backtrace symbol table,
@@ -485,6 +507,9 @@ def ir_facts(ir):
     count as escaped like any other."""
     fn_names = set(n.strip('"') for n in re.findall(r'^(?:define|declare) [^@]*' + IRNAME + r'\(', ir, re.M))
     indirect, dynamic, asm, escaped, symtab_users = set(), set(), set(), set(), set()
+    function_abis, indirect_abis = {}, {}
+    for head in re.finditer(r'^(?:define|declare) ([^@]*)' + IRNAME + r'\(([^\n]*)\)', ir, re.M):
+        function_abis[head[2].strip('"')] = scalar_abi(head[1], head[3])
     symtab_entries = set()
     cur = None
     for line in ir.splitlines():
@@ -506,10 +531,21 @@ def ir_facts(ir):
             continue
         if re.search(r'\bcall\b[^@%]*%[-A-Za-z0-9_.]+\(', line) and ' asm ' not in line:
             indirect.add(cur)
+            call = re.search(r'\bcall\b([^@%]*)%[-A-Za-z0-9_.]+\(([^\n]*)\)', line)
+            indirect_abis.setdefault(cur, set()).add(scalar_abi(call[1], call[2]) if call else None)
         if re.search(r'=\s*alloca\b[^,]*,\s*i\d+\s+%', line):
             dynamic.add(cur)
         if re.search(r'\bcall\b[^(]*\basm\b', line):
             asm.add(cur)
+            # A guarded stack invokes its entry through assembly. That
+            # call has no ordinary IR callee or x86 call relocation;
+            # include its escaped targets just like an IR indirect call.
+            template = re.search(r'\basm\b[^"\n]*"((?:[^"\\]|\\.)*)"', line)
+            if template:
+                instructions = re.sub(r'\\([0-9A-Fa-f]{2})', lambda m: chr(int(m[1], 16)), template[1])
+                if re.search(r'\b(?:call[qwl]?\s+\*|blr\s+|blx\s+)', instructions):
+                    indirect.add(cur)
+                    indirect_abis.setdefault(cur, set()).add(None)
         # Two shapes name a function without letting its address flow
         # anywhere a call could read it: `icmp`, whose result is an i1
         # (the backtracer asks "is this return address main?"), and
@@ -531,7 +567,8 @@ def ir_facts(ir):
     symtab_ok = not (symtab_users & indirect)
     if not symtab_ok:
         escaped |= symtab_entries
-    return dict(indirect=indirect, dynamic=dynamic, asm=asm, escaped=escaped,
+    return dict(indirect=indirect, indirect_abis=indirect_abis, function_abis=function_abis,
+                dynamic=dynamic, asm=asm, escaped=escaped,
                 symtab_users=sorted(symtab_users), symtab_excluded=symtab_ok and bool(symtab_entries))
 
 
@@ -822,7 +859,9 @@ def stack_bound(axiom, src, target, opt, roots, workdir):
     ir = open(irpath).read()
     irf = ir_facts(ir)
     ir_indirect, ir_dynamic, ir_asm = irf['indirect'], irf['dynamic'], irf['asm']
-    address_taken |= irf['escaped'] & names
+    # External callbacks remain candidates: no frame in this object is
+    # an unknown bound, not evidence that an indirect call cannot reach it.
+    address_taken |= irf['escaped']
     problems = {}
     for c in blr:
         if c not in ir_indirect:
@@ -837,21 +876,19 @@ def stack_bound(axiom, src, target, opt, roots, workdir):
     fault_entry = any(FAULT_STACK_ENTRY in ts for ts in list(calls.values()) + list(tails.values()))
     if fault_entry:
         frames[FAULT_STACK_ENTRY] = 0
-    undefined = set()
-    for f, ts in list(calls.items()) + list(tails.items()):
-        for t in ts:
-            if t not in frames:
-                undefined.add(t)
-    indirect_targets = sorted(address_taken)
+    targets = sorted(address_taken)
     for f in ir_indirect:
-        # An indirect site may reach any address-taken function.
-        calls.setdefault(f, set()).update(address_taken)
+        # A typed indirect call can reach only a compatible ABI. Unknown
+        # signatures and assembly calls retain the complete escape set.
+        calls.setdefault(f, set()).update(indirect_targets(irf, f, address_taken))
     irq_stub = irq_stub_frame(obj, elf)
     if irq_stub:
         frames[IRQ_STACK_ENTRY] = irq_stub['frame_bytes']
         calls[IRQ_STACK_ENTRY] = {IRQ_DISPATCH}
         names.add(IRQ_STACK_ENTRY)
         roots = list(roots) + ([IRQ_STACK_ENTRY] if IRQ_STACK_ENTRY not in roots else [])
+    undefined = {target for edges in (calls, tails) for ts in edges.values()
+                 for target in ts if target not in frames}
     # On x86-64 a call pushes its 8-byte return address below the
     # caller's frame, and `.stack_sizes` counts neither: every frame is
     # charged 8 more. A tail jump reuses its caller's slot, so the sum is
@@ -862,7 +899,7 @@ def stack_bound(axiom, src, target, opt, roots, workdir):
     return dict(results=results, frames=frames, frame_extra=extra, machine='x86-64' if x86 else 'aarch64',
                 fault_entry=fault_entry, irq_stub=irq_stub,
                 indirect_sites=sorted(ir_indirect),
-                indirect_targets=indirect_targets, asm=sorted(ir_asm),
+                indirect_targets=targets, asm=sorted(ir_asm),
                 symtab_excluded=irf['symtab_excluded'], symtab_users=irf['symtab_users'],
                 undefined=sorted(undefined), functions=len(funcs), ir=irpath, obj=obj)
 
@@ -1158,7 +1195,7 @@ def build_report(args):
     if stack is None:
         oblige('stack', 'no stack bound computed (run with --stack on an AArch64 or x86-64 ELF target)')
     else:
-        oblige('stack', ('%s: ' % stack['machine']) + ('each frame is charged 8 bytes more for the return address a call pushes, and indirect sites come from the post-opt IR alone (no machine-code cross-check); ' if stack['frame_extra'] else '') + 'frames are llc\'s .stack_sizes for the analysis object; indirect sites %s may reach only address-taken functions %s (no forged code pointers - `__call_word` of an arbitrary word breaks this and is Unsafe)%s; inline assembly in %s is assumed to use no stack beyond its frame; the reset vector and C runtime are outside the object%s' % (
+        oblige('stack', ('%s: ' % stack['machine']) + ('each frame is charged 8 bytes more for the return address a call pushes, and indirect sites come from the post-opt IR alone (no machine-code cross-check); ' if stack['frame_extra'] else '') + 'frames are llc\'s .stack_sizes for the analysis object; indirect sites %s may reach ABI-compatible address-taken functions %s (unknown signatures keep every candidate; no forged code pointers - `__call_word` of an arbitrary word breaks this and is Unsafe)%s; inline assembly in %s is assumed to use no stack beyond its frame; the reset vector and C runtime are outside the object%s' % (
             stack['indirect_sites'] or 'none', stack['indirect_targets'] or 'none',
             ('; the backtrace table @__axiom_symtab is excluded as never called, read only by %s, none of which holds an indirect call' % stack['symtab_users']) if stack.get('symtab_excluded') else '',
             stack['asm'] or 'none',
@@ -1250,6 +1287,33 @@ def selftest():
     case('undefined', {'a': 16}, {'a': ['ext']}, {}, ['a'], {'a': None})
     # Unrelated unbounded code does not taint a bounded root.
     case('isolated', {'a': 16, 'b': 8, 'x': 8}, {'a': ['b'], 'x': ['x']}, {}, ['a', 'x'], {'a': 24, 'x': None})
+    # A call inside inline assembly still invokes an escaped function.
+    # Encoded newlines must separate instructions before opcode matching.
+    for name, template in [('x86-stack', r'movq %rsp, %rbx\0Acallq *$0'),
+                           ('arm-stack', r'mov x19, sp\0Ablr $0'),
+                           ('syscall-control', 'syscall')]:
+        ir = ('define i64 @entry() {\n'
+              '  %r = call i64 asm sideeffect "' + template + '", "r"(ptr @recursive)\n'
+              '  ret i64 %r\n}\n'
+              'define i64 @recursive() {\n  ret i64 0\n}\n')
+        facts = ir_facts(ir)
+        want = set() if name == 'syscall-control' else {'entry'}
+        if facts['indirect'] != want or facts['escaped'] != {'recursive'}:
+            fails.append('%s: indirect %s, escaped %s' % (name, facts['indirect'], facts['escaped']))
+    # A two-argument stack entry is not a one-argument finaliser. Keep
+    # matching callbacks and unknown ABI shapes in the candidate set.
+    ir = ('define void @drop(i64 %h) {\n'
+          '  %r = call i64 %fn(i64 %h)\n  ret void\n}\n'
+          'define i64 @finalise(i64 %h) {\n  ret i64 0\n}\n'
+          'define i64 @stack_entry(i64 %self, i64 %arg) {\n  ret i64 0\n}\n'
+          'define void @wrong_return(i64 %h) {\n  ret void\n}\n'
+          'declare i64 @unknown(...)\n')
+    facts = ir_facts(ir)
+    targets = indirect_targets(facts, 'drop', {'finalise', 'stack_entry', 'wrong_return', 'unknown'})
+    if targets != {'finalise', 'unknown'}:
+        fails.append('indirect ABI: got %s' % targets)
+    if indirect_targets(facts, 'unparsed', {'stack_entry'}) != {'stack_entry'}:
+        fails.append('unknown call ABI dropped a possible target')
     return fails
 
 

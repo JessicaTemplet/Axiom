@@ -208,14 +208,17 @@ if python3 "$repo_root/scripts/lib/ablate-poison-arm.py" "$abl2/self_host/typech
     # chose.
     differ=0; swept=0; empty=0
     for f in "$repo_root"/self_host/main.ax "$repo_root"/stdlib/*.ax; do
-      a="$("$axc"          emit-llvm "$f" 2>/dev/null | shasum | cut -d' ' -f1)"
-      b="$("$work/axc-lww" emit-llvm "$f" 2>/dev/null | shasum | cut -d' ' -f1)"
       swept=$((swept + 1))
-      if [[ -z "$a" ]]; then
+      : > "$work/baseline.ll"
+      : > "$work/lww.ll"
+      if ! "$axc" emit-llvm "$f" -o "$work/baseline.ll" >"$work/baseline.emit.log" 2>&1 \
+          || ! "$work/axc-lww" emit-llvm "$f" -o "$work/lww.ll" >"$work/lww.emit.log" 2>&1 \
+          || [[ ! -s "$work/baseline.ll" || ! -s "$work/lww.ll" ]]; then
         empty=$((empty + 1))
+        echo "     failed or empty IR: ${f#"$repo_root"/}"
         continue
       fi
-      if [[ "$a" != "$b" ]]; then
+      if ! cmp -s "$work/baseline.ll" "$work/lww.ll"; then
         differ=$((differ + 1))
         echo "     reaches it: ${f#"$repo_root"/}"
       fi
@@ -225,7 +228,7 @@ if python3 "$repo_root/scripts/lib/ablate-poison-arm.py" "$abl2/self_host/typech
     # produced nothing, so a sweep that silently emitted nothing would
     # report perfect agreement. Counted and refused rather than trusted.
     if (( empty > 0 )); then
-      bad "$empty of $swept subjects emitted no IR - the sweep is comparing silence"
+      bad "$empty of $swept subjects failed or emitted no IR - the sweep cannot compare them"
     elif (( swept < 2 )); then
       bad "swept $swept subject(s) - the glob stopped matching"
     elif (( differ > 0 )); then

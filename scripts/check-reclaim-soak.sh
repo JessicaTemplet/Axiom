@@ -163,15 +163,15 @@ AX
 if build "$work/nontail.ax" "$work/nontail" 0; then
   "$work/nontail" >/dev/null 2>&1; rc_free=$?
   run_capped 64 "$work/nontail"; rc_cap=$?
-  if (( rc_free == 0 && rc_cap >= 128 )); then
-    ok "control: a 20,000-deep non-tail recursion runs at the default stack and dies under 64 KiB (signal exit $rc_cap)"
+  if (( rc_free == 0 && rc_cap == 86 )); then
+    ok "control: a 20,000-deep non-tail recursion runs at the default stack and dies under 64 KiB (named stack trap $rc_cap)"
   else
     bad "control: the 64 KiB limit is not in force (default exit $rc_free, capped exit $rc_cap)"
   fi
 fi
 if build_mutated "$deep.ax" "$work/deep-rec" recursive-release; then
   run_capped 64 "$work/deep-rec"; rc=$?
-  if (( rc >= 128 )); then
+  if (( rc == 86 )); then
     ok "ablation: with the release walk recursing per level, 555 dies under 64 KiB (exit $rc)"
   else
     bad "ablation: a recursive release walk still passed under 64 KiB (exit $rc) - section 1 cannot see recursion"

@@ -47,17 +47,17 @@ TRANSITION RULES checked against the runtime:
           bump and moves nothing; a size above 2^62 unsigned traps 70;
           otherwise the payload is rounded to 16 (sz0) and, between 1 KiB
           and 64 KiB, up to its size class (eight per doubling); a class
-          <= 64 KiB pops its list head first, and the block keeps its own
-          size, else the bump advances by the class + 16; the count word
-          is 0, the shape word is (size/8) << 1, every payload word 0.
+          above 64 KiB rounds to a power of two. Every class pops its
+          list first; otherwise bump advances by capacity plus header.
+          Large blocks carry an extra 16-byte capacity prefix and shape
+          sentinel 2. The count and every payload word are zero.
   retain  (MM-LIFE-2b/2k, MM-LIFE-2l) a negative count is left alone; a
           count of 2^63-1 traps 70 "reference count limit exceeded" with
           the header unchanged; otherwise +1.
   release (MM-LIFE-2e/2k, MM-ALLOC-25) a negative or zero count is left
-          alone; else -1, and at zero a leaf of 1..8192 words is filed
-          LIFO on the largest class not above its size with its count
-          word = -2 - (previous head's header); a larger one stays at
-          count 0 and is never reused.
+          alone; else -1, and at zero a leaf is filed LIFO on the
+          largest class not above its capacity, with its count word
+          = -2 - (previous head's header).
   filed   (MM-ALLOC-24) `__axiom_mem_stat 1` answers the bytes, headers
           included, of every block on a list: a filing adds, a pop
           subtracts, a reset empties it.
@@ -103,7 +103,8 @@ import re
 import sys
 
 MAX_COUNT = (1 << 63) - 1
-POOL_CEILING = 65536          # largest filed payload, bytes (class 4096)
+SMALL_CEILING = 65536        # largest compact-header class (index 4096)
+POOL_CEILING = SMALL_CEILING  # boundary exercised by the executable trace
 HUGE = 1 << 62                # MM-ALLOC-7a: sizes above this (unsigned) trap
 CHUNK_BUDGET = 512 * 1024     # a trace must fit this far above its origin
 DEFAULT_SEEDS = [7, 41, 20260927]
@@ -126,9 +127,11 @@ SMALL_CLASSES = 1024          # MM-ALLOC-25: every 16 bytes up to here
 
 def class_up(sz0):
     """MM-ALLOC-25: the class a request of sz0 bytes is served from - sz0
-    itself at or below 1 KiB and above the pool ceiling, else sz0 rounded
-    up to a multiple of 2^(floor(log2(sz0 - 1)) - 3)."""
-    if sz0 <= SMALL_CLASSES or sz0 > POOL_CEILING:
+    itself below 1 KiB, eight classes per doubling to 64 KiB, and
+    powers of two above 64 KiB."""
+    if sz0 > SMALL_CEILING:
+        return 1 << (sz0 - 1).bit_length()
+    if sz0 <= SMALL_CLASSES:
         return sz0
     step = 1 << ((sz0 - 1).bit_length() - 4)
     return (sz0 + step - 1) & -step
@@ -137,10 +140,20 @@ def class_up(sz0):
 def class_down(size):
     """MM-ALLOC-25: the class a dead block of `size` payload bytes files
     on - the largest class not above it."""
+    if size > SMALL_CEILING:
+        return 1 << (size.bit_length() - 1)
     if size <= SMALL_CLASSES:
         return size
     step = 1 << (size.bit_length() - 4)
     return size & -step
+
+
+def class_index(size):
+    return size.bit_length() - 1 + 4080 if size > SMALL_CEILING else class_down(size) // 16
+
+
+def overhead(size):
+    return 32 if size > SMALL_CEILING else 16
 
 
 @dataclass
@@ -155,13 +168,17 @@ class Block:
         return self.offset - 16
 
     @property
+    def base(self):
+        return self.offset - overhead(self.size)
+
+    @property
     def shape(self):
         words = self.size // 8
-        return 0 if words > 16383 else words << 1
+        return 2 if self.size > SMALL_CEILING else words << 1
 
     @property
     def filable(self):
-        return 1 <= self.size // 8 <= 8192
+        return self.size > 0
 
 
 @dataclass
@@ -197,19 +214,17 @@ class Model:
         if size < 0 or size > HUGE:
             raise Trap(70, "axiom: out of memory (allocation size out of range)")
         sz0 = class_up(padded(size))
-        cls = sz0 // 16
+        cls = class_index(sz0)
         offset = None
-        if sz0 <= POOL_CEILING:
-            pool = self.free.get(cls, [])
-            if pool:
-                offset = pool.pop()
-                # a popped block keeps its own size, which is at least
-                # its class's (it filed at the largest class below it)
-                sz0 = self.blocks[offset].size
-                self.filed -= sz0 + 16
+        pool = self.free.get(cls, [])
+        if pool:
+            offset = pool.pop()
+            # A recycled block retains its complete capacity and prefix.
+            sz0 = self.blocks[offset].size
+            self.filed -= sz0 + overhead(sz0)
         if offset is None:
-            offset = self.bump + 16
-            self.bump += sz0 + 16
+            offset = self.bump + overhead(sz0)
+            self.bump += sz0 + overhead(sz0)
             self.peak = max(self.peak, self.bump)
         self.blocks[offset] = Block(offset, sz0, 0, [0] * (sz0 // 8))
         self.invariant()
@@ -230,12 +245,12 @@ class Model:
             return
         block.count -= 1
         if block.count == 0 and block.filable:
-            cls = class_down(block.size) // 16
+            cls = class_index(block.size)
             previous = self.head(cls)
             # MM-LIFE-2k: the link, encoded. `None` (empty list) is 0.
             block.count = ("link", previous)
             self.free.setdefault(cls, []).append(offset)
-            self.filed += block.size + 16
+            self.filed += block.size + overhead(block.size)
         self.invariant()
 
     def forge(self, offset, value):
@@ -276,8 +291,8 @@ class Model:
     def restore(self, waterline):
         self.free.clear()                                       # MM-LIFE-2e
         self.filed = 0                                          # MM-ALLOC-24
-        self.reclaimed = {o: b for o, b in self.blocks.items() if b.header >= waterline}
-        self.blocks = {o: b for o, b in self.blocks.items() if b.header < waterline}
+        self.reclaimed = {o: b for o, b in self.blocks.items() if b.base >= waterline}
+        self.blocks = {o: b for o, b in self.blocks.items() if b.base < waterline}
         self.bump = waterline
 
     def count_word(self, block):
@@ -295,12 +310,12 @@ class Model:
                 assert o not in seen, "I3: duplicate free-list entry"
                 seen.add(o)
                 b = self.blocks[o]
-                assert class_down(b.size) // 16 == cls and isinstance(b.count, tuple), "I3: live block on a free list"
+                assert class_index(b.size) == cls and isinstance(b.count, tuple), "I3: live block on a free list"
             for below, above in zip(pool, pool[1:]):
                 assert self.blocks[above].count[1] == below, "I3: link does not name the next entry"
             if pool:
                 assert self.blocks[pool[0]].count[1] is None, "I3: list tail links somewhere"
-        extents = sorted((b.header, b.offset + b.size) for b in self.blocks.values())
+        extents = sorted((b.base, b.offset + b.size) for b in self.blocks.values())
         for start, end in extents:
             assert start % 16 == 0 and end % 16 == 0, "I1: misaligned extent"
             assert end <= self.bump, "I2: extent above the bump"
@@ -682,7 +697,7 @@ def witness(kind, perturb=None):
         t.release("e")
         t.allocate("f", 36865)
     elif kind == "boundary":
-        # The pool ceiling: 64 KiB files and is reused; 64 KiB + 16 never is.
+        # The compact-header boundary: both class families file and reuse.
         t.allocate("big", POOL_CEILING)
         t.retain("big")
         t.allocate("huge", POOL_CEILING + 16)

@@ -306,10 +306,10 @@ pattern (`MAC-LANG-15`), and selection is a match in rule order
 (`MAC-LANG-17`) both hold. An invocation that matches no rule is
 refused. It never falls through past the last rule.
 
-A pattern whose head doesn't repeat the macro's name is `AX2003`, a
-bare `syntax error`. `parseDeclMacro` reports it with `pErr`, which
-carries no expectation. Unknown declaration heads have a better message
-(`MAC-LANG-5`), and this refusal doesn't have one yet.
+A pattern whose head doesn't repeat the macro's name is `AX3133` at
+that head, and the message names both names: the macro's own, which
+every rule must open with, and the one written. Tested by
+`tests/diagnostics/613-macro-pattern-head.axbad`.
 
 A template's kind can't be read from the template alone, which is why
 a rule keeps both readings. `(defPair a b)` is a nested

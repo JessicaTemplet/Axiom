@@ -1506,11 +1506,11 @@ malformed record, and the handlers that answer it without unwinding.
 | `fallibleSkipped` | value | `Int` |  |  | The value a handler answers to mean "skip this record": the most negative `Int`. A loop compares the value it got against this, or asks `fallibleIsSkipped`. |
 | `fallibleIsSkipped` | value | `(-> Int Bool)` |  |  | Whether a value is the skip sentinel. The comparison a batch loop makes once per record; it allocates nothing. |
 | `fallibleSkip` | value | `(-> String Int)` |  |  | Skip every malformed record: answer `fallibleSkipped`, whatever the message. A one-parameter top-level function is a value, so it is passed bare. |
-| `fallibleDefault` | value | `(-> Int String Int)` |  |  | Use `d` in place of every malformed record: `(fallibleDefault 0)` is the handler. |
+| `fallibleDefault` | value | `(-> Int String Int)` | `Alloc` |  | Use `d` in place of every malformed record: `(fallibleDefault 0)` is the handler. |
 | `FallibleTally` | struct |  |  |  | How many records were malformed, as `fallibleCounting` counts them. |
 | `fallibleTally` | value | `FallibleTally` | `Alloc` |  | A fresh tally at zero. |
 | `fallibleCount` | value | `(-> FallibleTally Int)` |  |  | What a tally holds. |
-| `fallibleCounting` | value | `(-> FallibleTally (-> String Int) String Int)` | `Mut` |  | Count every malformed record in `tally`, then answer as `next` would: `(fallibleCounting t fallibleSkip)` skips and counts, `(fallibleCounting t (fallibleDefault 0))` substitutes and counts. The `handle` installing it lists `Mut` beside `Fallible`, because a handler's own effects count at the site that installs it. |
+| `fallibleCounting` | value | `(-> FallibleTally (-> String Int) String Int)` | `Alloc,Mut` |  | Count every malformed record in `tally`, then answer as `next` would: `(fallibleCounting t fallibleSkip)` skips and counts, `(fallibleCounting t (fallibleDefault 0))` substitutes and counts. The `handle` installing it lists `Mut` beside `Fallible`, because a handler's own effects count at the site that installs it. |
 
 ## `Ffi`
 
@@ -2495,6 +2495,40 @@ Utf8 - the character layer over `Str`'s bytes.
 | `utf8Valid` | value | `(-> String Bool)` |  |  | Is every byte of `s` part of a well-formed UTF-8 sequence? |
 | `utf8WellFormedAt` | value | `(-> String Int Int Int)` |  |  | The length of the WELL-FORMED UTF-8 sequence that begins at byte `i` of `s` and ends at or before byte `end`: 1 to 4, or 0 when the bytes there are not one. |
 
+## `Uuid`
+
+`stdlib/Uuid.ax` — 19 public names
+
+Uuid - universally unique identifiers, RFC 9562 versions 4 and 7.
+
+    (uuidV4)                          ; (Ok <random uuid>)
+    (uuidV7)                          ; (Ok <time-ordered uuid>)
+    (uuidToString u)                  ; "xxxxxxxx-xxxx-7xxx-yxxx-xxxxxxxxxxxx"
+    (uuidParse "550e8400-e29b-41d4-a716-446655440000")  ; (Ok u)
+    (uuidV4Seeded 42)                 ; one fixed uuid, every run
+
+| Name | Kind | Type | Effects | Contracts | Summary |
+|---|---|---|---|---|---|
+| `uuidInvalidFormat` | value | `Int` |  |  | Text that is not a canonical uuid, or bytes that are not 16 long. |
+| `uuidClockUnavailable` | value | `Int` |  |  | This target has no realtime clock, or reading it failed, so a version 7 uuid cannot be stamped. |
+| `Uuid` | struct |  |  |  | A universally unique identifier. Make one with `uuidV4`, `uuidV7`, `uuidParse`, `uuidFromBytes` or a seeded constructor, and the all zero value with `uuidNil`. |
+| `uuidNil` | value | `Uuid` | `Alloc` |  | The all-zero uuid. |
+| `uuidIsNil` | value | `(-> Uuid Bool)` |  |  | Whether `u` is the all-zero uuid. |
+| `uuidVersion` | value | `(-> Uuid Int)` |  |  | The version field: 4 or 7 for a value this module generated, 0 for `uuidNil`, and whatever a parsed or injected value carries. |
+| `uuidCompare` | value | `(-> Uuid Uuid Int)` |  |  | -1, 0 or 1 as `a` sorts before, equal to or after `b`, comparing the 16 bytes as one unsigned number. Version 7 values sort by timestamp under this order. |
+| `uuidEq` | value | `(-> Uuid Uuid Bool)` |  |  | Whether `a` and `b` are the same uuid. |
+| `uuidTimestampMs` | value | `(-> Uuid (Option Int))` | `Alloc,Mut,Unsafe` |  | The Unix millisecond timestamp of a version 7 uuid, as `(Some ms)`. Any other version answers `None`. |
+| `uuidBytes` | value | `(-> Uuid String)` | `Alloc,Mut,Unsafe` |  | The 16 bytes of `u`, most significant first. |
+| `uuidFromBytes` | value | `(-> String (Result Uuid Error))` | `Alloc` |  | The uuid whose bytes are `b`, or `Err` (`uuidInvalidFormat`) when `b` is not 16 bytes. The bytes are taken as they are: no version or variant bits are set, so `uuidFromBytes (uuidBytes u)` is `u` for every `u`. Use `uuidV4FromBytes` or `uuidV7FromBytes` to stamp a version onto bytes from another source. |
+| `uuidV4FromBytes` | value | `(-> String (Result Uuid Error))` | `Alloc,Mut` |  | A version 4 uuid over 16 bytes the caller supplies - its own randomness, a recording, a test vector. Only the version and variant bits change. `Err` when `b` is not 16 bytes. |
+| `uuidV7FromBytes` | value | `(-> Int String (Result Uuid Error))` | `Alloc,Mut,Unsafe` |  | A version 7 uuid for Unix millisecond `ms` over bytes the caller supplies. The timestamp replaces the first six bytes and the version and variant bits are stamped; the rest is the caller's. `ms` is taken modulo 2^48. `Err` when `b` is not 16 bytes. |
+| `uuidToString` | value | `(-> Uuid String)` | `Alloc,Mut,Unsafe` |  | `u` in canonical text form, lower case: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx". |
+| `uuidParse` | value | `(-> String (Result Uuid Error))` | `Alloc,Mut,Unsafe` |  | The uuid a canonical text form names, or `Err` (`uuidInvalidFormat`). Upper-case hex is accepted; the hyphenless 32-digit form and the braced form are not. |
+| `uuidV4Seeded` | value | `(-> Int Uuid)` | `Alloc,Mut` |  | The version 4 uuid a seed names: the same seed gives the same uuid on every run and target, which is what a test wants. A seed is not entropy - reach for `uuidV4` outside tests. |
+| `uuidV7Seeded` | value | `(-> Int Int Uuid)` | `Alloc,Mut` |  | The version 7 uuid a seed names, stamped with Unix millisecond `ms`. Deterministic, like `uuidV4Seeded`. |
+| `uuidV4` | value | `(Result Uuid Error)` | `Alloc,Entropy,IO,Mut` |  | A random version 4 uuid, from the kernel's entropy source. |
+| `uuidV7` | value | `(Result Uuid Error)` | `Alloc,Entropy,IO,Mut` |  | A time-ordered version 7 uuid: the realtime clock's millisecond, with random bits below it. Two made in the same millisecond differ but do not sort in creation order. |
+
 ## `Vec`
 
 `stdlib/Vec.ax` — 20 public names
@@ -2522,5 +2556,5 @@ Vec - a growable array of machine words, in Axiom.
 | `vecSum` | value | `(-> (Vec Int) Int)` |  |  | The sum of every element. |
 | `vecHash` | value | `(-> (Vec Int) Int)` |  |  | A position-sensitive digest of the whole vector. |
 | `vecSort` | value | `(-> (Vec Int) (Vec Int))` | `Mut` |  | Sort a vector of `Int` ascending, in place. Answers the vector. |
-| `vecSortBy` | value | `(-> (Vec a) (-> a a Int) (Vec a))` | `Mut (incomplete)` |  | Sort `v` in place by `cmp`, which takes two elements and answers negative, zero or positive the way `strCmp` does. Answers the vector. `(vecSortBy names (lambda (a b) (strCmp a b)))` orders strings by their bytes. |
+| `vecSortBy` | value | `(-> (Vec a) (-> a a Int) (Vec a))` | `Alloc,Mut (incomplete)` |  | Sort `v` in place by `cmp`, which takes two elements and answers negative, zero or positive the way `strCmp` does. Answers the vector. `(vecSortBy names (lambda (a b) (strCmp a b)))` orders strings by their bytes. |
 

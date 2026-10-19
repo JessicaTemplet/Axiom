@@ -44,7 +44,7 @@ restriction when an unknown answer must refuse the build.
 
 `tests/diagnostics/severity.policy` is the checked allowlist of codes
 permitted to render as warnings: `AX3037`, `AX3038`, `AX3045`,
-`AX3048` and `AX3051`.
+`AX3048`, `AX3051` and `AX3134`.
 
 The same file records why each warning remains one. Diagnostic
 severity and the policy gate are separate: a warning can still fail
@@ -56,10 +56,10 @@ Tested by `scripts/check-diagnostics.sh` and
 
 ## 3. Choose a safe boundary
 
-The checked Axiom AST is an internal set of word records. There is no
-stable, typed public AST façade. A program can import compiler modules
-with `AXIOM_PATH=self_host`, but those record layouts are internal.
-For a stable read-only view, use AXSYM and AXIR.
+Compiler passes exchange opaque `ASTNode` handles and typed node
+vectors. You can import compiler modules with `AXIOM_PATH=self_host`,
+but their APIs and packed boundary layouts remain internal.
+Use AXSYM and AXIR for a stable read-only view.
 
 ### 3.4 Agent.Policy
 

@@ -471,8 +471,9 @@ stack frame:
 ```
 
 At the default `--opt 1` with an 8 MiB stack, the unsafe shape costs
-**48 bytes of stack per call** and dies of `SIGSEGV` after about
-**174,000** calls. The safe shape completes **5,000,000** iterations
+**48 bytes of stack per call** and exhausts its stack after about
+**174,000** calls. A native POSIX executable reports stack overflow and
+exits 86 (`MM-EXEC-6d` in the [memory model](memory-model.md)). The safe shape completes **5,000,000** iterations
 with a flat stack.
 
 The shape a propagation form generates, with the continuation in the
@@ -1208,6 +1209,8 @@ This section records the codes below. All of them are built, and
 | `AX3130` `scoped-callback` | an invalid scoped callback declaration, an opaque callback without a matching contract, or erasure of the precondition through a function value | `tests/diagnostics/1441-scoped-callback-opaque.ax`, `tests/diagnostics/1442-scoped-callback-tag.ax` |
 | `AX3131` `compute-callback` | an invalid numeric callback declaration, a non-primitive capture, a transitive operation outside the closed numeric basis, or opaque forwarding and precondition erasure | `tests/diagnostics/1445-compute-callback.ax` |
 | `AX3132` `named-construction` | unknown, repeated or missing struct fields, or a labelled construction whose name is not a visible struct | `tests/diagnostics/1447-named-construction-fields.ax` |
+| `AX3133` `macro-pattern-head` | a macro rule pattern that does not open with the macro's own name | `tests/diagnostics/613-macro-pattern-head.axbad` |
+| `AX3134` `unreachable-arm` | a match arm an earlier arm already covers | A warning. `tests/diagnostics/1456-unreachable-arm.ax` |
 | `AX3116` `result-claim` | a `result(...)` claim the compiler cannot read: a value other than `owned`, or the claim on a function that is not a trusted encapsulation | `tests/diagnostics/1259-result-claim.ax` |
 | `AX3110` `axtag-never-checked` | an `effect(div)` claim, which names an effect nothing infers | An error, because no body can ever support it. `tests/diagnostics/359-div-not-inferred.ax` |
 | `AX3117` `inline-asm-rejected` | a line of an `asm` template the assembler rejects, or whose operands the register allocator can't place | An error when the program is built, at the template line, with status 1. `tests/embedded/asm-rejected.ax` |

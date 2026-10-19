@@ -637,17 +637,17 @@
 ; left-nested with one argument per node, so `(f a b)` is
 ; `((f a) b)`; `parser.ax`'s `spineArgVec` flattens the arguments and
 ; this walks to the function.
-(pub :: mSpineHead (-> Int Int))
+(pub :: mSpineHead (-> ASTNode ASTNode))
 (pub fn (mSpineHead e)
   (if (== (nodeTag e) TAG_E_APP)
-    (mSpineHead (nodeA e))
+    (mSpineHead (nodeAChild e))
     e))
 
 ; Lower every argument, left to right, onto `out`. Answers false the
 ; moment one of them leaves the subset - and the caller then refuses
 ; the whole function, so the half-lowered instructions already in the
 ; block are discarded with it.
-(pub :: mLowArgs (-> MLC (Vec MBind) Ints Int Ints Bool))
+(pub :: mLowArgs (-> MLC (Vec MBind) Nodes Int Ints Bool))
 (pub fn (mLowArgs lc env args i out)
   (if (>= i (vecLen args))
     true
@@ -664,7 +664,7 @@
 ; Lower one expression. Answers the register holding its value, or a
 ; NEGATIVE number when the expression is outside the subset. Every
 ; caller checks; nothing here answers a register it did not define.
-(pub :: mLower (-> MLC (Vec MBind) Int Int))
+(pub :: mLower (-> MLC (Vec MBind) ASTNode Int))
 (pub fn (mLower lc env e)
   {
     (let t (nodeTag e))
@@ -732,7 +732,7 @@
                 (if (== t TAG_E_SET)
                   (mLowerSet lc env e)
                   (if (== t TAG_E_BEGIN)
-                    (mLowerSeq lc env (nodeAVec e) 0 (- 0 1))
+                    (mLowerSeq lc env (nodeAChildren e) 0 (- 0 1))
                     (if (== t TAG_E_APP)
                       (mLowerApp lc env e)
                       (- 0 1))))))))))
@@ -750,17 +750,17 @@
 ; when it names an outer `mut` - while the body's stores to the
 ; `let`'s own name (a `mut` re-stored) die with it, or a use past
 ; the scope would read a register no live binding answers.
-(pub :: mLowerLet (-> MLC (Vec MBind) Int Int Int))
+(pub :: mLowerLet (-> MLC (Vec MBind) ASTNode Int Int))
 (pub fn (mLowerLet lc env e mut)
   {
-    (let rv (mLower lc env (nodeB e)))
+    (let rv (mLower lc env (nodeBChild e)))
     (let base (vecLen env))
     (if (< rv 0)
       (- 0 1)
       {
         (vecPush env (MBind :name (nodeAName e) :reg rv :isMut mut))
         {
-          (let rb (mLower lc env (nodeC e)))
+          (let rb (mLower lc env (nodeCChild e)))
           {
             (mEnvDropName env (nodeAName e) base)
             rb
@@ -781,7 +781,7 @@
 ; past the join with a register the other arm never defines - the
 ; dominance violation, refused at the store rather than reported at
 ; the use.
-(pub :: mLowerSet (-> MLC (Vec MBind) Int Int))
+(pub :: mLowerSet (-> MLC (Vec MBind) ASTNode Int))
 (pub fn (mLowerSet lc env e)
   (if (!= lc.cond 0)
     (- 0 1)
@@ -792,7 +792,7 @@
         (if (== m 0)
           (- 0 1)
           {
-            (let rv (mLower lc env (nodeB e)))
+            (let rv (mLower lc env (nodeBChild e)))
             (if (< rv 0)
               (- 0 1)
               {
@@ -887,7 +887,7 @@
 ; `cur` through its own blocks first, and the loop's branches land
 ; wherever it stopped, which is why a nested conditional composes
 ; instead of needing its own case.
-(pub :: mLowerWhile (-> MLC (Vec MBind) Int Int))
+(pub :: mLowerWhile (-> MLC (Vec MBind) ASTNode Int))
 (pub fn (mLowerWhile lc env e)
   {
     (let names vecNew)
@@ -914,7 +914,7 @@
               (set lc.cur hd)
               (mRebind env names ph 0)
               {
-                (let rc (mLower lc env (nodeA e)))
+                (let rc (mLower lc env (nodeAChild e)))
                 (if (< rc 0)
                   (- 0 1)
                   {
@@ -936,7 +936,7 @@
                     (set lc.cur bd)
                     (mRebind env names pd 0)
                     {
-                      (let bodyVal (mLowerSeq lc env (nodeBVec e) 0 (- 0 1)))
+                      (let bodyVal (mLowerSeq lc env (nodeBChildren e) 0 (- 0 1)))
                       (if (< bodyVal 0)
                         (- 0 1)
                         {
@@ -982,10 +982,10 @@
 ;
 ; Each arm terminates `lc.cur` - the block the arm ENDED in - rather
 ; than the block it started in.
-(pub :: mLowerIf (-> MLC (Vec MBind) Int Int))
+(pub :: mLowerIf (-> MLC (Vec MBind) ASTNode Int))
 (pub fn (mLowerIf lc env e)
   {
-    (let rc (mLower lc env (nodeA e)))
+    (let rc (mLower lc env (nodeAChild e)))
     (if (< rc 0)
       (- 0 1)
       {
@@ -1013,7 +1013,7 @@
             ; an arm as well as above one.
             (set lc.cond 1)
             {
-              (let r1 (mLower lc env (nodeB e)))
+              (let r1 (mLower lc env (nodeBChild e)))
               (if (< r1 0)
                 (- 0 1)
                 {
@@ -1029,7 +1029,7 @@
                       :alt 0))
                   (set lc.cur bf)
                   {
-                    (let r2 (mLower lc env (nodeC e)))
+                    (let r2 (mLower lc env (nodeCChild e)))
                     (if (< r2 0)
                       (- 0 1)
                       {
@@ -1059,7 +1059,7 @@
 ; one has no value to answer, so it refuses rather than inventing a
 ; zero - `last` starts negative and that is the answer if the loop
 ; never runs.
-(pub :: mLowerSeq (-> MLC (Vec MBind) Ints Int Int Int))
+(pub :: mLowerSeq (-> MLC (Vec MBind) (Vec ASTNode) Int Int Int))
 (pub fn (mLowerSeq lc env v i last)
   (if (>= i (vecLen v))
     last
@@ -1270,7 +1270,7 @@
     }
     0))
 
-(pub :: mLowerApp (-> MLC (Vec MBind) Int Int))
+(pub :: mLowerApp (-> MLC (Vec MBind) ASTNode Int))
 (pub fn (mLowerApp lc env e)
   {
     (let hd (mSpineHead e))
@@ -1366,7 +1366,7 @@
 ; application or a checker error, and refuses like the binop path.
 ; Block discipline is `mLowerIf`'s: the join exists before either
 ; arm is lowered, and each arm terminates the block it ENDED in.
-(pub :: mLowerAndOr (-> MLC (Vec MBind) String Ints Int))
+(pub :: mLowerAndOr (-> MLC (Vec MBind) String Nodes Int))
 (pub fn (mLowerAndOr lc env nm args)
   (if (!= (vecLen args) 2)
     (- 0 1)
@@ -1504,7 +1504,7 @@
 ; would produce a block with no terminator, which the verifier would
 ; then report as a defect in this file rather than as the refusal it
 ; is.
-(pub :: mLowerFn (-> Int (Vec MFunc)))
+(pub :: mLowerFn (-> ASTNode (Vec MFunc)))
 (pub fn (mLowerFn d)
   {
     (let entry (MBlock :id 0 :params vecNew :instrs vecNew :term vecNew))
@@ -1517,9 +1517,9 @@
           (let env vecNew)
           (let pregs vecNew)
           {
-            (mBindParams lc env (nodeBVec d) 0 pregs)
+            (mBindParams lc env (nodeBNames d) 0 pregs)
             {
-              (let r (mLower lc env (nodeC d)))
+              (let r (mLower lc env (nodeCChild d)))
               (if (! (< r 0))
                 {
                   (mlcTerm lc
@@ -1528,7 +1528,7 @@
                     (MFunc
                       :name (nodeAName d)
                       :params pregs
-                      :pnames (nodeBVec d)
+                      :pnames (nodeBNames d)
                       :blocks lc.blocks
                       :nreg lc.nreg))
                 })
@@ -1545,7 +1545,7 @@
 ; refused land on `refused`. Both drivers under `tests/mir/` share
 ; this walk, so "which functions lowered" is one answer rather than
 ; two that could disagree.
-(pub :: mLowerDecls (-> Ints (Vec MFunc) Strings Int Int))
+(pub :: mLowerDecls (-> (Vec ASTNode) (Vec MFunc) Strings Int Int))
 (pub fn (mLowerDecls ds out refused i)
   (if (>= i (vecLen ds))
     0
@@ -1904,8 +1904,7 @@
       }
     }))
 
-(pub :: mvUseList
-  (-> MFunc Ints Ints Ints Strings String Ints Int Int Int Int))
+(pub :: mvUseList (-> MFunc Ints Ints Ints Strings String Ints Int Int Int Int))
 (pub fn (mvUseList f dom defBlk defIdx out what rs blk idx i)
   (if (>= i (vecLen rs))
     0

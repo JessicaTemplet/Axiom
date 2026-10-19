@@ -46,10 +46,8 @@ fi
 
 run_at_512() {
   local bin="$1" rc
-  # When the child dies on a signal, the outer shell prints its own
-  # "Segmentation fault" line. The crash is expected here, so silence the
-  # shell's stderr as well as the child's.
-  { ( ulimit -s 512; "$bin" >/dev/null 2>&1 ); } 2>/dev/null
+  # Keep the runtime's report separate from any shell signal message.
+  { ( ulimit -s 512; "$bin" >/dev/null 2>"$work/run.err" ); } 2>/dev/null
   rc=$?
   echo "$rc"
 }
@@ -68,12 +66,14 @@ echo
 echo "--- 2. the defect, and the two controls that localise it ---"
 if [[ -x "$work/crash" ]]; then
   st="$(run_at_512 "$work/crash")"
-  if [[ "$st" == 139 ]]; then
-    ok "crash.ax still overflows at 20,000 under a 512 KiB stack (exit $st) - MM-EXEC-6b is unfixed"
+  if [[ "$st" == 86 ]] && grep -q '^axiom: stack overflow:' "$work/run.err" &&
+     grep -q '^  at run' "$work/run.err"; then
+    ok "crash.ax reports a named stack overflow at 20,000 under a 512 KiB stack (exit $st) - MM-EXEC-6b is unfixed"
   elif [[ "$st" == 0 ]]; then
     bad "crash.ax now EXITS 0. If MM-EXEC-6b has been fixed, delete this gate and say so in the changelog; if it has not, this fixture has stopped reproducing it"
   else
-    bad "crash.ax exited $st, which is neither the overflow (139) nor success (0)"
+    bad "crash.ax exited $st without the named stack-overflow trap and interrupted run frame"
+    head -5 "$work/run.err" | sed 's/^/     /'
   fi
 fi
 for n in boxed intpay; do

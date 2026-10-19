@@ -1004,6 +1004,13 @@ Other restrictions include `no-unsafe`, `no-block`, `no-spawn`,
 instead of receiving a warning. The [restricted profile](restricted-profile.md)
 lists the supported restrictions and their limits.
 
+For effect restrictions, the compiler also checks known callbacks at
+call sites. The requirement follows parameter aliases, forwarding
+functions and captured lambdas. An IO callback passed to a `no-io`
+function is refused with `AX3049`.
+
+Tested by `tests/diagnostics/1463-callback-restrictions.ax`.
+
 ### Contracts: pre and post
 
 Use a contract to state what a function accepts and what it promises.
@@ -1116,13 +1123,18 @@ declaration:
       0)
   })
 
+(:: box (-> (-> Int Int) Box))
+(fn (box f)
+  (Box :f f))
+
 (:: main Int)
 (fn (main)
-  (+ (call (Box :f (lambda (x) x))) (sketch 2)))
+  (+ (call (box (lambda (x) x))) (sketch 2)))
 ```
 
+The factory stores a parameter whose effects are unknown there.
 `call` keeps its unverifiable purity claim without the AX3037 warning,
-and `sketch` draws no hints. Both compile and run as before.
+and `sketch` draws no hints.
 
 A tag above an `import` covers the whole file, like Rust's `#![allow]`
 at the top of a module:
@@ -2150,7 +2162,7 @@ Tested by `tests/stdlib/841-net-ip.ax` and `tests/stdlib/843-net-stream.ax`.
 
 ### Modules at a Glance
 
-Sixty-one modules, all of them Axiom source under `stdlib/`, plus the six
+Sixty-two modules, all of them Axiom source under `stdlib/`, plus the six
 `Sys.Platform.*` target files covered by `Sys`. Only names marked `pub`
 are exported.
 
@@ -2160,6 +2172,7 @@ are exported.
 | `Mem` | [API](stdlib-api.md#mem) |
 | `Str` | [API](stdlib-api.md#str) |
 | `Utf8` | [API](stdlib-api.md#utf8) |
+| `Uuid` | [API](stdlib-api.md#uuid) |
 | `Vec` | [API](stdlib-api.md#vec) |
 | `Map` | [API](stdlib-api.md#map) |
 | `Fmt` | [API](stdlib-api.md#fmt) |

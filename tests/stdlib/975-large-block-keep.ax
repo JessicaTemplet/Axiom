@@ -1,0 +1,27 @@
+; Keeping a large block preserves bytes and uses a reusable capacity.
+(import IO)
+(import Mem)
+
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (main)
+  {
+    (let mark (__axiom_arena_mark))
+    (let p (memAlloc 65552))
+    (__store64 p 0 123)
+    (__store64 p 8193 456)
+    (let kept (__axiom_arena_reset_keeping mark p 65552))
+    (let mut failures 0)
+    (if (! (&& (== (__load64 kept 0) 123) (== (__load64 kept 8193) 456)))
+      (set failures (+ failures 1)))
+    (if (! (== (__load64 (- kept 32) 0) 131072))
+      (set failures (+ failures 2)))
+    (__retain kept)
+    (__release kept)
+    (let reused (memAlloc 70000))
+    (if (! (&& (== kept reused) (&& (== (__load64 reused 0) 0) (== (__load64 reused 8193) 0))))
+      (set failures (+ failures 4)))
+    (println failures)
+    failures
+  })

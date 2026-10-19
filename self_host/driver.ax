@@ -76,7 +76,7 @@
 ;
 ; `argv[0]` is the tool's own name, which the kernel does not supply and
 ; which several tools read back out of their own argv.
-(pub :: runTool (-> String Ints Int))
+(pub :: runTool (-> String Strings Int))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
@@ -112,7 +112,7 @@
     }
   })
 
-(pub :: fillArgv (-> Int Ints Int Int Int))
+(pub :: fillArgv (-> Int Strings Int Int Int))
 (pub fn (fillArgv v args i n)
   (if (>= i n)
     0
@@ -123,14 +123,14 @@
       (fillArgv v args (+ i 1) n)
     }))
 
-(pub :: argsOf3 (-> String String String Ints))
+(pub :: argsOf3 (-> String String String Strings))
 (pub fn (argsOf3 a b c)
   {
     (let v vecNew)
     {
-      (vecPush v (as a Int))
-      (vecPush v (as b Int))
-      (vecPush v (as c Int))
+      (vecPush v a)
+      (vecPush v b)
+      (vecPush v c)
       v
     }
   })
@@ -182,11 +182,11 @@
           {
             (let v vecNew)
             {
-              (vecPush v (as (concat "-O" (fmtIntStr lvl)) Int))
-              (vecPush v (as llPath Int))
-              (vecPush v (as "-S" Int))
-              (vecPush v (as "-o" Int))
-              (vecPush v (as outPath Int))
+              (vecPush v (concat "-O" (fmtIntStr lvl)))
+              (vecPush v llPath)
+              (vecPush v "-S")
+              (vecPush v "-o")
+              (vecPush v outPath)
               v
             }
           })
@@ -295,21 +295,21 @@
 
 ; Copy the caller's already-formatted link arguments (`-L<dir>`,
 ; `-l<name>`) onto the `cc` argument vector.
-(pub :: appendLinkArgs (-> Ints Ints Int Int))
+(pub :: appendLinkArgs (-> Strings Ints Int Int))
 (pub fn (appendLinkArgs v linkArgs i)
   (if (== (as linkArgs Int) 0)
     0
     (if (>= i (vecLen linkArgs))
       0
       {
-        (vecPush v (vecGet linkArgs i))
+        (vecPush v (vecGetStr linkArgs i))
         (appendLinkArgs v linkArgs (+ i 1))
       })))
 
 ; The same arguments in lld-link's spelling: `-L<dir>` is
 ; `/libpath:<dir>` and `-l<name>` is `<name>.lib`. Anything else is
 ; copied as it came, which is what `cc` would have done with it too.
-(pub :: appendLinkArgsWindows (-> Ints Ints Int Int))
+(pub :: appendLinkArgsWindows (-> Strings Ints Int Int))
 ;@axiom:effect(unsafe)
 (pub fn (appendLinkArgsWindows v linkArgs i)
   (if (== (as linkArgs Int) 0)
@@ -320,10 +320,10 @@
         (let a (as (vecGet linkArgs i) String))
         {
           (if (strStartsWith a "-L")
-            (vecPush v (as (concat "/libpath:" (strSlice a 2 (- (strLen a) 2))) Int))
+            (vecPush v (concat "/libpath:" (strSlice a 2 (- (strLen a) 2))))
             (if (strStartsWith a "-l")
-              (vecPush v (as (concat (strSlice a 2 (- (strLen a) 2)) ".lib") Int))
-              (vecPush v (vecGet linkArgs i))))
+              (vecPush v (concat (strSlice a 2 (- (strLen a) 2)) ".lib"))
+              (vecPush v (vecGetStr linkArgs i))))
           (appendLinkArgsWindows v linkArgs (+ i 1))
         }
       })))
@@ -538,7 +538,7 @@
 ; is llc's own text and AX4003, as before.
 ; ------------------------------------------------------------------
 ; `runTool` with the tool's standard error written to `errPath`.
-(pub :: runToolErrTo (-> String Ints String Int))
+(pub :: runToolErrTo (-> String Strings String Int))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
@@ -1007,12 +1007,12 @@
         {
           (let v vecNew)
           {
-            (vecPush v (as llPath Int))
-            (vecPush v (as "-filetype=obj" Int))
-            (vecPush v (as "-o" Int))
-            (vecPush v (as objPath Int))
-            (vecPush v (as (concat "-O" (fmtIntStr lvl)) Int))
-            (vecPush v (as llcRelocArg Int))
+            (vecPush v llPath)
+            (vecPush v "-filetype=obj")
+            (vecPush v "-o")
+            (vecPush v objPath)
+            (vecPush v (concat "-O" (fmtIntStr lvl)))
+            (vecPush v llcRelocArg)
             v
           }
         })
@@ -1043,20 +1043,20 @@
                           {
                             (let v vecNew)
                             {
-                              (vecPush v (as "/subsystem:console" Int))
-                              (vecPush v (as "/entry:mainCRTStartup" Int))
+                              (vecPush v "/subsystem:console")
+                              (vecPush v "/entry:mainCRTStartup")
                               ; 8 MB, the main-thread stack Linux and Darwin
                               ; give by default. Windows' default is 1 MB,
                               ; which the compiler overflows compiling
                               ; itself (0xC00000FD).
-                              (vecPush v (as "/stack:8388608" Int))
+                              (vecPush v "/stack:8388608")
                               (if (strEq winTarget "windows-aarch64")
-                                (vecPush v (as "/machine:arm64" Int))
+                                (vecPush v "/machine:arm64")
                                 v)
-                              (vecPush v (as (concat "/out:" outPath) Int))
-                              (vecPush v (as objPath Int))
+                              (vecPush v (concat "/out:" outPath))
+                              (vecPush v objPath)
                               (if (> (strLen implib) 0)
-                                (vecPush v (as implib Int)))
+                                (vecPush v implib))
                               (appendLinkArgsWindows v linkArgs 0)
                               v
                             }
@@ -1095,12 +1095,12 @@
                           {
                             (let v vecNew)
                             {
-                              (vecPush v (as "-T" Int))
-                              (vecPush v (as ldPath Int))
-                              (vecPush v (as objPath Int))
+                              (vecPush v "-T")
+                              (vecPush v ldPath)
+                              (vecPush v objPath)
                               (appendLinkArgs v linkArgs 0)
-                              (vecPush v (as "-o" Int))
-                              (vecPush v (as outPath Int))
+                              (vecPush v "-o")
+                              (vecPush v outPath)
                               v
                             }
                           })
@@ -1130,9 +1130,9 @@
                       {
                         (let v vecNew)
                         {
-                          (vecPush v (as "rcs" Int))
-                          (vecPush v (as outPath Int))
-                          (vecPush v (as objPath Int))
+                          (vecPush v "rcs")
+                          (vecPush v outPath)
+                          (vecPush v objPath)
                           v
                         }
                       })
@@ -1164,16 +1164,16 @@
                       {
                         (let v vecNew)
                         {
-                          (vecPush v (as objPath Int))
+                          (vecPush v objPath)
                           (if (hasFlagAnywhere subcommandName "--obfuscate")
                             (vecPush v
-                              (as (if (isSome (strFind (unwrapOr (readFile llPath) "") "apple-" 0))
+                              (if (isSome (strFind (unwrapOr (readFile llPath) "") "apple-" 0))
                                 "-Wl,-S,-x"
-                                "-Wl,--strip-all") Int))
+                                "-Wl,--strip-all"))
                             v)
                           (appendLinkArgs v linkArgs 0)
-                          (vecPush v (as "-o" Int))
-                          (vecPush v (as outPath Int))
+                          (vecPush v "-o")
+                          (vecPush v outPath)
                           v
                         }
                       })
@@ -1285,15 +1285,15 @@
         {
           (let v vecNew)
           {
-            (vecPush v (as "--src" Int))
-            (vecPush v (as (concat dir "src") Int))
-            (vecPush v (as "--lib" Int))
-            (vecPush v (as stem Int))
-            (vecPush v (as "--module" Int))
-            (vecPush v (as module Int))
-            (vecPush v (as "--check" Int))
-            (vecPush v (as modPath Int))
-            (vecPush v (as "--quiet" Int))
+            (vecPush v "--src")
+            (vecPush v (concat dir "src"))
+            (vecPush v "--lib")
+            (vecPush v stem)
+            (vecPush v "--module")
+            (vecPush v module)
+            (vecPush v "--check")
+            (vecPush v modPath)
+            (vecPush v "--quiet")
             v
           }
         })
@@ -1306,14 +1306,14 @@
               {
                 (let v vecNew)
                 {
-                  (vecPush v (as "--src" Int))
-                  (vecPush v (as (concat dir "src") Int))
-                  (vecPush v (as "--lib" Int))
-                  (vecPush v (as stem Int))
-                  (vecPush v (as "--module" Int))
-                  (vecPush v (as module Int))
-                  (vecPush v (as "-o" Int))
-                  (vecPush v (as (concat dir "axiom") Int))
+                  (vecPush v "--src")
+                  (vecPush v (concat dir "src"))
+                  (vecPush v "--lib")
+                  (vecPush v stem)
+                  (vecPush v "--module")
+                  (vecPush v module)
+                  (vecPush v "-o")
+                  (vecPush v (concat dir "axiom"))
                   v
                 }
               })
@@ -1337,10 +1337,10 @@
       {
         (let v vecNew)
         {
-          (vecPush v (as "build" Int))
-          (vecPush v (as "--release" Int))
-          (vecPush v (as "--manifest-path" Int))
-          (vecPush v (as (concat dir "Cargo.toml") Int))
+          (vecPush v "build")
+          (vecPush v "--release")
+          (vecPush v "--manifest-path")
+          (vecPush v (concat dir "Cargo.toml"))
           v
         }
       })
@@ -1354,7 +1354,7 @@
 ; `runTool` for a probe whose exit status is the whole answer. The
 ; tool is asked to be quiet by flag (`--quiet` rides in `args`): the
 ; driver redirects no descriptor, so a tool that talks anyway is heard.
-(pub :: runToolQuiet (-> String Ints Int))
+(pub :: runToolQuiet (-> String Strings Int))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
@@ -2131,15 +2131,15 @@
         (Err "could not write the kernel32 import definitions beside the object")
         {
           (let args vecNew)
-          (vecPush args (as "-m" Int))
+          (vecPush args "-m")
           (vecPush args
-            (as (if (strEq winTarget "windows-aarch64")
+            (if (strEq winTarget "windows-aarch64")
               "arm64"
-              "i386:x86-64") Int))
-          (vecPush args (as "-d" Int))
-          (vecPush args (as defPath Int))
-          (vecPush args (as "-l" Int))
-          (vecPush args (as libPath Int))
+              "i386:x86-64"))
+          (vecPush args "-d")
+          (vecPush args defPath)
+          (vecPush args "-l")
+          (vecPush args libPath)
           (let rc (runTool "llvm-dlltool" args))
           (unwrapOr (removeFile defPath) 0)
           (if (== rc 0)
@@ -2224,7 +2224,7 @@
 ; archive does define. `compileFile` runs this before the toolchain;
 ; `groundDeclares` below stays as the span-less fallback for IR built
 ; by another path.
-(pub :: groundExternsSpanned (-> String Ints Ints Int Ints Int))
+(pub :: groundExternsSpanned (-> String (Vec ASTNode) Ints Int Ints Int))
 ;@axiom:effect(io)
 (pub fn (groundExternsSpanned ir decls units dfmt linkArgs)
   {
@@ -2259,7 +2259,7 @@
     }
   })
 
-(pub :: groundEachSpanned (-> Ints Ints Ints Ints Ints Int Int Int))
+(pub :: groundEachSpanned (-> Ints Ints Ints (Vec ASTNode) Ints Int Int Int))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (groundEachSpanned names blobs paths decls units dfmt i)
@@ -2279,9 +2279,9 @@
           (let want
             {
               (let it (findExternItem decls n 0))
-              (if (== it 0)
+              (if (nodeSame it nilNode)
                 ""
-                (externSigTag (nodeB it)))
+                (externSigTag (nodeBChild it)))
             })
           (let have (descriptorsOf blobs n))
           (if (|| (== (strLen want) 0) (|| (== (vecLen have) 0) (>= (strIndexIn have want) 0)))
@@ -2291,7 +2291,7 @@
               {
                 (let d
                   (mkDiag SEV_ERROR "AX4005" "extern-shape"
-                    (if (== item 0)
+                    (if (nodeSame item nilNode)
                       0
                       (nodeSpan item))
                     (concat (concat "`" (concat n "` is exported by the crate for "))
@@ -2310,7 +2310,7 @@
                   {
                     (let out
                       (renderDiagsFormat dfmt ds
-                        (if (== item 0)
+                        (if (nodeSame item nilNode)
                           {
                             (let uv vecNew)
                             {
@@ -2355,7 +2355,7 @@
             {
               (let d
                 (mkDiag SEV_ERROR "AX4004" "ungrounded-symbol"
-                  (if (== item 0)
+                  (if (nodeSame item nilNode)
                     0
                     (nodeSpan item))
                   msg 0 0 help))
@@ -2368,7 +2368,7 @@
                 {
                   (let out
                     (renderDiagsFormat dfmt ds
-                      (if (== item 0)
+                      (if (nodeSame item nilNode)
                         {
                           (let u vecNew)
                           {
@@ -2394,7 +2394,7 @@
 ; comparison apart at every call site. The recursion below keeps the
 ; -1 and stays private; the boundary is where the type is worth
 ; having.
-(pub :: findExternUnit (-> Ints String Ints (Option Int)))
+(pub :: findExternUnit (-> (Vec ASTNode) String Ints (Option Int)))
 (pub fn (findExternUnit decls sym units)
   {
     (let u (findExternUnitFrom decls sym units 0))
@@ -2403,14 +2403,15 @@
       (Some u))
   })
 
-(:: findExternUnitFrom (-> Ints String Ints Int Int))
+(:: findExternUnitFrom (-> (Vec ASTNode) String Ints Int Int))
 ;@axiom:effect(unsafe)
 (fn (findExternUnitFrom decls sym units i)
   (if (>= i (vecLen decls))
     (- 0 1)
     {
       (let d (vecGet decls i))
-      (if (&& (== (nodeTag d) TAG_D_EXTERN) (!= (findExternItemIn (nodeCVec d) sym 0) 0))
+      (if (&& (== (nodeTag d) TAG_D_EXTERN)
+            (! (nodeSame (findExternItemIn (nodeCChildren d) sym 0) nilNode)))
         (if (== (as (nodeModule d) Int) 0)
           0
           (unitIndexOf units (as (nodeModule d) String) 0))
@@ -2420,27 +2421,27 @@
 ; The descriptor string an extern item's declared type spells:
 ; `<params>_<ret>`, one tag per parameter, the result after the
 ; underscore. Mirrors rust/axiom-ffi-classify.
-(pub :: externSigTag (-> Int String))
+(pub :: externSigTag (-> ASTNode String))
 (pub fn (externSigTag ty)
-  (if (== ty 0)
+  (if (nodeSame ty nilNode)
     ""
     (concat (sigParamTags ty) (concat "_" (sigTagOf (sigResultOf ty))))))
 
-(pub :: sigParamTags (-> Int String))
+(pub :: sigParamTags (-> ASTNode String))
 (pub fn (sigParamTags ty)
-  (if (&& (!= ty 0) (== (nodeTag ty) TAG_T_ARR))
-    (concat (sigTagOf (nodeA ty)) (sigParamTags (nodeB ty)))
+  (if (&& (! (nodeSame ty nilNode)) (== (nodeTag ty) TAG_T_ARR))
+    (concat (sigTagOf (nodeAChild ty)) (sigParamTags (nodeBChild ty)))
     ""))
 
-(pub :: sigResultOf (-> Int Int))
+(pub :: sigResultOf (-> ASTNode ASTNode))
 (pub fn (sigResultOf ty)
-  (if (&& (!= ty 0) (== (nodeTag ty) TAG_T_ARR))
-    (sigResultOf (nodeB ty))
+  (if (&& (! (nodeSame ty nilNode)) (== (nodeTag ty) TAG_T_ARR))
+    (sigResultOf (nodeBChild ty))
     ty))
 
-(pub :: sigTagOf (-> Int String))
+(pub :: sigTagOf (-> ASTNode String))
 (pub fn (sigTagOf t)
-  (if (== t 0)
+  (if (nodeSame t nilNode)
     "i"
     (if (== (nodeTag t) TAG_T_ARR)
       "c"
@@ -2538,39 +2539,40 @@
         ""))))
 
 ; The extern ITEM node binding linker symbol `sym`, or 0.
-(pub :: findExternItem (-> Ints String Int Int))
+(pub :: findExternItem (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (findExternItem decls sym i)
   (if (>= i (vecLen decls))
-    0
+    nilNode
     {
       (let d (vecGet decls i))
       (if (== (nodeTag d) TAG_D_EXTERN)
         {
-          (let it (findExternItemIn (nodeCVec d) sym 0))
-          (if (== it 0)
+          (let it (findExternItemIn (nodeCChildren d) sym 0))
+          (if (nodeSame it nilNode)
             (findExternItem decls sym (+ i 1))
             it)
         }
         (findExternItem decls sym (+ i 1)))
     }))
 
-(pub :: findExternItemIn (-> Ints String Int Int))
+(pub :: findExternItemIn (-> (Vec ASTNode) String Int ASTNode))
 (pub fn (findExternItemIn items sym i)
   (if (== (as items Int) 0)
-    0
+    nilNode
     (if (>= i (vecLen items))
-      0
+      nilNode
       (if (strEq (nodeCName (vecGet items i)) sym)
         (vecGet items i)
         (findExternItemIn items sym (+ i 1))))))
 
-(pub :: findExternLib (-> Ints String Int String))
+(pub :: findExternLib (-> (Vec ASTNode) String Int String))
 (pub fn (findExternLib decls sym i)
   (if (>= i (vecLen decls))
     ""
     {
       (let d (vecGet decls i))
-      (if (&& (== (nodeTag d) TAG_D_EXTERN) (!= (findExternItemIn (nodeCVec d) sym 0) 0))
+      (if (&& (== (nodeTag d) TAG_D_EXTERN)
+            (! (nodeSame (findExternItemIn (nodeCChildren d) sym 0) nilNode)))
         (nodeAName d)
         (findExternLib decls sym (+ i 1)))
     }))
@@ -2684,7 +2686,7 @@
 
 ; Spawn `tool` with `args`, answering the pid, or -1 when it could
 ; not be started. The argv buffer is `runTool`'s shape.
-(:: spawnTool (-> String Ints Int))
+(:: spawnTool (-> String Strings Int))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
 (fn (spawnTool tool args)
@@ -2760,31 +2762,17 @@
           (waitPhase pids (+ i 1) jobs)))
     }))
 
-(:: vecOf5 (-> String String String String String Ints))
-(fn (vecOf5 a b c d e)
-  {
-    (let v vecNew)
-    {
-      (vecPush v (as a Int))
-      (vecPush v (as b Int))
-      (vecPush v (as c Int))
-      (vecPush v (as d Int))
-      (vecPush v (as e Int))
-      v
-    }
-  })
-
-(:: vecOf6 (-> String String String String String String Ints))
+(:: vecOf6 (-> String String String String String String Strings))
 (fn (vecOf6 a b c d e f)
   {
     (let v vecNew)
     {
-      (vecPush v (as a Int))
-      (vecPush v (as b Int))
-      (vecPush v (as c Int))
-      (vecPush v (as d Int))
-      (vecPush v (as e Int))
-      (vecPush v (as f Int))
+      (vecPush v a)
+      (vecPush v b)
+      (vecPush v c)
+      (vecPush v d)
+      (vecPush v e)
+      (vecPush v f)
       v
     }
   })
@@ -2805,12 +2793,12 @@
       }
     }))
 
-(:: splitLinkArgs (-> String Int Int Ints Ints))
+(:: splitLinkArgs (-> String Int Int Strings Strings))
 (fn (splitLinkArgs stem jobs i acc)
   (if (>= i jobs)
     acc
     {
-      (vecPush acc (as (concat (splitPartPath stem i) ".o") Int))
+      (vecPush acc (concat (splitPartPath stem i) ".o"))
       (splitLinkArgs stem jobs (+ i 1) acc)
     }))
 
@@ -2838,10 +2826,10 @@
         {
           (let v vecNew)
           {
-            (vecPush v (as (concat "-j=" (fmtInt jobs)) Int))
-            (vecPush v (as "-o" Int))
-            (vecPush v (as (concat stem ".part") Int))
-            (vecPush v (as llPath Int))
+            (vecPush v (concat "-j=" (fmtInt jobs)))
+            (vecPush v "-o")
+            (vecPush v (concat stem ".part"))
+            (vecPush v llPath)
             v
           }
         })
@@ -2876,8 +2864,8 @@
                         (let v (splitLinkArgs stem jobs 0 vecNew))
                         {
                           (appendLinkArgs v linkArgs 0)
-                          (vecPush v (as "-o" Int))
-                          (vecPush v (as outPath Int))
+                          (vecPush v "-o")
+                          (vecPush v outPath)
                           v
                         }
                       })

@@ -18,30 +18,11 @@
 # Four checks. The fourth is the ABLATION, which is this repository's
 # rule for a refusal: show what accepting the program does.
 #
-#   1. A PROGRAM THAT WRITES NO `region` EMITS NO REGION. `emit-llvm
-#      self_host/main.ax` - the largest program there is, and one that
-#      writes no region - contains no region cell. The claim this
-#      stands for is MM-RGN-4's: a program with no region is the
-#      one-region instance and emits what it emitted before. That was
-#      measured once, against the compiler built from the commit before
-#      this landed, byte for byte (the CHANGELOG entry carries the
-#      number). A gate cannot hold that against a compiler it does not
-#      have, so it holds the MECHANISM: the cell is emitted only by
-#      `emitRegion`, which only a `region` node reaches - and the
-#      positive half beside it, a program with two nested regions
-#      emits exactly two cells, so the count is not zero because the
-#      grep stopped matching.
-#
-#      The cell has two widths (`emitRegionCell`): three words, or
-#      four in a module with the owner registry, whose fourth word is
-#      the registry's counter (MM-EXEC-20). The registry is on in a
-#      module that makes resource owners and resets the arena
-#      (`resRegistryWanted`). `self_host` is one, and so is any
-#      program with a region that imports IO, whose `File` is an
-#      owner. So the negative counts both widths, and the positive
-#      half is two probes, one per width, each also asserting the
-#      registry state that picks its width: a grep for one width
-#      alone reads zero in a module that emits the other.
+#   1. NO REGION FORM, NO REGION CELL. A leaf program with no imports
+#      emits no mark cell. The positive controls emit two nested regions
+#      at each width: three words without owners and four with owners.
+#      The compiler itself imports Task, whose taskSpawn has a region,
+#      so it is no longer a negative witness for this property.
 #
 #   2. RECLAIM, AS A RATIO. One program, two spellings one word apart:
 #      a region that allocates and fills 64 KiB, four thousand times,
@@ -104,10 +85,10 @@ gate_build_axc axc
 
 # A region's mark cell in its two widths (`emitRegionCell`), and the
 # registry global whose presence picks the four-word one (MM-EXEC-20).
-# No other alloca has either shape: a recovery record is sixteen words
-# or more.
-CELL3='alloca i64, i64 3, align 16'
-CELL4='alloca i64, i64 4, align 16'
+# The emitter marks region cells explicitly: other runtime helpers may
+# allocate scratch records of the same width.
+CELL3='^[[:space:]]*%[^ ]* = alloca i64, i64 3, align 16 ; axiom region mark'
+CELL4='^[[:space:]]*%[^ ]* = alloca i64, i64 4, align 16 ; axiom region mark'
 REGISTRY='^@__axiom_res_seq = '
 
 onoff() { if [[ "$1" -eq 1 ]]; then echo on; else echo off; fi; }
@@ -115,20 +96,22 @@ onoff() { if [[ "$1" -eq 1 ]]; then echo on; else echo off; fi; }
 # ---------------------------------------------------------------
 # 1. no region, no cell - and two regions, two cells, in each width
 # ---------------------------------------------------------------
-echo "== 1. a program that writes no region emits no region cell =="
+echo "== 1. a program with no region forms emits no region cell =="
+cat > "$work/no-region.ax" <<'AX'
+(:: main Int)
+(fn (main) 0)
+AX
 checks=$((checks + 1))
-if ! "$axc" emit-llvm "$repo_root/self_host/main.ax" -o "$work/self.ll" >"$work/self.log" 2>&1; then
-  bad "could not emit self_host/main.ax"
-  sed 's/^/     /' "$work/self.log" | head -20
+if ! "$axc" emit-llvm "$work/no-region.ax" -o "$work/no-region.ll" >"$work/no-region.log" 2>&1; then
+  bad "could not emit the no-region probe"
+  sed 's/^/     /' "$work/no-region.log" | head -20
 else
-  c3=$(grep -c "$CELL3" "$work/self.ll" || true)
-  c4=$(grep -c "$CELL4" "$work/self.ll" || true)
-  reg=$(grep -c "$REGISTRY" "$work/self.ll" || true)
-  lines=$(wc -l < "$work/self.ll" | tr -d ' ')
+  c3=$(grep -c "$CELL3" "$work/no-region.ll" || true)
+  c4=$(grep -c "$CELL4" "$work/no-region.ll" || true)
   if [[ $((c3 + c4)) -eq 0 ]]; then
-    ok "self_host/main.ax: 0 region cells of either width in $lines lines of IR (owner registry $(onoff "$reg"))"
+    ok "no-region probe: 0 region cells of either width"
   else
-    bad "self_host/main.ax emits $c3 three-word and $c4 four-word region cell(s) and writes no region"
+    bad "no-region probe emits $c3 three-word and $c4 four-word region cell(s)"
   fi
 fi
 
@@ -283,7 +266,8 @@ abl="$work/tree"
 mkdir -p "$abl"
 cp -R "$repo_root/self_host" "$repo_root/stdlib" "$abl/" || {
   echo "FAIL: could not copy the tree to ablate" >&2; exit 1; }
-python3 - "$abl/self_host/typecheck.ax" <<'PY'
+checks=$((checks + 1))
+if ! python3 - "$abl/self_host/typecheck.ax" <<'PY'
 import sys, re
 p = sys.argv[1]
 s = open(p, encoding="utf-8").read()
@@ -301,28 +285,26 @@ while depth > 0:
     elif c == ")": depth -= 1
     k += 1
 new = head + "  1\n)\n"
-open(p, "w", encoding="utf-8").write(s[:i] + new + s[k:].lstrip("\n"))
+s = s[:i] + new + s[k:].lstrip("\n")
 # Second blind, same discipline: S3's region-form reporting would
 # refuse the probe through the facts (AX3060) with S2's scalar test
 # blinded, so the ablation silences that branch's report flag too -
 # the walk still runs, still stamps, and diagnoses nothing. Anchored
-# on the tc39 branch. Read fresh: the first splice moved every index after
-# it, so offsets computed before the re-read would land mid-line.
-s = open(p, encoding="utf-8").read()
+# on the tc39 branch. Find offsets after the first splice, and write
+# only after both anchors have matched.
 branch = "(if (== (memGetWord tc 39) 1)"
 b = s.find(branch)
-if b < 0:
+if s.count(branch) != 1:
     sys.exit("the tc39 branch moved, wanted 1")
-call = "(rgnPass tc (memGetWordVec tc 10) 0 1)"
+call = "(rgnPass tc (readAstNodes tc 10) 0 1)"
 c = s.find(call, b)
-if c < 0:
+if c < 0 or s.count(call) != 1:
     sys.exit("the tc39 report-1 walk moved, wanted 1")
-s = s[:c] + "(rgnPass tc (memGetWordVec tc 10) 0 0)" + s[c+len(call):]
+s = s[:c] + "(rgnPass tc (readAstNodes tc 10) 0 0)" + s[c+len(call):]
 open(p, "w", encoding="utf-8").write(s)
 PY
-checks=$((checks + 1))
-if [[ $? -ne 0 ]]; then
-  bad "could not apply the ablation - rgTyScalar has moved, and this gate is asserting nothing"
+then
+  bad "could not apply both ablation guards - a rule moved, and this gate is asserting nothing"
 elif ! gate_build_tree "$axc" "$abl" "$abl/stdlib" \
      "$work/axc-ablated" >"$work/ablated.build.log" 2>&1; then
   bad "the ablated compiler did not build"

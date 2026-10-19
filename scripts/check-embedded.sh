@@ -52,14 +52,14 @@
 #   A2  `1048576` appears in `codegen.ax` once, in the table. A second
 #       spelling is a target that cannot move its own chunk size.
 #   A3  The minimal program imports nothing but the platform's own
-#       startup set and makes exactly three distinct syscalls. On
+#       startup set and makes exactly ten distinct syscalls. On
 #       Mach-O its size is inside the 24 KiB flash budget; on ELF and
 #       PE the size is the linker's, so it is printed and not gated.
 #   A4  4.1: one target's chunk moves. Every line that differs is one
 #       the constant reaches, and the untouched targets are
 #       byte-identical.
 #   A5  4.2: the static target emits region, cursor, end and carve, no
-#       `mmap`, two distinct syscalls instead of three, and a trap that
+#       heap mappings, and a trap that
 #       names the arena. A control (same probe, same target, the tree's
 #       compiler) must show the opposite of each, or "no mmap" means
 #       nothing.
@@ -384,6 +384,19 @@ emit() {  # emit <compiler> <target> <source> <out> [extra flags...]
 # fourth syscall.
 syscall_nums() { grep 'asm sideeffect' "$1" | grep -o '"(i64 [0-9][0-9]*' | sed 's/^"(i64 //' | sort -un; }
 
+# Static heap storage and native guarded stacks have separate budgets.
+# Count actual mapping sites in both heap allocation paths, excluding
+# the runtime stack mappings that hosted executables still need.
+heap_maps() {
+  awk '
+    /^define / { heap = ($0 ~ /@(axiom_alloc|__axiom_arena_reset_keeping_fn)\(/) }
+    heap && /asm sideeffect/ && /i64 -1, i64 0/ { n++ }
+    heap && /call.*@VirtualAlloc\(/ { n++ }
+    END { print n + 0 }
+  ' "$1"
+}
+
+
 CHUNK_BIG='  %big = icmp ugt i64 %need, 1048576'
 CHUNK_R0='  %rounded0 = add i64 %need, 65535'
 CHUNK_RD='  %rounded = and i64 %rounded0, -65536'
@@ -487,9 +500,9 @@ else
     printf '%s\n' "$stray" | sed 's/^/       /'
     ok=0
   fi
-  if [[ "$nsc" != "3" ]]; then
-    bad "the minimal program makes $nsc distinct syscalls, not 3 (mmap, write, exit).
-     Section 2 calls the three the whole of it, and the port is priced on that."
+  if [[ "$nsc" != "10" ]]; then
+    bad "the minimal program makes $nsc distinct syscalls, expected 10:
+     allocator/traps and native guarded-stack setup, cleanup and signal forwarding."
     ok=0
   fi
   # A budget, not a golden: a Mach-O carries paths the linker chose, so
@@ -520,7 +533,7 @@ else
       bad "the minimal program is not a PE, ELF or Mach-O object ($fmt)"
       ok=0 ;;
   esac
-  (( ok )) && note "$size bytes, $undef import(s) and none outside the platform's startup set, exactly 3 distinct syscalls"
+  (( ok )) && note "$size bytes, $undef import(s) and none outside the platform's startup set, exactly 10 distinct syscalls"
 fi
 
 # ---------------------------------------------------------------------
@@ -629,20 +642,15 @@ elif (( same == untouched )); then
 fi
 
 # ---------------------------------------------------------------------
-echo "== A5. 4.2: the static target emits a region and no mmap =="
+echo "== A5. 4.2: the static target emits a region and no heap mappings =="
 # ---------------------------------------------------------------------
 checks=$((checks + 1))
 emit "$vaxc" "$host_target" "$work/min.ax" "$work/v.min.$host_target.ll" \
   || bad "[$host_target] the variant compiler could not emit"
 sll="$work/v.min.$host_target.ll"
 hll="$work/min.$host_target.ll"
-sn=$(syscall_nums "$sll" | grep -c . || true)
-hn=$(syscall_nums "$hll" | grep -c . || true)
-# `comm` needs both inputs in its own collation, but `syscall_nums`
-# sorts numerically: Linux's `1 9 231` is not in lexical order, and
-# `comm` answers wrongly on unsorted input instead of failing. Re-sort
-# both sides under the collation `comm` runs in.
-gone="$(LC_ALL=C comm -23 <(syscall_nums "$hll" | LC_ALL=C sort) <(syscall_nums "$sll" | LC_ALL=C sort) | tr '\n' ' ')"
+sn=$(heap_maps "$sll")
+hn=$(heap_maps "$hll")
 prob=0
 grep -q '^@__axiom_arena = internal global \[262144 x i8\] zeroinitializer, align 16$' "$sll" \
   || { bad "the static build reserves no region"; prob=1; }
@@ -654,13 +662,12 @@ grep -q '^  %ar_cur = load i64, ptr @__axiom_arena_cursor$' "$sll" \
   || { bad "the static build has a region and does not carve out of it"; prob=1; }
 grep -q 'out of memory (arena exhausted)' "$sll" \
   || { bad "the static build's out-of-memory trap still blames mmap"; prob=1; }
-if [[ "$sn" != "2" ]]; then
-  bad "the static build makes $sn distinct syscalls; with no mmap it must make 2"
+if [[ "$sn" != "0" ]]; then
+  bad "the static build still has $sn heap mapping site(s)"
   prob=1
 fi
-if [[ "$hn" != "3" ]]; then
-  bad "the CONTROL - same target, same probe, the tree's compiler - makes $hn
-     syscalls, not 3, so 'two' above would not mean 'mmap is gone'"
+if (( hn < 1 )); then
+  bad "the control has no heap mapping site, so the static-heap comparison proves nothing"
   prob=1
 fi
 # Anchored on the definition: `@__axiom_arena_mark_fn` and
@@ -673,7 +680,7 @@ if grep -q '^@__axiom_arena = ' "$hll"; then
 fi
 grep -q 'out of memory (mmap failed)' "$hll" \
   || { bad "the control's trap does not name mmap, so the message check compares nothing"; prob=1; }
-(( prob )) || note "region + cursor + carve, $hn syscalls become $sn (gone: ${gone:-none}), trap renamed"
+(( prob )) || note "region + cursor + carve, $hn heap mapping site(s) become $sn, trap renamed"
 
 # ---------------------------------------------------------------------
 echo "== A6. 4.2: and it runs =="
@@ -761,8 +768,8 @@ else
     || { bad "the ceiling build reserves no 262144-byte region"; prob=1; }
   grep -q '  %chunk = select i1 %big, i64 %rounded, i64 262144$' "$work/ceil.fit.ll" \
     || { bad "the ceiling build's growth unit is not capped by the region"; prob=1; }
-  if grep -qE 'mmap|VirtualAlloc' "$work/ceil.fit.ll"; then
-    bad "the ceiling build still asks the kernel for pages"; prob=1
+  if [[ "$(heap_maps "$work/ceil.fit.ll")" != 0 ]]; then
+    bad "the ceiling build still asks the kernel for heap pages"; prob=1
   fi
   grep -q 'out of memory (arena exhausted)' "$work/ceil.fit.ll" \
     || { bad "the ceiling build's trap still blames mmap"; prob=1; }

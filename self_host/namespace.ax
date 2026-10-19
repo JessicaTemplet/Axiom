@@ -274,7 +274,7 @@
 ; reference that gets past it lands here as a name this map does not
 ; hold and is emitted unchanged - an undefined symbol reported by
 ; `opt` against generated code.
-(pub :: mangleDecl (-> Int String Int Strings Strings Int Int))
+(pub :: mangleDecl (-> ASTNode String Int Strings Strings Int Int))
 (pub fn (mangleDecl node modName idx bares fulls exported)
   (if (== (as modName Int) 0)
     0
@@ -284,7 +284,7 @@
         {
           (let full (concat (concat (strDup (as modName String)) "$") (strDup bare)))
           {
-            (memSetWord node 1 full)
+            (writeNodeText node 1 full)
             (if (== exported 1)
               (mangleRecord idx bares fulls bare full)
               (mangleRecordSelf idx bares fulls full))
@@ -293,7 +293,7 @@
       }
       (if (== (nodeTag node) TAG_D_SIG)
         {
-          (memSetWord node 1
+          (writeNodeText node 1
             (concat (concat (strDup (as modName String)) "$") (strDup (nodeAName node))))
           0
         }
@@ -310,12 +310,12 @@
         ; reached from the one direction the entry-file fixtures could
         ; not see, because `recordEntryFns` covers only the entry file.
         (if (== (nodeTag node) TAG_D_EXTERN)
-          (mangleExternItems (nodeCVec node) 0 idx bares fulls modName)
+          (mangleExternItems (nodeCChildren node) 0 idx bares fulls modName)
           0)))))
 
 ; Record qualified identities for every item and bare names for the
 ; exported items. A private binding remains callable within its module.
-(pub :: mangleExternItems (-> Ints Int Int Strings Strings String Int))
+(pub :: mangleExternItems (-> (Vec ASTNode) Int Int Strings Strings String Int))
 (pub fn (mangleExternItems items i idx bares fulls modName)
   (if (== (as items Int) 0)
     0
@@ -343,10 +343,10 @@
 
 ; Apply the import filter to declaration names, or to individual extern
 ; items. Preserve the written public surface for repeat-import unions.
-(pub :: moduleDeclExport (-> Int String Ints Strings Int))
+(pub :: moduleDeclExport (-> ASTNode String Ints Strings Int))
 (pub fn (moduleDeclExport d mod mods filter)
   (if (== (nodeTag d) TAG_D_EXTERN)
-    (moduleExternExport (nodeCVec d) mod mods filter
+    (moduleExternExport (nodeCChildren d) mod mods filter
       (if (== (as mod Int) 0)
         1
         (nodeVis d))
@@ -359,7 +359,7 @@
         0)
     }))
 
-(pub :: moduleExternExport (-> Ints String Ints Strings Int Int Int Int))
+(pub :: moduleExternExport (-> (Vec ASTNode) String Ints Strings Int Int Int Int))
 (pub fn (moduleExternExport items mod mods filter writtenPub i visible)
   (if (>= i (vecLen items))
     visible
@@ -373,7 +373,7 @@
         {
           (if (&& (!= (as mod Int) 0) (== writtenPub 1))
             (modPubsAdd mods mod (nodeAName f)))
-          (memSetWord f 5 exported)
+          (writeNodeWord f 5 exported)
           (moduleExternExport items mod mods filter writtenPub (+ i 1)
             (if (== exported 1)
               1
@@ -544,17 +544,17 @@
         (modFilterWidenIn mods name widened (+ i 1)))
     }))
 
-(pub :: repeatExportExtern (-> Ints Strings Int Int))
+(pub :: repeatExportExtern (-> (Vec ASTNode) Strings Int Int))
 (pub fn (repeatExportExtern items delta i)
   (if (>= i (vecLen items))
     0
     {
       (if (seenHasIn delta (nodeAName (vecGet items i)) 0)
-        (memSetWord (vecGet items i) 5 1))
+        (writeNodeWord (vecGet items i) 5 1))
       (repeatExportExtern items delta (+ i 1))
     }))
 
-(pub :: externAnyVisible (-> Ints Int Int))
+(pub :: externAnyVisible (-> (Vec ASTNode) Int Int))
 (pub fn (externAnyVisible items i)
   (if (>= i (vecLen items))
     0

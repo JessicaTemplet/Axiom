@@ -1,0 +1,156 @@
+; Uuid: RFC 9562 versions 4 and 7, their text and byte forms, and the
+; seeded constructors. The seeded expectations below are the values
+; the Lehmer expansion in `stdlib/Uuid.ax` defines; the version and
+; variant positions and the version 7 timestamp are read back through
+; the public API rather than trusted from the printed form.
+(import IO)
+(import Str)
+(import Err)
+(import Fmt)
+(import Uuid)
+
+(:: check (-> String String String Int))
+;@axiom:effect(io)
+(fn (check name got want)
+  (if (strEq got want)
+    {
+      (println "ok   {name}")
+      0
+    }
+    {
+      (println "FAIL {name} got={got} want={want}")
+      1
+    }))
+
+(:: checkInt (-> String Int Int Int))
+;@axiom:effect(io)
+(fn (checkInt name got want)
+  (check name (fmtInt got) (fmtInt want)))
+
+(:: errText (-> Error String))
+(fn (errText e)
+  (concat "Err " (fmtInt (errCode e))))
+
+(:: parsed (-> String String))
+(fn (parsed s)
+  (match (uuidParse s)
+    ((Ok u) (uuidToString u))
+    ((Err e) (errText e))))
+
+(:: variantOk (-> Uuid Bool))
+(fn (variantOk u)
+  (== (& (strByte (uuidBytes u) 8) 192) 128))
+
+(:: liveV4 (-> String String))
+;@axiom:effect(io)
+;@axiom:effect(entropy)
+(fn (liveV4 name)
+  (match uuidV4
+    ((Ok u)
+      (if (&& (== (uuidVersion u) 4) (variantOk u))
+        (if (strEq (parsed (uuidToString u)) (uuidToString u))
+          "ok"
+          "roundtrip changed it")
+        "wrong shape")
+    )
+    ((Err e) (errText e))))
+
+(:: liveV7 (-> String String))
+;@axiom:effect(io)
+;@axiom:effect(entropy)
+(fn (liveV7 name)
+  (match uuidV7
+    ((Ok u)
+      (if (&& (== (uuidVersion u) 7) (variantOk u))
+        (match (uuidTimestampMs u)
+          ((Some ms)
+            (if (> ms 0)
+              "ok"
+              "no timestamp")
+          )
+          ((None) "no timestamp"))
+        "wrong shape")
+    )
+    ((Err e) (errText e))))
+
+(:: main ())
+;@axiom:effect(io)
+;@axiom:effect(entropy)
+(fn (main)
+  {
+    (check "nil text" (uuidToString uuidNil) "00000000-0000-0000-0000-000000000000")
+    (checkInt "nil isNil"
+      (if (uuidIsNil uuidNil)
+        1
+        0)
+      1)
+    (checkInt "nil version" (uuidVersion uuidNil) 0)
+    (check "parse canonical" (parsed "550e8400-e29b-41d4-a716-446655440000")
+      "550e8400-e29b-41d4-a716-446655440000")
+    (check "parse upper case" (parsed "550E8400-E29B-41D4-A716-446655440000")
+      "550e8400-e29b-41d4-a716-446655440000")
+    (check "parse empty" (parsed "") "Err 1501")
+    (check "parse hyphenless" (parsed "550e8400e29b41d4a716446655440000") "Err 1501")
+    (check "parse braced" (parsed "{550e8400-e29b-41d4-a716-446655440000}") "Err 1501")
+    (check "parse bad hex" (parsed "550e8400-e29b-41d4-a716-44665544000g") "Err 1501")
+    (check "parse hyphen moved" (parsed "550e8400e-29b-41d4-a716-446655440000") "Err 1501")
+    (checkInt "version of parsed v4"
+      (match (uuidParse "550e8400-e29b-41d4-a716-446655440000")
+        ((Ok u) (uuidVersion u))
+        ((Err e) -1))
+      4)
+    (check "v4 from zero bytes"
+      (match (uuidV4FromBytes (uuidBytes uuidNil))
+        ((Ok u) (uuidToString u))
+        ((Err e) (errText e)))
+      "00000000-0000-4000-8000-000000000000")
+    (check "v7 from zero bytes"
+      (match (uuidV7FromBytes 1700000000000 (uuidBytes uuidNil))
+        ((Ok u) (uuidToString u))
+        ((Err e) (errText e)))
+      "018bcfe5-6800-7000-8000-000000000000")
+    (checkInt "v7 timestamp read back"
+      (match (uuidV7FromBytes 1700000000000 (uuidBytes uuidNil))
+        ((Ok u)
+          (match (uuidTimestampMs u)
+            ((Some ms) ms)
+            ((None) -1))
+        )
+        ((Err e) -1))
+      1700000000000)
+    (check "bytes too short"
+      (match (uuidFromBytes "short")
+        ((Ok u) (uuidToString u))
+        ((Err e) (errText e)))
+      "Err 1501")
+    (checkInt "bytes roundtrip"
+      (match (uuidFromBytes (uuidBytes (uuidV4Seeded 42)))
+        ((Ok u)
+          (if (uuidEq u (uuidV4Seeded 42))
+            1
+            0)
+        )
+        ((Err e) 0))
+      1)
+    (check "seeded v4 seed 0" (uuidToString (uuidV4Seeded 0))
+      "8fe2467d-f123-4159-837f-236fab4da903")
+    (check "seeded v4 seed 42" (uuidToString (uuidV4Seeded 42))
+      "05f9db25-a4e9-4104-8c74-e4bdd2117c97")
+    (check "seeded v7 seed 42" (uuidToString (uuidV7Seeded 42 1700000000000))
+      "018bcfe5-6800-7104-8c74-e4bdd2117c97")
+    (checkInt "seeded is deterministic"
+      (if (uuidEq (uuidV4Seeded 7) (uuidV4Seeded 7))
+        1
+        0)
+      1)
+    (checkInt "different seeds differ"
+      (if (uuidEq (uuidV4Seeded 7) (uuidV4Seeded 8))
+        0
+        1)
+      1)
+    (checkInt "compare nil below seeded" (uuidCompare uuidNil (uuidV4Seeded 42)) -1)
+    (checkInt "compare equal" (uuidCompare (uuidV4Seeded 42) (uuidV4Seeded 42)) 0)
+    (checkInt "v7 sorts by time" (uuidCompare (uuidV7Seeded 1 1000) (uuidV7Seeded 1 2000)) -1)
+    (check "live v4 shape and roundtrip" (liveV4 "live v4") "ok")
+    (check "live v7 shape and timestamp" (liveV7 "live v7") "ok")
+  })

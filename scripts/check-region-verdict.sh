@@ -9,9 +9,10 @@
 #
 # WHY FIXTURES, NOT THE COMPILER ITSELF, FOR THE REGION HALF. §1.1's
 # ablation ran on the compiler's own IR because the traffic it deleted
-# was everywhere. S4's region traffic is not: `self_host` holds no
-# region form, so the compiler's own IR is byte-identical with the
-# region elisions on or off - pinned by the slice gates' baselines -
+# was everywhere. Compiler source has no explicit region form, and
+# Task's imported region changes no region release in this workload.
+# The slice gates hold the compiler IR identical with region elisions
+# on or off,
 # and a verdict run there would assert a zero and prove nothing. The
 # verdict runs where the traffic is: the six S4 fixtures, each under
 # the compiler under test against ONE fully-ablated compiler with
@@ -35,7 +36,7 @@
 #   W1. THE §1.1 WORKLOAD ITSELF. Both compilers emit
 #       `self_host/main.ax`: the ablated IR carries thousands more
 #       releases, every restored one on a `@strhdr_*` literal (the
-#       region kills are inert where no region form stands), the IR
+#       region kills are inert in this workload), the IR
 #       diff is release traffic and dependent ownership guards. The
 #       emitting compiler's own peak RSS holds its ratio. The elisions delete
 #       calls that free nothing, so the emit cannot cost memory.
@@ -163,7 +164,7 @@ cg = cg[:j] + "0" + cg[j + len("(pairSlot cg 9)"):]
 
 # Kill 3, slice 5: turn off only the literal branch. Named function
 # descriptors keep their static sentinel, isolating the string traffic.
-pat = re.compile(r"(\(pub fn \(isStaticSentinelNode cg e\)\s+\(if \(== e 0\)\s+0\s+\(if \(== \(nodeTag e\) TAG_E_STR\)\s+)1(?=\s)")
+pat = re.compile(r"(\(pub fn \(isStaticSentinelNode cg e\)\s+\(if \(nodeSame e nilNode\)\s+0\s+\(if \(== \(nodeTag e\) TAG_E_STR\)\s+)1(?=\s)")
 if len(pat.findall(cg)) != 1:
     sys.exit("kill 3: literal sentinel branch found %d times, wanted 1" % len(pat.findall(cg)))
 cg = pat.sub(r"\g<1>0", cg, count=1)
@@ -206,7 +207,7 @@ if [[ -f "$work/axc-ablated" ]]; then
     if (( n_abl - n_new < 1000 )); then
       bad "self_host release delta is $((n_abl - n_new)) ($n_abl ablated, $n_new under test), wanted thousands"
     elif (( st_abl - st_new != n_abl - n_new )); then
-      bad "self_host delta is $((n_abl - n_new)) releases but only $((st_abl - st_new)) on literals - a region kill fired where no region stands"
+      bad "self_host delta is $((n_abl - n_new)) releases but only $((st_abl - st_new)) on literals - a region optimisation changed a nonliteral release in this workload"
     else
       # Restored releases flip `musttail` decisions downstream (a
       # pending release kills the jump, so the ablated arm branches
@@ -225,7 +226,9 @@ if [[ -f "$work/axc-ablated" ]]; then
       # vocabulary is the ablation moving something else. A forwarded
       # call result also needs a retain before an argument is released.
       # Normalise that guard only when the adjacent call, result and
-      # restored literal release establish the dependency.
+      # restored literal release establish the dependency. A matching
+      # peer musttail call also removes its return-slot store; the
+      # comparison checks that dependency before normalising it.
       # The residual looseness - a breakage spelled entirely
       # in flip words - is stated, and is covered from the other
       # side by the static-equality above (every restored release
@@ -268,10 +271,101 @@ for index, replacement in [(2, '  %result = call i64 @forward(i64 %heap)'),
     mutant[index] = replacement
     assert not literal_result_guards(mutant), (index, replacement)
 
-def norm(p):
+def call_key(function, callee, args):
+    args = re.sub(r"%t\d+|%\.\w*\d+", "%RN", args)
+    return function, callee, args
+
+def tail_calls(lines):
+    calls, function = Counter(), None
+    for line in lines:
+        start = re.match(r'define [^@]*@([^ (]+)', line)
+        if start:
+            function = start.group(1)
+        call = re.fullmatch(r'\s*%[.\w]+ = musttail call i64 @([^ (]+)\((.*)\)\s*', line)
+        if call:
+            calls[call_key(function, *call.groups())] += 1
+    return calls
+
+def literal_merge_stores(lines, peer_tails):
+    """Only a literal-release-induced call-to-tail flip's result stores.
+
+    Require the peer's matching musttail call, a released literal
+    argument, the exact three-instruction store of the call's result,
+    and a slot loaded on the function's return dependency graph.
+    """
+    skip, function, start = set(), None, 0
+    for end, line in enumerate(lines):
+        head = re.match(r'define [^@]*@([^ (]+)', line)
+        if head:
+            function, start = head.group(1), end
+        if line.strip() != '}' or function is None:
+            continue
+        body = lines[start:end + 1]
+        defs, roots = {}, []
+        for text in body:
+            definition = re.match(r'\s*(%[.\w]+) = (.*)', text)
+            if definition:
+                defs[definition.group(1)] = definition.group(2)
+            ret = re.fullmatch(r'\s*ret i64 (%[.\w]+)\s*', text)
+            if ret:
+                roots.append(ret.group(1))
+        seen = set()
+        while roots:
+            value = roots.pop()
+            if value not in seen:
+                seen.add(value)
+                roots.extend(re.findall(r'%[.\w]+', defs.get(value, '')))
+        slots = {match.group(1) for value in seen
+                 if (match := re.fullmatch(r'inttoptr i64 (%[.\w]+) to ptr', defs.get(value, '')))}
+        literals = set()
+        for i in range(start, end - 4):
+            literal = re.match(r'\s*(%[.\w]+) = ptrtoint .*@strhdr_\d+\b', lines[i])
+            if literal:
+                literals.add(literal.group(1))
+            call = re.fullmatch(r'\s*(%[.\w]+) = call i64 @([^ (]+)\((.*)\)\s*', lines[i])
+            release = re.fullmatch(r'\s*call void @axiom_release\(i64 (%[.\w]+)\)\s*', lines[i + 1])
+            base = re.fullmatch(r'\s*(%[.\w]+) = inttoptr i64 (%[.\w]+) to ptr\s*', lines[i + 2])
+            field = re.fullmatch(r'\s*(%[.\w]+) = getelementptr i64, ptr (%[.\w]+), i64 0\s*', lines[i + 3])
+            store = re.fullmatch(r'\s*store i64 (%[.\w]+), ptr (%[.\w]+)\s*', lines[i + 4])
+            if not all((call, release, base, field, store)):
+                continue
+            key = call_key(function, call.group(2), call.group(3))
+            if (peer_tails[key] and release.group(1) in literals
+                    and re.search(r'\bi64 ' + re.escape(release.group(1)) + r'(?=[,)])', call.group(3) + ')')
+                    and base.group(2) in slots and field.group(2) == base.group(1)
+                    and store.groups() == (call.group(1), field.group(1))):
+                skip.update(range(i + 2, i + 5))
+                peer_tails[key] -= 1
+        function = None
+    return skip
+
+# A return slot and its peer tail call are both required; arbitrary
+# field stores and unrelated call results stay in the comparison.
+merge_probe = ['define i64 @probe(i64 %heap) {',
+               '  %lit = ptrtoint ptr @strhdr_1 to i64',
+               '  %result = call i64 @forward(i64 %heap, i64 %lit)',
+               '  call void @axiom_release(i64 %lit)',
+               '  %p = inttoptr i64 %slot to ptr',
+               '  %q = getelementptr i64, ptr %p, i64 0',
+               '  store i64 %result, ptr %q',
+               '  %p2 = inttoptr i64 %slot to ptr',
+               '  %q2 = getelementptr i64, ptr %p2, i64 0',
+               '  %answer = load i64, ptr %q2', '  ret i64 %answer', '}']
+peer = Counter({call_key('probe', 'forward', 'i64 %heap, i64 %lit'): 1})
+assert literal_merge_stores(merge_probe, peer.copy()) == {4, 5, 6}
+assert not literal_merge_stores(merge_probe, Counter())
+for index, replacement in [(6, '  store i64 %heap, ptr %q'),
+                           (5, '  %q = getelementptr i64, ptr %p, i64 1'),
+                           (3, '  call void @axiom_release(i64 %heap)'),
+                           (10, '  ret i64 %heap')]:
+    mutant = merge_probe.copy()
+    mutant[index] = replacement
+    assert not literal_merge_stores(mutant, peer.copy()), (index, replacement)
+
+def norm(p, peer):
     out = []
     lines = open(p, encoding="utf-8", errors="replace").readlines()
-    guards = literal_result_guards(lines)
+    guards = literal_result_guards(lines) | literal_merge_stores(lines, tail_calls(peer))
     for i, L in enumerate(lines):
         if i in guards or "call void @axiom_release" in L:
             continue
@@ -280,7 +374,7 @@ def norm(p):
         L = re.sub(r"\.L+\d+", ".LN", L)
         out.append(L)
     return out
-a, b = norm(sys.argv[1]), norm(sys.argv[2])
+a, b = norm(sys.argv[1], open(sys.argv[2]).readlines()), norm(sys.argv[2], open(sys.argv[1]).readlines())
 import tempfile, os
 fa = tempfile.NamedTemporaryFile("w", delete=False); fa.write("".join(a)); fa.close()
 fb = tempfile.NamedTemporaryFile("w", delete=False); fb.write("".join(b)); fb.close()

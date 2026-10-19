@@ -41,6 +41,132 @@ class TracedClient(Client):
         assert self.traces == ['semantic cache ' + ('hit' if reuse else 'miss')], self.traces
         return result
 
+    def cached(self, method, params, reuse):
+        self.traces.clear()
+        result = self.request(method, params)
+        assert self.traces == ['semantic cache ' + ('hit' if reuse else 'miss')], (
+            method, self.traces)
+        return result
+
+    def publication(self, uri, version):
+        """Wait for analysis without putting a barrier query in the cache."""
+        while True:
+            message = self.inbox.get(timeout=45)
+            if isinstance(message, BaseException):
+                raise message
+            if message.get('method') == 'textDocument/publishDiagnostics':
+                self.publications.append(message['params'])
+                if (message['params']['uri'] == uri
+                        and message['params'].get('version') == version):
+                    return message['params']
+            else:
+                assert message.get('method') == '$/logTrace', message
+
+
+def retention(compiler, directory):
+    directory.mkdir()
+    uri = (directory / 'main.ax').as_uri()
+    source = '(:: value Int)\n(fn (value) 7)\n'
+    document = {'textDocument': {'uri': uri}}
+    client = TracedClient(compiler)
+    try:
+        client.request('initialize', {'trace': 'verbose'})
+        client.send('textDocument/didOpen', {'textDocument': {
+            'uri': uri, 'languageId': 'axiom', 'version': 1, 'text': source}})
+        client.publication(uri, 1)
+
+        def point(character):
+            return {**document, 'position': {'line': 0, 'character': character}}
+
+        # Nine tiny entries exercise the count limit independently of bytes.
+        # FIFO removes only the oldest, so all eight survivors must still hit.
+        for character in range(9):
+            client.cached('textDocument/hover', point(character), reuse=False)
+        for character in range(1, 9):
+            client.cached('textDocument/hover', point(character), reuse=True)
+        client.cached('textDocument/hover', point(0), reuse=False)
+
+        # Eight reusable query replies fill the original capacity. A cursor
+        # query must bypass retention without evicting any of them.
+        protected = [{'query': '__protected_%d__' % n} for n in range(9)]
+        for params in protected[:8]:
+            assert client.cached('workspace/symbol', params, reuse=False) == []
+        for _ in range(2):
+            client.cached('textDocument/hover', point(42), reuse=False)
+        for params in protected[:8]:
+            assert client.cached('workspace/symbol', params, reuse=True) == []
+        client.cached('workspace/symbol', protected[0], reuse=True)
+
+        # A ninth reusable reply evicts only the oldest reusable entry.
+        client.cached('workspace/symbol', protected[8], reuse=False)
+        for params in protected[1:]:
+            client.cached('workspace/symbol', params, reuse=True)
+        client.cached('workspace/symbol', protected[0], reuse=False)
+
+        # A new revision starts empty. Repeated cursor traffic must leave
+        # unrelated whole-document replies reusable, with unchanged answers.
+        client.send('textDocument/didChange', {'textDocument': {'uri': uri, 'version': 2},
+            'contentChanges': [{'text': source}]})
+        client.publication(uri, 2)
+        whole = [
+            ('textDocument/documentSymbol', document),
+            ('textDocument/foldingRange', document),
+            ('textDocument/formatting', {**document,
+                'options': {'tabSize': 2, 'insertSpaces': True}}),
+        ]
+        answers = [client.cached(method, params, reuse=False) for method, params in whole]
+        for character in range(12):
+            client.cached('textDocument/hover', point(character), reuse=False)
+            for (method, params), expected in zip(whole, answers):
+                assert client.cached(method, params, reuse=True) == expected
+        client.cached('textDocument/hover', point(11), reuse=True)
+        client.cached('textDocument/hover', point(0), reuse=False)
+
+        changed = source.replace('7', '8')
+        client.send('textDocument/didChange', {'textDocument': {'uri': uri, 'version': 3},
+            'contentChanges': [{'text': changed}]})
+        client.publication(uri, 3)
+        revised = [client.cached(method, params, reuse=False) for method, params in whole]
+        assert revised[2] != answers[2], (answers[2], revised[2])
+        client.send('textDocument/didChange', {'textDocument': {'uri': uri, 'version': 2},
+            'contentChanges': [{'text': source}]})
+        for (method, params), expected in zip(whole, revised):
+            assert client.cached(method, params, reuse=True) == expected
+
+        # Each observed dependency contributes just over 900 KB to an entry,
+        # below the one-MiB entry limit. Four fit within four MiB, five do not;
+        # six keys stay below the eight-entry count limit. This isolates byte
+        # eviction and requires surviving entries to remain reusable.
+        bulk = directory / 'Bulk.ax'
+        padding = ';' + 'x' * 900000 + '\n'
+        bulk.write_text('(pub :: boundValue Int)\n(pub fn (boundValue) 7)\n' + padding)
+        imported = '(import Bulk)\n(:: consume Int)\n(fn (consume) boundValue)\n'
+        client.send('textDocument/didChange', {'textDocument': {'uri': uri, 'version': 4},
+            'contentChanges': [{'text': imported}]})
+        client.publication(uri, 4)
+        start = imported.splitlines()[2].index('boundValue')
+        points = [{**document, 'position': {'line': 2, 'character': start + n}}
+                  for n in range(6)]
+        for params in points:
+            assert 'Int' in json.dumps(client.cached('textDocument/hover', params, reuse=False))
+        for params in points[2:]:
+            client.cached('textDocument/hover', params, reuse=True)
+        client.cached('textDocument/hover', points[1], reuse=False)
+
+        # Protected replies still validate exact disk inputs on every reuse.
+        symbols = {'query': 'boundValue'}
+        answer = client.cached('workspace/symbol', symbols, reuse=False)
+        assert 'boundValue' in json.dumps(answer), answer
+        assert client.cached('workspace/symbol', symbols, reuse=True) == answer
+        bulk.write_text('(pub :: boundValue String)\n(pub fn (boundValue) "changed")\n' + padding)
+        client.cached('workspace/symbol', symbols, reuse=False)
+        client.cached('workspace/symbol', symbols, reuse=True)
+        client.close()
+    finally:
+        if client.process.poll() is None:
+            client.process.kill()
+            client.process.wait()
+
 
 def run(compiler):
     with tempfile.TemporaryDirectory(prefix='axiom-lsp-cache-') as temporary:
@@ -101,7 +227,7 @@ def run(compiler):
             client.hover(uri, 'String', reuse=False)
 
             # The cache is bounded independently of the number of cursor
-            # positions requested. A ninth distinct key evicts the old set.
+            # positions requested. Cursor entries expire individually.
             client.hover(uri, 'String', reuse=True)
             for character in range(10):
                 client.request('textDocument/hover', {
@@ -165,7 +291,8 @@ def run(compiler):
                 'textDocument': {'uri': uri}, 'position': {'line': 2, 'character': 16}})
             assert not client.traces, client.traces
             client.close()
-            print('ok   semantic cache reuse, exact file inputs, search precedence, package roots, revisions and bounds')
+            retention(compiler, base / 'retention')
+            print('ok   semantic cache reuse, mixed providers, FIFO count/byte bounds, exact file inputs, search precedence, package roots and revisions')
         finally:
             if original_path is None:
                 os.environ.pop('AXIOM_PATH', None)

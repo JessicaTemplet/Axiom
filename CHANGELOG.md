@@ -34,6 +34,129 @@ its changelog too.
   `scripts/check-recover.sh`; `tests/testrunner/mixed-tests.ax` was
   run by hand on Windows 11 x86-64.
 
+- Guarded task stacks reinstall signal state after `fork`, reusing
+  their mapped alternate stack. A task overflow reports status 86
+  and a backtrace in both concurrency lowerings. Tested by
+  `tests/stdlib/920-task-stack.ax` and `scripts/check-task.sh`.
+
+- Effect inference charges closure construction to its creation site,
+  including an immediately called closure or an ignored callback.
+  `restrict(no-alloc)` refuses these allocations. Tested by
+  `scripts/check-unboxed-sums.sh`.
+
+- Native POSIX executables and worker threads use guarded stacks.
+  Overflow exits 86 with a named backtrace from the interrupted frame;
+  unrelated faults retain their signal status. Explicit task stack
+  budgets use the same runtime. Tested by
+  `tests/stdlib/977-native-stack-overflow.ax` and
+  `scripts/check-trap-statuses.sh`.
+
+- The formatter preserves an uppercase match binder followed by a
+  parenthesised body. Region checks use a leaf program
+  as their negative witness; the compiler imports Task, which uses a
+  region. Region cells carry an explicit IR marker.
+  Tested by `tests/stdlib/976-uppercase-pattern-binder.ax` and
+  `scripts/check-region-scope.sh`.
+
+- Darwin backtrace tables use relative addresses in read-only text.
+  Minimal executables avoid an extra 16 KiB data segment while retaining
+  named stack traces. Tested by `scripts/check-backtrace.sh` and
+  `scripts/check-embedded.sh`.
+
+- Released payloads above 64 KiB use reusable power-of-two capacity
+  classes. Large leaves, mapped records and arrays preserve their
+  ownership maps, are scrubbed on reuse and count both headers in
+  allocator statistics. Arena resets clear all classes. Tested by
+  `tests/stdlib/974-large-block-reuse.ax` and
+  `scripts/check-runtime-model.sh`.
+
+- The AXQLite editor has object navigation, bounded row previews,
+  filtering, refresh and collapsible schemas. It follows VS Code's
+  colours and keeps database text escaped behind a content security
+  policy. Tested by `editors/vscode/scripts/axqlite-smoke.mjs`.
+
+- Native tool arguments use string vectors throughout assembly, split
+  compilation, binding generation, crate builds, fetch and REPL calls.
+  The driver keeps their types until the syscall boundary. Tested by
+  `scripts/check-driver.sh` and `scripts/check-bootstrap.sh`.
+
+- Seeded UUID constructors have deterministic property coverage across
+  versions 4 and 7, text and byte roundtrips, timestamp extraction and
+  unsigned ordering. Tested by `tests/stdlib/973-uuid-properties.ax`.
+
+- VS Code Run and documentation commands use a terminal with known
+  quoting rules, including PowerShell's invocation operator on Windows.
+  They work with Nushell as the default terminal and with apostrophes
+  in paths. Tested by `editors/vscode/scripts/client-smoke.mjs`.
+
+- Compiler effect values use checked variants for named functions and
+  lambdas. Effect rows, handler masks and scope parameters use their
+  concrete vector types. Stored lambdas contribute their effects at
+  field calls, including captured named callbacks. Effect restrictions
+  are checked against known callback arguments and follow forwarding
+  functions and captured lambdas. Tested by
+  `tests/diagnostics/1462-lambda-field-effects.ax` and
+  `tests/diagnostics/1463-callback-restrictions.ax`. Stored lambda cast
+  facts also preserve deep cast restrictions, tested by
+  `tests/diagnostics/1464-lambda-field-casts.ax`.
+
+- Region analysis visits declarations with a loop, so its stack use
+  stays independent of the number of declarations. Tested by
+  `scripts/check-stack-depth.sh`.
+
+- Bare nullary constructors in patterns test their constructor. Match
+  arms covered by an earlier arm report `AX3134`. Duplicate constructor
+  names and empty literal subtype ranges are refused. Extra function
+  arguments name the function and its arity; numeric literals joined
+  to names and unmatched closing parentheses receive direct diagnostics.
+  Tested by `tests/selfhost/485-bare-ctor-binder.ax` and
+  `tests/diagnostics/1457-duplicate-constructors.ax`.
+
+- Integer remainder by -1 returns zero for the smallest signed value,
+  while division keeps its overflow trap. Tested by
+  `tests/stdlib/971-intmin-rem.ax`.
+
+- Rust-host accessor shims spell `(Vec Int)` directly, so generated
+  library code does not depend on compiler-internal aliases. Tested by
+  `scripts/check-ffi.sh`.
+
+- A macro rule whose pattern does not open with the macro's own name
+  is now refused with `AX3133` (`macro-pattern-head`), naming both
+  names, instead of a bare `AX2003`. Tested by
+  `tests/diagnostics/613-macro-pattern-head.axbad` and
+  `scripts/check-render-selfhost.sh`.
+
+- The language server collapses queued edits per document: while a
+  worker is busy, a newer queued `didChange` replaces the queued one
+  for the same document, and a queued `didClose` drops its queued
+  edits, so a burst of typing no longer earns a full check per
+  intermediate version. Tested by `tests/lsp/queued-changes.py` in
+  `scripts/check-lsp-selfhost.sh`.
+
+- Type references inside a type alias's target are found by the
+  language server again: `(type Alias (Option Shape))` contributes
+  its `Shape` occurrence to definition and references, split by the
+  alias's own parameter list rather than the removed `=` marker.
+  Tested by `scripts/check-lsp-selfhost.sh`.
+
+- `axiom fmt` refuses `(type Name = Target)`, as `axiom check` does:
+  `(type Name Target)` is the one alias form every surface accepts.
+  The formatter no longer rewrites the `=` spelling. Tested by
+  `scripts/check-fmt.sh`.
+
+- `axiom doc` renders in the brand palette: the graphite and
+  electric-lime tokens of `web/src/styles/tokens.css`, dark by
+  default with the site's light variant under
+  `prefers-color-scheme: light`. Tested by `scripts/check-doc-drift.sh`.
+
+- The VS Code extension browses AXQLite databases: an explorer view
+  lists `.db`, `.axqlite` and `.axql` files down to their rows, a
+  summary command and a read-only custom editor show the same
+  content, and the Axiom file-icons theme gives databases a database
+  icon and `axiom.pkg` a package icon. Tested by
+  `editors/vscode/scripts/axqlite-smoke.mjs` against the format in
+  `docs/axqlite-format.md`, and the extension's `npm run check`.
+
 - Codegen ownership and flow facts now converge as a worklist:
   after one full pass, rounds re-walk only the callers of functions
   whose summaries moved, over a caller index whose counts ride on

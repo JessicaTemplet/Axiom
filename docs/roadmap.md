@@ -58,6 +58,8 @@ integrator would still need.
 | Final reference results from calls with surplus arguments own one share through temporaries, returns and generic field stores | Done | `tests/stdlib/962-overapplied-result-ownership.ax` |
 | `vecFree` and `mapFree` leave safe code, so an early drop can't free a block still in use | Done | `tests/stdlib/406-array-form-large-block.ax`, `tests/stdlib/489-map-free.ax` |
 | CI builds the compiler with a poisoned allocator and checks it still reaches its fixpoint | Done | `scripts/check-poisoned-alloc.sh` |
+| Released blocks larger than 64 KiB can be reused | Done | `MM-ALLOC-25`, `tests/stdlib/974-large-block-reuse.ax` |
+| Stack overflow reports a named runtime trap | Native POSIX entry, worker and task stacks; bare-metal guard | `tests/stdlib/977-native-stack-overflow.ax`; Windows and host-owned archive stacks remain |
 | No cast, `Int` container or raw store lets a heap value become an untracked word in safe code | Not started | `MM-VAL-24` |
 | Raw-address functions and the word-to-reference accessors (`vecGetStr`, `vecGetVec`, `memGetWordStr`, `memGetWordVec`) leave the public library, so safe code can't forge an address or a reference | Not started | `MM-EXEC-9d` |
 | `fileFd` and the raw descriptor calls can't close a descriptor a `File` owns | Done | `MM-EXEC-17a`, `tests/diagnostics/1225-descriptor-hole.ax` |
@@ -70,6 +72,11 @@ integrator would still need.
 
 | Item | State | Where it's specified or tested |
 |---|---|---|
+| Compiler data uses typed structures and checked effect boundaries across every phase | In progress | Typed AST and effect values cross every phase; packed registry and frame storage remains |
+| Native tool arguments keep their string vector type to the syscall boundary | Done | `scripts/check-driver.sh`, `scripts/check-bootstrap.sh` |
+| Known callback arguments honour effect restrictions through forwarding and captures | Done | `tests/diagnostics/1463-callback-restrictions.ax` |
+| Stored lambdas contribute their resolved effects at field calls | Done | `tests/diagnostics/1462-lambda-field-effects.ax` |
+| Stored lambdas retain cast facts for deep restrictions | Done | `tests/diagnostics/1464-lambda-field-casts.ax` |
 | Contracts are visible in hover, signature help, completion and generated documentation | Done | `tests/lsp/drive.py`, `scripts/check-stdlib-api.sh` |
 | Contracts diagnose certainly false calls and postconditions at compile time | Planned | |
 | A misspelt checked AXTAG key is an error | Done | `AX3039` |
@@ -126,6 +133,7 @@ ADT instantiation.
 | Item | State | Where it's specified or tested |
 |---|---|---|
 | Shorter, consistent names, with duplicates removed and internals private | In progress | `compat/BREAKING` |
+| UUID versions 4 and 7 with injected randomness and deterministic seeded constructors | Done | `tests/stdlib/970-uuid.ax`, `tests/stdlib/973-uuid-properties.ax` |
 | Failure answers a `Result` or `Option`, never a sentinel | In progress | `ERR-ADOPT-1`, `compat/SENTINELS` |
 | `Map` is generic, and `vecSortBy` takes a typed comparator | Done | `tests/stdlib/081-map-value-type.ax`, `tests/stdlib/405-vec-sort.ax` |
 | `Par` folds into `Task` | Done | `tests/stdlib/476-par-pool.ax`, `tests/stdlib/492-par-pool-checked.ax` |

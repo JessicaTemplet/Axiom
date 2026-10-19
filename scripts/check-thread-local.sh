@@ -7,14 +7,15 @@
 # `@__axiom_` globals in `self_host/codegen.ax`.
 #
 #   @__axiom_bump  _bump_end  _chunk  _free  _high   the allocator's
-#   @__axiom_slabs                                   4,097 class heads
+#   @__axiom_slabs                                   4,143 class heads
 #   @__axiom_recover_top                             the armed point
 #   @__axiom_ev_<Effect>                             one per effect
 #
 # A threaded program also moves the child registry's two globals
 # (MM-PAR-7), for ten, and one that makes resource owners and resets
 # the arena moves the owner registry's three (MM-EXEC-20), for
-# thirteen. `@__axiom_argc` and `@__axiom_argv` stay shared:
+# thirteen. The guard bounds and alternate signal stack add four more,
+# for seventeen. `@__axiom_argc` and `@__axiom_argv` stay shared:
 # `@main`'s prologue writes them once, before any thread can exist.
 #
 # A program that spawns no thread must emit no thread-local storage. On
@@ -161,6 +162,7 @@ tl_on="$(grep -c '= internal thread_local(localexec) global' "$work/on.ll" || tr
 wrong=0
 for g in __axiom_bump __axiom_bump_end __axiom_chunk __axiom_free \
          __axiom_high __axiom_slabs __axiom_recover_top __axiom_ev_Console \
+         __axiom_stack_lo __axiom_stack_hi __axiom_stack_top __axiom_stack_alt \
          __axiom_par_live __axiom_par_seq \
          __axiom_res_head __axiom_res_seq __axiom_res_unwinding; do
   if ! grep -q "^@$g = internal thread_local(localexec) global" "$work/on.ll"; then
@@ -173,18 +175,18 @@ for g in __axiom_bump __axiom_bump_end __axiom_chunk __axiom_free \
   fi
 done
 if [[ "$wrong" == 0 ]]; then
-  ok "all thirteen globals moved to thread_local(localexec)"
+  ok "all seventeen globals moved to thread_local(localexec)"
 fi
-# Thirteen: the eight, the child registry's head and sequence counter
+# Seventeen: the four stack-guard words, the eight, the child registry's head and sequence counter
 # (MM-PAR-7), and the owner registry's head, counter and unwinding flag
 # (MM-EXEC-20): the probe imports IO, which makes owners, and arms a
 # recovery point. Both registries are per thread because each thread
 # sweeps the children it spawned and resets its own arena. A shared list
 # would have two threads linking into one unsynchronised structure.
-if [[ "$tl_on" == 13 ]]; then
-  ok "and $tl_on thread_local global(s) in the whole module - the eight and the registries' five, nothing else"
+if [[ "$tl_on" == 17 ]]; then
+  ok "and $tl_on thread_local global(s) in the whole module - the eight, the registries' five and the four stack-guard words"
 else
-  bad "$tl_on thread_local globals, expected exactly 13"
+  bad "$tl_on thread_local globals, expected exactly 17"
   grep 'thread_local' "$work/on.ll" | sed 's/^/     /' | head -12
 fi
 # argc/argv must not move: they are written once in @main's prologue,

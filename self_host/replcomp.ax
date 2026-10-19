@@ -297,18 +297,18 @@
 ; printer. Asked about a `fn` and about a bare signature, and about
 ; nothing else - a `data` or a `struct` has no signature to find, and
 ; the scan is the length of the declaration list.
-(pub :: replComplSigOf (-> String Ints Int String))
+(pub :: replComplSigOf (-> String (Vec ASTNode) ASTNode String))
 (pub fn (replComplSigOf src decls d)
   (if (|| (== (nodeTag d) TAG_D_FN) (== (nodeTag d) TAG_D_SIG))
     {
       (let sig (lspFindSig decls (nodeAName d) (- (vecLen decls) 1)))
-      (if (== sig 0)
+      (if (nodeSame sig nilNode)
         ""
         (lspSigType src sig))
     }
     ""))
 
-(pub :: replComplCtors (-> Ints Strings Ints String Int))
+(pub :: replComplCtors (-> Ints Strings (Vec ASTNode) String Int))
 (pub fn (replComplCtors out seen ctors prefix)
   {
     (let n (vecLen ctors))
@@ -323,7 +323,7 @@
     }
   })
 
-(pub :: replComplDecls (-> Ints Strings String Ints String Int))
+(pub :: replComplDecls (-> Ints Strings String (Vec ASTNode) String Int))
 (pub fn (replComplDecls out seen src decls prefix)
   {
     (let n (vecLen decls))
@@ -342,7 +342,7 @@
                   (replComplOffer out seen (nodeAName d) RC_LOCAL (nodeTag d)
                     (replComplSigOf src decls d) prefix))
                 (if (== (nodeTag d) TAG_D_DATA)
-                  (replComplCtors out seen (nodeBVec d) prefix))
+                  (replComplCtors out seen (nodeBChildren d) prefix))
               })
             (set i (+ i 1))
           }
@@ -374,7 +374,7 @@
 ; whose function name IS mangled. Probed, not guessed: `(import IO)`
 ; and the prefix `printl` answered `printlnLit | IO` and `println |`
 ; before this fell back.
-(pub :: replComplModOf (-> Int String))
+(pub :: replComplModOf (-> ASTNode String))
 (pub fn (replComplModOf d)
   {
     (let m (lspModOf (nodeAName d)))
@@ -383,7 +383,7 @@
       (nodeModuleName d))
   })
 
-(pub :: replComplImported (-> Ints Strings Ints String Int))
+(pub :: replComplImported (-> Ints Strings (Vec ASTNode) String Int))
 (pub fn (replComplImported out seen allDecls prefix)
   {
     (let n (vecLen allDecls))
@@ -398,7 +398,7 @@
                 (replComplOffer out seen (bareOf (nodeAName d)) RC_IMPORT (nodeTag d)
                   (replComplModOf d) prefix)
                 (if (== (nodeTag d) TAG_D_DATA)
-                  (replComplCtors out seen (nodeBVec d) prefix))
+                  (replComplCtors out seen (nodeBChildren d) prefix))
               })
             (set i (+ i 1))
           }
@@ -512,7 +512,7 @@
 ; would then serve a resolution for an import set the session no
 ; longer has. The walk is `TAG_D_IMPORT`, name in word 1 - the one
 ; `lspPreflight` and `resolveDeclsPhase` both use.
-(pub :: replComplImportKey (-> Ints String))
+(pub :: replComplImportKey (-> (Vec ASTNode) String))
 (pub fn (replComplImportKey decls)
   {
     (let n (vecLen decls))
@@ -524,7 +524,7 @@
           (let d (vecGet decls i))
           {
             (if (== (nodeTag d) TAG_D_IMPORT)
-              (set key (concat (concat key (memGetWordStr d 1)) "\n")))
+              (set key (concat (concat key (nodeAText d)) "\n")))
             (set i (+ i 1))
           }
         })
@@ -539,18 +539,18 @@
 ; "no session names" rather than as an error, because a completion
 ; menu that reports a parse failure while the user is mid-word is a
 ; REPL that looks broken exactly when it is not.
-(pub :: replComplEnvDecls (-> Int Ints))
+(pub :: replComplEnvDecls (-> Int (Vec ASTNode)))
 ;@axiom:effect(unsafe)
 (pub fn (replComplEnvDecls e)
   (if (!= (memGetWord e 4) 0)
-    (memGetWordVec e 4)
+    (readAstNodes e 4)
     {
       (let dr (parseDecls (lex (memGetWordStr e 0)) 0 vecNew))
       (if (== (memGetWord dr 0) 0)
-        (as 0 (Vec Int))
+        (as 0 Nodes)
         {
           (memSetWord e 4 (memGetWord dr 1))
-          (memGetWordVec dr 1)
+          (readAstNodes dr 1)
         })
     }))
 
@@ -566,16 +566,16 @@
 ; a session, and it is the state in which Tab is most likely to be
 ; pressed. Only a SUCCESS is cached, so the module that appears on
 ; disk a moment later is picked up.
-(pub :: replComplResolved (-> Int Ints Ints))
+(pub :: replComplResolved (-> Int (Vec ASTNode) (Vec ASTNode)))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (replComplResolved e decls)
   (if (== (as decls Int) 0)
-    (as 0 (Vec Int))
+    (as 0 Nodes)
     {
       (let key (replComplImportKey decls))
       (if (&& (!= (memGetWord e 3) 0) (strEq key (memGetWordStr e 2)))
-        (memGetWordVec e 3)
+        (readAstNodes e 3)
         {
           (let tcode (checkedTargetCode hostTarget))
           (let units
@@ -588,7 +588,7 @@
               }
             })
           (if (> (strLen (lspPreflight decls tcode "." vecNew)) 0)
-            (as 0 (Vec Int))
+            (as 0 Nodes)
             {
               (let allDecls (resolveImports decls vecNew vecNew vecNew tcode "." units))
               {

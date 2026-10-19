@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# What an arena reset costs (MM-LIFE-2a). Every reset makes 4,097
+# What an arena reset costs (MM-LIFE-2a). Every reset makes 4,143
 # slab-head stores on MM-ALLOC-22's once-per-request path, because
 # releases file blocks into those heads. This gate measures that cost,
 # so a change in it is noticed.
@@ -21,7 +21,7 @@
 # One check uses no clock. Timing shows the reset is expensive but not
 # why, and would stay green if the scrub became something equally slow.
 # So the emitted IR is read directly: the reset opens with a `slabclear`
-# loop bounded at 4,097, one store per iteration, the number
+# loop bounded at 4,143, one store per iteration, the number
 # `docs/memory-model.md` states.
 #
 # The negative probe removes the cause. It deletes the `slabclear` block
@@ -168,11 +168,11 @@ else
   stores="$(printf '%s' "$body" | grep -c 'store i64 0, ptr %sp' || true)"
   bound="$(printf '%s' "$body" | grep -oE 'icmp eq i64 %si1, [0-9]+' | grep -oE '[0-9]+$' || true)"
   width="$(grep -oE '@__axiom_slabs = internal global \[[0-9]+ x i64\]' "$work/live.ll" | grep -oE '[0-9]+' | head -1 || true)"
-  if [[ "$stores" == 1 && "$bound" == 4097 && "$width" == 4097 ]]; then
+  if [[ "$stores" == 1 && "$bound" == 4143 && "$width" == 4143 ]]; then
     ok "the scrub is one store per iteration, bounded at $bound, over a [$width x i64] array"
   else
     bad "the scrub reads: $stores store(s), bound '$bound', array width '$width'"
-    echo "     docs/memory-model.md states 4,097 in five places; this is the emitter's answer."
+    echo "     docs/memory-model.md states 4,143 in five places; this is the emitter's answer."
   fi
 fi
 

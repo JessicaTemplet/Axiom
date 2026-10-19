@@ -164,8 +164,8 @@
 #      `capcut` (the child never capped), `spawnregion` (a region
 #      around each spawn again, whose reset loses what the pool gave
 #      back) and `stackcut` (the task run on the stack its process forked
-#      with, which on Darwin is a 512 KiB thread stack inside a
-#      `--threads` binding), each on a copy of the library.
+#      with, under the same 512 KiB native stack limit an intact run
+#      survives), each on a copy of the library.
 #
 # WHAT THE NUMBERS ARE. Peak RSS (`max_rss_kb`), in KiB, of the whole
 # program. Times are the programs' own `sysTimeoutMicros` readings -
@@ -1380,13 +1380,24 @@ task 2: err 70 task out of memory'
       bad "920-task-stack ($lowering -O$lvl) did not build"; sed 's/^/    /' "$fbin.build" | head -6; continue
     fi
     rc=0; gate_timeout 60 "$fbin" > "$fbin.out" 2> "$fbin.err" || rc=$?
+    sed '/^axiom: backtrace/q' "$fbin.err" > "$fbin.err.cmp"
     if [[ "$rc" == 0 ]] && cmp -s "$repo_root/tests/stdlib/920-task-stack.out" "$fbin.out" \
-       && cmp -s "$repo_root/tests/stdlib/920-task-stack.err" "$fbin.err"; then
+       && cmp -s "$repo_root/tests/stdlib/920-task-stack.err" "$fbin.err.cmp" \
+       && grep -q '^  at deep' "$fbin.err"; then
       ok "920-task-stack ($lowering -O$lvl): 86 in its slot beside an Ok sibling, the default budget and a binding's pool hold the deep task"
     else
       bad "920-task-stack ($lowering -O$lvl): exit $rc, '$(tr '\n' ';' < "$fbin.out")' '$(tr '\n' ';' < "$fbin.err")'"
     fi
   done
+  # The explicit task budget must hold even when entry and worker
+  # stacks are smaller. This also supplies stackcut's matching control.
+  rc=0
+  (ulimit -S -s 512; gate_timeout 60 "$fbin") > "$fbin.capped.out" 2> "$fbin.capped.err" || rc=$?
+  if [[ "$rc" == 0 ]] && cmp -s "$repo_root/tests/stdlib/920-task-stack.out" "$fbin.capped.out"; then
+    ok "920-task-stack ($lowering): explicit task budgets hold under a 512 KiB native stack limit"
+  else
+    bad "920-task-stack ($lowering): explicit task budget failed under the smaller native stack limit (exit $rc)"
+  fi
 done
 if run_ablation keepcut "$budget" 60 "$work/abl-keepcut/prog" keep 500; then
   red keepcut "$([[ "$rc" == 0 && "$out" == "ok 16 over "* ]] && echo 1 || echo 0)"
@@ -1402,22 +1413,16 @@ fi
 stack_golden="$repo_root/tests/stdlib/920-task-stack.out"
 if run_ablation stackcut "$repo_root/tests/stdlib/920-task-stack.ax" 60 "$work/abl-stackcut/prog"; then
   red stackcut "$([[ "$rc" == 0 && "$out" == "$(cat "$stack_golden")" ]] && echo 1 || echo 0)"
-  # Under --threads the binding is a thread, and its own stack is what
-  # the cut leaves the binding's task: on Darwin, 512 KiB, which the
-  # 50,000 calls overflow. glibc gives a thread `RLIMIT_STACK`, 8 MiB,
-  # which holds them, so there this line cannot go red.
+  # Match the intact 512 KiB control above. Removing the task's own
+  # stack leaves the binding's task on that smaller native stack.
   dir="$work/abl-stackcut"
   if (cd "$dir" && AXIOM_STDLIB="$dir/stdlib" "$axc" build --threads --opt 2 --input prog.ax --output "$dir/prog-threads") > "$dir/threads.log" 2>&1; then
-    rc=0; out="$(gate_timeout 60 "$dir/prog-threads" 2>/dev/null)" || rc=$?
+    rc=0; out="$(ulimit -S -s 512; gate_timeout 60 "$dir/prog-threads" 2>/dev/null)" || rc=$?
     line="$(grep '^binding: ' <<<"$out")"
-    if [[ "$(uname -s)" == Darwin ]]; then
-      if [[ "$line" == "binding: ok 50000" ]]; then
-        bad "stackcut threads: the binding's task still held 50,000 calls on a 512 KiB thread stack - the check is blind to it"
-      else
-        ok "stackcut threads: red - with the cut, the pool inside a --threads binding answers '${line}'"
-      fi
+    if [[ "$line" == "binding: the task failed" ]]; then
+      ok "stackcut threads: red - the task lost its budget under the 512 KiB native stack limit"
     else
-      echo "note stackcut threads: '${line}' - this platform's threads have the stack the budget gives, so the binding's line cannot go red here"
+      bad "stackcut threads: expected the binding's task to fail under the smaller native stack limit, got '$line' (exit $rc)"
     fi
   else
     bad "stackcut threads: the ablated copy did not build under --threads"; sed 's/^/    /' "$dir/threads.log" | head -6
