@@ -2075,7 +2075,7 @@ Sys - portable syscall wrappers.
 
 ## `Sys.Platform`
 
-`stdlib/Sys/Platform.darwin.ax` — 165 public names
+`stdlib/Sys/Platform.darwin.ax` — 166 public names
 
 Sys.Platform - the numbers this target's kernel uses: syscall
 numbers, open and socket flags, errno values, poll and signal
@@ -2119,6 +2119,7 @@ target being compiled for (this one is `darwin`).
 | `sysGetPidNum` | value | `Int` |  |  | getpid() - BSD 20 |
 | `sysClockNum` | value | `Int` |  |  | gettimeofday(tv, tz) - BSD 116. Writes {tv_sec i64, tv_usec i32+pad} to its 16-byte buffer; the register-return interpretation was probed WRONG on arm64 (x0 is 0 on success, never seconds). Verified against the shell clock, 400,000 reads, zero backwards steps, ~200ns/call. |
 | `clockIsGettimeofday` | value | `Int` |  |  | 1 where wall-clock time comes from `gettimeofday`, 0 where it comes from `clock_gettime`. |
+| `envNamesFoldCase` | value | `Int` |  |  | 1 where environment names match without regard to ASCII case, as Windows matches them, 0 where they match byte for byte. |
 | `clockHasMonotonic` | value | `Int` |  |  | Whether this platform can answer a MONOTONIC clock - one that never steps backwards - through a syscall. Darwin cannot: its monotonic clock is the arm64 counter below. |
 | `clockMonotonicId` | value | `Int` |  |  | The id `clock_gettime` takes for the monotonic clock: 0, unused here, since `clockIsGettimeofday` sends both clock readers to `gettimeofday`. |
 | `clockHasCounter` | value | `Int` |  |  | Whether `Sys.ax` reads the arm64 counter for its monotonic clock: 1. It is `CNTVCT_EL0`, the counter `mach_absolute_time` reads, which never steps backwards and is the same on every core. darwin-x86_64 has no such register; there `sysCounterHz` answers 0, and Darwin has no monotonic clock. |

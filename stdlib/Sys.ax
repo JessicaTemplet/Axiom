@@ -210,11 +210,37 @@
       ""
       {
         (let e (strFromLit p))
-        (if (strStartsWith e prefix)
+        (if (sysEnvNameIs e prefix)
           (strSlice e (strLen prefix) (- (strLen e) (strLen prefix)))
           (sysEnvLookup prefix (+ i 1)))
       })
   })
+
+; Whether the entry `e` starts with `prefix`, the name and its `=`.
+; Where `envNamesFoldCase` says so the compare folds ASCII case, which
+; is how Windows finds `Path` when asked for `PATH`. Bytes above 127
+; compare exactly, so a name outside ASCII matches only as spelled.
+(:: sysEnvNameIs (-> String String Bool))
+(fn (sysEnvNameIs e prefix)
+  (if (== envNamesFoldCase 0)
+    (strStartsWith e prefix)
+    (if (> (strLen prefix) (strLen e))
+      false
+      (sysEnvFoldFrom e prefix 0))))
+
+(:: sysEnvFoldFrom (-> String String Int Bool))
+(fn (sysEnvFoldFrom e prefix k)
+  (if (>= k (strLen prefix))
+    true
+    (if (== (sysAsciiLower (strByte e k)) (sysAsciiLower (strByte prefix k)))
+      (sysEnvFoldFrom e prefix (+ k 1))
+      false)))
+
+(:: sysAsciiLower (-> Int Int))
+(fn (sysAsciiLower c)
+  (if (&& (>= c 65) (<= c 90))
+    (+ c 32)
+    c))
 
 ;; A NULL-terminated copy of the process's own environment vector, in the
 ;; form a child expects.
