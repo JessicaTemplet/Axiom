@@ -16,6 +16,13 @@ its changelog too.
 
 ## Unreleased
 
+- Native POSIX executables and worker threads use guarded stacks.
+  Overflow exits 86 with a named backtrace from the interrupted frame;
+  unrelated faults retain their signal status. Explicit task stack
+  budgets use the same runtime. Tested by
+  `tests/stdlib/977-native-stack-overflow.ax` and
+  `scripts/check-trap-statuses.sh`.
+
 - The formatter preserves an uppercase match binder followed by a
   parenthesised body. Region checks use a leaf program
   as their negative witness; the compiler imports Task, which uses a

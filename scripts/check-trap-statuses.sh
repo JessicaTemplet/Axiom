@@ -173,6 +173,69 @@ check_one 84 "$got84" "shift amount out of range (696)"
 check_one 85 "$got85" "a second join (572)"
 check_one 86 "$got86" "a mapped stack's guard"
 
+# Native entry and pthread entry use the same guard/reporting path.
+# A non-stack memory fault must retain its signal status.
+echo "== native stacks report the interrupted function =="
+cat > "$work/native-overflow.ax" <<'AX'
+(import IO)
+(:: deep (-> Int Int))
+(fn (deep n) (if (== n 0) 0 { (let r (deep (- n 1))) (if (> r n) r (+ r 1)) }))
+(:: main Int)
+;@axiom:effect(io)
+(fn (main) { (println "entered") (deep 1000000) })
+AX
+cat > "$work/thread-overflow.ax" <<'AX'
+(import IO)
+(:: deep (-> Int Int))
+(fn (deep n) (if (== n 0) 0 { (let r (deep (- n 1))) (if (> r n) r (+ r 1)) }))
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (main) { (println "entered") (__thread_join (__thread_spawn (lambda (x) (deep x)) 1000000)) })
+AX
+cat > "$work/nonstack-fault.ax" <<'AX'
+(import IO)
+(:: main Int)
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(fn (main) { (println "entered") (__load64 (__argc) 0) })
+AX
+for level in 0 2; do
+  for kind in native thread; do
+    if ! "$axc" --diagnostic-format=ai build --input "$work/$kind-overflow.ax" \
+         --output "$work/$kind-O$level" --opt "$level" >"$work/native-build.log" 2>&1; then
+      bad "$kind stack --opt $level did not build"
+      head -8 "$work/native-build.log"
+      continue
+    fi
+    rc=0
+    "$work/$kind-O$level" >"$work/native.out" 2>"$work/native.err" || rc=$?
+    if [[ "$rc" == 86 && "$(cat "$work/native.out")" == entered ]] &&
+       grep -q '^axiom: stack overflow:' "$work/native.err" &&
+       grep -q '^axiom: backtrace ' "$work/native.err" &&
+       grep -q '^  at deep' "$work/native.err"; then
+      ok "$kind stack --opt $level exits 86 and names deep from its interrupted stack"
+    else
+      bad "$kind stack --opt $level: exit $rc or missing interrupted trace"
+      head -8 "$work/native.err"
+    fi
+  done
+  if "$axc" --diagnostic-format=ai build --input "$work/nonstack-fault.ax" \
+       --output "$work/nonstack-O$level" --opt "$level" >"$work/native-build.log" 2>&1; then
+    rc=0
+    "$work/nonstack-O$level" >"$work/native.out" 2>"$work/native.err" || rc=$?
+    if (( rc >= 128 )) && [[ "$(cat "$work/native.out")" == entered ]] &&
+       ! grep -q 'stack overflow' "$work/native.err"; then
+      ok "a non-stack fault --opt $level keeps its signal status ($rc)"
+    else
+      bad "a non-stack fault --opt $level became a stack trap (exit $rc)"
+    fi
+  else
+    bad "the non-stack fault control --opt $level did not build"
+  fi
+done
+
 # The cross-trap comparison no gate performed: the twelve answers must
 # be twelve different numbers. Each `check_one` above is internally
 # consistent on its own - the 77 collision proved that is not enough.

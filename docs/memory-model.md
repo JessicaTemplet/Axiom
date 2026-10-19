@@ -324,9 +324,16 @@ and only while the release after them is dead. That depends on LLVM's
 sibling-call pass succeeding, and nothing guarantees it.
 
 **MM-EXEC-6d (H).** Non-tail recursion is bounded by the machine stack.
-An 8176 KiB stack holds **174,000–175,000** frames at `--opt 0` and
-**260,000–262,000** at `--opt 1`. Beyond that, the process dies with
-SIGSEGV (status 139).
+Native POSIX executables run their entry point and worker threads on
+mapped stacks with a 64 KiB guard. Their usable size follows a finite
+`RLIMIT_STACK`, rounded up to 4 KiB; an unlimited or unavailable limit
+uses 8 MiB. A guard fault reports stack overflow, prints a bounded
+backtrace and exits 86. Static archives use their host's stack;
+Windows uses its existing stack. Bare metal reports its guard through
+the CPU-exception handler (`MM-EXEC-18`).
+
+Tested by `tests/stdlib/977-native-stack-overflow.ax` and
+`scripts/check-trap-statuses.sh`.
 
 > `stdlib/Mem.ax` writes its byte loops as `while`. The standard
 > library must not owe its stack safety to an optimisation or to a
@@ -1035,7 +1042,7 @@ statuses. A program **MUST NOT** reuse them as a normal result:
 | 83 | `INT_MIN / -1`, raised by the division guard (`emitDivGuard`): `sdiv` overflow has no representable answer. `INT_MIN % -1` is not this row: a remainder by -1 is 0, and the emitter rewrites that divisor to 1 (`tests/stdlib/971-intmin-rem.ax`) | measured: `tests/stdlib/695-intmin-div-trap.ax` divides inside a recovery point, which answers 83, then prints `axiom: division overflow` to fd 2 and exits 83, at every `--opt` level |
 | 84 | a shift amount below 0 or above 63, raised by the shift guard (`emitShiftGuard`): an overshift is poison in LLVM | measured: `tests/stdlib/696-shift-wide-trap.ax` shifts inside a recovery point, which answers 84, then prints `axiom: shift amount out of range` to fd 2 and exits 84, at every `--opt` level |
 | 85 | a handle that isn't live: a spawn handle joined twice or by the other lowering's join, a forged one, or a table handle the unsafe layer freed (`@__axiom_handle_dead`, `MM-PAR-8`) | measured: `tests/stdlib/572-spawn-joined-twice.ax` runs a second join, the pid of a joined binding, a forged word and a channel used as a spawn handle, each inside a recovery point, which answers 85 each time, then prints `axiom: not a live handle (freed, or never made)` to fd 2 and exits 85, at every `--opt` level. `tests/stdlib/571-handle-table.ax` pins the table: 65,536 live handles, the next refused, and a reused slot under a new generation |
-| 86 | a stack overflow into the guard below a stack `__axiom_stack_run` mapped (`@__axiom_stack_fault`, `MM-PAR-17`) | measured: `scripts/check-trap-statuses.sh` §3 recurses a million calls on a 64 KiB stack, and the run prints `axiom: stack overflow: the fault address is in the guard below a mapped stack` to fd 2 and exits 86. `tests/stdlib/920-task-stack.ax` pins the sentence from a task's process, whose slot answers 86, at `--opt` 0 and 2 in both lowerings. Not recoverable: the handler runs on an alternate signal stack, and the thunk runs with no recovery point armed. A fault outside the guard dies of its signal, as it would with no handler |
+| 86 | a fault in the guard below a native POSIX entry stack, worker stack or explicit `__axiom_stack_run` stack (`MM-EXEC-6d`, `MM-PAR-17`) | The handler reports stack overflow and a bounded backtrace on a 64 KiB alternate signal stack, then exits 86. It cannot recover. A fault outside the guard retains its signal status. Tested by `tests/stdlib/977-native-stack-overflow.ax` and `scripts/check-trap-statuses.sh` |
 
 `(__indexTrap)` never returns, so it fits every result type. It exists
 because traps are `internal` LLVM functions emitted by the runtime
@@ -6759,18 +6766,19 @@ arena it caps is. A task's child sets it before the task runs.
 answered. The stack is `bytes` rounded up to 64 KiB, with a 64 KiB
 guard below it that no access may touch, and it's unmapped when the
 thunk returns. A task's child runs the task on one, so its stack is its
-budget, not the stack of the thread that forked it. A `--threads`
-binding's own stack is 512 KiB on Darwin.
+budget, independently of the thread that forked it. Native POSIX
+worker stacks follow `MM-EXEC-6d`.
 
 The first call on a thread installs a 64 KiB alternate signal stack and
 a handler for `SIGSEGV` and `SIGBUS`. A fault in the guard writes `axiom:
 stack overflow: the fault address is in the guard below a mapped stack`
-and exits 86. Any other fault takes its default action, so the process
-dies of its signal as it would without the handler. The thunk runs
-with no recovery point armed, so 86 isn't recoverable, and a mapping
-the kernel refuses traps 70 before the thunk runs. A module that
-doesn't name the primitive emits none of it. On Windows and bare metal,
-which have no `fork`, the call runs the thunk on the stack it's on.
+and exits 86 after a bounded backtrace from the interrupted frame.
+Any other fault retains its signal status. The thunk runs with no
+recovery point armed, so 86 cannot recover. Mapping or signal-setup
+refusal traps 70 before the thunk runs. Native POSIX executables share
+this runtime with their entry and worker stacks. A static archive emits
+it when it names the primitive. On Windows and bare metal, which have
+no `fork`, the call runs the thunk on its existing stack.
 
 Lowering `RLIMIT_STACK` in the child isn't an equivalent. On Darwin a
 child forked from a thread is refused the `setrlimit` and keeps its

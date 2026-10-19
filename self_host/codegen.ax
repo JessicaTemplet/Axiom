@@ -604,6 +604,9 @@
       ; that maps a guarded stack and reports its overflow is emitted
       ; (`stackRunOn`, `parScan`).
       (vecPush ps 0)
+      ; slot 24: native executable mode, selected once at the pipeline
+      ; boundary. Emitters read this value without consulting host IO.
+      (vecPush ps 0)
       (addTypeNamed ts "Some" TF_DATA 1 0 2
         {
           (let f vecNew)
@@ -7886,11 +7889,20 @@
       (emitLine cg "  %fn = load i64, ptr %p1")
       (emitLine cg "  %p2 = getelementptr i64, ptr %pg, i64 2")
       (emitLine cg "  %arg = load i64, ptr %p2")
-      (emitLine cg "  %r = call i64 @__axiom_par_call(i64 %fn, i64 %arg)")
+      (if (programStackOn cg)
+        {
+          (emitLine cg "  %budget = call i64 @__axiom_program_stack_bytes()")
+          (emitLine cg "  %code = ptrtoint ptr @__axiom_stack_call to i64")
+          (emitLine cg
+            "  %r = call i64 @__axiom_stack_run_code(i64 %budget, i64 %code, i64 %fn, i64 %arg)")
+        }
+        (emitLine cg "  %r = call i64 @__axiom_par_call(i64 %fn, i64 %arg)"))
       (emitLine cg "  %p3 = getelementptr i64, ptr %pg, i64 3")
       (emitLine cg "  store i64 %r, ptr %p3")
       (emitLine cg "  call void @__axiom_par_sweep(i64 -1)")
       (emitLine cg "  call void @__axiom_arena_unmap_thread()")
+      (if (stackRunOn cg)
+        (emitLine cg "  call void @__axiom_stack_disarm()"))
       (emitLine cg "  ret ptr null")
       (emitLine cg "}")
       (emitLine cg "")
@@ -11892,7 +11904,9 @@
           (emitLine cg "entry:")
           (emitLine cg "  store i64 %argc, ptr @__axiom_argc")
           (emitLine cg "  store i64 %argv, ptr @__axiom_argv")
-          (emitLine cg "  %r = call i64 @__axiom_user_main()")
+          (if (programStackOn cg)
+            (emitLine cg "  %r = call i64 @__axiom_program_run()")
+            (emitLine cg "  %r = call i64 @__axiom_user_main()"))
           ; MM-PAR-7: a handle the program never joined does not
           ; outlive `main`.
           (if (== (parRegistryOn cg) 1)
@@ -14977,25 +14991,39 @@
   {
     (emitLine cg "define internal void @__axiom_backtrace() #0 {")
     (emitLine cg "entry:")
-    ; Resolve the line addresses before walking: the table holds what
-    ; links, and this fills what only runs. Idempotent stores, so a
-    ; re-entrant trap cannot corrupt them, and fork inherits them.
-    (emitLine cg "  %li0 = call i64 @__axiom_lineinit()")
-    (emitLine cg "  %hp = ptrtoint ptr @__axiom_bt_hdr to i64")
-    (emitBtWrite cg "%hp" "42")
     (emitLine cg
       (concat "  %fpi = call i64 asm sideeffect "
         (concat (targetFrameAsm (memGetWord cg 26)) "()")))
+    (emitLine cg "  notail call void @__axiom_backtrace_from(i64 %fpi, i64 0, i64 -1, i64 0)")
+    (emitLine cg "  ret void")
+    (emitLine cg "}")
+    (emitLine cg
+      "define internal void @__axiom_backtrace_from(i64 %fpi, i64 %lo, i64 %hi, i64 %pc) #0 {")
+    (emitLine cg "entry:")
+    (emitLine cg "  %li0 = call i64 @__axiom_lineinit()")
+    (emitLine cg "  %hp = ptrtoint ptr @__axiom_bt_hdr to i64")
+    (emitBtWrite cg "%hp" "42")
+    (emitLine cg "  %havepc = icmp ne i64 %pc, 0")
+    (emitLine cg "  br i1 %havepc, label %faultpc, label %walkstart")
+    (emitLine cg "faultpc:")
+    (emitLine cg "  %faultname = call i64 @__axiom_bt_name(i64 %pc)")
+    (emitLine cg "  br label %walkstart")
+    (emitLine cg "walkstart:")
     (emitLine cg "  br label %loop")
     (emitLine cg "loop:")
-    (emitLine cg "  %fp = phi i64 [ %fpi, %entry ], [ %nx, %frame ]")
-    (emitLine cg "  %d = phi i64 [ 0, %entry ], [ %d1, %frame ]")
+    (emitLine cg "  %fp = phi i64 [ %fpi, %walkstart ], [ %nx, %frame ]")
+    (emitLine cg "  %d = phi i64 [ 0, %walkstart ], [ %d1, %frame ]")
     (emitLine cg "  %deep = icmp uge i64 %d, 64")
     (emitLine cg "  %fpz = icmp eq i64 %fp, 0")
     (emitLine cg "  %mis = and i64 %fp, 7")
     (emitLine cg "  %misb = icmp ne i64 %mis, 0")
     (emitLine cg "  %s0 = or i1 %deep, %fpz")
-    (emitLine cg "  %stop = or i1 %s0, %misb")
+    (emitLine cg "  %badframe = or i1 %s0, %misb")
+    (emitLine cg "  %lastword = sub i64 %hi, 16")
+    (emitLine cg "  %below = icmp ult i64 %fp, %lo")
+    (emitLine cg "  %above = icmp ugt i64 %fp, %lastword")
+    (emitLine cg "  %outside = or i1 %below, %above")
+    (emitLine cg "  %stop = or i1 %badframe, %outside")
     (emitLine cg "  br i1 %stop, label %done, label %read")
     (emitLine cg "read:")
     (emitLine cg "  %fpp = inttoptr i64 %fp to ptr")
@@ -15379,57 +15407,38 @@
     cg))
 
 ; ------------------------------------------------------------------
-; A STACK OF ITS OWN (docs/memory-model.md MM-PAR-17, MM-EXEC-16's 86).
-; `(__axiom_stack_run bytes thunk arg)` runs `(thunk arg)` on a stack
-; the call maps, and answers what the thunk answered. The stack is
-; `bytes` rounded up to 64 KiB - at least 64 KiB, at most 2^46 - with a
-; 64 KiB guard below it that no access may touch, so its size is the
-; caller's choice and not the calling thread's: the main thread's stack
-; is what `RLIMIT_STACK` said at exec, and a thread's is a fixed
-; allocation (512 KiB by default on Darwin). Lowering `RLIMIT_STACK`
-; after a fork is not an equivalent: measured on darwin-aarch64, a child
-; forked from a thread is refused the `setrlimit` and dies of SIGBUS at
-; its thread's 512 KiB, and on Linux the limit binds only a main
-; thread's stack, which grows. `stdlib/Task.ax` runs every task on one.
+; Guarded stacks (docs/memory-model.md MM-PAR-17, MM-EXEC-6d).
+; Native POSIX executables enter main on a mapped stack, and each
+; worker thread enters its closure on one. The usable size follows a
+; finite RLIMIT_STACK, or defaults to 8 MiB, rounded up to 4 KiB.
+; `(__axiom_stack_run bytes thunk arg)` uses the same runner with an
+; explicit budget rounded up to 64 KiB. Each has a 64 KiB guard below.
 ;
-; AN ACCESS IN THE GUARD IS A STACK OVERFLOW, and it traps 86 with a
-; sentence of its own. The first call on a thread maps a 64 KiB
-; alternate signal stack, installs it with `sigaltstack`, and points
-; SIGSEGV and SIGBUS at `@__axiom_stack_fault` with SA_ONSTACK, so the
-; handler runs there and not on the stack that overflowed. It compares
-; the fault address with the guard the innermost call armed. Inside
-; it, the handler writes the sentence and exits 86. Outside it, the
-; fault is not this mechanism's: SA_RESETHAND has already put the
-; default action back and SA_NODEFER left the signal unblocked, so the
-; handler sends the signal to its own process, which dies of it with
-; the status it always would have. The handler never returns. On
-; Darwin, where the kernel enters a handler through the trampoline the
-; action names, as `tramp(catcher, style, signo, info, uap)`, it IS the
-; trampoline; on linux-x86_64, whose kernel refuses an action without a
-; restorer, it is its own restorer, never reached.
+; A guard fault traps 86. A 64 KiB alternate signal stack lets the
+; handler report the interrupted PC and bounded frame chain without
+; using the exhausted stack. Other faults retain their signal status.
+; The handler never returns. Darwin enters through its signal
+; trampoline; Linux x86-64 supplies its required restorer here.
 ;
-; NOT RECOVERABLE. The trap is taken inside a signal handler on the
-; alternate stack, and a recovery point armed before the switch was
-; armed on another stack, so the thunk runs with none armed: a trap
-; inside it ends the process with its status. A task's child already
-; runs with none (`emitParProc`), and a point the thunk arms itself
-; works as it always does.
+; A recovery point belongs to the stack that armed it. The runner
+; saves and clears the recovery chain before switching, then restores
+; it on return. A stack-overflow trap inside the handler cannot recover.
+; Mapping or signal-setup refusal traps 70 before the thunk runs.
 ;
-; A mapping the kernel refuses, the stack's or the alternate stack's,
-; traps 70 before the thunk runs. A `sigaltstack` or `sigaction` it
-; refuses leaves the guard in place and the report out: an overflow
-; then dies of the signal, 128 plus its number, instead of 86.
-;
-; ONLY A MODULE THAT NAMES THE PRIMITIVE PAYS FOR IT (slot 23). The
-; three words are mutable runtime globals (`cgMutGlobal`), so under
-; `--threads` each thread has its own guard and alternate stack, as
-; `sigaltstack` is itself per thread. On a target with no syscall ABI,
-; Windows or bare metal, the call runs the thunk on the stack it is on:
-; neither has a `fork` for a task to need it, and bare metal's one
-; stack has a guard of its own (`emitCpuExceptionFn`).
+; Native executable mode (slot 24) or the explicit primitive (slot 23)
+; emits this runtime. The four globals are thread-local under threads.
+; Worker exit disables and unmaps its alternate stack. Static archives
+; borrow their host's stack. Windows calls the thunk on its existing
+; stack, and bare metal has its own CPU-exception guard.
 (pub :: stackRunOn (-> Int Bool))
 (pub fn (stackRunOn cg)
-  (== (pairSlot cg 23) 1))
+  (|| (== (pairSlot cg 23) 1) (programStackOn cg)))
+
+; Native executables use the guarded runtime for their entry stack.
+; An archive runs on its host's stack; bare metal has its own guard.
+(:: programStackOn (-> Int Bool))
+(fn (programStackOn cg)
+  (== (pairSlot cg 24) 1))
 
 ; `mprotect`, `sigaltstack` and `sigaction` (`rt_sigaction` on Linux):
 ; darwin BSD 74, 53 and 46 with the class bit; linux-aarch64 226, 132
@@ -15553,7 +15562,13 @@
       (emitLine cg "}")
       (emitLine cg "")
       (if (== (targetHasSpawn (memGetWord cg 26)) 1)
-        (emitStackRunGuarded cg (memGetWord cg 26))
+        {
+          (emitStackRunGuarded cg (memGetWord cg 26))
+          (emitStackDisarm cg (memGetWord cg 26))
+          (if (programStackOn cg)
+            (emitProgramStack cg))
+          cg
+        }
         {
           (emitLine cg "define internal i64 @__axiom_stack_run(i64 %bytes, i64 %fn, i64 %arg) #0 {")
           (emitLine cg "entry:")
@@ -15582,6 +15597,7 @@
         (emitLine cg (concat "@__axiom_stack_lo = " (concat (cgMutGlobal cg) " i64 0")))
         (emitLine cg (concat "@__axiom_stack_hi = " (concat (cgMutGlobal cg) " i64 0")))
         (emitLine cg (concat "@__axiom_stack_alt = " (concat (cgMutGlobal cg) " i64 0")))
+        (emitLine cg (concat "@__axiom_stack_top = " (concat (cgMutGlobal cg) " i64 0")))
         (emitLine cg
           (concat "@__axiom_stack_msg = private unnamed_addr constant ["
             (concat n (concat " x i8] c\"" (concat msg "\\0A\"")))))
@@ -15608,6 +15624,8 @@
         (emitLine cg "over:")
         (emitLine cg "  %mp = ptrtoint ptr @__axiom_stack_msg to i64")
         (emitRuntimeWrite cg "%mp" n)
+        (if (== (pairSlot cg 16) 0)
+          (emitStackFaultTrace cg t))
         (emitRuntimeExit cg "86")
         (emitLine cg "  unreachable")
         (emitLine cg "other:")
@@ -15662,20 +15680,38 @@
         (emitStackSys cg "%bus" (targetSigActionNum t)
           (concat "i64 "
             (concat (fmtInt (targetSigBusNum t)) ", i64 %actw, i64 0, i64 8, i64 0, i64 0")))
-        (emitLine cg "  br label %done")
+        (emitLine cg "  %sabad = icmp ne i64 %sa, 0")
+        (emitLine cg "  %svbad = icmp ne i64 %segv, 0")
+        (emitLine cg "  %bubad = icmp ne i64 %bus, 0")
+        (emitLine cg "  %sigbad0 = or i1 %sabad, %svbad")
+        (emitLine cg "  %sigbad = or i1 %sigbad0, %bubad")
+        (emitLine cg "  br i1 %sigbad, label %oom, label %done")
         (emitLine cg "done:")
         (emitLine cg "  ret void")
         (emitLine cg "}")
-        (emitLine cg "")
         ; The call: map, guard, arm, switch, and give it all back.
         (emitLine cg "define internal i64 @__axiom_stack_run(i64 %bytes, i64 %fn, i64 %arg) #0 {")
+        (emitLine cg "entry:")
+        (emitLine cg "  %low = icmp slt i64 %bytes, 1")
+        (emitLine cg "  %positive = select i1 %low, i64 1, i64 %bytes")
+        (emitLine cg "  %big = icmp sgt i64 %positive, 70368744177664")
+        (emitLine cg "  %bounded = select i1 %big, i64 70368744177664, i64 %positive")
+        (emitLine cg "  %up = add i64 %bounded, 65535")
+        (emitLine cg "  %rounded = and i64 %up, -65536")
+        (emitLine cg "  %code = ptrtoint ptr @__axiom_stack_call to i64")
+        (emitLine cg
+          "  %r = call i64 @__axiom_stack_run_code(i64 %rounded, i64 %code, i64 %fn, i64 %arg)")
+        (emitLine cg "  ret i64 %r")
+        (emitLine cg "}")
+        (emitLine cg
+          "define internal i64 @__axiom_stack_run_code(i64 %bytes, i64 %code, i64 %fn, i64 %arg) #0 {")
         (emitLine cg "entry:")
         (emitLine cg "  %small = icmp slt i64 %bytes, 1")
         (emitLine cg "  %b1 = select i1 %small, i64 1, i64 %bytes")
         (emitLine cg "  %huge = icmp sgt i64 %b1, 70368744177664")
         (emitLine cg "  %b2 = select i1 %huge, i64 70368744177664, i64 %b1")
-        (emitLine cg "  %b3 = add i64 %b2, 65535")
-        (emitLine cg "  %size = and i64 %b3, -65536")
+        (emitLine cg "  %b3 = add i64 %b2, 4095")
+        (emitLine cg "  %size = and i64 %b3, -4096")
         (emitLine cg "  %total = add i64 %size, 65536")
         (emitStackSys cg "%base" (targetMmapNum t)
           (concat "i64 0, i64 %total, i64 3, i64 " (concat flags ", i64 -1, i64 0")))
@@ -15700,16 +15736,18 @@
         (emitLine cg "  call void @__axiom_stack_arm()")
         (emitLine cg "  %olo = load i64, ptr @__axiom_stack_lo")
         (emitLine cg "  %ohi = load i64, ptr @__axiom_stack_hi")
+        (emitLine cg "  %otop = load i64, ptr @__axiom_stack_top")
         (emitLine cg "  %orec = load i64, ptr @__axiom_recover_top")
         (emitLine cg "  store i64 %base, ptr @__axiom_stack_lo")
         (emitLine cg "  %ghi = add i64 %base, 65536")
         (emitLine cg "  store i64 %ghi, ptr @__axiom_stack_hi")
         (emitLine cg "  store i64 0, ptr @__axiom_recover_top")
         (emitLine cg "  %top = add i64 %base, %total")
+        (emitLine cg "  store i64 %top, ptr @__axiom_stack_top")
+        (emitLine cg "  %codeptr = inttoptr i64 %code to ptr")
         (emitLine cg
           (concat "  %rr = call "
-            (concat (targetStackSwitchAsm t)
-              "(i64 %top, ptr @__axiom_stack_call, i64 %fn, i64 %arg)")))
+            (concat (targetStackSwitchAsm t) "(i64 %top, ptr %codeptr, i64 %fn, i64 %arg)")))
         (emitLine cg
           (if (targetIsAArch64 t)
             "  %r = extractvalue { i64, i64 } %rr, 0"
@@ -15717,6 +15755,7 @@
         (emitLine cg "  store i64 %orec, ptr @__axiom_recover_top")
         (emitLine cg "  store i64 %olo, ptr @__axiom_stack_lo")
         (emitLine cg "  store i64 %ohi, ptr @__axiom_stack_hi")
+        (emitLine cg "  store i64 %otop, ptr @__axiom_stack_top")
         (emitStackSys cg "%u" (targetMunmapNum t)
           "i64 %base, i64 %total, i64 0, i64 0, i64 0, i64 0")
         (emitLine cg "  ret i64 %r")
@@ -16117,6 +16156,11 @@
       (let _ (memSetWord cg 12 bares))
       (let _2 (memSetWord cg 13 fulls))
       (let _2t (memSetWord cg 26 tcode))
+      (let _stackMode
+        (pairSetSlot cg 24
+          (if cgStaticlib
+            0
+            (targetHasSpawn tcode))))
       (let _2p (parScan cg allDecls))
       (let _3
         (memSetWord cg 15
@@ -30954,6 +30998,146 @@
     (emitLine cg "  %total = add i64 %cap, 32")
     (emitLine cg "  %filed1 = add i64 %filed, %total")
     (emitLine cg "  store i64 %filed1, ptr @__axiom_slabs")
+    (emitLine cg "  ret void")
+    (emitLine cg "}")
+    cg
+  })
+
+; The kernel's ucontext layouts: Darwin points at mcontext (offset 48),
+; Linux embeds it, and FreeBSD puts it after its 16-byte signal mask.
+; Offsets name the saved frame pointer and instruction pointer.
+(:: stackContextOffset (-> Int Bool Int))
+(fn (stackContextOffset t pc)
+  (if (|| (== t 0) (== t 1))
+    (if (targetIsAArch64 t)
+      (if pc
+        272
+        248)
+      (if pc
+        144
+        64))
+    (if (== t 2)
+      (if pc
+        440
+        416)
+      (if (== t 3)
+        (if pc
+          168
+          120)
+        (if (targetIsAArch64 t)
+          (if pc
+            272
+            248)
+          (if pc
+            176
+            88))))))
+
+(:: emitStackFaultTrace (-> Int Int Int))
+(fn (emitStackFaultTrace cg t)
+  {
+    (emitLine cg "  %uc = inttoptr i64 %uap to ptr")
+    (if (|| (== t 0) (== t 1))
+      {
+        (emitLine cg "  %mca = getelementptr i8, ptr %uc, i64 48")
+        (emitLine cg "  %mc = load ptr, ptr %mca")
+      }
+      (emitLine cg "  %mc = getelementptr i8, ptr %uc, i64 0"))
+    (emitLine cg
+      (concat "  %fpa = getelementptr i8, ptr %mc, i64 " (fmtInt (stackContextOffset t false))))
+    (emitLine cg
+      (concat "  %pca = getelementptr i8, ptr %mc, i64 " (fmtInt (stackContextOffset t true))))
+    (emitLine cg "  %fp = load i64, ptr %fpa")
+    (emitLine cg "  %pc = load i64, ptr %pca")
+    (emitLine cg "  %ra = add i64 %pc, 1")
+    (emitLine cg "  %top = load i64, ptr @__axiom_stack_top")
+    (emitLine cg "  call void @__axiom_backtrace_from(i64 %fp, i64 %hi, i64 %top, i64 %ra)")
+    cg
+  })
+
+(:: targetGetrlimitNum (-> Int Int))
+(fn (targetGetrlimitNum t)
+  (if (|| (== t 0) (== t 1))
+    33554626
+    (if (== t 2)
+      163
+      (if (== t 3)
+        97
+        194))))
+
+; Preserve the process's finite RLIMIT_STACK as the entry budget.
+; An unlimited or unavailable limit selects the runtime's 8 MiB default.
+; The entry uses a direct code pointer and borrows no heap share.
+(:: emitProgramStack (-> Int Int))
+(fn (emitProgramStack cg)
+  {
+    (emitLine cg "define internal i64 @__axiom_program_main(i64 %self, i64 %arg) #0 {")
+    (emitLine cg "entry:")
+    (emitLine cg "  %r = call i64 @__axiom_user_main()")
+    (emitLine cg "  ret i64 %r")
+    (emitLine cg "}")
+    (emitLine cg "define internal i64 @__axiom_program_stack_bytes() #0 {")
+    (emitLine cg "entry:")
+    (emitLine cg "  %limits = alloca [2 x i64], align 16")
+    (emitLine cg "  store i64 8388608, ptr %limits")
+    (emitLine cg "  %limitaddr = ptrtoint ptr %limits to i64")
+    (emitStackSys cg "%rl" (targetGetrlimitNum (memGetWord cg 26))
+      "i64 3, i64 %limitaddr, i64 0, i64 0, i64 0, i64 0")
+    (emitLine cg "  %soft = load i64, ptr %limits")
+    (emitLine cg "  %rlok = icmp eq i64 %rl, 0")
+    (emitLine cg "  %finite = icmp ule i64 %soft, 70368744177664")
+    (emitLine cg "  %valid = and i1 %rlok, %finite")
+    (emitLine cg "  %budget = select i1 %valid, i64 %soft, i64 8388608")
+    (emitLine cg "  ret i64 %budget")
+    (emitLine cg "}")
+    (emitLine cg "define internal i64 @__axiom_program_run() #0 {")
+    (emitLine cg "entry:")
+    (emitLine cg "  %budget = call i64 @__axiom_program_stack_bytes()")
+    (emitLine cg "  %code = ptrtoint ptr @__axiom_program_main to i64")
+    (emitLine cg "  %r = call i64 @__axiom_stack_run_code(i64 %budget, i64 %code, i64 0, i64 0)")
+    (emitLine cg "  ret i64 %r")
+    (emitLine cg "}")
+    cg
+  })
+
+; An exiting pthread gives its alternate signal stack back after its
+; user code and allocator cleanup have returned to the host's stack.
+(:: emitStackDisarm (-> Int Int Int))
+(fn (emitStackDisarm cg t)
+  {
+    (emitLine cg "define internal void @__axiom_stack_disarm() #0 {")
+    (emitLine cg "entry:")
+    (emitLine cg "  %alt = load i64, ptr @__axiom_stack_alt")
+    (emitLine cg "  %have = icmp ne i64 %alt, 0")
+    (emitLine cg "  br i1 %have, label %disable, label %done")
+    (emitLine cg "disable:")
+    (emitLine cg "  %ss = alloca [3 x i64], align 8")
+    (emitLine cg "  store i64 0, ptr %ss")
+    (emitLine cg "  %s1 = getelementptr i64, ptr %ss, i64 1")
+    (emitLine cg "  %s2 = getelementptr i64, ptr %ss, i64 2")
+    (emitLine cg
+      (concat "  store i64 "
+        (concat
+          (if (|| (== t 2) (== t 3))
+            "2"
+            "0")
+          ", ptr %s1")))
+    (emitLine cg
+      (concat "  store i64 "
+        (concat
+          (if (|| (== t 2) (== t 3))
+            "0"
+            "4")
+          ", ptr %s2")))
+    (emitLine cg "  %ssw = ptrtoint ptr %ss to i64")
+    (emitStackSys cg "%off" (targetSigAltStackNum t) "i64 %ssw, i64 0, i64 0, i64 0, i64 0, i64 0")
+    (emitLine cg "  %ok = icmp eq i64 %off, 0")
+    (emitLine cg "  br i1 %ok, label %unmap, label %done")
+    (emitLine cg "unmap:")
+    (emitLine cg "  store i64 0, ptr @__axiom_stack_alt")
+    (emitStackSys cg "%unmapped" (targetMunmapNum t)
+      "i64 %alt, i64 65536, i64 0, i64 0, i64 0, i64 0")
+    (emitLine cg "  br label %done")
+    (emitLine cg "done:")
     (emitLine cg "  ret void")
     (emitLine cg "}")
     cg

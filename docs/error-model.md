@@ -471,8 +471,9 @@ stack frame:
 ```
 
 At the default `--opt 1` with an 8 MiB stack, the unsafe shape costs
-**48 bytes of stack per call** and dies of `SIGSEGV` after about
-**174,000** calls. The safe shape completes **5,000,000** iterations
+**48 bytes of stack per call** and exhausts its stack after about
+**174,000** calls. A native POSIX executable reports stack overflow and
+exits 86 (`MM-EXEC-6d` in the [memory model](memory-model.md)). The safe shape completes **5,000,000** iterations
 with a flat stack.
 
 The shape a propagation form generates, with the continuation in the

@@ -17,8 +17,8 @@
 #   * The minimum stack at which `check self_host/main.ax` succeeds is
 #     under a ceiling. It is printed either way, so growth shows in the
 #     log before it fails.
-#   * At half that minimum the process dies by a signal, not just a
-#     non-zero exit. A run that failed for an unrelated reason would
+#   * At half that minimum the process reports status 86 with a named
+#     stack-overflow message and a backtrace. A run that failed for an unrelated reason would
 #     otherwise look like one that ran out of stack, and any number would
 #     pass.
 #   * The successful run prints `OK`. A compiler that exits 0 having done
@@ -58,7 +58,7 @@ axiom="$work/stage1"
 # One run at a given stack limit. Answers "ok", "signal", or "other:<rc>".
 run_at() {
   local kib="$1" rc out
-  out="$( (ulimit -s "$kib" 2>/dev/null || exit 200; "$axiom" check "$subject") 2>"$work/err" )"
+  out="$( (ulimit -s "$kib" 2>/dev/null || exit 200; "$axiom" --diagnostic-format=ai check "$subject") 2>"$work/err" )"
   rc=$?
   if [[ "$rc" -eq 200 ]]; then echo "unsettable"; return; fi
   if [[ "$rc" -eq 0 ]]; then
@@ -66,6 +66,8 @@ run_at() {
     if [[ "$out" == *OK* ]]; then echo "ok"; else echo "other:0-no-OK"; fi
     return
   fi
+  if [[ "$rc" == 86 ]] && grep -q '^axiom: stack overflow:' "$work/err" &&
+     grep -q '^  at ' "$work/err"; then echo "overflow:86"; return; fi
   if [[ "$rc" -ge 128 ]]; then echo "signal:$rc"; return; fi
   echo "other:$rc"
 }
@@ -102,19 +104,19 @@ if (( need > ceiling_kib )); then
   exit 1
 fi
 
-# The other half: at half the requirement it must die by a signal.
+# The other half: at half the requirement it must report stack overflow.
 # Without this, the bisection above could report anything and still pass.
 half=$(( need / 2 ))
 (( half < 8 )) && half=8
 r="$(run_at "$half")"
 case "$r" in
-  signal:*) echo "and dies by ${r#signal:} at ${half} KiB, as it must" ;;
+  overflow:86) echo "and reports stack overflow with a backtrace at ${half} KiB" ;;
   ok)
     echo "FAIL: it also succeeded at ${half} KiB, so the ${need} KiB figure is not" >&2
     echo "      a stack requirement and this gate measured nothing" >&2
     exit 1 ;;
   *)
-    echo "FAIL: at ${half} KiB it answered '$r' rather than dying by a signal, so" >&2
+    echo "FAIL: at ${half} KiB it answered '$r' rather than reporting the named stack trap, so" >&2
     echo "      the failure above is not the stack running out" >&2
     exit 1 ;;
 esac
