@@ -52,6 +52,25 @@ the server.
 | Axiom: Expand macro at cursor | Opens the expansion at the cursor in a new tab. The progress notification lets you cancel a long expansion. |
 | Axiom: Open the documentation | Runs `axiom doc` in a terminal. |
 | Axiom: Restart the language server | Stops and restarts `axiom lsp`. |
+| Axiom: Browse AXQLite database | Opens the database summary for the selected `.db`, `.axqlite` or `.axql` file. |
+| Axiom: Open database summary | Shows a database or table as text: header, schema and first rows. |
+| Axiom: Refresh databases | Rescans the workspace for databases. |
+
+## Browse a database
+
+The explorer's *Axiom databases* view lists every `.db`, `.axqlite`
+and `.axql` file in your workspace. Expand a database to see its
+tables, and a table to see its first hundred rows. *Axiom: Open
+database summary* shows the same content as a document, and opening a
+database with *Open With → AXQLite browser* shows it in a read-only
+tab. The extension reads the file itself, so browsing works with the
+server stopped. A `.db` file that is not AXQLite is refused with the
+reader's message. Query files (`.axql`) open as text.
+
+With the *Axiom file icons* icon theme selected, databases and
+`.axql` files carry a database icon and `axiom.pkg` carries a package
+icon. Without it, `.axql` files still carry the database icon through
+their language registration.
 
 Snippets cover the shapes you write most: type `fn`, `main`, `let`,
 `letmut`, `match`, `data`, `struct`, `record` or `import` in a `.ax` file
