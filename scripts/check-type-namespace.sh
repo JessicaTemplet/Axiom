@@ -40,7 +40,7 @@
 #      `Config` and the reference resolves. Qualification (`TeamC::Cfg`)
 #      is the other. AX3044's help text names both, so both run here.
 #
-#   4  One file, two aliases. Two `(type Amt = ...)` in one file are
+#   4  One file, two aliases. Two `(type Amt ...)` in one file are
 #      AX3006, as two `(struct Amt ...)` are.
 #
 #   5  Scale. Module-aware resolution cannot stop at the first match:
@@ -266,14 +266,14 @@ ok_clean dat one.ax "control: one import, the same reference resolves"
 # type alias
 mk al
 cat > "$work/al/AlA.ax" <<'EOF'
-(pub type Amount = Float)
+(pub type Amount Float)
 
 (pub :: aOne Amount)
 
 (pub fn (aOne) 1.5)
 EOF
 cat > "$work/al/AlB.ax" <<'EOF'
-(pub type Amount = Int)
+(pub type Amount Int)
 
 (pub :: bTwice (-> Amount Amount))
 
@@ -332,8 +332,8 @@ ok_exit qual qual.ax 3 "\`TeamC::Cfg\` resolves the reference to TeamC"
 # ---------------------------------------------------------------
 echo "== one file, two \`type\` declarations of one name =="
 mk dup
-printf '(type Amt = Int)\n(type Amt = Float)\n(:: main Int)\n(fn (main) 0)\n' > "$work/dup/two.ax"
-printf '(type Amt = Int)\n(:: main Int)\n(fn (main) 0)\n' > "$work/dup/one.ax"
+printf '(type Amt Int)\n(type Amt Float)\n(:: main Int)\n(fn (main) 0)\n' > "$work/dup/two.ax"
+printf '(type Amt Int)\n(:: main Int)\n(fn (main) 0)\n' > "$work/dup/one.ax"
 ok_diag  dup two.ax AX3006 "two \`type Amt\` in one file" "Amt"
 ok_clean dup one.ax "control: one \`type Amt\` is not a duplicate"
 

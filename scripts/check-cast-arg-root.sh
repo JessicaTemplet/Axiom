@@ -180,13 +180,18 @@ echo "--- 1. user-level cast count does not grow ---"
 # the precise-numeric REPL transcript, fourteen in its compiled and
 # REPL cross-checks, and one oracle refusal control in local-models.py.
 # The compiler and library add no reference erasure for these tests.
+# Baseline 982 adds the two Vec fast-path storage conversions, which
+# mirror the retained element and vector-header operations in the slow
+# path. Six occurrences are the parallel frontend fixtures' unit-handle
+# and nullable-name boundaries; two are the nested numeric conversions
+# in the stored-lambda deep-cast diagnostic fixture.
 cast_count="$(git -C "$repo_root" grep -h -o '(as ' -- stdlib tests examples ':!tests/fuzz' | wc -l | tr -d ' ')"
 if [ "$cast_count" -eq 0 ]; then
   bad "user-level: the cast count read 0 - the measurement is broken, not the tree clean"
-elif [ "$cast_count" -le 972 ]; then
-  ok "user-level (cast count $cast_count <= 972)"
+elif [ "$cast_count" -le 982 ]; then
+  ok "user-level (cast count $cast_count <= 982)"
 else
-  bad "user-level (cast count $cast_count > 972): new casts need a MM-VAL-23 reason and a baseline bump"
+  bad "user-level (cast count $cast_count > 982): new casts need a MM-VAL-23 reason and a baseline bump"
 fi
 
 echo "--- 2. type-preserving casts keep ownership ---"
@@ -224,8 +229,10 @@ fi
 if [[ ! -f "$work/cast3.ll" || ! -f "$work/cast4.ll" ]]; then
   bad "emit-llvm produced no IR for the probes; counting releases would compare nothing"
 else
-  rel3="$(grep -c 'call void @axiom_release' "$work/cast3.ll" || true)"
-  rel4="$(grep -c 'call void @axiom_release' "$work/cast4.ll" || true)"
+  # Count the exact callee: the runtime's axiom_release_full forwarding
+  # call belongs to neither program's ownership behaviour.
+  rel3="$(grep -c 'call void @axiom_release(' "$work/cast3.ll" || true)"
+  rel4="$(grep -c 'call void @axiom_release(' "$work/cast4.ll" || true)"
   rel3="${rel3:-0}"
   rel4="${rel4:-0}"
   if [[ "$rel3" -gt 0 && "$rel4" -eq "$rel3" ]]; then
@@ -244,7 +251,7 @@ cat > "$work/scalar.ax" <<'EOF'
 EOF
 if "$axc" --diagnostic-format=ai emit-llvm "$work/scalar.ax" -o "$work/scalar.ll" \
      > /dev/null 2> "$work/scalar.err"; then
-  if grep -q 'call void @axiom_release' "$work/scalar.ll"; then
+  if grep -q 'call void @axiom_release(' "$work/scalar.ll"; then
     bad "the scalar control acquired a reference release"
   else
     ok "the scalar control still has no reference release"
@@ -296,7 +303,10 @@ echo "--- 4. the compiler's erasures do not grow ---"
 # resolveDeclsPhase removed two sites; fpLambda, fpPat and fpPatVecAt
 # removed one each. The total therefore rises by nine without adding
 # an implicit conversion or widening the kinds the counter recognises.
-erasure_pin=845
+# Typed command argument vectors remove 84 reference erasures from the
+# 873-site tree measured before this migration. The resulting 789 sites
+# tighten the prior 845-site pin; no compiler erasure is exempted.
+erasure_pin=789
 erasure_sum() {  # <axsym> -> the #erasures= total over self_host/ rows
   awk '$1 == "F" && index($3, "self_host/") == 1 {
          for (i = 4; i <= NF; i++)
@@ -341,7 +351,7 @@ cat > "$work/erase.ax" <<'EOF'
   (Red)
   (Green))
 
-(type Word = Int)
+(type Word Int)
 
 (:: str (-> String Int))
 (fn (str s)

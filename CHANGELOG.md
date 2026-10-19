@@ -16,6 +16,15 @@ its changelog too.
 
 ## Unreleased
 
+- Native tool arguments use string vectors throughout assembly, split
+  compilation, binding generation, crate builds, fetch and REPL calls.
+  The driver keeps their types until the syscall boundary. Tested by
+  `scripts/check-driver.sh` and `scripts/check-bootstrap.sh`.
+
+- Seeded UUID constructors have deterministic property coverage across
+  versions 4 and 7, text and byte roundtrips, timestamp extraction and
+  unsigned ordering. Tested by `tests/stdlib/973-uuid-properties.ax`.
+
 - VS Code Run and documentation commands use a terminal with known
   quoting rules, including PowerShell's invocation operator on Windows.
   They work with Nushell as the default terminal and with apostrophes
