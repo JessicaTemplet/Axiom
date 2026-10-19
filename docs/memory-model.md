@@ -2172,8 +2172,8 @@ still catches an arena that stopped rewinding. It also carries a
 negative probe: the unscoped run **MUST** grow past 2× between the two
 loads. Without it, a measurement that read the wrong pid, sampled after the
 workers died or read nothing at all would also show a flat column. The
-same pair holds the language server at **840 bytes per edit**, against
-**193,247** with the boundary removed (`MM-LIFE-2e`).
+language server uses the same pair to bound its per-message workspace
+(`MM-LIFE-2e`).
 
 The target workload is a stateless request/response service. The live
 set at the reset is empty by construction, so the boundary costs one
@@ -3145,11 +3145,10 @@ The arena replaced it because Axiom's target workload is a stateless
 request/response service, and the reclamation that fits it is the arena
 scope. `MM-ALLOC-22` measures a request handler bracketed by a mark and
 a reset at 76–681× less memory than the same binary unscoped, checked
-with a negative probe. The same pair holds the language server at 840
-bytes per edit, against 193,247 with the boundary removed. The arena is
-the strategy, not a bridge to counting. Reference counting is no longer
-scheduled, and no rule in this document may cite `MM-LIFE-2a` as
-something to come.
+with a negative probe. The language server also bounds each message
+with an arena scope. Reference counting reclaims typed references
+within those scopes. No rule may cite the withdrawn `MM-LIFE-2a` as
+future work.
 
 Withdrawing the strategy doesn't remove the half that landed. That
 half is emitted on every build:
@@ -3690,7 +3689,7 @@ from three fixpoints over the call graph (`inferOwnership` and
 
 The stash mask names the parameters a function parks in one of those
 ways. A `__retainref` or `__retain` of the parameter makes the store
-counted and cancels the bit, as in `memSetWord`, `mkNode` and
+counted and cancels the bit, as in `memSetWord`, `nodeStore` and
 `strSlice`.
 
 The ret mask names the parameters whose reference may be part of a word
@@ -3924,16 +3923,10 @@ These cases don't leak:
   resource owner bound there runs its cleanup with its last share.
   Tested by `tests/stdlib/845-pair-let-release.ax`.
 
-The next rule removes what blocked counting in containers and in the
-compiler's own data. Whether a store emits a retain is decided by
-`fldClass`, from the declared type of the place stored into. The
-containers store through `memSetWord`, where the checker sees a machine
-word, and `ASTNode` declares all ten of its fields `Int`. Without the
-rule, a `String` whose header count reads 0 still reads **0** after it
-is pushed into a `Vec` and interned into an `Intern`. Stored into a
-struct field, the same string reads **0** through a field declared
-`Int` and **1** through a field declared `String`. Every reference the
-compiler holds in its own data structures would be in the first group.
+Typed container and AST stores preserve a value's reference class
+until they take its share. `fldClass` classifies declared struct fields;
+the trusted word-store boundary uses the value's type before erasing
+it. An `Int` field alone cannot identify a stored heap reference.
 
 Freeing early is worse than leaking. Entry retains a reference
 parameter and the boundary releases it, which balances for the
@@ -3950,8 +3943,8 @@ value's type **SHALL** take a share of it. Trusted polymorphic stores
 take that share before converting the value to an `Int` word. They include:
 
 - `Mem.memSetWord`, the typed wrapper for raw word stores;
-- the AST's `mkNode`/`mkNodeAt`, whose three payload words are
-  `ASTNode`'s `Int`-declared fields;
+- the AST's typed payload setters, which maintain each slot's
+  reference bit through `nodeStore`;
 - `Vec.vecPush` and `Vec.vecSet`, which retain an element before its
   word enters the data block;
 - `Map.mapInsert`, which retains a value before handing its word to
@@ -3971,10 +3964,8 @@ at that call is counted, and 0 otherwise, including a type the call
 can't see. A container reads that answer to learn what its elements
 are (`MM-LIFE-2m`).
 
-That last case makes the rule affordable on the hottest store in the
-compiler: a tag, a span or a length costs zero instructions. With the
-rule, self-compile takes 1.22 s and 492.6 MiB peak RSS, against 1.24 s
-and 492.4 MiB without it.
+A tag, span or length remains an uncounted word. Its store emits no
+reference retain.
 
 A lambda parameter needs one more step. `bindLamParams` binds it to a
 minted placeholder, and `evClassOf` answers a placeholder `-1`, which
@@ -4151,25 +4142,17 @@ the same reference witness, so scalar answers keep their word form.
 
 Tested by `tests/stdlib/962-overapplied-result-ownership.ax`.
 
-The share `MM-LIFE-2g` takes through `memSetWord` or `mkNode` is
-unbalanced, and has to be: nothing tells the unsafe layer when a word
-is overwritten or its block dies. So a reference stored through either
-place is immortal. The containers take their shares with `__retainref`
-directly and record whether they did, so a container that owns its
-elements hands them back (`MM-LIFE-2m`). That is a leak,
-the safe direction, and it costs nothing new: a value reachable only
-from `memAlloc`'d memory is never reclaimed anyway. What it buys is
-that the value is no longer invisible, which every remaining ownership
-event depends on. This is §10's unsafe layer discharging its own
-obligation at the two points where the layer is crossed, instead of
-leaving it to every caller.
+A raw `memSetWord` store cannot return its retained share when the
+word is overwritten: the unsafe layer has no map describing that word.
+Its surrounding arena bounds the reference's lifetime.
 
-The rule doesn't cover a program that casts a reference into an
-`Int`-declared field of its own `struct`. That writes a word the rule
-never sees. `as` marks leaving the type system, and keeping such a
-value alive is the program's obligation, the same position §10 takes
-for `memAlloc`. The compiler's own instance of that shape is `mkNode`,
-which the rule covers.
+AST stores record which slots contain references. Replacing a slot or
+releasing the node returns those shares. Owning containers also record
+their element class and release their elements (`MM-LIFE-2m`).
+
+The rule does not cover a program that casts a reference into an
+`Int`-declared field of its own struct. Keeping that value alive is the
+program's obligation, as for raw `memAlloc` storage in section 10.
 
 Closure capture words are stored unretained, with the one exception
 event 4 requires: a capture that is a reference parameter of the
@@ -4585,9 +4568,8 @@ ARC is not landing (`MM-LIFE-2a`, withdrawn), and the three primitives
 are the reclamation strategy (`MM-ALLOC-22`). The clause's own second
 half is the argument against its first: they remain the only
 whole-program reclamation there is for garbage counting can't see.
-Refusing them would take a stateless service from 192 KiB at ten
-thousand connections to 130,848 KiB, and the language server from 840
-bytes per edit to 193,247.
+Refusing them would remove the explicit lifetime of request-local
+state, including compiler tables whose contents remain raw words.
 
 A runtime guard replaces the refusal. An arena reset scrubs the 4,143
 slab heads first, because a release-to-zero inside an arena extent
@@ -4596,11 +4578,10 @@ re-issuable memory. That pays for the composition hazard at run time
 instead of forbidding it at compile time, at 4,143 stores per reset.
 `MM-LIFE-2a` prices those stores.
 
-The rule sets two acceptance measurements. They gated ARC's arrival,
-and ARC is withdrawn (`MM-LIFE-2a`), so neither is a blocker. The first
-now passes and the second doesn't. The second is evidence for the
-opposite conclusion: the LSP figure below is half of `MM-ALLOC-22`'s
-case for the arena. §9.1 records what they measure now.
+The withdrawn rule's acceptance measurements concern unbracketed
+memory use. Counted vectors reclaim dead boards in the Life workload.
+The language server uses an explicit boundary around each message.
+Section 9.1 records the scope of those checks.
 
 *The unmanaged column* of `scripts/measure-memory-baseline.sh` **MUST**
 go flat with no bracket in the source. It does. The probe's `advance`
@@ -4613,54 +4594,23 @@ Peak RSS in KiB, one machine, before and after `MM-LIFE-2m`:
 | `Vec` not counted | 1696 | 2240 | 5616 | 17,728 | 162,864 |
 | `Vec` counted | 1632 | 1616 | 1632 | 1632 | 1616 |
 
-*The LSP's 200-edit session* **MUST** hold flat with the explicit
-boundary removed. `scripts/check-lsp-selfhost.sh` doesn't run that
-ablation. Its six ablations are LSP-correctness drills that patch
-`lspChar`, `lspSeverity`, `lspSymKind` and the publish loop, and none
-touches the arena boundary at `lsp.ax`'s `__axiom_arena_mark` /
-`__axiom_arena_reset_keeping` pair. Run by hand, replacing the reset
-with a pass-through of the same snapshot and rebuilding the server:
+The language server brackets each message with `__axiom_arena_mark`
+and `__axiom_arena_reset_keeping`. Its editing-session check bounds
+memory growth across repeated edits.
 
-| Server | 5 edits | 200 edits | Per edit |
-|---|---|---|---|
-| boundary intact | 2016 KiB | 2176 KiB | **840 bytes** |
-| boundary removed | 2672 KiB | 39,472 KiB | **193,247 bytes** |
+AST nodes retain child nodes, names and vectors through runtime
+reference maps. Replacing a payload retains its new reference and
+releases the previous one. Scalar payloads carry no reference bit.
+Cloning a node preserves those ownership edges.
 
-`MM-LIFE-2g` and event 4 both change what the compiler's frontend
-allocates per message, yet they move the per-edit figures by only
-0.04% and 0%. The gate's ceiling is 2048 KiB over those 195 edits. The
-boundary-removed session misses it by a factor of eighteen, and its
-per-edit figure is 230 times the bracketed one.
+Tested by `tests/frontend/090-typed-ast-storage.ax` and
+`scripts/check-lsp-selfhost.sh`.
 
-**The LSP's flatness is entirely the arena boundary's doing.** What the
-boundary reclaims is per-message AST garbage, and ARC doesn't reach it.
-That is the class `MM-LIFE-2c`'s two probes show counting can't see,
-because `ASTNode` declares all ten of its fields `Int`. `MM-LIFE-2g`'s
-share makes those words *visible* without making them *reclaimable*.
-
-These figures settle the §3.3 refusal: it is withdrawn, with the
-strategy that ordered it. Refusing `__axiom_arena_mark` and its pair
-would take the language server from 840 bytes per edit to 193 KB per
-edit, because nothing else reclaims what it reclaims. A second, larger
-workload says the same. A pre-forked server's request handler is
-bracketed by the same pair. Without the bracket it needs 76 times the
-memory at a thousand connections (10,992 KiB against 144) and 681 times
-at ten thousand (130,848 KiB against 192). `scripts/check-net.sh` gates
-that with a negative probe, and `MM-ALLOC-22` states it as a rule. That isn't a program with an unusual
-memory profile. It is the shape the project targets.
-
-Raw word storage limits which references these ownership events can
-reclaim. Trusted stores take a share before erasing a value's type
-(`MM-LIFE-2g`). `MM-LIFE-2c`'s events 2 and 3 are implemented
-(`tests/stdlib/372-arc-owned-results.ax`), but an `Int` payload no longer
-names the reference type it holds. Typed compiler containers preserve
-those reference edges; raw AST fields and raw containers rely on their
-enclosing arena's lifetime.
-
-That order is most of the reason the strategy is withdrawn rather than
-rescheduled. Twice, the step that looked next was neither the one that
-unblocked this nor the one that landed. What moved the numbers in the
-end was a workload the arena already served (`MM-ALLOC-22`).
+Some compiler state remains in packed word tables. Trusted stores take
+a share before erasing a reference's type (`MM-LIFE-2g`), and the
+surrounding arena bounds that state's lifetime. Typed AST storage does
+not establish that every compiler allocation is reclaimed without an
+explicit boundary.
 
 One allocation class is outside `MM-LIFE-2c`'s events: the emitter's
 own one-word cells, such as a `match`'s result cell or a
@@ -7418,13 +7368,12 @@ that says nothing about the rule. That isn't the same as pinned:
   of thousands of times, without asking whether a cycle is
   constructible.
 
-`MM-LIFE-2e`'s two acceptance measurements measure a withdrawn
-strategy. They were the gate on ARC's arrival: the unmanaged Life
-column, now flat at about 1,600 KiB because a `Vec` is counted
-(`MM-LIFE-2m`), and the LSP's **193,247 bytes per edit** with the
-boundary removed, against 840 with it. `MM-LIFE-2a` is withdrawn, so
-nothing waits on either. The LSP pair is half the evidence for
-`MM-ALLOC-22`.
+`MM-LIFE-2e`'s unbracketed-memory criteria belong to the withdrawn
+strategy. Counted vectors reclaim dead Life boards (`MM-LIFE-2m`).
+AST reference maps preserve typed child ownership, while the LSP's
+editing-session check measures its explicit per-message boundary.
+These checks do not establish unbracketed reclamation of every raw
+compiler table.
 
 <!-- doc-gate:negative-exempt an inventory of gaps, which is the safe direction - it claims rules are UNGATED. A false version of this paragraph under-claims coverage; the defect this rule exists for over-claims it. -->
 Every other rule is pinned by nothing, and the probes quoted inline
@@ -7608,15 +7557,12 @@ annotation the compiler derives.
 
 ### 10.4 Why explicit primitives are the strategy
 
-`MM-ALLOC-12`–`MM-ALLOC-16` are what a programmer uses. `MM-ALLOC-22`
-is the rule and `scripts/check-net.sh` is the measurement: a request
-handler scoped as an arena uses 76–681× less memory than the same
-binary unscoped, with the LSP's 840 bytes per edit beside it. Their
-gates are also what proved the allocator could be trusted at all. The
-automation was meant to be built over them. The ARC design that was
-chosen ended up refusing them instead (`MM-LIFE-2e`'s retired clause),
-which shows how far that plan drifted from the one thing already known
-to work.
+`MM-ALLOC-12`–`MM-ALLOC-16` let you bound a request's allocation
+lifetime. `MM-ALLOC-22` and `scripts/check-net.sh` measure a scoped
+request handler at 76–681× less memory than the same binary unscoped.
+The LSP uses an equivalent boundary around each message. Typed AST
+ownership reclaims references within that boundary; packed tables and
+cycles still need a bounded lifetime.
 
 ### 10.5 Why the unsafe layer is named
 
