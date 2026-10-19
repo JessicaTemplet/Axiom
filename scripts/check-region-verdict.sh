@@ -164,7 +164,7 @@ cg = cg[:j] + "0" + cg[j + len("(pairSlot cg 9)"):]
 
 # Kill 3, slice 5: turn off only the literal branch. Named function
 # descriptors keep their static sentinel, isolating the string traffic.
-pat = re.compile(r"(\(pub fn \(isStaticSentinelNode cg e\)\s+\(if \(== e 0\)\s+0\s+\(if \(== \(nodeTag e\) TAG_E_STR\)\s+)1(?=\s)")
+pat = re.compile(r"(\(pub fn \(isStaticSentinelNode cg e\)\s+\(if \(nodeSame e nilNode\)\s+0\s+\(if \(== \(nodeTag e\) TAG_E_STR\)\s+)1(?=\s)")
 if len(pat.findall(cg)) != 1:
     sys.exit("kill 3: literal sentinel branch found %d times, wanted 1" % len(pat.findall(cg)))
 cg = pat.sub(r"\g<1>0", cg, count=1)

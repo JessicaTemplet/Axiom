@@ -266,7 +266,8 @@ abl="$work/tree"
 mkdir -p "$abl"
 cp -R "$repo_root/self_host" "$repo_root/stdlib" "$abl/" || {
   echo "FAIL: could not copy the tree to ablate" >&2; exit 1; }
-python3 - "$abl/self_host/typecheck.ax" <<'PY'
+checks=$((checks + 1))
+if ! python3 - "$abl/self_host/typecheck.ax" <<'PY'
 import sys, re
 p = sys.argv[1]
 s = open(p, encoding="utf-8").read()
@@ -284,28 +285,26 @@ while depth > 0:
     elif c == ")": depth -= 1
     k += 1
 new = head + "  1\n)\n"
-open(p, "w", encoding="utf-8").write(s[:i] + new + s[k:].lstrip("\n"))
+s = s[:i] + new + s[k:].lstrip("\n")
 # Second blind, same discipline: S3's region-form reporting would
 # refuse the probe through the facts (AX3060) with S2's scalar test
 # blinded, so the ablation silences that branch's report flag too -
 # the walk still runs, still stamps, and diagnoses nothing. Anchored
-# on the tc39 branch. Read fresh: the first splice moved every index after
-# it, so offsets computed before the re-read would land mid-line.
-s = open(p, encoding="utf-8").read()
+# on the tc39 branch. Find offsets after the first splice, and write
+# only after both anchors have matched.
 branch = "(if (== (memGetWord tc 39) 1)"
 b = s.find(branch)
-if b < 0:
+if s.count(branch) != 1:
     sys.exit("the tc39 branch moved, wanted 1")
-call = "(rgnPass tc (memGetWordVec tc 10) 0 1)"
+call = "(rgnPass tc (readAstNodes tc 10) 0 1)"
 c = s.find(call, b)
-if c < 0:
+if c < 0 or s.count(call) != 1:
     sys.exit("the tc39 report-1 walk moved, wanted 1")
-s = s[:c] + "(rgnPass tc (memGetWordVec tc 10) 0 0)" + s[c+len(call):]
+s = s[:c] + "(rgnPass tc (readAstNodes tc 10) 0 0)" + s[c+len(call):]
 open(p, "w", encoding="utf-8").write(s)
 PY
-checks=$((checks + 1))
-if [[ $? -ne 0 ]]; then
-  bad "could not apply the ablation - rgTyScalar has moved, and this gate is asserting nothing"
+then
+  bad "could not apply both ablation guards - a rule moved, and this gate is asserting nothing"
 elif ! gate_build_tree "$axc" "$abl" "$abl/stdlib" \
      "$work/axc-ablated" >"$work/ablated.build.log" 2>&1; then
   bad "the ablated compiler did not build"

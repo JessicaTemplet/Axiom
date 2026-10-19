@@ -193,7 +193,7 @@ import re, sys
 p = sys.argv[1]
 s = open(p, encoding="utf-8").read()
 # Flip only the literal branch; named function descriptors stay static.
-pat = re.compile(r"(\(pub fn \(isStaticSentinelNode cg e\)\s+\(if \(== e 0\)\s+0\s+\(if \(== \(nodeTag e\) TAG_E_STR\)\s+)1(?=\s)")
+pat = re.compile(r"(\(pub fn \(isStaticSentinelNode cg e\)\s+\(if \(nodeSame e nilNode\)\s+0\s+\(if \(== \(nodeTag e\) TAG_E_STR\)\s+)1(?=\s)")
 if len(pat.findall(s)) != 1:
     sys.exit("the literal sentinel branch matched %d times, wanted 1" % len(pat.findall(s)))
 open(p, "w", encoding="utf-8").write(pat.sub(r"\g<1>0", s, count=1))

@@ -185,13 +185,16 @@ echo "--- 1. user-level cast count does not grow ---"
 # path. Six occurrences are the parallel frontend fixtures' unit-handle
 # and nullable-name boundaries; two are the nested numeric conversions
 # in the stored-lambda deep-cast diagnostic fixture.
+# Baseline 983 adds the Float-to-Int conversion of the mutable field
+# in 396-macro-struct-field-types.ax. It checks the generated field's
+# numeric type under MM-VAL-23; it creates no reference or ownership.
 cast_count="$(git -C "$repo_root" grep -h -o '(as ' -- stdlib tests examples ':!tests/fuzz' | wc -l | tr -d ' ')"
 if [ "$cast_count" -eq 0 ]; then
   bad "user-level: the cast count read 0 - the measurement is broken, not the tree clean"
-elif [ "$cast_count" -le 982 ]; then
-  ok "user-level (cast count $cast_count <= 982)"
+elif [ "$cast_count" -le 983 ]; then
+  ok "user-level (cast count $cast_count <= 983)"
 else
-  bad "user-level (cast count $cast_count > 982): new casts need a MM-VAL-23 reason and a baseline bump"
+  bad "user-level (cast count $cast_count > 983): new casts need a MM-VAL-23 reason and a baseline bump"
 fi
 
 echo "--- 2. type-preserving casts keep ownership ---"
