@@ -83,6 +83,16 @@ if python3 "$tool" --selftest > "$work/self.out" 2>&1; then
 else
   bad "selftest:"; sed 's/^/     /' "$work/self.out"
 fi
+if command -v llc >/dev/null 2>&1 && command -v opt >/dev/null 2>&1; then
+  if python3 "$repo_root/tests/profile/verify-stack-callbacks.py" "$tool" "$work" > "$work/callbacks.out" 2>&1; then
+    ok "$(tail -1 "$work/callbacks.out")"
+  else
+    bad "indirect callback stack bounds:"
+    head -12 "$work/callbacks.out" | sed 's/^/     /'
+  fi
+else
+  skip "llc/opt not on PATH: assembled callback stack bounds unavailable"
+fi
 
 echo
 echo "== 2. facts read off the compiler =="
@@ -884,6 +894,21 @@ if ablate blocking "BLOCKING_KERNEL = {" "BLOCKING_KERNEL = set() and {"; then
   fi
 else
   bad "ablation blocking: the seam did not match exactly once"
+fi
+# A guarded stack enters through an assembly call with no IR callee.
+# Ignoring that call must reproduce the false bounded recursion verdict.
+if ablate stackcall "            if template:" "            if False:"; then
+  if command -v llc >/dev/null 2>&1 && command -v opt >/dev/null 2>&1; then
+    report "$work/abl-stackcall.py" "$work/a-stackcall.json" "$fxdir/rp1-recursion.ax" --target linux-x86_64 --profile restricted --stack; rc=$?
+    b="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["stack"]["results"]["main"]; print(r["bounded"])' "$work/a-stackcall.json" 2>/dev/null)"
+    if [[ "$rc" == 0 && "$b" == "True" && -z "$(rules_of "$work/a-stackcall.json")" ]]; then
+      ok "ablation stackcall: ignoring the guarded stack entry falsely admits tree recursion"
+    else
+      bad "ablation stackcall: exit $rc, bound [$b], expected false clearance"
+    fi
+  fi
+else
+  bad "ablation stackcall: the seam did not match exactly once"
 fi
 # x86-64 calls are read off the opcode byte: a copy that never reads
 # E8 as a call loses every call edge, and tree recursion comes out
