@@ -3340,6 +3340,8 @@
 ;                    definition (AX3015). The effect walk reads a call to
 ;                    one as unresolved (`tcIsUnknownCallee`), so what it
 ;                    performs is unknown rather than nothing.
+;  14 `regionWalkCtx` the reusable region walk frame, allocated on first
+;                    demand and reset between function bodies.
 (struct UState
   (unsafeSink : Nodes)
   (forgeSites : Nodes)
@@ -3354,7 +3356,8 @@
   (mayCalls : Int)
   (walkCtx : (Vec BCtx))
   (mut discard : Int)
-  (unknownCallees : (Vec Int)))
+  (unknownCallees : (Vec Int))
+  (regionWalkCtx : Int))
 
 ; One evidence witness kept for `evSettle`: a call is checked in program
 ; order, and the pin that decides its witness may come later in the
@@ -4479,7 +4482,8 @@
                     :mayCalls 0
                     :walkCtx (bsCtxOf vecNew vecNew 0 vecNew)
                     :discard 0
-                    :unknownCallees vecNew)
+                    :unknownCallees vecNew
+                    :regionWalkCtx 0)
                 :parLends vecNew
                 :exprChecks
                   (ExprChecks
@@ -29627,37 +29631,56 @@
 ;   10 form names (Vec String)   11 report   12 facts   13 changed
 ;   14 lambda base (env index; -1 outside every lambda)
 ;   15 capture mask of the lambda being walked
-;   16 capture names (Vec String)   17 lexical extent bodies (Vec Int)
+;   16 capture names (Vec String)   17 lexical extent bodies (Vec ASTNode)
 ;   18 capture origin masks (Vec Int), for AX3062 to name the capture
 ;   19 extent boundary spans (Vec Int), for diagnostics and the LSP
+; A checker walks one function at a time. Reuse this frame and its
+; vectors across worklist rounds; per-function facts live in FnEnt.
 (pub :: rgnCtxNew (-> Int ASTNode Int Int Int))
+;@axiom:effect(unsafe)
 (pub fn (rgnCtxNew tc d ent report)
   {
-    (let rc (memAlloc 160))
-    (let n (vecLen (nodeBNames d)))
-    {
-      (memSetWord rc 0 tc)
-      (memSetWord rc 1 d)
-      (memSetWord rc 2 ent)
-      (memSetWord rc 3 n)
-      (memSetWord rc 4 (as (rgnStrVec) Int))
-      (memSetWord rc 5 (as (rgnIntVec) Int))
-      (memSetWord rc 6 (as (rgnIntVec) Int))
-      (memSetWord rc 7 1)
-      (memSetWord rc 8 0)
-      (memSetWord rc 9 (as (rgnIntVec) Int))
-      (memSetWord rc 10 (as (rgnStrVec) Int))
-      (memSetWord rc 11 report)
-      (memSetWord rc 12 (rgnFactsOf ent n))
-      (memSetWord rc 13 0)
-      (memSetWord rc 14 (- 0 1))
-      (memSetWord rc 15 0)
-      (memSetWord rc 16 (as (rgnStrVec) Int))
-      (memSetWord rc 17 (as (rgnIntVec) Int))
-      (memSetWord rc 18 (as (rgnIntVec) Int))
-      (memSetWord rc 19 (as (rgnIntVec) Int))
-      rc
-    }
+    (let state (memGetWord tc 44))
+    (let mut rc (memGetWord state 14))
+    (if (== rc 0)
+      {
+        (set rc (memAlloc 160))
+        (memSetWord state 14 rc)
+        (memSetWord rc 4 (as (rgnStrVec) Int))
+        (memSetWord rc 5 (as (rgnIntVec) Int))
+        (memSetWord rc 6 (as (rgnIntVec) Int))
+        (memSetWord rc 9 (as (rgnIntVec) Int))
+        (memSetWord rc 10 (as (rgnStrVec) Int))
+        (memSetWord rc 16 (as (rgnStrVec) Int))
+        (memSetWord rc 17 (as nodesNew Int))
+        (memSetWord rc 18 (as (rgnIntVec) Int))
+        (memSetWord rc 19 (as (rgnIntVec) Int))
+      }
+      {
+        (vecClear (rgnNames rc))
+        (vecClear (rgnOrigs rc))
+        (vecClear (rgnBinds rc))
+        (vecClear (rgnFormParents rc))
+        (vecClear (rgnFormNames rc))
+        (vecClear (as (memGetWord rc 16) Strings))
+        (vecClear (readAstNodes rc 17))
+        (vecClear (as (memGetWord rc 18) Ints))
+        (vecClear (as (memGetWord rc 19) Ints))
+      })
+    (let previous (memGetWord rc 1))
+    (memSetWord rc 0 tc)
+    (memSetWord rc 1 d)
+    (__release previous)
+    (memSetWord rc 2 ent)
+    (memSetWord rc 3 (vecLen (nodeBNames d)))
+    (memSetWord rc 7 1)
+    (memSetWord rc 8 0)
+    (memSetWord rc 11 report)
+    (memSetWord rc 12 (rgnFactsOf ent (vecLen (nodeBNames d))))
+    (memSetWord rc 13 0)
+    (memSetWord rc 14 -1)
+    (memSetWord rc 15 0)
+    rc
   })
 
 (pub :: rgnTc (-> Int Int))
