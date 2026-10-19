@@ -3,6 +3,8 @@
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const axqlite = require("../axqlite.js");
+const manifest = require("../package.json");
+const iconTheme = require("../icons/file-icon-theme.json");
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -87,6 +89,21 @@ try {
   axqlite.readDatabase(path.join(os.tmpdir(), "axqlite-smoke-missing.db"));
   check("missing file refused", "no throw", "throw");
 } catch { check("missing file refused", "throw", "throw"); }
+
+// Language registrations supply fallback icons when a different file theme is active.
+for (const [id, kind, names] of [
+  ["axqlite-db", "database", [".db", ".axqlite"]],
+  ["axql", "database", [".axql"]],
+  ["axiom-package", "package", ["axiom.pkg", "axiom.axiom.pkg"]],
+]) {
+  const language = manifest.contributes.languages.find((entry) => entry.id === id);
+  check(`${id} association`, [...(language?.extensions || []), ...(language?.filenames || [])], names);
+  check(`${id} light icon`, language?.icon?.light, `./icons/${kind}.svg`);
+  check(`${id} dark icon`, language?.icon?.dark, `./icons/${kind}.svg`);
+  check(`${id} theme icon`, iconTheme.languageIds[id], kind);
+  check(`${id} asset`, fs.existsSync(new URL(`../${language.icon.light}`, import.meta.url)), true);
+}
+check("unknown files keep their theme icon", iconTheme.file, undefined);
 
 console.log(failed ? `${failed} check(s) failed` : "axqlite smoke ok");
 process.exit(failed ? 1 : 0);

@@ -40,7 +40,7 @@ transport messages and the server's cache and worker events.
 
 ## Commands
 
-All four are in the command palette under *Axiom*. Run and Expand
+All commands are in the command palette under *Axiom*. Run and Expand
 macro are also in the editor title bar and the editor menu on an
 Axiom file, Run is in the explorer menu on a `.ax` file, and the
 status bar shows whether the server is running. Select it to restart
@@ -69,8 +69,8 @@ reader's message. Query files (`.axql`) open as text.
 
 With the *Axiom file icons* icon theme selected, databases and
 `.axql` files carry a database icon and `axiom.pkg` carries a package
-icon. Without it, `.axql` files still carry the database icon through
-their language registration.
+icon. Other icon themes can use the language icons for `.db`, `.axqlite`,
+`.axql` and `axiom.pkg` through their file associations.
 
 Snippets cover the shapes you write most: type `fn`, `main`, `let`,
 `letmut`, `match`, `data`, `struct`, `record` or `import` in a `.ax` file
