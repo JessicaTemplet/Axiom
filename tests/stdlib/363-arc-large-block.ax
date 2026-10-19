@@ -1,41 +1,6 @@
 ; exit 63 (see .exit)
-; MM-LIFE-2e's large-block policy: the release path pools every block
-; the shape word can size, up to 64 KiB, where it used to stop at
-; 1 KiB.
-;
-; What the old ceiling cost, measured before it moved (20,000
-; iterations of a tail loop allocating one string per iteration and
-; dropping the previous one, peak RSS):
-;
-;     payload    ceiling 1 KiB    ceiling 64 KiB
-;      1008 B         1,312 KiB         1,312 KiB
-;      1024 B        21,936 KiB         1,312 KiB
-;      2048 B        41,936 KiB         1,312 KiB
-;      8192 B       162,560 KiB         1,328 KiB
-;     65536 B       321,312 KiB       321,312 KiB
-;
-; The cliff is the point: a program whose buffers are a kilobyte and
-; a byte reclaimed NOTHING, and its RSS tracked the number of
-; iterations rather than the live set. The last row is the new
-; ceiling stated as a measurement - a payload plus its NUL plus the
-; header lands above 64 KiB, and above the ceiling nothing is pooled.
-;
-;   32  a released 2 KiB block is reused by the next 2 KiB request
-;   16  and it reads ZERO where garbage was written before the
-;       release - the handout scrub covers the large path too
-;    8  class separation still holds up here: a released 2 KiB block
-;       does not satisfy a 4 KiB request
-;    4  the CEILING holds: a released block one class above 64 KiB is
-;       not pooled, so the boundary is pinned in both directions
-;    2  and the last class inside the ceiling - exactly 64 KiB - is
-;    1  every step above ran
-;
-; The unfixed compiler answers 13: the 2 KiB and 64 KiB blocks are
-; both above its 1 KiB ceiling, so 32, 16 and 2 fail. The two
-; NEGATIVE claims (8 and 4) pass there for the wrong reason - a
-; compiler that pools nothing satisfies every "is not reused" - which
-; is why they are asserted beside the positive ones and not alone,
-; and why 16 is guarded by the reuse it is about.
+; MM-LIFE-2e: released blocks on both sides of 64 KiB are reused
+; and scrubbed. The 2 KiB and 4 KiB requests remain separate classes.
 (:: b2i (-> Bool Int))
 (fn (b2i x)
   (if x
@@ -89,12 +54,7 @@
           {
             (let b2 (__alloc 65552))
             {
-              (set acc (+ acc
-                         (* 4
-                           (b2i
-                             (if (== b2 b1)
-                               false
-                               true)))))
+              (set acc (+ acc (* 4 (b2i (== b2 b1)))))
               (set steps (+ steps 1))
             }
           }

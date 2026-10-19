@@ -7,7 +7,7 @@
 # `@__axiom_` globals in `self_host/codegen.ax`.
 #
 #   @__axiom_bump  _bump_end  _chunk  _free  _high   the allocator's
-#   @__axiom_slabs                                   4,097 class heads
+#   @__axiom_slabs                                   4,143 class heads
 #   @__axiom_recover_top                             the armed point
 #   @__axiom_ev_<Effect>                             one per effect
 #

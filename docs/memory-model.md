@@ -1774,7 +1774,7 @@ and one array:
 | `@__axiom_chunk` | head of the active-chunk list |
 | `@__axiom_free` | head of the reclaimed-chunk free list |
 | `@__axiom_high` | dirty watermark for the current chunk: a **conservative upper bound** on how far into it memory has ever been handed out |
-| `@__axiom_slabs` | the array: one free-list head per size class (`MM-ALLOC-25`), indexed by the class's size / 16, used by `MM-LIFE-2e`'s release path (4,097 words). Slot 0 is no class: it holds the filed-bytes count of `MM-ALLOC-24` |
+| `@__axiom_slabs` | the array: one free-list head per size class (`MM-ALLOC-25`), small classes indexed by size / 16 and large classes by power + 4080 (`MM-LIFE-2e`, 4,143 words). Slot 0 is no class: it holds the filed-bytes count of `MM-ALLOC-24` |
 
 The array is zero-initialised BSS. Like the five words, it is private
 after `fork` (`MM-PAR-3`), and it holds only addresses of blocks the
@@ -1969,7 +1969,7 @@ with its own acceptance criteria, not a Planned row.
 Such a rule would have to show how a replacement upholds `I1`–`I15`.
 Nine of those fifteen invariants are about the emitted allocator
 itself: the 16-byte header on both allocation paths (`MM-LIFE-2b`), the
-4,097 slab-class heads a reset scrubs (`MM-LIFE-2e`), and the chunk
+4,143 slab-class heads a reset scrubs (`MM-LIFE-2e`), and the chunk
 list that `MM-ALLOC-23`'s abort walks. A program-supplied
 `axiom_alloc` would have to uphold every one, and the implementation
 would have no way to check that it does. That doesn't make it
@@ -2037,7 +2037,7 @@ the executable model predicts filed after every step of every trace
 (`scripts/check-runtime-model.sh`).
 
 **MM-ALLOC-25 (H). Size classes: every 16 bytes up to 1 KiB, then
-eight per doubling up to 64 KiB.** Every request is rounded to 16
+eight per doubling up to 64 KiB, then powers of two.** Every request is rounded to 16
 bytes (`MM-ALLOC-3`). One between 1 KiB and 64 KiB is then rounded *up*
 to its class, a multiple of 2^(floor(log2(size − 1)) − 3). There are
 113 classes: 64 of them 16 bytes apart, then 1,152, 1,280 … 2,048,
@@ -2045,6 +2045,23 @@ to its class, a multiple of 2^(floor(log2(size − 1)) − 3). There are
 class not above its size (`MM-LIFE-2e`), so every block on a list is at
 least as big as the class it serves, and a block born on a class files
 back on it. A popped block keeps its own size in its header.
+
+Above 64 KiB, requests round up to powers of two through 2^62. A
+large block has a 16-byte capacity prefix before its ordinary 16-byte
+count/shape header. The prefix stores payload capacity and class index.
+The shape's word count is 1, a reserved sentinel: ordinary padded counts
+are even. Slots 4097 through 4142 hold these 46 large classes. Release
+walks mapped children before filing the block; reuse zeroes its full
+capacity. Filed-byte accounting includes both headers. Arena reset
+clears every class.
+
+The arena's keep helper uses the same capacity classes. It copies the
+requested bytes before any recycled storage is scrubbed, preserving
+overlapping input. A popped block keeps its capacity, so reuse never
+exposes fewer bytes than requested. Tested by
+`tests/stdlib/974-large-block-reuse.ax`,
+`tests/stdlib/975-large-block-keep.ax` and the executable model's
+`boundary` witness.
 
 So a block freed at one size serves every request of its class: 1,100
 bytes then 1,150 reuse one 1,152-byte block. The rounding costs at most
@@ -2391,7 +2408,7 @@ the mark once, before the loop.
 
 The jump abandons N frames of pending `axiom_release` calls. They are
 harmless because of `MM-ALLOC-14` and `MM-LIFE-2e`: the reset reclaims
-everything above the mark regardless of any count, and scrubs all 4,097
+everything above the mark regardless of any count, and scrubs all 4,143
 slab heads first, so nothing filed survives to be issued twice. What is
 *not* free is a retain taken on a block **below** the mark whose
 matching release was above it. `emitHandleDyn` takes one on the record
@@ -2881,7 +2898,7 @@ Two phrases from the design proposal don't describe the implementation:
   is withdrawn as a universal description. It doesn't promise to remove
   every retain and release inside a region.
 - “In one pointer move” describes the waterline, not the cost of the
-  whole reset. A reset also clears 4,097 size-class heads and walks
+  whole reset. A reset also clears 4,143 size-class heads and walks
   surplus chunks, so counting's free lists can't hold on to reclaimed
   storage.
 
@@ -3140,7 +3157,7 @@ self-compile from 2.93 s to 1.94 s, and from 314 MiB to 248 MiB. This
 document describes it in the present tense.
 
 **What it costs: 1.7–1.8% of each request.**
-`__axiom_arena_reset_fn` scrubs 4,097 slab heads on every reset, the
+`__axiom_arena_reset_fn` scrubs 4,143 slab heads on every reset, the
 path `MM-ALLOC-22`'s workload takes once per request. It has to,
 because releases file blocks into those heads. A head left dangling
 across a reset hands out the same storage twice on the next allocation
@@ -3856,7 +3873,6 @@ These still leak, which is the safe direction:
   position, its consumer decides, by the masks);
 - a self-tail-calling function's `Int` slots, and a parameter whose
   word it parks or answers, which keep their slot's share;
-- blocks above the 64 KiB pool ceiling, which are never filed;
 - the free list's order, which a rebuild of a 1,000,000-cell list
   scrambles a little more each generation.
 
@@ -4167,20 +4183,11 @@ the array form. A buffer takes it when its container owns its elements
 (`MM-LIFE-2m`).
 
 The array form is bit 15 of the shape word. It says that every payload
-word `0..count-1` of this block is a handle. It costs one bit and no
-second header word. The allocator clamps a payload past 16,383 words to
-the unknown-size sentinel, instead of past 32,767, which leaves bit 15
-free. The cost is reuse of blocks between 131 KB and 262 KB, which read
-as unknown-size instead of being filed.
-
-The `count` is the caller's, in bits 16..62. The allocator's word count
-in bits 1..14 is a size class: the allocator clamps it to 0 past 16,383
-words, because it won't pool a block that large. Read from there, a
-container's element buffer of 131,072 bytes or more would announce
-itself as an array of zero handles. The walk would release the block
-and none of its elements, so the whole form would be off above one
-size. With that encoding, at 16,384 elements over 200 iterations, an
-owning vector and a leaf one both peaked at 335,344 KiB.
+word `0..count-1` is a handle. Its length lives in bits 16..62. The
+allocator's size count in bits 1..14 describes capacity, with sentinel 1
+selecting the large-block prefix. These fields have separate jobs:
+releasing a large array walks its full declared length before filing
+its storage for reuse.
 
 Bits 16..62 are the record form's reference bitmap, and the two forms
 are disjoint by construction, so the field can be a bitmap for one and
@@ -4196,10 +4203,9 @@ rather than a leak.
 22 against the old encoding and 31 against this one.
 `scripts/check-container-reclaim.sh`'s `big` arm is the measurement.
 
-Not reclaimed yet: the buffer itself. 131,072 bytes is past the release
-path's 64 KiB pool ceiling, so the block is never filed, and
-`big/mapped` stays linear in the iteration count at about 130 KiB a
-turn. The elements come back, and the buffer does not.
+The buffer itself is reclaimed into a large size class after its
+elements are released. `tests/stdlib/974-large-block-reuse.ax` checks
+both the child shares and reuse of the scrubbed array storage.
 
 A bitmap couldn't do this job. The record form holds **47** words, and
 `Intern`'s string vector is **64 words** from its first string. A
@@ -4421,12 +4427,10 @@ million closures each drop whole under a 64 KiB stack
 (`tests/stdlib/555-release-deep-chain.ax`, `scripts/check-reclaim-soak.sh`
 section 1, whose ablation makes the walk recurse and dies).
 
-The walk's own guards cover immediates, statics and zero counts. The allocator and the arena's keep helper stamp the
-leaf of their dynamic size with a shared clamp: a payload past 16,383
-words stores count 0, the unknown-size sentinel that release refuses
-to file. The ceiling is 16,383 rather than 32,767 because the array
-form takes bit 15. `bootstrap/axiom-*.ll` and `codegen.ax` both carry
-`icmp ugt i64 %wcnt, 16383`.
+The walk's guards cover immediates, statics and zero counts. The
+allocator and arena keep helper stamp a leaf with its capacity count.
+A count of 1 selects a large-block prefix; small counts are even.
+Record maps and array lengths keep their upper 47 bits in either case.
 
 *The evidence half holds* (`tests/stdlib/354-arc-evidence.ax`, 255). A
 function whose signature puts a type variable in a parameter position
@@ -4573,11 +4577,11 @@ Refusing them would take a stateless service from 192 KiB at ten
 thousand connections to 130,848 KiB, and the language server from 840
 bytes per edit to 193,247.
 
-A runtime guard replaces the refusal. An arena reset scrubs the 4,097
+A runtime guard replaces the refusal. An arena reset scrubs the 4,143
 slab heads first, because a release-to-zero inside an arena extent
 files a block that the reset would otherwise leave dangling into
 re-issuable memory. That pays for the composition hazard at run time
-instead of forbidding it at compile time, at 4,097 stores per reset.
+instead of forbidding it at compile time, at 4,143 stores per reset.
 `MM-LIFE-2a` prices those stores.
 
 The rule sets two acceptance measurements. They gated ARC's arrival,
@@ -4679,45 +4683,13 @@ Release's class lookup reads the count field, and the dead-path walk
 reads the map.
 
 *The large-block policy holds* (`tests/stdlib/363-arc-large-block.ax`,
-63), and the measurement it waited for is a **cliff**, not a gradient.
-Twenty thousand iterations of a tail loop that allocates one string per
-iteration and drops the previous one, peak RSS:
+63). Blocks on either side of 64 KiB are reused and scrubbed. Large
+leaves, mapped records and arrays share the power-of-two classes in
+`MM-ALLOC-25`. A growing string can reuse buffers from earlier
+iterations within the same capacity class.
 
-| payload | ceiling 1 KiB | ceiling 64 KiB |
-|---|---|---|
-| 1008 B | 1,312 KiB | 1,312 KiB |
-| 1024 B | **21,936 KiB** | 1,312 KiB |
-| 2048 B | 41,936 KiB | 1,312 KiB |
-| 8192 B | 162,560 KiB | 1,328 KiB |
-| 65536 B | 321,312 KiB | 321,312 KiB |
-
-Under a 1 KiB ceiling, a program whose buffers were a kilobyte and a
-byte reclaimed nothing. Its RSS tracked the iteration count rather than
-the live set, while the same program one byte smaller stayed flat. The
-8 KiB row is also faster pooled: 0.27 s against 0.44 s over the same
-20,000 iterations. Reusing a hot block beats faulting in fresh pages,
-so the handout scrub more than pays for itself, even though a recycled
-large block has to be wiped again.
-
-The ceiling is 64 KiB rather than the 262,128 bytes the count field
-can describe, because the wider array buys nothing. A self-compile
-peaks at the same memory under a 1 KiB, a 64 KiB and a 256 KiB
-ceiling. Nothing large dies in it: the compiler's own containers are
-`Int`-typed, so the ownership events are emitted around them rather
-than on them. A ceiling costs its head array (4,097 words of BSS, 352
-bytes of binary) and the per-reset scrub, and neither is worth paying
-for classes no measurement reaches. The table's last row shows the
-ceiling itself: a 64 KiB payload plus its NUL and header lands above
-it, and nothing above the ceiling is pooled.
-
-What remains of this rule will not be built:
-
-- Pooling blocks above 64 KiB. They are one-shot in every workload
-  measured here, and a class for them would hold at most an eighth of
-  its block in slack for reuse nothing measured asks for.
-- The acceptance measurements. They would need the compiler's own
-  container and AST handles to carry a type the checker can see, and
-  the container element maps under them.
+Tested by `tests/stdlib/974-large-block-reuse.ax` and
+`scripts/check-container-reclaim.sh`.
 
 The §3.3 refusal is withdrawn (`MM-ALLOC-22`). The match-cell
 amendment is done: those cells are no longer allocations (`MM-ALLOC-9`,
@@ -5252,7 +5224,7 @@ program that asks for threads pays it:
   stop being unconditional.
 - **The whole of `MM-PAR-3`.** Every process-wide mutable global is
   private after `fork` by construction. Threads share them, so the five
-  allocator words, the 4,097 size-class heads and every evidence slot
+  allocator words, the 4,143 size-class heads and every evidence slot
   need atomics or thread-local storage. That is `MM-PAR-6`'s
   obligation, which also records that a shared bump pointer is the one
   thing this allocator's design can't absorb.
@@ -7347,7 +7319,7 @@ with the fixture that pins it.
 | `MM-LIFE-7` | `consume` and `alloc` win as expression heads, so you can define a function with either name but can't call it |
 | `MM-LIFE-2j` | **Resolved by removal in 0.6.0.** A trait default body's shape word depended on `impl` declaration order. `checkImplComplete` synthesised the default into every impl that omitted the method without copying the body's nodes, so one AST was checked once per implementing type, and per-node stamps were last-write-wins across the monomorphisations. On the fixture `373-shared-default-binder` in 0.3.0, `Ident#String#ident` got header `131076` and `axiom_retain(%x)` with the `Int` impl declared first, and header `4` (a leaf) with no retain with the `String` impl first. Removing traits removed the only way to check one body under two type environments. Emitted IR from a last-write-wins compiler is byte-identical to the tree's across 278 fixtures, every `stdlib/` module and `self_host/main.ax`. `scripts/check-fallible-reclaim.sh` asserts that the case stays unreachable, so the rule stays listed: a future construct that re-checks a body per instantiation would bring it back |
 | ~~`MM-EXEC-16`~~ | **CLOSED.** Status **72** meant division by zero here, and also, in `docs/ffi.md` C7, the exit a `no_std` crate's panic handler took. A supervisor reading the status couldn't tell an Axiom division from a Rust panic. The FFI exit moved to **73**, which `MM-EXEC-16` doesn't reserve, and `tests/ffi/demo/115-abort-status.ax` gates it |
-| ~~`MM-LIFE-2a`~~ | **CLOSED.** The defect was that nothing measured this cost. The cost itself stays, by design: every arena reset charges **4,097** slab-head stores on the once-per-request path, because releases file blocks into those heads and a head left dangling across a reset double-issues storage. `scripts/check-arena-reset-rate.sh` measures it. Three spellings of one program, one word apart, put a reset at **about 1.35 µs** against a mark's few nanoseconds. A fourth binary, built by deleting the `slabclear` block from the emitted IR, shows the scrub is the cost. The emitter's `[4097 x i64]` and loop bound are asserted with no clock involved. The cost is **1.7–1.8%** of the 77 µs per-connection budget |
+| ~~`MM-LIFE-2a`~~ | **CLOSED.** The defect was that nothing measured this cost. The cost itself stays, by design: every arena reset charges **4,143** slab-head stores on the once-per-request path, because releases file blocks into those heads and a head left dangling across a reset double-issues storage. `scripts/check-arena-reset-rate.sh` measures it. Three spellings of one program, one word apart, put a reset at **about 1.35 µs** against a mark's few nanoseconds. A fourth binary, built by deleting the `slabclear` block from the emitted IR, shows the scrub is the cost. The emitter's `[4143 x i64]` and loop bound are asserted with no clock involved. The cost is **1.7–1.8%** of the 77 µs per-connection budget |
 
 These defects are fixed, and each is pinned by the fixture its rule
 names:

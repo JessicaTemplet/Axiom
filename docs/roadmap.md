@@ -58,7 +58,7 @@ integrator would still need.
 | Final reference results from calls with surplus arguments own one share through temporaries, returns and generic field stores | Done | `tests/stdlib/962-overapplied-result-ownership.ax` |
 | `vecFree` and `mapFree` leave safe code, so an early drop can't free a block still in use | Done | `tests/stdlib/406-array-form-large-block.ax`, `tests/stdlib/489-map-free.ax` |
 | CI builds the compiler with a poisoned allocator and checks it still reaches its fixpoint | Done | `scripts/check-poisoned-alloc.sh` |
-| Released blocks larger than 64 KiB can be reused | Not started | `MM-ALLOC-25` |
+| Released blocks larger than 64 KiB can be reused | Done | `MM-ALLOC-25`, `tests/stdlib/974-large-block-reuse.ax` |
 | Stack overflow reports a named runtime trap | Not started | |
 | No cast, `Int` container or raw store lets a heap value become an untracked word in safe code | Not started | `MM-VAL-24` |
 | Raw-address functions and the word-to-reference accessors (`vecGetStr`, `vecGetVec`, `memGetWordStr`, `memGetWordVec`) leave the public library, so safe code can't forge an address or a reference | Not started | `MM-EXEC-9d` |

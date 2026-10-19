@@ -16,6 +16,13 @@ its changelog too.
 
 ## Unreleased
 
+- Released payloads above 64 KiB use reusable power-of-two capacity
+  classes. Large leaves, mapped records and arrays preserve their
+  ownership maps, are scrubbed on reuse and count both headers in
+  allocator statistics. Arena resets clear all classes. Tested by
+  `tests/stdlib/974-large-block-reuse.ax` and
+  `scripts/check-runtime-model.sh`.
+
 - The AXQLite editor has object navigation, bounded row previews,
   filtering, refresh and collapsible schemas. It follows VS Code's
   colours and keeps database text escaped behind a content security
