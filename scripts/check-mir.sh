@@ -719,8 +719,10 @@ echo "--- 9. the guard, at the emitted bytes ---"
 # compiler's own emitted IR with no evaluator involved. An emitter and
 # an evaluator that dropped guards together would pass §4 and fail here.
 #
-# The correspondence is exact both ways: every `sdiv`/`srem` is the first
-# instruction of a `divok_` block, and every `divok_` block starts with one.
+# Every divok_ block contains one signed division. A remainder may first
+# replace a -1 divisor with 1, keeping LLVM's INT_MIN % -1 case defined.
+# The verifier checks the exact comparison, selection and consumed operand,
+# and refuses six independent corruptions of the emitted text.
 "$axc" emit-llvm --input self_host/main.ax > "$work/self.ll" 2>"$work/self.ll.err" || {
   bad "could not emit the compiler's own IR"
 }
@@ -731,19 +733,10 @@ if [[ -s "$work/self.ll" ]]; then
   # count the symbol's `declare` line.
   n_helper="$(grep -cE '^ *(%[^ ]+ = )?(tail )?call .*@__axiom_div_by_zero\(' "$work/self.ll" || true)"
   n_div="$(grep -cE '= (sdiv|srem) i64' "$work/self.ll" || true)"
-  # a division not immediately preceded by its divok_ label
-  unguarded="$(awk '/= (sdiv|srem) i64/ { if (prev !~ /^divok_/) n++ } { prev=$0 } END { print n+0 }' "$work/self.ll")"
-  # a divok_ label not immediately followed by a division
-  empty_ok="$(awk '/^divok_/ { getline nxt; if (nxt !~ /= (sdiv|srem) i64/) n++ } END { print n+0 }' "$work/self.ll")"
-  if [[ "$unguarded" == 0 ]]; then
-    ok "every sdiv/srem in the compiler's own IR follows a divok_ label"
+  if guards="$(python3 "$repo_root/scripts/lib/check-mir-guards.py" "$work/self.ll" 2>&1)"; then
+    ok "$guards"
   else
-    bad "$unguarded sdiv/srem in the compiler's own IR are not guarded"
-  fi
-  if [[ "$empty_ok" == 0 ]]; then
-    ok "every divok_ label in the compiler's own IR is followed by an sdiv/srem"
-  else
-    bad "$empty_ok divok_ labels are not followed by a division"
+    bad "signed division block verification: $guards"
   fi
   # A floor, so the two zeroes above cannot be satisfied by a tree with
   # no divisions in it at all.
