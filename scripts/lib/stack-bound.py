@@ -338,6 +338,21 @@ def classify_line(m, line, lineno, cur, curglobal):
         if not callee.startswith("llvm.") and cur is not None:
             (m.musttail if kind == "musttail" else m.edges)[cur].add(callee)
 
+    # A function pointer passed to inline assembly may be called there.
+    # Treat explicit pointer operands as escapes and the assembly as an
+    # indirect call. Template text is excluded: an @name in assembly is
+    # not itself an LLVM operand. Unknown forms still fail closed below.
+    asm = re.search(r'\bcall\b.*?\basm(?:\s+sideeffect)?\s+"(?:[^"\\]|\\.)*",\s*"(?:[^"\\]|\\.)*"\((.*)\)', line)
+    if asm and cur is not None:
+        pointers = re.findall(r'\bptr\s+@("[^"]+"|[\w.$]+)', asm.group(1))
+        for raw in pointers:
+            name = raw.strip('"')
+            consumed.append(name)
+            if name in m.fnnames:
+                m.taken.add(name)
+        if pointers:
+            m.indirect[cur] += 1
+
     for raw in PTRTOINT_INSTR.findall(line):
         name = raw.strip('"')
         consumed.append(name)
