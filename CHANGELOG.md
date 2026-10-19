@@ -16,6 +16,11 @@ its changelog too.
 
 ## Unreleased
 
+- The AXQLite editor has object navigation, bounded row previews,
+  filtering, refresh and collapsible schemas. It follows VS Code's
+  colours and keeps database text escaped behind a content security
+  policy. Tested by `editors/vscode/scripts/axqlite-smoke.mjs`.
+
 - Native tool arguments use string vectors throughout assembly, split
   compilation, binding generation, crate builds, fetch and REPL calls.
   The driver keeps their types until the syscall boundary. Tested by

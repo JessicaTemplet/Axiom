@@ -71,6 +71,12 @@ tab. The extension reads the file itself, so browsing works with the
 server stopped. A `.db` file that is not AXQLite is refused with the
 reader's message. Query files (`.axql`) open as text.
 
+The preview shows up to 100 rows per table. Use the object list to
+jump to a table, filter the displayed rows, or expand *Schema* to see
+its declaration. Filtering searches the preview, so rows beyond that
+limit are not included. *Refresh* reads the file again after your
+program changes it. The preview is read only.
+
 With the *Axiom file icons* icon theme selected, databases and
 `.axql` files carry a database icon and `axiom.pkg` carries a package
 icon. Other icon themes can use the language icons for `.db`, `.axqlite`,

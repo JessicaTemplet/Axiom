@@ -3,6 +3,7 @@
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const axqlite = require("../axqlite.js");
+const { renderDatabase } = require("../axqlite-view.js");
 const manifest = require("../package.json");
 const iconTheme = require("../icons/file-icon-theme.json");
 import fs from "fs";
@@ -85,6 +86,21 @@ const db = axqlite.readDatabase(file);
 check("header pages", db.header.pageCount, 3);
 check("tables", db.tables.map((t) => [t.name, t.rootPage, t.columns]), [["t", 2, ["a"]]]);
 check("rows", axqlite.readTableRows(file, 2).map((r) => [r.rowid, axqlite.renderValue(r.values[0])]), [[1, "42"]]);
+
+const preview = renderDatabase(file);
+check("preview limits are visible", preview.includes("Up to 100 rows per table"), true);
+check("preview links to its table", preview.includes('href="#object-0"'), true);
+check("preview contains the row", preview.includes('<td>42</td>'), true);
+check("preview is read only", preview.includes("Read only"), true);
+check("preview has a search label", preview.includes('aria-label="Filter preview rows"'), true);
+const nonce = /script-src 'nonce-([a-f0-9]+)'/.exec(preview)?.[1];
+check("preview script and style use its CSP nonce", !!nonce && preview.includes(`<script nonce="${nonce}">`) && preview.includes(`<style nonce="${nonce}">`), true);
+check("preview refuses inline handlers", preview.includes("unsafe-inline"), false);
+fs.writeFileSync(file, Buffer.concat([header, schema,
+  leaf([cell(rowid1, record([{ k: "text", v: '<img src=x onerror="alert(1)">' }]))]) ]));
+const escapedPreview = renderDatabase(file);
+check("preview escapes database values", escapedPreview.includes("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;"), true);
+check("preview adds no data HTML", escapedPreview.includes('<img src=x'), false);
 try {
   axqlite.readDatabase(path.join(os.tmpdir(), "axqlite-smoke-missing.db"));
   check("missing file refused", "no throw", "throw");

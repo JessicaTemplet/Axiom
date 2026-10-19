@@ -19,6 +19,7 @@ const token = { isCancellationRequested: false };
 let request;
 let progress;
 let saves = true;
+let databaseProvider;
 const disposable = () => ({ dispose() { this.disposed = true; } });
 const document = {
   fileName: "/tmp/Axiom project/main.ax",
@@ -81,7 +82,7 @@ const vscode = {
     showTextDocument: async (_doc, options) => assert.equal(options.preview, true),
     withProgress: async (options, task) => { progress = options; return task({}, token); },
     registerTreeDataProvider: () => disposable(),
-    registerCustomEditorProvider: () => disposable(),
+    registerCustomEditorProvider: (_view, provider) => { databaseProvider = provider; return disposable(); },
   },
 };
 const module = { exports: {} };
@@ -90,6 +91,7 @@ vm.runInNewContext(source, { module, process, require: (name) => {
   if (name === "vscode") return vscode;
   if (name === "vscode-languageclient/node") return { LanguageClient, State, LSPErrorCodes };
   if (name === "./axqlite") return nodeRequire("../axqlite.js");
+  if (name === "./axqlite-view") return nodeRequire("../axqlite-view.js");
   throw new Error("unexpected module " + name);
 }}, { filename: "extension.js" });
 const context = { subscriptions: [] };
@@ -155,6 +157,27 @@ assert.equal(terminalOptions.length, 1, "Run reuses its command terminal");
 await commands.get("axiom.doc")();
 assert.equal(terminalCommands[2], invoke + "'axiom' 'doc'");
 assert.equal(terminalOptions[1].name, "axiom doc");
+const databaseUri = { fsPath: "/tmp/axiom-client-missing.db" };
+const databaseDocument = await databaseProvider.openCustomDocument(databaseUri);
+assert.equal(databaseDocument.uri, databaseUri);
+let receiveMessage;
+let closePanel;
+const messageSubscription = disposable();
+const panel = {
+  webview: {
+    onDidReceiveMessage(handler) { receiveMessage = handler; return messageSubscription; },
+  },
+  onDidDispose(handler) { closePanel = handler; return disposable(); },
+};
+await databaseProvider.resolveCustomEditor(databaseDocument, panel);
+assert.equal(panel.webview.options.enableScripts, true);
+assert.match(panel.webview.html, /Could not open this database/);
+const firstPreview = panel.webview.html;
+receiveMessage({ type: "refresh", path: "/ignored" });
+assert.notEqual(panel.webview.html, firstPreview, "Refresh did not render a new preview");
+closePanel();
+assert.equal(messageSubscription.disposed, true, "closing the panel leaked its message listener");
+databaseDocument.dispose();
 await commands.get("axiom.restartServer")();
 assert.equal(clients[0].stops, 1);
 assert.equal(clients.length, 2);

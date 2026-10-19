@@ -5,6 +5,7 @@
 const vscode = require("vscode");
 const { LanguageClient, State, LSPErrorCodes } = require("vscode-languageclient/node");
 const axqlite = require("./axqlite");
+const { renderDatabase } = require("./axqlite-view");
 
 let client;
 let output;
@@ -276,57 +277,19 @@ async function openDatabaseSummary(node) {
   }
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
 class AxqliteEditorProvider {
+  openCustomDocument(uri) {
+    return { uri, dispose() {} };
+  }
+
   async resolveCustomEditor(document, panel) {
-    panel.webview.options = {};
-    const file = document.uri.fsPath;
-    let body;
-    try {
-      const { header, tables } = axqlite.readDatabase(file);
-      const cards = tables.map((t) => {
-        const cols = t.columns.length ? t.columns : [];
-        let rowsHtml = "";
-        if (t.kind === "table") {
-          const rows = axqlite.readTableRows(file, t.rootPage, 20);
-          const names = cols.length ? cols : (rows[0] ? rows[0].values.map((_, i) => `col${i}`) : []);
-          const head = names.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
-          const lines = rows.map((r) =>
-            `<tr><td class="rowid">${r.rowid ?? ""}</td>${r.values.map((v) => `<td>${escapeHtml(axqlite.renderValue(v))}</td>`).join("")}</tr>`).join("");
-          rowsHtml = rows.length
-            ? `<table><thead><tr><th class="rowid">#</th>${head}</tr></thead><tbody>${lines}</tbody></table>`
-            : `<p class="muted">No rows yet.</p>`;
-        }
-        return `<section class="card"><h2>${escapeHtml(t.name)} <span class="kind">${escapeHtml(t.kind)}</span></h2>`
-          + (t.sql ? `<p class="sql">${escapeHtml(t.sql)}</p>` : "")
-          + rowsHtml + `</section>`;
-      }).join("");
-      body = `<header><h1>${escapeHtml(file.split("/").pop())}</h1>`
-        + `<p class="muted">AXQLite format ${header.version} · ${header.pageCount} page(s) · schema ${header.schemaVersion} · change ${header.changeCounter}</p></header>`
-        + (cards || `<p class="muted">No tables.</p>`);
-    } catch (e) {
-      body = `<p class="error">Not an AXQLite database: ${escapeHtml(e.message)}</p>`;
-    }
-    panel.webview.html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-      body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground);
-        font-family: var(--vscode-font-family); padding: 20px 24px; }
-      h1 { font-size: 1.3em; margin: 0 0 4px; } h2 { font-size: 1.05em; margin: 0 0 6px; }
-      .muted { color: var(--vscode-descriptionForeground); }
-      .error { color: var(--vscode-errorForeground); }
-      .card { border: 1px solid var(--vscode-panel-border); border-radius: 6px;
-        padding: 12px 16px; margin: 14px 0; background: var(--vscode-editorWidget-background); }
-      .kind { color: var(--vscode-descriptionForeground); font-weight: normal; font-size: .85em;
-        text-transform: uppercase; letter-spacing: .04em; }
-      .sql { font-family: var(--vscode-editor-font-family); font-size: .9em;
-        color: var(--vscode-descriptionForeground); white-space: pre-wrap; }
-      table { border-collapse: collapse; width: 100%; font-family: var(--vscode-editor-font-family); font-size: .9em; }
-      th, td { border-bottom: 1px solid var(--vscode-panel-border); padding: 4px 8px; text-align: left; }
-      th { color: var(--vscode-descriptionForeground); font-weight: 600; }
-      td.rowid, th.rowid { color: var(--vscode-descriptionForeground); width: 3em; }
-      </style></head><body>${body}</body></html>`;
+    panel.webview.options = { enableScripts: true };
+    const render = () => { panel.webview.html = renderDatabase(document.uri.fsPath); };
+    const listener = panel.webview.onDidReceiveMessage((message) => {
+      if (message?.type === "refresh") render();
+    });
+    panel.onDidDispose(() => listener.dispose());
+    render();
   }
 }
 
