@@ -158,7 +158,9 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (ioClose fd)
-  (__syscall1 sysCloseNum fd))
+  (if (== usesSyscallAbi 1)
+    (__syscall1 sysCloseNum fd)
+    (platformClose fd)))
 
 ; fcntl(fd, cmd, arg): the answer, or `-errno`.
 (:: ioFcntl (-> Int Int Int Int))
@@ -366,8 +368,10 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (ioOpenMode path flags mode)
-  (if (== openNeedsDirFd 1)
-    (__syscall4 sysOpenNum atFdCwd path flags mode)
+  (if (== usesSyscallAbi 0)
+      (platformOpen path flags mode)
+    (== openNeedsDirFd 1)
+      (__syscall4 sysOpenNum atFdCwd path flags mode)
     (__syscall3 sysOpenNum path flags mode)))
 
 (:: ioOpen (-> Int Int Int))
@@ -380,7 +384,9 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (ioSeek fd offset whence)
-  (__syscall3 sysLseekNum fd offset whence))
+  (if (== usesSyscallAbi 1)
+    (__syscall3 sysLseekNum fd offset whence)
+    (platformSeek fd offset whence)))
 
 ; Close a descriptor this module opened for one call, ignoring the
 ; answer: the bytes are already in hand, and there is nothing to do
@@ -594,8 +600,10 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (ioUnlink p)
-  (if (== openNeedsDirFd 1)
-    (__syscall3 sysUnlinkNum atFdCwd p 0)
+  (if (== usesSyscallAbi 0)
+      (platformUnlink p)
+    (== openNeedsDirFd 1)
+      (__syscall3 sysUnlinkNum atFdCwd p 0)
     (__syscall1 sysUnlinkNum p)))
 
 ;; Move `old` to `new`, answering `(Ok 0)` or `(Err …)` with the errno.
@@ -614,8 +622,10 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (ioRename o n)
-  (if (== openNeedsDirFd 1)
-    (__syscall4 sysRenameNum atFdCwd o atFdCwd n)
+  (if (== usesSyscallAbi 0)
+      (platformRename o n)
+    (== openNeedsDirFd 1)
+      (__syscall4 sysRenameNum atFdCwd o atFdCwd n)
     (__syscall2 sysRenameNum o n)))
 
 ;; Open `path` with `flags` (`oRdonly`, `oWronlyCreateTrunc`, ...):
@@ -720,8 +730,10 @@
 (fn (ioMkdir path mode)
   {
     (let p (ioPath path))
-    (if (== openNeedsDirFd 1)
-      (__syscall3 sysMkdirNum atFdCwd p mode)
+    (if (== usesSyscallAbi 0)
+        (platformMkdir p mode)
+      (== openNeedsDirFd 1)
+        (__syscall3 sysMkdirNum atFdCwd p mode)
       (__syscall2 sysMkdirNum p mode))
   })
 
@@ -803,8 +815,10 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (fn (ioRmdir p)
-  (if (== openNeedsDirFd 1)
-    (__syscall3 sysRmdirNum atFdCwd p 512)
+  (if (== usesSyscallAbi 0)
+      (platformRmdir p)
+    (== openNeedsDirFd 1)
+      (__syscall3 sysRmdirNum atFdCwd p 512)
     (__syscall1 sysRmdirNum p)))
 
 ; ------------------------------------------------------------------
@@ -865,8 +879,10 @@
 (fn (ioReadDirLoop fd buf pos out)
   {
     (let n
-      (if (== dirReadNeedsPosition 1)
-        (__syscall4 sysGetdentsNum fd buf ioDirBufBytes pos)
+      (if (== usesSyscallAbi 0)
+          (platformReadDir fd buf ioDirBufBytes)
+        (== dirReadNeedsPosition 1)
+          (__syscall4 sysGetdentsNum fd buf ioDirBufBytes pos)
         (__syscall3 sysGetdentsNum fd buf ioDirBufBytes)))
     (if (<= n 0)
       n
@@ -995,21 +1011,28 @@
   ; comes back as ERANGE rather than truncated.
   {
     (let buf (memAlloc 4097))
-    (if (== cwdUsesFcntlPath 1)
-      {
-        (let fd (ioOpen (__addr ".") 0))
-        (if (< fd 0)
-          (Err (mkError (- 0 fd) "getcwd: open ."))
-          {
-            (let rc (__syscall3 sysCwdNum fd fGetPath buf))
+    (if (== usesSyscallAbi 0)
+        {
+          (let rc (platformGetCwd buf 4097))
+          (if (< rc 0)
+            (Err (mkError (- 0 rc) "getcwd"))
+            (Ok (strDup (strFromLit buf))))
+        }
+      (== cwdUsesFcntlPath 1)
+        {
+          (let fd (ioOpen (__addr ".") 0))
+          (if (< fd 0)
+            (Err (mkError (- 0 fd) "getcwd: open ."))
             {
-              (ioCloseQuiet fd)
-              (if (< rc 0)
-                (Err (mkError (- 0 rc) "getcwd"))
-                (Ok (strDup (strFromLit buf))))
-            }
-          })
-      }
+              (let rc (__syscall3 sysCwdNum fd fGetPath buf))
+              {
+                (ioCloseQuiet fd)
+                (if (< rc 0)
+                  (Err (mkError (- 0 rc) "getcwd"))
+                  (Ok (strDup (strFromLit buf))))
+              }
+            })
+        }
       {
         (let rc (__syscall2 sysCwdNum buf 4096))
         (if (< rc 0)
