@@ -56,6 +56,10 @@ the server.
 | Axiom: Open database summary | Shows a database or table as text: header, schema and first rows. |
 | Axiom: Refresh databases | Rescans the workspace for databases. |
 
+Run and documentation commands open their own terminal, so they also
+work when your default shell is Nushell. Paths may contain spaces and
+apostrophes.
+
 ## Browse a database
 
 The explorer's *Axiom databases* view lists every `.db`, `.axqlite`

@@ -28,6 +28,21 @@ function shellQuote(value) {
     : "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
+function commandShell(name) {
+  // Quoting belongs to this shell, even when the user's default is
+  // Nushell or another shell with a different command grammar.
+  if (typeof process !== "undefined" && process.platform === "win32") {
+    const systemRoot = process.env.SystemRoot || "C:\\Windows";
+    return { name, shellPath: systemRoot + "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", shellArgs: ["-NoLogo", "-NoProfile"] };
+  }
+  return { name, shellPath: "/bin/sh", shellArgs: [] };
+}
+
+function commandLine(args) {
+  const invoke = typeof process !== "undefined" && process.platform === "win32" ? "& " : "";
+  return invoke + [serverPath(), ...args].map(shellQuote).join(" ");
+}
+
 function setStatus(state) {
   if (!statusBar) return;
   if (state === State.Running) {
@@ -70,14 +85,14 @@ async function stopClient() {
 
 // A terminal running an axiom command, shown so its output is visible.
 // One terminal per name: running again reuses it instead of stacking.
-function runInTerminal(name, command) {
+function runInTerminal(name, args) {
   let t = terminals.get(name);
   if (!t) {
-    t = vscode.window.createTerminal(name);
+    t = vscode.window.createTerminal(commandShell(name));
     terminals.set(name, t);
   }
   t.show();
-  t.sendText(command);
+  t.sendText(commandLine(args));
 }
 
 // Code lenses pass the file path, the explorer passes a Uri and the
@@ -93,7 +108,7 @@ async function runFile(arg) {
   }
   const doc = vscode.workspace.textDocuments.find((d) => d.fileName === file);
   if (doc && doc.isDirty && !await doc.save()) return;
-  runInTerminal("axiom run", shellQuote(serverPath()) + " run " + shellQuote(file));
+  runInTerminal("axiom run", ["run", file]);
 }
 
 // `axiom/expandMacro` answers the macro's name and its expansion, or
@@ -338,7 +353,7 @@ function activate(context) {
     statusBar,
     vscode.commands.registerCommand("axiom.run", runFile),
     vscode.commands.registerCommand("axiom.expandMacro", expandMacro),
-    vscode.commands.registerCommand("axiom.doc", () => runInTerminal("axiom doc", shellQuote(serverPath()) + " doc")),
+    vscode.commands.registerCommand("axiom.doc", () => runInTerminal("axiom doc", ["doc"])),
     vscode.commands.registerCommand("axiom.restartServer", restartServer),
     vscode.commands.registerCommand("axiom.browseDatabase", browseDatabase),
     vscode.commands.registerCommand("axiom.refreshDatabases", () => dbProvider.refresh()),

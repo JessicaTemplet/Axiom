@@ -14,6 +14,7 @@ const opened = [];
 const errors = [];
 const information = [];
 const terminalCommands = [];
+const terminalOptions = [];
 const token = { isCancellationRequested: false };
 let request;
 let progress;
@@ -69,7 +70,10 @@ const vscode = {
     activeTextEditor: { document, selection: { active: { line: 1, character: 2 } } },
     createOutputChannel: () => output,
     createStatusBarItem: () => ({ ...disposable(), show() {} }),
-    createTerminal: () => ({ show() {}, sendText: (command) => terminalCommands.push(command) }),
+    createTerminal: (options) => {
+      terminalOptions.push(options);
+      return { show() {}, sendText: (command) => terminalCommands.push(command) };
+    },
     onDidCloseTerminal: disposable,
     showInformationMessage: (message) => information.push(message),
     showErrorMessage: (message) => errors.push(message),
@@ -82,7 +86,7 @@ const vscode = {
 };
 const module = { exports: {} };
 const source = readFileSync(new URL("../extension.js", import.meta.url), "utf8");
-vm.runInNewContext(source, { module, require: (name) => {
+vm.runInNewContext(source, { module, process, require: (name) => {
   if (name === "vscode") return vscode;
   if (name === "vscode-languageclient/node") return { LanguageClient, State, LSPErrorCodes };
   if (name === "./axqlite") return nodeRequire("../axqlite.js");
@@ -131,14 +135,26 @@ assert.equal(terminalCommands.length, 0, "Run ignored a cancelled save");
 saves = true;
 await commands.get("axiom.run")();
 assert.equal(terminalCommands.length, 1);
-assert.equal(terminalCommands[0], "'axiom' run '/tmp/Axiom project/main.ax'");
+const invoke = process.platform === "win32" ? "& " : "";
+assert.equal(terminalCommands[0], invoke + "'axiom' 'run' '/tmp/Axiom project/main.ax'");
+assert.equal(terminalOptions.length, 1);
+assert.equal(terminalOptions[0].name, "axiom run");
+if (process.platform === "win32") {
+  assert.match(terminalOptions[0].shellPath, /WindowsPowerShell\\v1\.0\\powershell\.exe$/);
+} else {
+  assert.equal(terminalOptions[0].shellPath, "/bin/sh");
+}
 await commands.get("axiom.run")("/tmp/it's main.ax");
 assert.equal(terminalCommands.length, 2);
 if (process.platform === "win32") {
-  assert.equal(terminalCommands[1], "'axiom' run '/tmp/it''s main.ax'");
+  assert.equal(terminalCommands[1], "& 'axiom' 'run' '/tmp/it''s main.ax'");
 } else {
-  assert.equal(terminalCommands[1], "'axiom' run '/tmp/it'\\''s main.ax'");
+  assert.equal(terminalCommands[1], "'axiom' 'run' '/tmp/it'\\''s main.ax'");
 }
+assert.equal(terminalOptions.length, 1, "Run reuses its command terminal");
+await commands.get("axiom.doc")();
+assert.equal(terminalCommands[2], invoke + "'axiom' 'doc'");
+assert.equal(terminalOptions[1].name, "axiom doc");
 await commands.get("axiom.restartServer")();
 assert.equal(clients[0].stops, 1);
 assert.equal(clients.length, 2);
