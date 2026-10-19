@@ -16,6 +16,22 @@ its changelog too.
 
 ## Unreleased
 
+- VS Code Run and documentation commands use a terminal with known
+  quoting rules, including PowerShell's invocation operator on Windows.
+  They work with Nushell as the default terminal and with apostrophes
+  in paths. Tested by `editors/vscode/scripts/client-smoke.mjs`.
+
+- Compiler effect values use checked variants for named functions and
+  lambdas. Effect rows, handler masks and scope parameters use their
+  concrete vector types. Stored lambdas contribute their effects at
+  field calls, including captured named callbacks. Effect restrictions
+  are checked against known callback arguments and follow forwarding
+  functions and captured lambdas. Tested by
+  `tests/diagnostics/1462-lambda-field-effects.ax` and
+  `tests/diagnostics/1463-callback-restrictions.ax`. Stored lambda cast
+  facts also preserve deep cast restrictions, tested by
+  `tests/diagnostics/1464-lambda-field-casts.ax`.
+
 - Region analysis visits declarations with a loop, so its stack use
   stays independent of the number of declarations. Tested by
   `scripts/check-stack-depth.sh`.

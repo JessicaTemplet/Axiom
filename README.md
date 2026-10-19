@@ -32,9 +32,9 @@ into the C library.
 - **Bring Rust along.** Declare Rust functions in an `extern` block,
   and `axiom build --crate` builds and links the crate for you.
 
-Axiom is young. The core language is complete, the standard library,
-Macros are complete; FFI and editor support are functional. There is
-no package index and no green threads yet. [What's ready today](docs/status.md) lists
+Axiom is young. The core language, macros and standard library are
+complete; FFI and editor support are functional. There is no package
+index and no green threads yet. [What's ready today](docs/status.md) lists
 every feature with the test behind it.
 
 ## Install

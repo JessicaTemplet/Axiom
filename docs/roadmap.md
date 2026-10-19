@@ -70,6 +70,10 @@ integrator would still need.
 
 | Item | State | Where it's specified or tested |
 |---|---|---|
+| Compiler data uses typed structures and checked effect boundaries across every phase | In progress | Effect values use checked variants; AST and declaration handles still need migration |
+| Known callback arguments honour effect restrictions through forwarding and captures | Done | `tests/diagnostics/1463-callback-restrictions.ax` |
+| Stored lambdas contribute their resolved effects at field calls | Done | `tests/diagnostics/1462-lambda-field-effects.ax` |
+| Stored lambdas retain cast facts for deep restrictions | Done | `tests/diagnostics/1464-lambda-field-casts.ax` |
 | Contracts are visible in hover, signature help, completion and generated documentation | Done | `tests/lsp/drive.py`, `scripts/check-stdlib-api.sh` |
 | Contracts diagnose certainly false calls and postconditions at compile time | Planned | |
 | A misspelt checked AXTAG key is an error | Done | `AX3039` |
