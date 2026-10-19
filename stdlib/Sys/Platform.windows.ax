@@ -1538,11 +1538,13 @@
       })
   })
 
-; The signal a POSIX shell would report for the NTSTATUS a crashed
-; child exits with: SIGSEGV (11) for an access violation or a stack
+; The signal a POSIX shell would report for a child that ended with
+; the NTSTATUS `code`, or 0 when `code` is not one of the crash
+; statuses below: SIGSEGV (11) for an access violation or a stack
 ; overflow, SIGFPE (8) for the arithmetic faults, SIGILL (4) for an
-; illegal or privileged instruction, SIGINT (2) for Ctrl-C, and SIGABRT
-; (6) for any other failure status, `__fastfail` included.
+; illegal or privileged instruction, SIGTRAP (5) for a breakpoint
+; (`int3`, which LLVM places after a call that must not return), SIGINT
+; (2) for Ctrl-C, and SIGABRT (6) for `__fastfail`.
 (:: winSignalOf (-> Int Int))
 (fn (winSignalOf code)
   (if (|| (== code 3221225477) (== code 3221225725))
@@ -1551,19 +1553,27 @@
       8
     (|| (== code 3221225501) (== code 3221225622))
       4
+    (|| (== code 2147483651) (== code 2147483652))
+      5
     (== code 3221225786)
       2
-    6))
+    (== code 3221226505)
+      6
+    0))
 
 ; An exit code as the POSIX wait status `Sys.sysExitCode` and
-; `Sys.sysTermSignal` read. A failure NTSTATUS (0xC0000000 and above)
-; is a crash and reads as a signal; anything else is an exit code, of
-; which a wait status keeps the low byte.
+; `Sys.sysTermSignal` read. A crash status (`winSignalOf`) reads as
+; the signal it stands for; anything else is an exit code, of which a
+; wait status keeps the low byte, so a program that exits -1 reads as
+; 255, as it does on POSIX.
 (:: winWaitStatus (-> Int Int))
 (fn (winWaitStatus code)
-  (if (>= code 3221225472)
-    (winSignalOf code)
-    (* (& code 255) 256)))
+  {
+    (let sig (winSignalOf code))
+    (if (> sig 0)
+      sig
+      (* (& code 255) 256))
+  })
 
 ;; Wait for the child `pid` and close its handle: its POSIX wait
 ;; status, or `-errno`.
