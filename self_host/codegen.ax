@@ -309,10 +309,10 @@
 ; Field 2 = result (Str, current result value)
 ; Field 3 = types (Vec of TypeEntry, constructor/struct registry)
 ; Field 4 = tagN (Int, next data constructor tag)
-; Field 5 = argVec (Vec of Int, temp storage during EApp flattening)
+; Field 5 = argVec (Nodes, temp storage during EApp flattening)
 ; Field 6 = symnames (Vec of Int, symbol table — bound variable names)
 ; Field 7 = symregs (Vec of Int, symbol table — bound variable register strings)
-; Field 8 = decls (Int, module declarations for re-scanning before emit)
+; Field 8 = decls (Nodes, module declarations for re-scanning before emit)
 ; Field 9 = argsTyped (Str, argument list with a type before each entry)
 ;
 ; Two argument spellings are needed because LLVM writes the type once for
@@ -399,10 +399,10 @@
   (result : String)
   (types : (Vec Int))
   (tagN : Int)
-  (argVec : (Vec Int))
+  (argVec : Nodes)
   (symnames : (Vec Int))
   (symregs : (Vec Int))
-  (decls : Int)
+  (decls : Nodes)
   (argsTyped : String)
   (strings : (Vec Int))
   (curBlock : String)
@@ -430,7 +430,7 @@
   (effOps : (Vec Int))
   (curModule : Int)
   (dataTyNames : (Vec String))
-  (curDeclNode : Int)
+  (curDeclNode : ASTNode)
   (sigIntern : Int)
   (sigById : (Vec Int))
   (bareIntern : Int)
@@ -634,10 +634,10 @@
             :result ""
             :types ts
             :tagN 2
-            :argVec vecNew
+            :argVec nodesNew
             :symnames vecNew
             :symregs vecNew
-            :decls 0
+            :decls nilNodes
             :argsTyped ""
             :strings vecNew
             :curBlock "entry"
@@ -665,7 +665,7 @@
             :effOps vecNew
             :curModule 0
             :dataTyNames vecNew
-            :curDeclNode 0
+            :curDeclNode nilNode
             :sigIntern 0
             :sigById vecNew
             :bareIntern 0
@@ -1565,7 +1565,7 @@
   {
     (inferOwnershipRounds cg decls)
     (memSetWord cg 34 0)
-    (memSetWord cg 36 0)
+    (memSetWord cg 36 nilNode)
   })
 
 ; The rounds: one full pass, then worklist rounds over the caller
@@ -2004,7 +2004,7 @@
   {
     (inferFlowsRounds cg decls)
     (memSetWord cg 34 0)
-    (memSetWord cg 36 0)
+    (memSetWord cg 36 nilNode)
   })
 
 ; The rounds: one full pass, then worklist rounds over the caller
@@ -3990,7 +3990,7 @@
     nilNode
     (if (!= (nodeTag stamp) TAG_EVSTAMP)
       nilNode
-      (if (== (nodeA stamp) (memGetWord cg 36))
+      (if (nodeSame (nodeAChild stamp) (readAstNode cg 36))
         stamp
         nilNode))))
 
@@ -16526,7 +16526,7 @@
           (let cgP cgD)
           {
             (memSetWord cgP 34 0)
-            (memSetWord cgP 36 0)
+            (memSetWord cgP 36 nilNode)
             (memSetWord cgP 41 vecNew)
             cgP
           }
@@ -20032,7 +20032,8 @@
           (let stamp (nodeBinderTyChild node))
           (if (if (nodeSame stamp nilNode)
             false
-            (&& (== (nodeTag stamp) TAG_EVSTAMP) (== (nodeC stamp) (memGetWord out 36))))
+            (&& (== (nodeTag stamp) TAG_EVSTAMP)
+              (nodeSame (nodeCChild stamp) (readAstNode out 36))))
             (memSetWord out 14 (tyIsBareFloat (tyResolve (nodeAChild stamp))))
             out)
         }
@@ -21243,7 +21244,7 @@
 ;@axiom:effect(io)
 (pub fn (emitApp node cg)
   {
-    (memSetWord cg 5 vecNew)
+    (memSetWord cg 5 nodesNew)
     (memSetWord cg 45 vecNew)
     (walkAppChain node cg node)
   })
@@ -21304,7 +21305,7 @@
           ; term 64 is written in - a closure applied where it stands,
           ; with no name in between.
           {
-            (let args (reverseVec (memGetWordVec cg 5)))
+            (let args (reverseVec (readAstNodes cg 5)))
             (let evs (spineEvs cg))
             {
               (memSetWord cg 30 0)
@@ -27857,7 +27858,8 @@
                   (let st (nodeBinderTyChild valExpr))
                   (if (if (nodeSame st nilNode)
                     true
-                    (|| (!= (nodeTag st) TAG_EVSTAMP) (!= (nodeC st) (memGetWord cg 36))))
+                    (|| (!= (nodeTag st) TAG_EVSTAMP)
+                      (! (nodeSame (nodeCChild st) (readAstNode cg 36)))))
                     0
                     ; A class the stamp could not give when the call was
                     ; checked may have been decided by a pin later in the
@@ -27905,7 +27907,8 @@
                       (let st (nodeBinderTyChild valExpr))
                       (if (if (nodeSame st nilNode)
                         true
-                        (|| (!= (nodeTag st) TAG_EVSTAMP) (!= (nodeC st) (memGetWord cg 36))))
+                        (|| (!= (nodeTag st) TAG_EVSTAMP)
+                          (! (nodeSame (nodeCChild st) (readAstNode cg 36)))))
                         0
                         (if (== (fldClass cg (pinnedTy (nodeAChild st) 64)) 0)
                           1
@@ -29856,7 +29859,7 @@
         false)
         1
         (if (if (== tg TAG_E_LAM)
-          (== (strVecHas (nodeAChildren e) name) 1)
+          (== (strVecHas (nodeANames e) name) 1)
           false)
           1
           (if (if (== tg TAG_E_MATCH)
@@ -30868,7 +30871,7 @@
         (let w
           (if (if (nodeSame t nilNode)
             false
-            (&& (== (nodeTag t) TAG_EVSTAMP) (== (nodeC t) (memGetWord cg 36))))
+            (&& (== (nodeTag t) TAG_EVSTAMP) (nodeSame (nodeCChild t) (readAstNode cg 36))))
             (nodeB t)
             0))
         {
@@ -30910,7 +30913,7 @@
 (pub fn (literalRefIdentity cg e)
   (if (== (nodeTag e) TAG_E_LAM)
     {
-      (let ps (nodeAChildren e))
+      (let ps (nodeANames e))
       (let b (nodeBChild e))
       (let t (nodeBinderTyChild e))
       (if (&& (== (vecLen ps) 1)
@@ -30960,7 +30963,7 @@
                 base
                 {
                   (let saved (pairSlot cg 15))
-                  (let savedDecl (memGetWord cg 36))
+                  (let savedDecl (readAstNode cg 36))
                   (let savedMod (memGetWord cg 34))
                   (let cell regionNew)
                   {
