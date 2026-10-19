@@ -12958,8 +12958,23 @@
     (emitLine cg
       (concat "  call void asm sideeffect "
         (concat (targetRecoverJumpAsm (memGetWord cg 26)) "(i64 %top, i64 %sp, i64 %fp, i64 %pc)")))
+    ; ON WINDOWS-X86_64 THE JUMP NEEDS A REAL INSTRUCTION AFTER IT.
+    ; LLVM's Win64 unwinder pass (X86AvoidTrailingCall) puts an `int3`
+    ; after a call that ends a function, and it does not count inline
+    ; asm as an instruction. Above -O0 the loads move above the reset
+    ; call, so `callq __axiom_arena_reset_fn` sat right before the
+    ; block and the `int3` landed BETWEEN them: every abort from an
+    ; armed recovery point ended in STATUS_BREAKPOINT (0x80000003)
+    ; instead of jumping. `llvm.trap` is a `ud2` that is never reached
+    ; and leaves the jump no longer the function's tail. windows-aarch64
+    ; has no such pass and emits its `brk` after the block. Tested by
+    ; `scripts/check-recover.sh`.
+    (if (== (memGetWord cg 26) 6)
+      (emitLine cg "  call void @llvm.trap()"))
     (emitLine cg "  unreachable")
     (emitLine cg "}")
+    (if (== (memGetWord cg 26) 6)
+      (emitLine cg "declare void @llvm.trap() cold noreturn nounwind"))
     cg
   })
 

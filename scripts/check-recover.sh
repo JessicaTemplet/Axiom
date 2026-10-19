@@ -632,6 +632,62 @@ fi
 # with x18 missing only `402-recover-oom` faults on linux-aarch64.
 
 # ------------------------------------------------------------------
+# 5b. Nothing stops the jump on Windows.
+#
+# On x86_64-pc-windows-msvc, llc puts an `int3` after a call that ends
+# a function and does not count inline asm as an instruction. Above -O0
+# the abort's last call sits right before the jump block, so the `int3`
+# lands between them and an armed abort ends in STATUS_BREAKPOINT. The
+# check builds the abort through the driver's pipeline at every level
+# and requires no trap instruction before the jump. Without the
+# `llvm.trap` that `emitRecoverRuntime` writes after the jump,
+# windows-x86_64 turns red at -O1, -O2 and -O3.
+# ------------------------------------------------------------------
+echo "== nothing stops the jump on Windows =="
+
+win_checked=0
+for target in windows-x86_64 windows-aarch64; do
+  case "$target" in
+    windows-x86_64)  triple="x86_64-pc-windows-msvc";  jump='jmpq[[:space:]]+\*'; trap='int3|ud2' ;;
+    windows-aarch64) triple="aarch64-pc-windows-msvc"; jump='^[[:space:]]+br[[:space:]]';  trap='brk' ;;
+  esac
+  ir="$work/win-$target.ll"
+  if ! "$axc" --target="$target" emit-llvm tests/stdlib/403-recover-div.ax -o "$ir" >/dev/null 2>&1; then
+    echo "FAIL [$target] could not emit IR for the jump check"
+    status=1
+    continue
+  fi
+  for opt in 0 1 2 3; do
+    asm="$work/win-$target-O$opt.s"
+    if ! opt -O"$opt" "$ir" 2>/dev/null | llc -O"$opt" -relocation-model=pic -mtriple="$triple" -o "$asm" 2>/dev/null; then
+      echo "FAIL [$target -O$opt] llc could not build the abort"
+      status=1
+      continue
+    fi
+    body="$(awk '/^__axiom_recover_abort:/,/\.seh_endproc/' "$asm")"
+    before="$(printf '%s\n' "$body" | grep -nE "$jump" | head -1 | cut -d: -f1)"
+    if [[ -z "$before" ]]; then
+      echo "FAIL [$target -O$opt] no jump in __axiom_recover_abort"
+      status=1
+      continue
+    fi
+    if printf '%s\n' "$body" | head -n "$before" | grep -qE "^[[:space:]]+($trap)\b"; then
+      echo "FAIL [$target -O$opt] a trap instruction sits before the recovery jump"
+      printf '%s\n' "$body" | head -n "$before" | tail -6 | sed 's/^/    /'
+      status=1
+      continue
+    fi
+    win_checked=$((win_checked + 1))
+  done
+done
+if (( win_checked == 8 )); then
+  echo "ok   the recovery jump is reached on both Windows targets at all four levels"
+else
+  echo "FAIL only $win_checked of 8 Windows builds reached the jump check"
+  status=1
+fi
+
+# ------------------------------------------------------------------
 # 6. The negative probe, run by hand because it needs a compiler build.
 #
 # Delete this line from `emitDivTrap` in self_host/codegen.ax and

@@ -26,6 +26,14 @@ its changelog too.
   `scripts/check-freestanding.sh`; the Windows runs themselves were
   by hand on Windows 11 x86-64, because no CI job runs Windows yet.
 
+- Windows: a recovery point recovers on `windows-x86_64` at every
+  optimisation level, so `axiom test` reports every test after a
+  failing one. Above `--opt 0`, llc put an `int3` between the abort's
+  last call and its jump, and the process ended in `STATUS_BREAKPOINT`.
+  The abort now ends in `llvm.trap` after the jump. Tested by
+  `scripts/check-recover.sh`; `tests/testrunner/mixed-tests.ax` was
+  run by hand on Windows 11 x86-64.
+
 - Codegen ownership and flow facts now converge as a worklist:
   after one full pass, rounds re-walk only the callers of functions
   whose summaries moved, over a caller index whose counts ride on
