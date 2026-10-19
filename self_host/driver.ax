@@ -1035,40 +1035,42 @@
                           "arm64"
                           "x64")
                         " on a `--link-search` directory")))
-                  {
-                    (let linkArgsW
+                  (match (windowsImportLib ir objPath winTarget linkArgs)
+                    ((Err msg) (toolFailDiag "could not make kernel32.lib" msg))
+                    ((Ok implib)
                       {
-                        (let v vecNew)
+                        (let linkArgsW
+                          {
+                            (let v vecNew)
+                            {
+                              (vecPush v (as "/subsystem:console" Int))
+                              (vecPush v (as "/entry:mainCRTStartup" Int))
+                              (if (strEq winTarget "windows-aarch64")
+                                (vecPush v (as "/machine:arm64" Int))
+                                v)
+                              (vecPush v (as (concat "/out:" outPath) Int))
+                              (vecPush v (as objPath Int))
+                              (if (> (strLen implib) 0)
+                                (vecPush v (as implib Int)))
+                              (appendLinkArgsWindows v linkArgs 0)
+                              v
+                            }
+                          })
                         {
-                          (vecPush v (as "/subsystem:console" Int))
-                          (vecPush v (as "/entry:mainCRTStartup" Int))
-                          (if (strEq winTarget "windows-aarch64")
-                            (vecPush v (as "/machine:arm64" Int))
-                            v)
-                          (vecPush v (as (concat "/out:" outPath) Int))
-                          (vecPush v (as objPath Int))
-                          (appendLinkArgsWindows v linkArgs 0)
-                          v
+                          (let rcw (runTool "lld-link" linkArgsW))
+                          (if (> (strLen implib) 0)
+                            (unwrapOr (removeFile implib) 0))
+                          (if (!= rcw 0)
+                            (toolFailDiag
+                              (if (< rcw 0)
+                                "could not run `lld-link`"
+                                "lld-link failed")
+                              (concat (concat "lld-link links a " winTarget)
+                                " executable; it ships with LLVM's lld (`brew install lld`, `apt-get install lld`, choco's llvm) - put it on PATH"))
+                            0)
                         }
-                      })
-                    {
-                      (let rcw (runTool "lld-link" linkArgsW))
-                      (if (!= rcw 0)
-                        (toolFailDiag
-                          (if (< rcw 0)
-                            "could not run `lld-link`"
-                            "lld-link failed")
-                          (concat (concat "lld-link links a " winTarget)
-                            (concat
-                              " executable; it ships with LLVM's lld (`brew install lld`, `apt-get install lld`, choco's llvm) - put it on PATH, and put a `kernel32.lib` for "
-                              (concat
-                                (if (strEq winTarget "windows-aarch64")
-                                  "arm64"
-                                  "x64")
-                                " on a `--link-search` directory"))))
-                        0)
-                    }
-                  }))
+                      }
+                    ))))
               (if isBaremetal
                 ; The bare target links an ELF for QEMU's `-kernel`, not
                 ; a hosted executable: `ld.lld` with the port's linker
@@ -2028,13 +2030,153 @@
   (sizedTyIn n
     "llvm.fptosi.sat.i8.f64 llvm.fptoui.sat.i8.f64 llvm.fptosi.sat.i16.f64 llvm.fptoui.sat.i16.f64 llvm.fptosi.sat.i32.f64 llvm.fptoui.sat.i32.f64 llvm.fptosi.sat.i64.f64 llvm.fptoui.sat.i64.f64"))
 
+; Every kernel32 name a Windows module imports: the runtime's own
+; `declare dllimport` lines, and each `declare` in the run that follows
+; a `; axiom-extern-lib kernel32` line, which codegen writes above the
+; declares of an `extern "kernel32"` block. These are the names an
+; import library for this module has to carry.
+(pub :: windowsImportNamesOf (-> String Ints))
+(pub fn (windowsImportNamesOf ir)
+  {
+    (let out vecNew)
+    (windowsDllimportFrom ir 0 out)
+    (windowsKernel32RunsFrom ir 0 out)
+    out
+  })
+
+; The name in the `declare` line starting at `d`, or "".
+(pub :: declareNameAt (-> String Int String))
+(pub fn (declareNameAt ir d)
+  (match (strFindByte ir 64 d)
+    ((None) "")
+    ((Some sym)
+      (match (strFindByte ir 40 sym)
+        ((None) "")
+        ((Some open) (strDup (strSlice ir (+ sym 1) (- open (+ sym 1))))))
+    )))
+
+(pub :: pushNameOnce (-> Ints String Int))
+(pub fn (pushNameOnce out n)
+  (if (|| (== (strLen n) 0) (>= (strIndexIn out n) 0))
+    0
+    {
+      (vecPush out (as n Int))
+      0
+    }))
+
+(pub :: windowsDllimportFrom (-> String Int Ints Int))
+(pub fn (windowsDllimportFrom ir at out)
+  {
+    (let d (strFindSub ir "\ndeclare dllimport " at))
+    (if (< d 0)
+      0
+      {
+        (pushNameOnce out (declareNameAt ir (+ d 1)))
+        (windowsDllimportFrom ir (+ d 1) out)
+      })
+  })
+
+(pub :: windowsKernel32RunsFrom (-> String Int Ints Int))
+(pub fn (windowsKernel32RunsFrom ir at out)
+  {
+    (let m (strFindSub ir "\n; axiom-extern-lib kernel32\n" at))
+    (if (< m 0)
+      0
+      {
+        (let next (windowsDeclareRun ir (+ m 29) out))
+        (windowsKernel32RunsFrom ir next out)
+      })
+  })
+
+; Push the name of each consecutive `declare` line from `at`, a line
+; start, answering where the run ended.
+(pub :: windowsDeclareRun (-> String Int Ints Int))
+(pub fn (windowsDeclareRun ir at out)
+  (if (strStartsWith (strSlice ir at (- (strLen ir) at)) "declare ")
+    {
+      (pushNameOnce out (declareNameAt ir at))
+      (match (strFindByte ir 10 at)
+        ((None) (strLen ir))
+        ((Some nl) (windowsDeclareRun ir (+ nl 1) out)))
+    }
+    at))
+
+; The import library a Windows link uses for kernel32: "" when the
+; link arguments already name a `kernel32.lib` that exists, which
+; keeps a hand-made one in charge, and otherwise one this writes
+; beside the object with `llvm-dlltool` from the module's own imports
+; (`windowsImportNamesOf`), the way `scripts/check-windows-hello.sh`
+; makes one from the allowlist. `(Err msg)` when `llvm-dlltool` can't
+; make it.
+(pub :: windowsImportLib (-> String String String Ints (Result String String)))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(pub fn (windowsImportLib ir objPath winTarget linkArgs)
+  (if (windowsHasKernel32Lib (windowsArchivePathsOf linkArgs) 0)
+    (Ok "")
+    {
+      (let defPath (concat objPath ".kernel32.def"))
+      (let libPath (concat objPath ".kernel32.lib"))
+      (let names (windowsImportNamesOf ir))
+      (let def (concat "LIBRARY kernel32.dll\nEXPORTS\n" (joinLines names 0 "")))
+      (if (isErr (writeFile defPath def))
+        (Err "could not write the kernel32 import definitions beside the object")
+        {
+          (let args vecNew)
+          (vecPush args (as "-m" Int))
+          (vecPush args
+            (as (if (strEq winTarget "windows-aarch64")
+              "arm64"
+              "i386:x86-64") Int))
+          (vecPush args (as "-d" Int))
+          (vecPush args (as defPath Int))
+          (vecPush args (as "-l" Int))
+          (vecPush args (as libPath Int))
+          (let rc (runTool "llvm-dlltool" args))
+          (unwrapOr (removeFile defPath) 0)
+          (if (== rc 0)
+            (Ok libPath)
+            (Err
+              (if (< rc 0)
+                "could not run `llvm-dlltool`, which makes the kernel32 import library; it ships with LLVM - put it on PATH, or put a `kernel32.lib` on a `--link-search` directory"
+                "llvm-dlltool failed to make the kernel32 import library")))
+        })
+    }))
+
+(pub :: windowsHasKernel32Lib (-> Ints Int Bool))
+;@axiom:effect(io)
+;@axiom:effect(unsafe)
+(pub fn (windowsHasKernel32Lib paths i)
+  (if (>= i (vecLen paths))
+    false
+    {
+      (let p (as (vecGet paths i) String))
+      (if (&& (strEq (pathBase p) "kernel32.lib") (fileExists p))
+        true
+        (windowsHasKernel32Lib paths (+ i 1)))
+    }))
+
+(pub :: joinLines (-> Ints Int String String))
+;@axiom:effect(unsafe)
+(pub fn (joinLines v i acc)
+  (if (>= i (vecLen v))
+    acc
+    (joinLines v (+ i 1) (concat acc (concat (as (vecGet v i) String) "\n")))))
+
 ; The name in each `declare i64 @NAME(` line of the IR - less the two
-; the platform grounds (`platformGroundedSym`).
+; the platform grounds (`platformGroundedSym`), and on a Windows target
+; less the kernel32 imports (`windowsImportNamesOf`), which the link
+; grounds with an import library (`windowsImportLib`).
 (pub :: declareNamesOf (-> String Ints))
 (pub fn (declareNamesOf ir)
   {
     (let out vecNew)
     (let mut at 0)
+    (let k32
+      (if (irTargetIsWindows ir)
+        (windowsImportNamesOf ir)
+        vecNew))
     {
       (while (>= at 0)
         {
@@ -2054,7 +2196,9 @@
                     {
                       (if (!
                             (|| (platformGroundedSym (strSlice ir (+ sym 1) (- open (+ sym 1))))
-                              (backendGroundedSym (strSlice ir (+ sym 1) (- open (+ sym 1))))))
+                              (|| (backendGroundedSym (strSlice ir (+ sym 1) (- open (+ sym 1))))
+                                (>= (strIndexIn k32 (strSlice ir (+ sym 1) (- open (+ sym 1))))
+                                  0))))
                         (vecPush out (as (strSlice ir (+ sym 1) (- open (+ sym 1))) Int)))
                       (set at open)
                     }
@@ -2515,7 +2659,10 @@
     ""
     {
       (let colon (strFind path ":" from))
-      (let end (match colon ((None) (strLen path)) ((Some c) c)))
+      (let end
+        (match colon
+          ((None) (strLen path))
+          ((Some c) c)))
       {
         (let dir (strSlice path from (- end from)))
         (let cand
@@ -2564,7 +2711,8 @@
     ((Ok st)
       (if (!= (sysTermSignal st) 0)
         (+ 128 (sysTermSignal st))
-        (sysExitCode st)))))
+        (sysExitCode st))
+    )))
 
 ; Spawn llc for parts i..jobs-1, recording each pid in `pids`. The
 ; module was already optimised whole (see buildSplit), so a part is
@@ -2582,8 +2730,8 @@
       {
         (vecPush pids
           (spawnTool "llc"
-            (vecOf6 part "-filetype=obj" "-o" (concat part ".o")
-              (concat "-O" (fmtIntStr lvl)) llcRelocArg)))
+            (vecOf6 part "-filetype=obj" "-o" (concat part ".o") (concat "-O" (fmtIntStr lvl))
+              llcRelocArg)))
         (spawnPhase stem lvl (+ i 1) jobs pids)
       }
     }))

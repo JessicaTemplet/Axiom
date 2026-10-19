@@ -1284,13 +1284,25 @@ if command -v lld-link > /dev/null 2>&1 && command -v llvm-dlltool > /dev/null 2
     && ok "--emit-llvm keeps whello3.ll beside whello3.exe, with the Windows triple" \
     || bad "--emit-llvm on a Windows build: $(ls whello3* 2>/dev/null | tr '\n' ' ')"
 
-  # No kernel32.lib on any search directory: the grounding pass refuses
-  # BEFORE the toolchain runs, naming the runtime's own import.
+  # No kernel32.lib on any search directory: the link makes one from the
+  # module's own imports with llvm-dlltool, and removes it afterwards.
   "$s1" build --target=windows-x86_64 --input hello.ax --output wnolib >wnolib.log 2>&1; rc=$?
-  if [[ $rc != 0 && ! -f wnolib.exe ]] && grep -q 'AX4004' wnolib.log && grep -q 'VirtualAlloc' wnolib.log; then
-    ok "a Windows build with no kernel32.lib is refused as AX4004 naming VirtualAlloc, before any tool runs"
+  if [[ $rc == 0 && -f wnolib.exe ]] && [[ "$(head -c 2 wnolib.exe)" == "MZ" ]] \
+      && [[ -z "$(ls wnolib.o* 2>/dev/null)" ]]; then
+    ok "a Windows build with no kernel32.lib makes its own import library and leaves nothing behind"
   else
-    bad "a Windows build with no kernel32.lib (rc=$rc, first line: $(head -1 wnolib.log))"
+    bad "a Windows build with no kernel32.lib (rc=$rc, first line: $(head -1 wnolib.log); left: $(ls wnolib* 2>/dev/null | tr '\n' ' '))"
+  fi
+
+  # Neither a kernel32.lib nor llvm-dlltool: the link says which tool
+  # is missing and exits 4.
+  mkdir -p fake-nodlltool
+  for t in llc opt lld-link; do ln -sf "$(command -v $t)" "fake-nodlltool/$t"; done
+  PATH="$work/fake-nodlltool" "$s1" build --target=windows-x86_64 --input hello.ax --output wnodll >wnodll.log 2>&1; rc=$?
+  if [[ $rc == 4 && ! -f wnodll.exe ]] && grep -q 'llvm-dlltool' wnodll.log; then
+    ok "with neither a kernel32.lib nor llvm-dlltool, the Windows build exits 4 and names llvm-dlltool"
+  else
+    bad "no kernel32.lib and no llvm-dlltool (rc=$rc, first line: $(head -1 wnodll.log))"
   fi
 
   # A PATH with no lld-link on it: blamed by name, exit 4.
