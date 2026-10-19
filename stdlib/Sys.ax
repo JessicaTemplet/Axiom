@@ -314,25 +314,27 @@
 (pub fn (sysSpawn path argv envp)
   (sysResult
     "sysSpawn"
-    (if (== spawnUsesPosixSpawn 1)
-      {
-        (let pidbuf (memAlloc 8))
+    (if (== usesSyscallAbi 0)
+        (platformSpawn path argv envp)
+      (== spawnUsesPosixSpawn 1)
         {
-          (memSetWord pidbuf 0 0)
-          ; FIVE arguments, not libc's six: the kernel entry point fuses
-          ; the file actions and the attributes into one descriptor, so
-          ; `(pid, path, adesc, argv, envp)` is the shape. See the note
-          ; on `sysPosixSpawnNum` in the Darwin platform module for what the
-          ; six-argument spelling does instead, and why it is nearly
-          ; invisible.
+          (let pidbuf (memAlloc 8))
           {
-            (let rc (__syscall5 sysPosixSpawnNum pidbuf path 0 argv envp))
-            (if (< rc 0)
-              rc
-              (memGetWord pidbuf 0))
+            (memSetWord pidbuf 0 0)
+            ; FIVE arguments, not libc's six: the kernel entry point fuses
+            ; the file actions and the attributes into one descriptor, so
+            ; `(pid, path, adesc, argv, envp)` is the shape. See the note
+            ; on `sysPosixSpawnNum` in the Darwin platform module for what the
+            ; six-argument spelling does instead, and why it is nearly
+            ; invisible.
+            {
+              (let rc (__syscall5 sysPosixSpawnNum pidbuf path 0 argv envp))
+              (if (< rc 0)
+                rc
+                (memGetWord pidbuf 0))
+            }
           }
         }
-      }
       ; The path is tested BEFORE the fork, and only this backend needs
       ; the test. `posix_spawn` resolves the path in the PARENT and
       ; answers `-ENOENT` without creating a process; here the fork
@@ -398,21 +400,23 @@
 (pub fn (sysWaitPid pid)
   (sysResult
     "sysWaitPid"
-    {
-      (let statbuf (memAlloc 8))
+    (if (== usesSyscallAbi 0)
+      (platformWait pid)
       {
-        ; The kernel writes a 32-bit int into an 8-byte word, so the upper
-        ; half is whatever was there before. Zeroing first is what makes
-        ; the read below the status rather than the status plus garbage.
-        (memSetWord statbuf 0 0)
+        (let statbuf (memAlloc 8))
         {
-          (let w (__syscall4 sysWait4Num pid statbuf 0 0))
-          (if (< w 0)
-            w
-            (memGetWord statbuf 0))
+          ; The kernel writes a 32-bit int into an 8-byte word, so the upper
+          ; half is whatever was there before. Zeroing first is what makes
+          ; the read below the status rather than the status plus garbage.
+          (memSetWord statbuf 0 0)
+          {
+            (let w (__syscall4 sysWait4Num pid statbuf 0 0))
+            (if (< w 0)
+              w
+              (memGetWord statbuf 0))
+          }
         }
-      }
-    }))
+      })))
 
 ;; The exit code carried by a wait status, for a child that exited
 ;; normally.
@@ -464,6 +468,10 @@
 ;
 ; This is `execvp`'s rule: a name with a slash is a path and is used as
 ; written, and a bare name is looked for in each `PATH` entry in order.
+; Where `pathBackslashSeparates` is 1 a backslash or a leading `C:` also
+; makes a path, the entries split on `pathListSep`, an entry in quotes
+; loses them, and where `exeSuffixTried` is 1 a name with no extension
+; is looked for as `NAME.exe`, the name `CreateProcessW` would run.
 ;
 ; THE CANDIDATE IS TESTED BEFORE IT IS SPAWNED, and it has to be, on one
 ; of the two backends. The search used to be done by attempting each
@@ -546,16 +554,56 @@
 ;@axiom:effect(spawn)
 ;@axiom:effect(block)
 (pub fn (sysRunPath name argv envp)
-  (if (match (strFindByte name 47 0)
-    ((None) false)
-    ((Some _) true))
-    (sysRun (strCStr (strDup name)) argv envp)
+  (if (sysNameIsPath name)
+    (sysRun (strCStr (sysExeName name)) argv envp)
     {
       (let path (sysEnv "PATH"))
       (if (== (strLen path) 0)
         (Err (mkError 2 "sysRunPath: PATH is empty"))
         (sysRunSearch name argv envp path 0))
     }))
+
+; Whether `name` is a path to run as written rather than a name to look
+; for: it holds a `/`, or, where `pathBackslashSeparates` says so, a
+; `\` or a drive letter's colon.
+(:: sysNameIsPath (-> String Bool))
+(fn (sysNameIsPath name)
+  (if (isSome (strFindByte name 47 0))
+      true
+    (== pathBackslashSeparates 0)
+      false
+    (|| (isSome (strFindByte name 92 0)) (== (strByte name 1) 58))))
+
+; `name` with `.exe` added where `exeSuffixTried` says a program is
+; found that way and its last component has no extension; a fresh copy
+; either way, so `strCStr` can terminate it.
+(:: sysExeName (-> String String))
+(fn (sysExeName name)
+  (if (|| (== exeSuffixTried 0) (sysHasExt name 0 false))
+    (strDup name)
+    (concat name ".exe")))
+
+; Whether the last component of `name`, from byte `i`, holds a `.`.
+(:: sysHasExt (-> String Int Bool Bool))
+(fn (sysHasExt name i dot)
+  (if (>= i (strLen name))
+      dot
+    (|| (== (strByte name i) 47) (== (strByte name i) 92))
+      (sysHasExt name (+ i 1) false)
+    (== (strByte name i) 46)
+      (sysHasExt name (+ i 1) true)
+    (sysHasExt name (+ i 1) dot)))
+
+; A `PATH` entry without the quotes Windows lets one carry, as in
+; `"C:\Program Files\LLVM\bin"`. Only where `pathBackslashSeparates`
+; says so: on POSIX a quote is part of the name.
+(:: sysUnquote (-> String String))
+(fn (sysUnquote dir)
+  (if (&& (== pathBackslashSeparates 1)
+        (&& (>= (strLen dir) 2)
+          (&& (== (strByte dir 0) 34) (== (strByte dir (- (strLen dir) 1)) 34))))
+    (strSlice dir 1 (- (strLen dir) 2))
+    dir))
 
 ; Try `name` in each `:`-separated entry of `path` starting at `from`.
 ;
@@ -594,11 +642,11 @@
     ; `sysRun` and never comes here.
     {
       (let end
-        (match (strFindByte path 58 from)
+        (match (strFindByte path pathListSep from)
           ((None) (strLen path))
           ((Some colon) colon)))
       {
-        (let dir (strSlice path from (- end from)))
+        (let dir (sysUnquote (strSlice path from (- end from))))
         (if (== (strLen dir) 0)
           (sysRunSearch name argv envp path (+ end 1))
           ; `concat` copies, so the candidate is
@@ -611,7 +659,7 @@
           ; such file" and "the tool exited 127" are the same
           ; integer.
           {
-            (let cand (concat (concat dir "/") name))
+            (let cand (concat (concat dir "/") (sysExeName name)))
             {
               (let cpath (strCStr cand))
               {
@@ -646,8 +694,7 @@
 ;; written to the file at `errPath`, created or truncated, rather than
 ;; to this process's. `(Ok code)` is the child's answer and `(Err e)` a
 ;; child that never ran, as `sysRunPath` answers; a file that can't be
-;; opened is `(Err e)` too, and then nothing runs. A target with no
-;; syscall ABI runs the child with standard error where it was.
+;; opened is `(Err e)` too, and then nothing runs.
 ;
 ; The child inherits descriptor 2, so the swap happens here in the
 ; parent, which works under both spawn backends - `posix_spawn` and
@@ -667,7 +714,7 @@
 ;@axiom:effect(block)
 (pub fn (sysRunPathErrTo name argv envp errPath)
   (if (== usesSyscallAbi 0)
-    (sysRunPath name argv envp)
+    (sysRunPathErrToPlatform name argv envp errPath)
     {
       (let fd (sysOpenPathMode (strCStr (strDup errPath)) (| oWronlyCreateTrunc oCloexec) 420))
       (if (< fd 0)
@@ -704,15 +751,14 @@
 ;; done for both descriptors and undone as soon as the child exists,
 ;; because a spawned child keeps the descriptors it was born with.
 ;; For as long as the spawn itself takes, this process's own output
-;; and error are the files too. A target with no syscall ABI runs the
-;; child with its output where it was.
+;; and error are the files too.
 (pub :: sysSpawnOutErrTo (-> Int Int Int String String (Result Int Error)))
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 ;@axiom:effect(spawn)
 (pub fn (sysSpawnOutErrTo path argv envp outPath errPath)
   (if (== usesSyscallAbi 0)
-    (sysSpawn path argv envp)
+    (sysSpawnOutErrToPlatform path argv envp outPath errPath)
     {
       (let ofd (sysOpenPathMode (strCStr (strDup outPath)) (| oWronlyCreateTrunc oCloexec) 420))
       (if (< ofd 0)
@@ -768,13 +814,76 @@
         })
     }))
 
+; The same two swaps where there is no syscall ABI. `platformSetStd`
+; puts a handle in place of standard error or output and answers the
+; one it replaced, which goes back once the child exists.
+(:: sysRunPathErrToPlatform (-> String Int Int String (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+;@axiom:effect(block)
+(fn (sysRunPathErrToPlatform name argv envp errPath)
+  {
+    (let fd (sysOpenPathMode (strCStr (strDup errPath)) (| oWronlyCreateTrunc oCloexec) 420))
+    (if (< fd 0)
+      (Err (mkError (- 0 fd) (concat "sysRunPathErrTo: " errPath)))
+      {
+        (let saved (platformSetStd 2 fd))
+        (if (< saved 0)
+          {
+            (let _ (sysCloseFd fd))
+            (Err (mkError (- 0 saved) "sysRunPathErrTo: saving standard error"))
+          }
+          {
+            (let r (sysRunPath name argv envp))
+            (platformSetStd 2 saved)
+            (let _ (sysCloseFd fd))
+            r
+          })
+      })
+  })
+
+(:: sysSpawnOutErrToPlatform (-> Int Int Int String String (Result Int Error)))
+;@axiom:effect(io)
+;@axiom:effect(spawn)
+(fn (sysSpawnOutErrToPlatform path argv envp outPath errPath)
+  {
+    (let ofd (sysOpenPathMode (strCStr (strDup outPath)) (| oWronlyCreateTrunc oCloexec) 420))
+    (if (< ofd 0)
+      (Err (mkError (- 0 ofd) (concat "sysSpawnOutErrTo: " outPath)))
+      {
+        (let efd (sysOpenPathMode (strCStr (strDup errPath)) (| oWronlyCreateTrunc oCloexec) 420))
+        (if (< efd 0)
+          {
+            (let _ (sysCloseFd ofd))
+            (Err (mkError (- 0 efd) (concat "sysSpawnOutErrTo: " errPath)))
+          }
+          {
+            (let savedOut (platformSetStd 1 ofd))
+            (let savedErr (platformSetStd 2 efd))
+            (let r
+              (if (|| (< savedOut 0) (< savedErr 0))
+                (Err (mkError 5 "sysSpawnOutErrTo: swapping standard handles"))
+                (sysSpawn path argv envp)))
+            (if (>= savedOut 0)
+              (platformSetStd 1 savedOut))
+            (if (>= savedErr 0)
+              (platformSetStd 2 savedErr))
+            (let _ (sysCloseFd ofd))
+            (let _ (sysCloseFd efd))
+            r
+          })
+      })
+  })
+
 ;; The calling process's own id, such as a suffix that keeps two
 ;; processes' scratch files apart.
 (pub :: sysPid Int)
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (sysPid)
-  (__syscall3 sysGetPidNum 0 0 0))
+  (if (== usesSyscallAbi 1)
+    (__syscall3 sysGetPidNum 0 0 0)
+    platformPid))
 
 ;; Microseconds now, from the platform's cheapest correct clock: Darwin
 ;; answers gettimeofday's timeval (realtime; Darwin's syscall table has
@@ -1406,7 +1515,10 @@
 ;@axiom:effect(io)
 ;@axiom:effect(unsafe)
 (pub fn (sysKill pid signo)
-  (sysResult "sysKill" (__syscall3 sysKillNum pid signo 0)))
+  (sysResult "sysKill"
+    (if (== usesSyscallAbi 1)
+      (__syscall3 sysKillNum pid signo 0)
+      (platformKill pid signo))))
 
 ; ------------------------------------------------------------------
 ; Duplicating this process
@@ -1440,16 +1552,18 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(spawn)
 (pub fn (sysForkProcess)
-  {
-    (let r (__syscall5 sysForkNum sysForkArg 0 0 0 0))
-    (if (< r 0)
-      r
-      (if (== forkChildIsZero 1)
+  (if (== usesSyscallAbi 0)
+    (- 0 eNoSys)
+    {
+      (let r (__syscall5 sysForkNum sysForkArg 0 0 0 0))
+      (if (< r 0)
         r
-        (if (== r (__syscall3 sysGetPidNum 0 0 0))
-          0
-          r)))
-  })
+        (if (== forkChildIsZero 1)
+          r
+          (if (== r (__syscall3 sysGetPidNum 0 0 0))
+            0
+            r)))
+    }))
 
 ; ------------------------------------------------------------------
 ; Memory two bindings can share, and blocking on a word in it.
@@ -1938,8 +2052,15 @@
 ;@axiom:effect(unsafe)
 ;@axiom:effect(block)
 (pub fn (sysChildExited pid buf)
-  (if (== childPollKind 0)
-    (Err (mkError 78 "sysChildExited"))
+  (if (== usesSyscallAbi 0)
+      {
+        (let r (platformChildExited pid))
+        (if (< r 0)
+          (Err (mkError (- 0 r) "sysChildExited"))
+          (Ok (== r 1)))
+      }
+    (== childPollKind 0)
+      (Err (mkError 78 "sysChildExited"))
     {
       (memSetWord buf 0 0)
       (memSetWord buf 1 0)
