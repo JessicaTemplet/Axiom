@@ -4500,6 +4500,7 @@
           (tcCheckAliasDecls tc allDecls 0)
           (tcCheckAliasCycles tc allDecls 0)
           (tcCheckTypeParams tc allDecls 0)
+          (tcCheckDupCtors tc allDecls 0)
           (tcCollectSubtypeDecls tc allDecls 0)
           (tcExpandFieldAliases tc allDecls 0)
           (tcCollect tc allDecls 0)
@@ -7988,6 +7989,84 @@
 ; Collect TAG_D_SUBTYPE declarations into tcSubtypes for lookup by name.
 ; Registered in the type index like aliases so signatures may name
 ; them; the base/bounds stay on the declaration node itself.
+; Constructor names share their module's value namespace. Keep the
+; declarations in a typed table so comparisons use names and modules,
+; without depending on an AST word offset.
+(pub struct CtorDefinition
+  (name : String)
+  (module : Int)
+  (span : Int))
+
+(pub :: tcCheckDupCtors (-> Int Ints Int Int))
+(pub fn (tcCheckDupCtors tc decls i)
+  (tcCheckDupCtorsFrom tc decls i vecNew))
+
+(pub :: tcCheckDupCtorsFrom (-> Int Ints Int (Vec CtorDefinition) Int))
+(pub fn (tcCheckDupCtorsFrom tc decls i seen)
+  (if (>= i (vecLen decls))
+    0
+    {
+      (let d (vecGet decls i))
+      (if (== (nodeTag d) TAG_D_DATA)
+        (tcCheckDupCtorsIn tc (nodeBVec d) (nodeModule d) 0 seen))
+      (tcCheckDupCtorsFrom tc decls (+ i 1) seen)
+    }))
+
+(pub :: tcCheckDupCtorsIn (-> Int Ints Int Int (Vec CtorDefinition) Int))
+(pub fn (tcCheckDupCtorsIn tc ctors mod k seen)
+  (if (>= k (vecLen ctors))
+    0
+    {
+      (let c (vecGet ctors k))
+      (let current (CtorDefinition :name (nodeAName c) :module mod :span (nodeSpan c)))
+      (tcFindEarlierCtor tc seen current 0)
+      (vecPush seen current)
+      (tcCheckDupCtorsIn tc ctors mod (+ k 1) seen)
+    }))
+
+(pub :: tcFindEarlierCtor (-> Int (Vec CtorDefinition) CtorDefinition Int Int))
+(pub fn (tcFindEarlierCtor tc seen current i)
+  (if (>= i (vecLen seen))
+    0
+    {
+      (let prior (vecGet seen i))
+      (if (&& (== (tcSameModule prior.module current.module) 1) (strEq prior.name current.name))
+        {
+          (emitDiag tc
+            (diagSetLabel
+              (mkDiag SEV_ERROR "AX3006" "duplicate-definition" current.span
+                (concat (concat "duplicate constructor `" current.name) "`") prior.span
+                (concat (concat "`" current.name) "` first declared here")
+                "rename one of the constructors")
+              (concat (concat "`" current.name) "` redeclared here")))
+          1
+        }
+        (tcFindEarlierCtor tc seen current (+ i 1)))
+    }))
+
+; An empty or reversed literal range admits no value, and every
+; conversion into it then fails at run time. Refuse it where it is
+; declared when both bounds are integer literals.
+(pub :: tcCheckSubtypeRange (-> Int Int Int))
+(pub fn (tcCheckSubtypeRange tc d)
+  {
+    (let bounds (nodeCVec d))
+    (if (|| (== (as bounds Int) 0) (!= (vecLen bounds) 2))
+      0
+      {
+        (let lo (vecGet bounds 0))
+        (let hi (vecGet bounds 1))
+        (if (&& (== (nodeTag lo) TAG_E_INT) (== (nodeTag hi) TAG_E_INT))
+          (if (>= (nodeA lo) (nodeA hi))
+            (emitDiag tc
+              (mkDiag SEV_ERROR "AX3004" "type-mismatch" (nodeSpan d)
+                "this subtype range is empty: its lower bound is not below its upper bound" 0 ""
+                "give the range a lower bound below its upper bound"))
+            0)
+          0)
+      })
+  })
+
 (pub :: tcCollectSubtypeDecls (-> Int Ints Int Int))
 (pub fn (tcCollectSubtypeDecls tc decls i)
   (if (>= i (vecLen decls))
@@ -7999,6 +8078,7 @@
           {
             (vecPush (tcSubtypesVec tc) d)
             (tyIdxPut tc (nodeAName d) TY_SUBTYPE (nodeModule d) d 0)
+            (tcCheckSubtypeRange tc d)
           })
       }
       (tcCollectSubtypeDecls tc decls (+ i 1))
@@ -15371,6 +15451,16 @@
 ; arguments are still checked, left to right; the head is not
 ; (reporting it again would double the diagnostic). Answers 1 when
 ; refused.
+; A polymorphic result may itself be a function. Saturation cannot
+; reject extra arguments until the application has grounded it.
+(pub :: fnResultClosed (-> Int Int))
+(pub fn (fnResultClosed ty)
+  (if (== (nodeTag ty) TAG_T_ARR)
+    (fnResultClosed (nodeB ty))
+    (if (|| (== (nodeTag ty) TAG_T_CON) (== (nodeTag ty) TAG_T_PTR))
+      1
+      0)))
+
 (pub :: checkSaturation (-> Int Int Int String Int))
 (pub fn (checkSaturation tc e head hname)
   (if (!= (scopeFindFrame tc hname) 0)
@@ -15384,34 +15474,54 @@
           (if (!= ent 0)
             {
               (let ar (repArity ent))
+              (let arLim
+                (if (> (arrowArity (memGetWord ent 1)) ar)
+                  (arrowArity (memGetWord ent 1))
+                  ar))
               (let got (spineArgs e 0))
               (if (< ar 0)
                 0
-                (if (>= got ar)
-                  0
-                  (if (== (nodeSpan head) 0)
+                (if (&& (> got arLim) (== (fnResultClosed (memGetWord ent 1)) 1))
+                  (if (|| (== (nodeSpan head) 0) (!= (memGetWord ent 4) 0))
                     0
                     {
                       (emitDiag tc
                         (diagSetLabel
-                          (mkDiagNote SEV_ERROR "AX3013" "partial-application" (nodeSpan head)
-                            (concat
-                              (concat
-                                (concat
-                                  (concat (concat "partial application of `" hname) "`: it takes ")
-                                  (fmtInt ar))
-                                " argument(s) and ")
-                              (concat (fmtInt got) " were supplied"))
+                          (mkDiag SEV_ERROR "AX3004" "type-mismatch" (nodeSpan head)
+                            (concat (concat (concat (concat "`" hname) "` takes ") (fmtInt arLim))
+                              (concat " argument(s), given " (fmtInt got)))
                             0 0
-                            "bind the missing arguments with a lambda: `(lambda (y) (f x y))` builds the value `(f x)` would mean"
-                            "a partial application has to hold the arguments it was not given, and a top-level function has no closure record to hold them in")
-                          (concat
-                            (concat (concat (concat (concat "`" hname) "` takes ") (fmtInt ar))
-                              " argument(s); ")
-                            (concat (fmtInt (- ar got)) " more needed"))))
+                            "remove the extra argument(s), or add a parameter to the definition")
+                          (concat (fmtInt got) " argument(s) provided here")))
                       (checkSpineArgsOnly tc e)
                       1
-                    })))
+                    })
+                  (if (>= got ar)
+                    0
+                    (if (== (nodeSpan head) 0)
+                      0
+                      {
+                        (emitDiag tc
+                          (diagSetLabel
+                            (mkDiagNote SEV_ERROR "AX3013" "partial-application" (nodeSpan head)
+                              (concat
+                                (concat
+                                  (concat
+                                    (concat (concat "partial application of `" hname)
+                                      "`: it takes ")
+                                    (fmtInt ar))
+                                  " argument(s) and ")
+                                (concat (fmtInt got) " were supplied"))
+                              0 0
+                              "bind the missing arguments with a lambda: `(lambda (y) (f x y))` builds the value `(f x)` would mean"
+                              "a partial application has to hold the arguments it was not given, and a top-level function has no closure record to hold them in")
+                            (concat
+                              (concat (concat (concat (concat "`" hname) "` takes ") (fmtInt ar))
+                                " argument(s); ")
+                              (concat (fmtInt (- ar got)) " more needed"))))
+                        (checkSpineArgsOnly tc e)
+                        1
+                      }))))
             }
             {
               (let ctor (rfindCtor tc hname))
@@ -15420,7 +15530,7 @@
                 {
                   (let want (arrowArity (memGetWord ctor 3)))
                   (let got (spineArgs e 0))
-                  (if (>= got want)
+                  (if (== got want)
                     0
                     (if (== (nodeSpan head) 0)
                       0
@@ -19862,8 +19972,7 @@
 ; frontier size: the initial pass can contain every declaration in
 ; the compiler. Processing the body after a recursive call retained
 ; one frame per entry, even at --opt 1.
-(pub :: inferEffectsDirtyPass
-  (-> Int Ints IntRows Ints Ints Ints Int Int))
+(pub :: inferEffectsDirtyPass (-> Int Ints IntRows Ints Ints Ints Int Int))
 (pub fn (inferEffectsDirtyPass tc decls bs work marks next i)
   {
     (let mut j (- (vecLen work) 1))
@@ -21361,8 +21470,133 @@
       })
   })
 
+; A bare pattern name that names a nullary constructor is that
+; constructor's test, not a binder: `None` in an arm must not swallow
+; `(Some 5)`. Retag in place before the arms are checked, recursively,
+; so codegen - which reads the same tree after the checker - tests the
+; tag too. A fieldful constructor's bare name stays a binder: it
+; cannot test without its fields. `true`/`false` stay literal tests.
+(pub :: normCtorPat (-> Int Int Int))
+(pub fn (normCtorPat tc pat)
+  {
+    (let tag (nodeTag pat))
+    (if (== tag TAG_E_VAR)
+      {
+        (let name (nodeAName pat))
+        (if (&& (&& (! (strEq name "_")) (! (strEq name "true")))
+              (&& (! (strEq name "false")) (== (tcCtorOfArity tc name 0) 1)))
+          (memSetWord pat 0 TAG_P_CON0)
+          0)
+      }
+      (if (== tag TAG_E_APP)
+        (normCtorPatVec tc (spineArgVec pat vecNew) 0)
+        (if (== tag TAG_P_CONNAMED)
+          (normCtorPatVec tc (nodeCVec pat) 0)
+          0)))
+  })
+
+(pub :: normCtorPatVec (-> Int Ints Int Int))
+(pub fn (normCtorPatVec tc args i)
+  (if (>= i (vecLen args))
+    0
+    {
+      (normCtorPat tc (vecGet args i))
+      (normCtorPatVec tc args (+ i 1))
+    }))
+
+; Whether two patterns are the same literal test, or the same
+; constructor headed test whose arguments all bind.
+(pub :: patSameTest (-> Int Int Int))
+(pub fn (patSameTest a b)
+  {
+    (let ta (nodeTag a))
+    (if (!= ta (nodeTag b))
+      0
+      (if (|| (== ta TAG_E_INT) (== ta TAG_E_CHAR))
+        (if (== (nodeA a) (nodeA b))
+          1
+          0)
+        (if (== ta TAG_E_STR)
+          (if (strEq (nodeAName a) (nodeAName b))
+            1
+            0)
+          (if (== ta TAG_P_CON0)
+            (if (strEq (nodeAName a) (nodeAName b))
+              1
+              0)
+            (if (== ta TAG_E_APP)
+              (if (strEq (patCtorName a) (patCtorName b))
+                (patArgsAllBinders (spineArgVec a vecNew) 0)
+                0)
+              (if (== ta TAG_P_CONNAMED)
+                (if (strEq (nodeAName a) (nodeAName b))
+                  (patArgsAllBinders (nodeCVec a) 0)
+                  0)
+                0))))))
+  })
+
+(pub :: patArgsAllBinders (-> Ints Int Int))
+(pub fn (patArgsAllBinders args i)
+  (if (>= i (vecLen args))
+    1
+    (if (== (patIrrefutable (vecGet args i)) 1)
+      (patArgsAllBinders args (+ i 1))
+      0)))
+
+; Warn AX3134 on an arm an earlier arm already covers: after a
+; catch-all, or repeating a literal or constructor test.
+(pub :: checkUnreachableArms (-> Int Ints Int Int Int))
+(pub fn (checkUnreachableArms tc arms i catchallSeen)
+  (if (>= i (vecLen arms))
+    0
+    {
+      (let arm (vecGet arms i))
+      (if (== (nodeTag arm) TAG_M_FOR)
+        (checkUnreachableArms tc arms (+ i 1) catchallSeen)
+        {
+          (let pat (nodeA arm))
+          {
+            (if (|| (== catchallSeen 1) (== (armsRepeatTest arms pat 0 i) 1))
+              (emitDiag tc
+                (mkDiag SEV_WARNING "AX3134" "unreachable-arm" (nodeSpan pat)
+                  "this arm can never match: an earlier arm already covers it" 0 ""
+                  "remove the arm, or move it above the arm that covers it")))
+            (checkUnreachableArms tc arms (+ i 1)
+              (if (== (patIrrefutable pat) 1)
+                1
+                catchallSeen))
+          }
+        })
+    }))
+
+(pub :: armsRepeatTest (-> Ints Int Int Int Int))
+(pub fn (armsRepeatTest arms pat j end)
+  (if (>= j end)
+    0
+    {
+      (let arm (vecGet arms j))
+      (if (&& (!= (nodeTag arm) TAG_M_FOR) (== (patSameTest (nodeA arm) pat) 1))
+        1
+        (armsRepeatTest arms pat (+ j 1) end))
+    }))
+
+(pub :: normCtorArms (-> Int Ints Int Int))
+(pub fn (normCtorArms tc arms i)
+  (if (>= i (vecLen arms))
+    0
+    {
+      (let arm (vecGet arms i))
+      {
+        (if (!= (nodeTag arm) TAG_M_FOR)
+          (normCtorPat tc (nodeA arm)))
+        (normCtorArms tc arms (+ i 1))
+      }
+    }))
+
 (pub fn (checkMatch tc e disc)
   {
+    (normCtorArms tc (nodeBVec e) 0)
+    (checkUnreachableArms tc (nodeBVec e) 0 0)
     (let errsBefore (countErrorDiags (tcOutVec tc)))
     (let scrutTy (checkExprH tc (nodeA e) 0))
     (let recWarn (checkRecursionInScrutinee tc e scrutTy errsBefore))
@@ -30333,6 +30567,7 @@
 ; The value is 2 rather than a second word because every reader of
 ; word 28 asks `!= 0`; 2 is still "done".
 (pub :: rgnRounds (-> Int Ints Int Int Int))
+
 ; Answers 0 when the facts CONVERGED and 1 when the round cap was
 ; reached with facts still moving. Both used to answer 0, so a caller
 ; could not tell a proven claim from an abandoned one - and

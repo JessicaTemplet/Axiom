@@ -588,6 +588,26 @@ else
   printf '%s\n' "$out" | sed 's/^/     /' | head -8
 fi
 
+# A sibling Float must not replace Fmt's own dependency, including when
+# the parallel frontend prefetched the sibling before visiting Fmt.
+shadow="$work/library-import-origin"
+mkdir -p "$shadow"
+cat > "$shadow/Float.ax" <<'EOF'
+(pub :: twice (-> Int Int))
+(pub fn (twice n) (* n 2))
+EOF
+cat > "$shadow/main.ax" <<'EOF'
+(import IO)
+(:: main Int)
+;@axiom:effect(io)
+(fn (main) { (println 1.5) 0 })
+EOF
+for jobs in 1 2; do
+  got="$(cd "$shadow" && AXIOM_FRONTEND_JOBS="$jobs" "$axc" run main.ax 2>"$work/origin.err")"
+  [[ "$got" == "1.500000" ]] && ok "library imports keep their origin with frontend jobs=$jobs" \
+    || bad "a sibling Float replaced the library's dependency with frontend jobs=$jobs: $got"
+done
+
 # The ablation: the same file in the entry file's own directory must
 # still build and shadow. That is how a project overrides a library
 # module (docs/reference.md's search order), so the refusal must not

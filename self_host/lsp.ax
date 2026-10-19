@@ -5041,8 +5041,7 @@
 ; it is filled at `didOpen`/`didChange`, which is before the reclaim,
 ; so it crosses the boundary like the text or the first request after
 ; every edit answers from an empty one.
-(pub :: lspSnapshot
-  (-> Strings Strings Strings Ints Strings Strings Int Int))
+(pub :: lspSnapshot (-> Strings Strings Strings Ints Strings Strings Int Int))
 (pub fn (lspSnapshot uris texts gens meta highlights cache r)
   {
     (let n (vecLen uris))
@@ -5597,8 +5596,7 @@
   (|| (lspNavHandles method)
     (|| (lspViewHandles method) (|| (lspFixHandles method) (lspHlHandles method)))))
 
-(pub :: lspExtDispatch
-  (-> LspWorkspace String Int Int Strings (Vec a) Strings Strings String))
+(pub :: lspExtDispatch (-> LspWorkspace String Int Int Strings (Vec a) Strings Strings String))
 ;@axiom:effect(io)
 (pub fn (lspExtDispatch workspace method id params uris texts gens highlights)
   (if (lspNavHandles method)
@@ -6665,34 +6663,18 @@
       }
     }))
 
-; `(type Name a T)`: the identifiers up to and including the `=`
-; are the alias's own parameters, which `parseAliasDecl` reads the
-; same way; what follows is the type.
+; `(type Name a T)`: the alias's parameters are the node's own
+; tyvar list, which `parseAliasDecl` reads the same way; every other
+; identifier in the form names the target type. There is no `=` in
+; the canonical form, so the split is by the tyvar list, not a marker.
 (pub :: lspNavTypesAlias (-> Int Int Int))
 (pub fn (lspNavTypesAlias nv d)
   (if (== (nodeSpan d) 0)
     0
     {
       (let src (memGetWordStr nv 0))
-      (let mut i 0)
-      (let mut seenEq 0)
-      {
-        (let spans (lspNavIdents src (spanEnd (nodeSpan d)) (lspNavDeclEnd src d)))
-        {
-          (while (< i (vecLen spans))
-            {
-              (let sp (vecGet spans i))
-              {
-                (if (== seenEq 1)
-                  (lspNavTypeRef nv (lspNavSpanText src sp) sp)
-                  (if (strEq (lspNavSpanText src sp) "=")
-                    (set seenEq 1)))
-                (set i (+ i 1))
-              }
-            })
-          0
-        }
-      }
+      (lspNavTypeRefs nv (lspNavIdents src (spanEnd (nodeSpan d)) (lspNavDeclEnd src d))
+        (as (nodeCVec d) (Vec Int)) 0)
     }))
 
 ; `(subtype Positive is Int range LO..HI)`: the identifiers between
@@ -7639,8 +7621,7 @@
 ; isn't, its uses can't be listed without reading every file on disk,
 ; but the declaration itself is one lookup away - the one `definition`
 ; makes - so a request that includes the declaration still gets it.
-(pub :: lspNavHomeLocations
-  (-> LspWorkspace Int String String Ints String Int Strings (Vec a) Int))
+(pub :: lspNavHomeLocations (-> LspWorkspace Int String String Ints String Int Strings (Vec a) Int))
 ;@axiom:effect(io)
 (pub fn (lspNavHomeLocations workspace out path src decls bare incl uris texts)
   {
@@ -7790,8 +7771,7 @@
     }
   })
 
-(pub :: lspRenameTop
-  (-> LspWorkspace String String Ints Ints String String Strings (Vec a) Int))
+(pub :: lspRenameTop (-> LspWorkspace String String Ints Ints String String Strings (Vec a) Int))
 ;@axiom:effect(io)
 (pub fn (lspRenameTop workspace src uri ix occs key newName uris texts)
   (if (lspNavNamed occs newName)
@@ -8137,8 +8117,7 @@
         (lspShapeConBuild tname params pairs 0 vecNew))
     }))
 
-(pub :: lspShapeBindAll
-  (-> Ints Ints Ints Ints Strings Ints Int Int Int))
+(pub :: lspShapeBindAll (-> Ints Ints Ints Ints Strings Ints Int Int Int))
 (pub fn (lspShapeBindAll decls occs fts args params pairs fuel i)
   (if (>= i (vecLen fts))
     1
@@ -10935,8 +10914,7 @@
       ((None) 0)
       ((Some _) 1))))
 
-(pub :: lspViewHintsExpr
-  (-> Int String Ints LspBuckets LspBuckets Ints Ints Int Int Int Int))
+(pub :: lspViewHintsExpr (-> Int String Ints LspBuckets LspBuckets Ints Ints Int Int Int Int))
 (pub fn (lspViewHintsExpr out src ix fns locals decls occs e rs re)
   (if (== e 0)
     0
@@ -11003,8 +10981,7 @@
                             0)))))))))))
     }))
 
-(pub :: lspViewHintsVec
-  (-> Int String Ints LspBuckets LspBuckets Ints Ints Ints Int Int Int))
+(pub :: lspViewHintsVec (-> Int String Ints LspBuckets LspBuckets Ints Ints Ints Int Int Int))
 (pub fn (lspViewHintsVec out src ix fns locals decls occs xs rs re)
   (if (== (as xs Int) 0)
     0
@@ -11023,8 +11000,7 @@
 ; The arms of a `match` (bodies alone - the pattern is not a call).
 ; (`cond` clauses used to walk here too, tests included; `cond` is
 ; AX2004 now, so the flag that distinguished them is gone with it.)
-(pub :: lspViewHintsArms
-  (-> Int String Ints LspBuckets LspBuckets Ints Ints Ints Int Int Int))
+(pub :: lspViewHintsArms (-> Int String Ints LspBuckets LspBuckets Ints Ints Ints Int Int Int))
 (pub fn (lspViewHintsArms out src ix fns locals decls occs arms rs re)
   (if (== (as arms Int) 0)
     0
@@ -11049,8 +11025,7 @@
 ; variable is a call; any other head - a lambda, a nested form - is
 ; walked as an expression. Every argument is walked afterwards, since
 ; each may hold calls of its own.
-(pub :: lspViewHintsApp
-  (-> Int String Ints LspBuckets LspBuckets Ints Ints Int Int Int Int))
+(pub :: lspViewHintsApp (-> Int String Ints LspBuckets LspBuckets Ints Ints Int Int Int Int))
 (pub fn (lspViewHintsApp out src ix fns locals decls occs e rs re)
   {
     (let args vecNew)
@@ -11761,8 +11736,7 @@
 
 ; One SymbolInformation, when `name` holds the query and the
 ; declaration at `uri`:`span` has not been listed already.
-(pub :: lspViewSymOffer
-  (-> Int Strings String String String Ints String Int Int String Int))
+(pub :: lspViewSymOffer (-> Int Strings String String String Ints String Int Int String Int))
 (pub fn (lspViewSymOffer out seen query uri src ix name kind span container)
   (if (>= (jsonArrLen out) LSP_COMPL_MAX)
     0
@@ -12245,8 +12219,7 @@
 ; every signature grouped at the top (2,000 walks of 4,000
 ; declarations) and 1.87x with no signatures at all (2,000 walks of
 ; the checker's table), against 0.72x for a one-line range.
-(pub :: lspSigAssists
-  (-> Int Ints Ints LspBuckets LspBuckets String String Ints Int Int))
+(pub :: lspSigAssists (-> Int Ints Ints LspBuckets LspBuckets String String Ints Int Int))
 (pub fn (lspSigAssists out decls rawVis sigs entries src uri ix want)
   {
     (let n (vecLen rawVis))
@@ -12538,8 +12511,7 @@
 ; One suppression per (owner, code): the tag line above the owner
 ; declaration's first line. No action when the owner is nowhere to
 ; be found, which a macro-generated name would be.
-(pub :: lspNolintOffer
-  (-> Int String String Ints Ints Int String String Int String Strings Int))
+(pub :: lspNolintOffer (-> Int String String Ints Ints Int String String Int String Strings Int))
 (pub fn (lspNolintOffer out src uri ix decls want code owner sp msg seen)
   {
     (let key (concat owner (concat "$" code)))
@@ -12762,8 +12734,7 @@
 ; E)) S')` with `x` for `E` in `S'`. What this changes on purpose: the
 ; item now runs before whatever the statement evaluated ahead of it.
 ; ------------------------------------------------------------------
-(pub :: lspNameAssists
-  (-> Int Ints String String Ints Int Ints String Ints Ints Int))
+(pub :: lspNameAssists (-> Int Ints String String Ints Int Ints String Ints Ints Int))
 ;@axiom:effect(io)
 (pub fn (lspNameAssists out ds src uri ix want decls path allDecls units)
   {
@@ -12848,8 +12819,7 @@
 
 ; One action per (module, name), whatever the number of diagnostics
 ; that asked for it - a whole-document range meets every one.
-(pub :: lspImportOffer
-  (-> Int Int String String Ints Ints String String Strings Int))
+(pub :: lspImportOffer (-> Int Int String String Ints Ints String String Strings Int))
 (pub fn (lspImportOffer out d src uri ix decls mod name seen)
   {
     (let key (concat mod (concat "$" name)))
@@ -12960,8 +12930,7 @@
 ; deep at most. Dot-files and dot-directories are skipped. A root of
 ; "" is the working directory - `moduleSearchDirs` pushes it for an
 ; entry file named with no directory - and is listed as `./`.
-(pub :: lspFixScanDir
-  (-> String String String Int String String Int String Strings Strings Int))
+(pub :: lspFixScanDir (-> String String String Int String String Int String Strings Strings Int))
 ;@axiom:effect(io)
 (pub fn (lspFixScanDir dir rel modPrefix depth name path tcode entryDir found seen)
   {
@@ -13173,8 +13142,7 @@
 ; ------------------------------------------------------------------
 ; `pub` for an AX3023 name.
 ; ------------------------------------------------------------------
-(pub :: lspPublicAssist
-  (-> Int Int String String Ints Ints Ints Ints Strings Int))
+(pub :: lspPublicAssist (-> Int Int String String Ints Ints Ints Ints Strings Int))
 ;@axiom:effect(io)
 (pub fn (lspPublicAssist out d src uri ix decls allDecls units seen)
   {
@@ -13270,9 +13238,7 @@
         (lspFixDeclIn allDecls mod name (- i 1)))
     }))
 
-(pub :: lspPublicOffer
-  (-> Int Int String String Ints Ints Ints Ints String String Int Strings
-    Int))
+(pub :: lspPublicOffer (-> Int Int String String Ints Ints Ints Ints String String Int Strings Int))
 ;@axiom:effect(io)
 (pub fn (lspPublicOffer out d src uri ix decls allDecls units mod name decl seen)
   {
@@ -14429,8 +14395,7 @@
 ; Every product of this one call into the answer: the invocation's
 ; own span and macro name travel with each, from the ORIGINAL list,
 ; whose handles the expansion never touched.
-(pub :: lspGenCollect
-  (-> String Ints Int Ints Ints Ints Ints Ints Int))
+(pub :: lspGenCollect (-> String Ints Int Ints Ints Ints Ints Ints Int))
 (pub fn (lspGenCollect src decls idx decls2 before wasCall gens out)
   {
     (let site (vecGet decls idx))
@@ -18018,8 +17983,7 @@
     (jsonObjPut (jsonObjPut (jsonObjPut jsonObj "jsonrpc" (jsonStr "2.0")) "id" id) "error"
       (jsonObjPut (jsonObjPut jsonObj "code" (jsonNum code)) "message" (jsonStr message)))))
 
-(pub :: lspRequestBody
-  (-> LspWorkspace String Int Int Strings Strings Strings Strings String))
+(pub :: lspRequestBody (-> LspWorkspace String Int Int Strings Strings Strings Strings String))
 ;@axiom:effect(io)
 (pub fn (lspRequestBody workspace method id params uris texts gens highlights)
   {
@@ -18737,6 +18701,65 @@
     }
   })
 
+; Queue a message behind the active worker. A queued `didOpen` or
+; `didChange` for a document is replaced by the next one for the same
+; document: only the newest text can produce diagnostics anyone should
+; see, and checking every intermediate version in order was the cost a
+; burst of typing paid whenever a request was in flight. A queued
+; `didClose` drops the document's queued changes. Requests are never
+; replaced, and nothing is reordered.
+(pub :: lspQueuePush (-> Strings String String String Int))
+(pub fn (lspQueuePush queue body method uri)
+  {
+    (let mut i 0)
+    (let mut placed false)
+    {
+      (if (strEq method "textDocument/didClose")
+        {
+          (let kept vecNew)
+          {
+            (while (< i (vecLen queue))
+              {
+                (let queued (jsonParse (vecGetStr queue i)))
+                (if (&& (lspMutation (jsonGetStr queued "method"))
+                      (strEq (lspParamsUri (jsonGet queued "params")) uri))
+                  0
+                  (vecPush kept (vecGetStr queue i)))
+                (set i (+ i 1))
+              })
+            (vecClear queue)
+            (set i 0)
+            (while (< i (vecLen kept))
+              {
+                (vecPush queue (vecGetStr kept i))
+                (set i (+ i 1))
+              })
+          }
+        })
+      (if (|| (strEq method "textDocument/didChange") (strEq method "textDocument/didOpen"))
+        {
+          (set i 0)
+          (while (&& (! placed) (< i (vecLen queue)))
+            {
+              (let queued (jsonParse (vecGetStr queue i)))
+              (if (&& (strEq (jsonGetStr queued "method") method)
+                    (strEq (lspParamsUri (jsonGet queued "params")) uri))
+                {
+                  (vecSet queue i body)
+                  (set placed true)
+                }
+                (set i (+ i 1)))
+            })
+        })
+      (if placed
+        0
+        {
+          (vecPush queue body)
+          0
+        })
+    }
+  })
+
 (pub :: lspAcceptMessage (-> (-> Int Int) Int String Int))
 ;@axiom:effect(io)
 ;@axiom:effect(spawn)
@@ -18766,10 +18789,7 @@
               (if (strEq method "$/cancelRequest")
                 (lspCancelWork store (jsonGet (jsonGet msg "params") "id"))
                 (if (&& (lspWorkActive store) (! (&& (== (vecLen queue) 0) (lspMutation method))))
-                  {
-                    (vecPush queue body)
-                    0
-                  }
+                  (lspQueuePush queue body method (lspParamsUri (jsonGet msg "params")))
                   (lspHandleMessage worker store body))))))
       })
   })

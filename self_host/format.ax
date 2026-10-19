@@ -5390,6 +5390,21 @@
       })
   })
 
+; An alias's final element is its target, even when it is a bare
+; type variable or a qualified name beginning with a lowercase module.
+(pub :: fpAliasTyvarsEnd (-> String Int Int Int))
+(pub fn (fpAliasTyvarsEnd src n from)
+  (if (>= from (fnLen n))
+    from
+    (if (fpIsTyvarList src (fnKid n from))
+      (+ from 1)
+      {
+        (let mut i from)
+        (while (&& (< i (- (fnLen n) 1)) (fpIsLowerIdent src (fnKid n i)))
+          (set i (+ i 1)))
+        i
+      })))
+
 (pub :: fpDeclType (-> Int Int Int))
 (pub fn (fpDeclType p n)
   {
@@ -5401,10 +5416,13 @@
             true))
       (fpBad p)
       {
-        (let tvEnd (fpTyvarsEnd src n (+ b 2)))
+        (let tvEnd (fpAliasTyvarsEnd src n (+ b 2)))
+        ; `(type Name = Target)` is refused, as `check` refuses it:
+        ; the canonical form is `(type Name Target)` and the formatter
+        ; does not rewrite a spelling the compiler rejects.
         (let target
-          (if (fpIsAtomText src (fnKid n tvEnd) "=")
-            (+ tvEnd 1)
+          (if (|| (>= tvEnd (fnLen n)) (fpIsAtomText src (fnKid n tvEnd) "="))
+            (fnLen n)
             tvEnd))
         (if (!= (+ target 1) (fnLen n))
           (fpBad p)

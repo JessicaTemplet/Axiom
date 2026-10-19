@@ -945,6 +945,14 @@
 (pub fn (pErrSizedTy p n)
   (as (PResult :ok 0 :value 0 :pos p :exp n :code "AX3047") Int))
 
+; A macro rule whose pattern does not open with the macro's own name.
+; `exp` carries the MACRO's name, the way `pErrModSeg` carries the
+; segment, because the diagnostic names both names: the one a rule
+; must open with and the one it opened with.
+(pub :: pErrMacroHead (-> Int String Int))
+(pub fn (pErrMacroHead p mac)
+  (as (PResult :ok 0 :value 0 :pos p :exp mac :code "AX3133") Int))
+
 ; A `'` that opens no character literal. The code is the bare word,
 ; the way `for-in` is: the diagnostic keeps its AX2001 code and slug,
 ; and only the message and help are quote-specific.
@@ -1027,6 +1035,24 @@
           (concat (sizedTyMeant n)
             "`. Primitive type names begin with a capital letter. Int is signed 64-bit; Int8, Int16, Int32, UInt8, UInt16, UInt32 and UInt64 carry distinct precision and signedness. Convert explicitly with `(as value Type)`; lowercase primitive spellings cannot stand in for these types."))))
     (diagSetLabel d "use the Axiom primitive type name")
+  })
+
+; AX3133, at the rule pattern's head token: the one name a rule's
+; pattern may not open with is any name but the macro's own, because
+; the head is how a rule is matched to its macro (MAC-LANG-14).
+(pub :: ax3133Diag (-> Ints Int String Int))
+(pub fn (ax3133Diag tokens pos mac)
+  {
+    (let tok (vecGet tokens pos))
+    (diagSetLabel
+      (mkDiag SEV_ERROR "AX3133" "macro-pattern-head" (tokenSpan tok)
+        (concat "a rule of macro `"
+          (concat mac
+            (concat "` must open with `"
+              (concat mac (concat "`, found `" (concat (tokenLexeme tok) "`"))))))
+        0 ""
+        "write every rule pattern as `(macroName pattern...) template`, repeating the name the `macro` form declares")
+      "this rule does not open with the macro's name")
   })
 
 ; A `'` that opens no character literal: AX2001 with a
@@ -1182,106 +1208,113 @@
   {
     (let pos (memGetWord r 2))
     (let exp (pResExp r))
-    (if (|| (strEq (pResCode r) "import-order") (strEq (pResCode r) "import-position"))
-      (importPositionDiag tokens pos (pResCode r))
-      (if (strEq (pResCode r) "AX2005")
-        (ax2005Diag tokens pos)
-        (if (strEq (pResCode r) "for-in")
-          (forInDiag tokens pos)
-          ; AX2006 is tested before the EOF branch for the same reason
-          ; AX2005 is: the refusal happens at a real identifier token, so
-          ; every test below would step over it and report AX2001 with an
-          ; expectation the site never made.
-          (if (strEq (pResCode r) "AX2006")
-            (ax2006Diag tokens pos exp)
-            (if (strEq (pResCode r) "AX3047")
-              (ax3047Diag tokens pos exp)
-              (if (strEq (pResCode r) "AX3041")
-                (ax3041Diag tokens pos exp)
-                ; A stray `'`, refused where the token kind is still
-                ; known: the generic arms below read only the
-                ; expectation, which a quote never states, so without
-                ; this the reader gets a bare syntax error.
-                (if (strEq (pResCode r) "quote")
-                  (quoteDiag tokens pos)
-                  ; AX2002 is NOT "the position is at EOF" - stage0 emits it from
-                  ; exactly one routine, the one that demands a SPECIFIC token kind
-                  ; (`expect(RParen)` and friends), and reports AX2001 with a found
-                  ; text of `EOF` from every site that wanted a CATEGORY. So the
-                  ; distinction is already carried here: a site that named its
-                  ; expectation gets AX2001 wherever it failed, and a site that did
-                  ; not is the specific-token case, which at EOF is AX2002.
-                  (if (&& (== (strLen exp) 0)
-                        (|| (>= pos (vecLen tokens))
-                          (== (kindInt (tokenKind (vecGet tokens pos))) (kindInt TK_EOF))))
-                    (diagSetLabel
-                      (mkDiag SEV_ERROR "AX2002" "unexpected-eof"
-                        (mkSpan (strLen src) (strLen src)) "unexpected end of file" 0 ""
-                        (concat "count `(`/`[`/`{` against `)`/`]`/`}` "
-                          "working backward from the end of the file"))
-                      "file ends here while a form is still open")
-                    {
-                      (let tok (vecGet tokens pos))
-                      (if (strEq (pResCode r) "AX2004")
+    (if (strEq (pResCode r) "unmatched-paren")
+      (diagSetLabel
+        (mkDiag SEV_ERROR "AX2001" "unexpected-token" (tokenSpan (vecGet tokens pos))
+          "unmatched `)`" 0 "" "remove this `)`, or add the `(` it was meant to close")
+        "this `)` closes nothing")
+      (if (strEq (pResCode r) "AX3133")
+        (ax3133Diag tokens pos exp)
+        (if (|| (strEq (pResCode r) "import-order") (strEq (pResCode r) "import-position"))
+          (importPositionDiag tokens pos (pResCode r))
+          (if (strEq (pResCode r) "AX2005")
+            (ax2005Diag tokens pos)
+            (if (strEq (pResCode r) "for-in")
+              (forInDiag tokens pos)
+              ; AX2006 is tested before the EOF branch for the same reason
+              ; AX2005 is: the refusal happens at a real identifier token, so
+              ; every test below would step over it and report AX2001 with an
+              ; expectation the site never made.
+              (if (strEq (pResCode r) "AX2006")
+                (ax2006Diag tokens pos exp)
+                (if (strEq (pResCode r) "AX3047")
+                  (ax3047Diag tokens pos exp)
+                  (if (strEq (pResCode r) "AX3041")
+                    (ax3041Diag tokens pos exp)
+                    ; A stray `'`, refused where the token kind is still
+                    ; known: the generic arms below read only the
+                    ; expectation, which a quote never states, so without
+                    ; this the reader gets a bare syntax error.
+                    (if (strEq (pResCode r) "quote")
+                      (quoteDiag tokens pos)
+                      ; AX2002 is NOT "the position is at EOF" - stage0 emits it from
+                      ; exactly one routine, the one that demands a SPECIFIC token kind
+                      ; (`expect(RParen)` and friends), and reports AX2001 with a found
+                      ; text of `EOF` from every site that wanted a CATEGORY. So the
+                      ; distinction is already carried here: a site that named its
+                      ; expectation gets AX2001 wherever it failed, and a site that did
+                      ; not is the specific-token case, which at EOF is AX2002.
+                      (if (&& (== (strLen exp) 0)
+                            (|| (>= pos (vecLen tokens))
+                              (== (kindInt (tokenKind (vecGet tokens pos))) (kindInt TK_EOF))))
                         (diagSetLabel
-                          (mkDiag
-                            SEV_ERROR
-                            "AX2004"
-                            "removed-construct"
-                            (tokenSpan tok)
-                            (if (strEq exp "fn")
-                              ; `fn` and `struct` are still Axiom - they
-                              ; declare - so only their expression spelling is
-                              ; refused, and the heading says which.
-                              "`fn` in expression position is refused: an anonymous function is `lambda`"
-                              (if (strEq exp "struct")
-                                "`struct` in expression position is refused: a struct is built by calling its name"
-                                (if (strEq exp "deriving")
-                                  ; Five of the eight get their own verb:
-                                  ; union/foreign (and region, until it returned)
-                                  ; once WORKED and were
-                                  ; removed, but `deriving` never derived anything,
-                                  ; `linear` never counted a use, `consume` never
-                                  ; reclaimed a byte, and the list and tuple types
-                                  ; never inhabited a value. Saying "no longer part of
-                                  ; Axiom" about those five would claim a history
-                                  ; they do not have, and the difference is the
-                                  ; whole reason a reader is being told anything.
-                                  "`deriving` parsed and derived nothing, and is now refused"
-                                  (if (strEq exp "linear")
-                                    "`linear` parsed and enforced nothing, and is now refused"
-                                    (if (strEq exp "consume")
-                                      "`consume` parsed and reclaimed nothing, and is now refused"
-                                      (if (strEq exp "list")
-                                        "`[T]` checked as a type no value could inhabit, and is now refused"
-                                        (if (strEq exp "tuple")
-                                          "`(A B)` checked as a type no value could inhabit, and is now refused"
-                                          (concat (concat "`" exp)
-                                            "` is no longer part of Axiom"))))))))
-                            0
-                            ""
-                            (removedHelp exp))
-                          (removedRationale exp))
-                        ; NO LABEL, deliberately, and the same for AX3067-AX3070, AX3011,
-                        ; AX3017 and AX3010. stage0 set a primary label on all
-                        ; twenty-seven of its diagnostics, but for these five the
-                        ; label WAS the heading - `message.clone()` at the call site -
-                        ; and ariadne fell back to the heading anyway when a label was
-                        ; empty, so its output always printed something under the
-                        ; caret, sometimes the same sentence twice. Printing nothing
-                        ; when there is nothing further to say is the better half of
-                        ; that behaviour, and it keeps `#` out of the AXDL line rather
-                        ; than putting a redundant field in it.
-                        (if (== (strLen exp) 0)
-                          (mkDiag SEV_ERROR "AX2003" "syntax-error" (tokenSpan tok) "syntax error"
-                            0 "" 0)
-                          (diagSetLabel
-                            (mkDiag SEV_ERROR "AX2001" "unexpected-token" (tokenSpan tok)
-                              (concat (concat "expected " exp)
-                                (concat ", found `" (concat (foundText tok) "`")))
-                              0 "" (concat (concat "Axiom expected " exp) " at this position"))
-                            (concat (concat "found `" (foundText tok)) "` here"))))
-                    }))))))))
+                          (mkDiag SEV_ERROR "AX2002" "unexpected-eof"
+                            (mkSpan (strLen src) (strLen src)) "unexpected end of file" 0 ""
+                            (concat "count `(`/`[`/`{` against `)`/`]`/`}` "
+                              "working backward from the end of the file"))
+                          "file ends here while a form is still open")
+                        {
+                          (let tok (vecGet tokens pos))
+                          (if (strEq (pResCode r) "AX2004")
+                            (diagSetLabel
+                              (mkDiag
+                                SEV_ERROR
+                                "AX2004"
+                                "removed-construct"
+                                (tokenSpan tok)
+                                (if (strEq exp "fn")
+                                  ; `fn` and `struct` are still Axiom - they
+                                  ; declare - so only their expression spelling is
+                                  ; refused, and the heading says which.
+                                  "`fn` in expression position is refused: an anonymous function is `lambda`"
+                                  (if (strEq exp "struct")
+                                    "`struct` in expression position is refused: a struct is built by calling its name"
+                                    (if (strEq exp "deriving")
+                                      ; Five of the eight get their own verb:
+                                      ; union/foreign (and region, until it returned)
+                                      ; once WORKED and were
+                                      ; removed, but `deriving` never derived anything,
+                                      ; `linear` never counted a use, `consume` never
+                                      ; reclaimed a byte, and the list and tuple types
+                                      ; never inhabited a value. Saying "no longer part of
+                                      ; Axiom" about those five would claim a history
+                                      ; they do not have, and the difference is the
+                                      ; whole reason a reader is being told anything.
+                                      "`deriving` parsed and derived nothing, and is now refused"
+                                      (if (strEq exp "linear")
+                                        "`linear` parsed and enforced nothing, and is now refused"
+                                        (if (strEq exp "consume")
+                                          "`consume` parsed and reclaimed nothing, and is now refused"
+                                          (if (strEq exp "list")
+                                            "`[T]` checked as a type no value could inhabit, and is now refused"
+                                            (if (strEq exp "tuple")
+                                              "`(A B)` checked as a type no value could inhabit, and is now refused"
+                                              (concat (concat "`" exp)
+                                                "` is no longer part of Axiom"))))))))
+                                0
+                                ""
+                                (removedHelp exp))
+                              (removedRationale exp))
+                            ; NO LABEL, deliberately, and the same for AX3067-AX3070, AX3011,
+                            ; AX3017 and AX3010. stage0 set a primary label on all
+                            ; twenty-seven of its diagnostics, but for these five the
+                            ; label WAS the heading - `message.clone()` at the call site -
+                            ; and ariadne fell back to the heading anyway when a label was
+                            ; empty, so its output always printed something under the
+                            ; caret, sometimes the same sentence twice. Printing nothing
+                            ; when there is nothing further to say is the better half of
+                            ; that behaviour, and it keeps `#` out of the AXDL line rather
+                            ; than putting a redundant field in it.
+                            (if (== (strLen exp) 0)
+                              (mkDiag SEV_ERROR "AX2003" "syntax-error" (tokenSpan tok)
+                                "syntax error" 0 "" 0)
+                              (diagSetLabel
+                                (mkDiag SEV_ERROR "AX2001" "unexpected-token" (tokenSpan tok)
+                                  (concat (concat "expected " exp)
+                                    (concat ", found `" (concat (foundText tok) "`")))
+                                  0 "" (concat (concat "Axiom expected " exp) " at this position"))
+                                (concat (concat "found `" (foundText tok)) "` here"))))
+                        }))))))))))
   })
 
 ; The diagnostic for a LEXICAL error, or 0 when the token stream has
@@ -2136,9 +2169,11 @@
 (pub fn (parseDecl tokens pos)
   (if (peekIs tokens pos TK_EOF)
     (pOk 0 pos)
-    (if (peekIs tokens pos TK_LPAREN)
-      (parseTopForm tokens (advance pos))
-      (pErrExp pos "("))))
+    (if (peekIs tokens pos TK_RPAREN)
+      (pErrCode pos "unmatched-paren")
+      (if (peekIs tokens pos TK_LPAREN)
+        (parseTopForm tokens (advance pos))
+        (pErrExp pos "(")))))
 
 ; Is the token at `pos` a second `pub`?
 (pub :: pubFollows (-> Ints Int Bool))
@@ -2600,8 +2635,9 @@
 
 ; `(type Name [tyvars] Type)`, uniform with every other declaration:
 ; no assignment operator stands between a name and what it names.
-; The `=` spelling is refused here (the formatter still reads it and
-; prints the uniform form). The name span, the tyvars, and the
+; The `=` spelling is refused here, and the formatter refuses it too:
+; `(type Name Target)` is the one alias form every surface accepts.
+; The name span, the tyvars, and the
 ; target's STRUCTURE all survive - `symbols` renders the target in
 ; the checker's notation. Any shape this does not recognise falls
 ; back to the old skip, so acceptance is unchanged: only
@@ -2732,10 +2768,13 @@
   (if (peekIs tokens pos TK_LPAREN)
     (collectTyParams tokens pos tvs)
     (if (&& (peekIs tokens pos TK_IDENT)
-          {
-            (let b (strByte (tokenLexeme (vecGet tokens pos)) 0))
-            (&& (>= b 97) (<= b 122))
-          })
+          (&& (! (peekIs tokens (advance pos) TK_RPAREN))
+            (&& (! (peekIs tokens (advance pos) TK_DOT))
+              (&& (! (peekIs tokens (advance pos) TK_DOUBLE_COLON))
+                {
+                  (let b (strByte (tokenLexeme (vecGet tokens pos)) 0))
+                  (&& (>= b 97) (<= b 122))
+                }))))
       {
         (vecPush tvs (tokenLexeme (vecGet tokens pos)))
         (aliasTyvarsEnd tokens (advance pos) tvs)
@@ -4207,8 +4246,7 @@
     }
   })
 
-(pub :: rewriteRuleLitsIn
-  (-> Ints Strings Strings Strings Ints Strings Int Int))
+(pub :: rewriteRuleLitsIn (-> Ints Strings Strings Strings Ints Strings Int Int))
 (pub fn (rewriteRuleLitsIn pats names lits used pats2 names2 i)
   (if (>= i (vecLen pats))
     0
@@ -4335,7 +4373,7 @@
                   })
               })
           }
-          (pErr (advance (advance pos)))))
+          (pErrMacroHead (advance (advance pos)) macName)))
     }
     (if (== (vecLen acc) 0)
       (pErr pos)

@@ -16,6 +16,59 @@ its changelog too.
 
 ## Unreleased
 
+- Bare nullary constructors in patterns test their constructor. Match
+  arms covered by an earlier arm report `AX3134`. Duplicate constructor
+  names and empty literal subtype ranges are refused. Extra function
+  arguments name the function and its arity; numeric literals joined
+  to names and unmatched closing parentheses receive direct diagnostics.
+  Tested by `tests/selfhost/485-bare-ctor-binder.ax` and
+  `tests/diagnostics/1457-duplicate-constructors.ax`.
+
+- Integer remainder by -1 returns zero for the smallest signed value,
+  while division keeps its overflow trap. Tested by
+  `tests/stdlib/971-intmin-rem.ax`.
+
+- Rust-host accessor shims spell `(Vec Int)` directly, so generated
+  library code does not depend on compiler-internal aliases. Tested by
+  `scripts/check-ffi.sh`.
+
+- A macro rule whose pattern does not open with the macro's own name
+  is now refused with `AX3133` (`macro-pattern-head`), naming both
+  names, instead of a bare `AX2003`. Tested by
+  `tests/diagnostics/613-macro-pattern-head.axbad` and
+  `scripts/check-render-selfhost.sh`.
+
+- The language server collapses queued edits per document: while a
+  worker is busy, a newer queued `didChange` replaces the queued one
+  for the same document, and a queued `didClose` drops its queued
+  edits, so a burst of typing no longer earns a full check per
+  intermediate version. Tested by `tests/lsp/queued-changes.py` in
+  `scripts/check-lsp-selfhost.sh`.
+
+- Type references inside a type alias's target are found by the
+  language server again: `(type Alias (Option Shape))` contributes
+  its `Shape` occurrence to definition and references, split by the
+  alias's own parameter list rather than the removed `=` marker.
+  Tested by `scripts/check-lsp-selfhost.sh`.
+
+- `axiom fmt` refuses `(type Name = Target)`, as `axiom check` does:
+  `(type Name Target)` is the one alias form every surface accepts.
+  The formatter no longer rewrites the `=` spelling. Tested by
+  `scripts/check-fmt.sh`.
+
+- `axiom doc` renders in the brand palette: the graphite and
+  electric-lime tokens of `web/src/styles/tokens.css`, dark by
+  default with the site's light variant under
+  `prefers-color-scheme: light`. Tested by `scripts/check-doc-drift.sh`.
+
+- The VS Code extension browses AXQLite databases: an explorer view
+  lists `.db`, `.axqlite` and `.axql` files down to their rows, a
+  summary command and a read-only custom editor show the same
+  content, and the Axiom file-icons theme gives databases a database
+  icon and `axiom.pkg` a package icon. Tested by
+  `editors/vscode/scripts/axqlite-smoke.mjs` against the format in
+  `docs/axqlite-format.md`, and the extension's `npm run check`.
+
 - Codegen ownership and flow facts now converge as a worklist:
   after one full pass, rounds re-walk only the callers of functions
   whose summaries moved, over a caller index whose counts ride on

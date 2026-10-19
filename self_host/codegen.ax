@@ -1149,15 +1149,6 @@
         }))
   })
 
-; The half of `mangledForCg` that no module-local spelling claimed:
-; `mangledForIn`'s first-match, read out of the index. Field 40 slot 0
-; is the old `bareFirst`; see `buildNameIndexes` for the other four.
-(:: mangledForBareCg (-> Int Int String String))
-(fn (mangledForBareCg cg bi name)
-  (match (internFind bi name)
-    ((Some id) (vecGetStr (memGetWordVec cg 13) (vecGet (vecGet (memGetWordVec cg 40) 0) id)))
-    ((None) name)))
-
 ; The same, for a reference made inside module `m` (0 in the entry
 ; file). A module can't import the entry file, so when the bare slot
 ; answers the name unchanged, which is how the entry file holds it,
@@ -8428,7 +8419,8 @@
   (match (frontCached cache name)
     ((None) (parseModuleOrDieUnitSerial name tcode entryDir units parentName site))
     ((Some module)
-      (if (>= (unitIndexOf units name 0) 0)
+      (if (|| (>= (unitIndexOf units name 0) 0)
+            (cachedModuleWrongOrigin module units parentName tcode))
         (parseModuleOrDieUnitSerial name tcode entryDir units parentName site)
         {
           (let parsed module.parsed)
@@ -8436,6 +8428,62 @@
           parsed.decls
         })
     )))
+
+; Prefetching has no parent context. A cached local module cannot
+; satisfy a library import that resolves to the library's own file.
+(pub :: cachedModuleWrongOrigin (-> FrontModule Units String Int Bool))
+;@axiom:effect(io)
+(pub fn (cachedModuleWrongOrigin module units parentName tcode)
+  {
+    (let parent
+      (vecGet units
+        (if (== (as parentName Int) 0)
+          0
+          (unitIndexOf units parentName 0))))
+    (if (== (unitInStdlib parent) 1)
+      {
+        (let library (stdlibModulePath module.name tcode))
+        (&& (> (strLen library) 0) (! (strEq library module.path)))
+      }
+      false)
+  })
+
+; Whether a unit's file lives in the standard library, so its own
+; imports resolve against the library first: a file beside the entry
+; program named like a library module must not replace the library's
+; own copy for the library itself. The entry file's imports keep the
+; documented entry-first order.
+(pub :: unitInStdlib (-> Int Int))
+;@axiom:effect(io)
+(pub fn (unitInStdlib unit)
+  (unitInDirs (memGetWordStr unit 0) stdlibSearchDirs 0))
+
+(pub :: unitInDirs (-> String Ints Int Int))
+(pub fn (unitInDirs file dirs i)
+  (if (>= i (vecLen dirs))
+    0
+    (if (strStartsWith file (vecGetStr dirs i))
+      1
+      (unitInDirs file dirs (+ i 1)))))
+
+; `name` resolved against the standard library only, or "".
+(pub :: stdlibModulePath (-> String Int String))
+;@axiom:effect(io)
+(pub fn (stdlibModulePath name tcode)
+  {
+    (let stem (modPathToFile name))
+    {
+      (let a (searchDirsFor stdlibSearchDirs (concat stem (targetOsArchSuffix tcode)) 0))
+      (if (> (strLen a) 0)
+        a
+        {
+          (let b (searchDirsFor stdlibSearchDirs (concat stem (targetOsSuffix tcode)) 0))
+          (if (> (strLen b) 0)
+            b
+            (searchDirsFor stdlibSearchDirs (concat stem ".ax") 0))
+        })
+    }
+  })
 
 (pub :: parseModuleOrDieUnitSerial (-> String Int String Ints String Int Ints))
 ;@axiom:effect(io)
@@ -8450,7 +8498,15 @@
     {
       (if (< (unitIndexOf units name 0) 0)
         {
-          (let path (moduleSrcPath name tcode entryDir))
+          (let path
+            (if (== (unitInStdlib parent) 1)
+              {
+                (let lib (stdlibModulePath name tcode))
+                (if (> (strLen lib) 0)
+                  lib
+                  (moduleSrcPath name tcode entryDir))
+              }
+              (moduleSrcPath name tcode entryDir)))
           (if (== (strLen path) 0)
             (dieImportDiag name tcode entryDir parent (nodeSpan site))
             {
@@ -24242,12 +24298,26 @@
     (let ty (concat "i" (fmtInt bits)))
     (let cg3
       (if (isDivOp op)
-        (emitDivGuardWidth a b cg2 snode bits (integerUnsigned code))
+        (emitDivGuardWidth a b cg2 snode bits (integerUnsigned code) (strEq op "%"))
         (if (isShiftOp op)
           (emitShiftGuardWidth b cg2 snode bits)
           cg2)))
     (let an (emitIntegerNarrow cg3 a bits))
-    (let bn (emitIntegerNarrow cg3 b bits))
+    (let bSafe
+      (if (&& (strEq op "%") (! (integerUnsigned code)))
+        {
+          (let cmp (regStr (allocReg cg3)))
+          (let sel (regStr (allocReg cg3)))
+          {
+            (emitLine cg3 (concat (concat "  " cmp) (concat " = icmp eq i64 " (concat b ", -1"))))
+            (emitLine cg3
+              (concat (concat "  " sel)
+                (concat (concat " = select i1 " cmp) (concat ", i64 1, i64 " b))))
+            sel
+          }
+        }
+        b))
+    (let bn (emitIntegerNarrow cg3 bSafe bits))
     (let r (regStr (allocReg cg3)))
     (if (isCmpOp op)
       {
@@ -24290,7 +24360,7 @@
     {
       (let cgG
         (if (isDivOp fnName)
-          (emitDivGuard a b cg snode)
+          (emitDivGuardWidth a b cg snode 64 false (strEq fnName "%"))
           (if (isShiftOp fnName)
             (emitShiftGuard b cg snode)
             cg)))
@@ -24298,10 +24368,25 @@
         (let rn (allocReg cgG))
         {
           (let r (regStr rn))
+          (let bSafe
+            (if (strEq fnName "%")
+              {
+                (let cmp (regStr (allocReg cgG)))
+                (let sel (regStr (allocReg cgG)))
+                {
+                  (emitLine cgG
+                    (concat (concat "  " cmp) (concat " = icmp eq i64 " (concat b ", -1"))))
+                  (emitLine cgG
+                    (concat (concat "  " sel)
+                      (concat (concat " = select i1 " cmp) (concat ", i64 1, i64 " b))))
+                  sel
+                }
+              }
+              b))
           {
             (emitLine cgG
               (concat (concat (concat "  " r) (concat " = " (binopToLLVM fnName)))
-                (concat " i64 " (concat (concat a (concat ", " b)) ""))))
+                (concat " i64 " (concat (concat a (concat ", " bSafe)) ""))))
             (memSetWord cgG 2 r)
             (memSetWord cgG 14 0)
             cgG
@@ -24356,10 +24441,13 @@
 ; is there.
 (pub :: emitDivGuard (-> String String Int Int Int))
 (pub fn (emitDivGuard a b cg snode)
-  (emitDivGuardWidth a b cg snode 64 false))
+  (emitDivGuardWidth a b cg snode 64 false false))
 
-(pub :: emitDivGuardWidth (-> String String Int Int Int Bool Int))
-(pub fn (emitDivGuardWidth a b cg snode bits unsigned)
+; `isRem` skips the overflow trap: a remainder by -1 is 0 for every
+; dividend, so the caller rewrites that divisor to 1 and `srem` never
+; sees its one overflowing pair. `/` keeps the trap (AX83).
+(pub :: emitDivGuardWidth (-> String String Int Int Int Bool Bool Int))
+(pub fn (emitDivGuardWidth a b cg snode bits unsigned isRem)
   {
     (let c0 (regStr (allocReg cg)))
     (let c1 (regStr (allocReg cg)))
@@ -24385,7 +24473,7 @@
       (emitLine cg (concat (concat "  " c2) (concat " = icmp eq i64 " (concat b ", -1"))))
       (emitLine cg
         (concat (concat "  " c3)
-          (if unsigned
+          (if (|| unsigned isRem)
             " = and i1 false, false"
             (concat " = and i1 " (concat c1 (concat ", " c2))))))
       (emitLine cg

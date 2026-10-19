@@ -643,6 +643,9 @@ fi
 if ! python3 tests/lsp/background-analysis.py "$work/stage1"; then
   status=1
 fi
+if ! python3 tests/lsp/queued-changes.py "$work/stage1"; then
+  status=1
+fi
 if ! python3 tests/lsp/abrupt-close.py "$work/stage1"; then
   status=1
 fi

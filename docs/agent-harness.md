@@ -44,7 +44,7 @@ restriction when an unknown answer must refuse the build.
 
 `tests/diagnostics/severity.policy` is the checked allowlist of codes
 permitted to render as warnings: `AX3037`, `AX3038`, `AX3045`,
-`AX3048` and `AX3051`.
+`AX3048`, `AX3051` and `AX3134`.
 
 The same file records why each warning remains one. Diagnostic
 severity and the policy gate are separate: a warning can still fail
