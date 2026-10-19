@@ -28067,10 +28067,10 @@
     (let decl (findEffectDecl tc name))
     (if (nodeSame decl nilNode)
       (concat (concat "effect `" name) "`")
-      (if (== (vecLen (nodeBChildren decl)) 1)
+      (if (== (vecLen (nodeBNames decl)) 1)
         (concat
-          (concat
-            (concat (concat "operation `" (vecGetStr (nodeBChildren decl) 0)) "` of effect `") name)
+          (concat (concat (concat "operation `" (vecGetStr (nodeBNames decl) 0)) "` of effect `")
+            name)
           "`")
         (concat (concat "effect `" name) "`")))
   })
@@ -29771,7 +29771,7 @@
         "a value allocated in this function's own region"
         (if (<= bit n)
           (concat
-            (concat (concat "parameter `" (vecGetStr (nodeBChildren (readAstNode rc 1)) (- bit 1)))
+            (concat (concat "parameter `" (vecGetStr (nodeBNames (readAstNode rc 1)) (- bit 1)))
               "`, which lives in ")
             (rgnRidText rc (rgnOriginRid rc bit)))
           (concat "a value allocated in " (rgnRidText rc (rgnOriginRid rc bit))))))
@@ -30749,11 +30749,15 @@
                     {
                       (if fresh
                         {
-                          (rgnEmitEscape rc (rgnStoreBadMask rc (memGetWord rc 7) (vecGet masks i))
-                            span into
-                            (concat (concat " - `" (bareOf callee))
-                              "` stores a value it allocates into that parameter")
-                            nilNode)
+                          (if (== (rgnReport rc) 1)
+                            {
+                              (let bad (rgnStoreBadMask rc (memGetWord rc 7) (vecGet masks i)))
+                              (if (!= bad 0)
+                                (rgnEmitEscape rc bad span into
+                                  (concat (concat " - `" (bareOf callee))
+                                    "` stores a value it allocates into that parameter")
+                                  nilNode))
+                            })
                           (rgnNoteFlow rc (memGetWord rc 7) (vecGet masks i) callee)
                         })
                       {
@@ -30762,15 +30766,20 @@
                           {
                             (if (!= (& from (<< 1 j)) 0)
                               {
-                                (rgnEmitEscape rc
-                                  (rgnStoreBadMask rc (vecGet masks j) (vecGet masks i)) span into
-                                  (concat
-                                    (concat
-                                      (concat (concat " - `" (bareOf callee))
-                                        "` stores its parameter `")
-                                      (rgnCalleeParamName tc callee j))
-                                    "` into it")
-                                  (vecGet args j))
+                                (if (== (rgnReport rc) 1)
+                                  {
+                                    (let bad
+                                      (rgnStoreBadMask rc (vecGet masks j) (vecGet masks i)))
+                                    (if (!= bad 0)
+                                      (rgnEmitEscape rc bad span into
+                                        (concat
+                                          (concat
+                                            (concat (concat " - `" (bareOf callee))
+                                              "` stores its parameter `")
+                                            (rgnCalleeParamName tc callee j))
+                                          "` into it")
+                                        (vecGet args j)))
+                                  })
                                 (rgnNoteFlow rc (vecGet masks j) (vecGet masks i) callee)
                               })
                             (set j (+ j 1))
@@ -30823,26 +30832,27 @@
             ; No signature, no stamp: without declared parameter
             ; types there is nothing to prove scalar with, so a
             ; signature-less callee abstains rather than guessing.
-            (if (nodeSame sig nilNode)
-              (set ok 0)
-              {
-                (set ok 1)
-                (set i 0)
-                (while (&& (< i (vecLen args)) (< i (memGetWord f 7)))
-                  {
-                    (if (&& (!= (& (memGetWord f 3) (<< 1 i)) 0)
-                          (== (rgTyScalar tc (nthParamTy sig i nilNode)) 0))
-                      (set ok 0))
-                    (set i (+ i 1))
-                  })
-              })
             (if (&& (== (memGetWord tc 40) 1)
                   (&& (== (memGetWord tc 28) 1)
                     (&& (== (nodeResWord e) 0)
                       (&& (!= (memGetWord f 4) 0)
-                        (&& (== (memGetWord f 5) 0)
-                          (&& (== (vecLen args) (memGetWord f 7)) (== ok 1)))))))
-              (setNodeResWord e 2))
+                        (&& (== (memGetWord f 5) 0) (== (vecLen args) (memGetWord f 7)))))))
+              {
+                (if (nodeSame sig nilNode)
+                  (set ok 0)
+                  {
+                    (set i 0)
+                    (while (< i (vecLen args))
+                      {
+                        (if (&& (!= (& (memGetWord f 3) (<< 1 i)) 0)
+                              (== (rgTyScalar tc (nthParamTy sig i nilNode)) 0))
+                          (set ok 0))
+                        (set i (+ i 1))
+                      })
+                  })
+                (if (== ok 1)
+                  (setNodeResWord e 2))
+              })
             res
           })
       }
