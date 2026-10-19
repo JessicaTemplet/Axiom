@@ -2075,7 +2075,7 @@ Sys - portable syscall wrappers.
 
 ## `Sys.Platform`
 
-`stdlib/Sys/Platform.darwin.ax` — 175 public names
+`stdlib/Sys/Platform.darwin.ax` — 184 public names
 
 Sys.Platform - the numbers this target's kernel uses: syscall
 numbers, open and socket flags, errno values, poll and signal
@@ -2196,6 +2196,15 @@ target being compiled for (this one is `darwin`).
 | `platformRmdir` | value | `(-> Int Int)` |  |  | The platform's own way to remove a directory where raw `rmdir` is not available; -78 where the raw syscall is used instead. |
 | `platformReadDir` | value | `(-> Int Int Int Int)` |  |  | The platform's own way to read a directory where raw `getdents` is not available; -78 where the raw syscall is used instead. |
 | `platformGetCwd` | value | `(-> Int Int Int)` |  |  | The platform's own way to read the working directory where raw `getcwd` is not available; -78 where the raw syscall is used instead. |
+| `platformSpawn` | value | `(-> Int Int Int Int)` |  |  | The platform's own way to start a child where raw `posix_spawn` or `fork` and `execve` are not available; -78 where the raw syscalls are used instead. |
+| `platformWait` | value | `(-> Int Int)` |  |  | The platform's own way to wait for a child where raw `wait4` is not available; -78 where the raw syscall is used instead. |
+| `platformKill` | value | `(-> Int Int Int)` |  |  | The platform's own way to signal a child where raw `kill` is not available; -78 where the raw syscall is used instead. |
+| `platformChildExited` | value | `(-> Int Int)` |  |  | The platform's own way to poll a child where raw `waitid` is not available; -78 where the raw syscall is used instead. |
+| `platformPid` | value | `Int` |  |  | The platform's own way to read the process id where raw `getpid` is not available; -78 where the raw syscall is used instead. |
+| `platformSetStd` | value | `(-> Int Int Int)` |  |  | The platform's own way to swap a standard descriptor where raw `dup2` is not available; -78 where the raw syscall is used instead. |
+| `pathListSep` | value | `Int` |  |  | The byte that separates the entries of `PATH`: `:` here, `;` on Windows. |
+| `pathBackslashSeparates` | value | `Int` |  |  | 1 where a backslash separates path components and `C:` starts an absolute path, so `Sys.sysRunPath` reads either as a path rather than a name to search for. 0 here, where only `/` does. |
+| `exeSuffixTried` | value | `Int` |  |  | 1 where a program named without an extension is found as `NAME.exe`, as on Windows; 0 here, where a program is found under its own name. |
 | `ttyUsesTermios` | value | `Int` |  |  | Whether this platform's terminal control is the POSIX `termios` trio - read the attributes, edit them, write them back - reached through `ioctl`. Windows answers 0: its mechanism is `GetConsoleMode`/`SetConsoleMode` against a HANDLE, which shares no part of this shape. |
 | `sysIoctlNum` | value | `Int` |  |  | ioctl(fd, request, arg) - BSD 54, encoded the way every number in this file is: `0x2000000 \| 54` = 33554486. Probe: `SYS_ioctl = 54 (0x36)`, `SYS_ioctl encoded = 33554486`. |
 | `tcGetAttrReq` | value | `Int` |  |  | TIOCGETA - read the terminal attributes into a `struct termios`. |
