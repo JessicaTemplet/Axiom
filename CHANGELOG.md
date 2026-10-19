@@ -16,6 +16,16 @@ its changelog too.
 
 ## Unreleased
 
+- Windows: the standard library reaches files, directories and child
+  processes through kernel32 (`stdlib/Sys/Platform.windows.ax`), and a
+  compiler built for `windows-x86_64` runs on Windows and builds
+  itself there. Its emission of `self_host/main.ax` is byte-identical
+  to a Linux compiler's cross-emission. A Windows link makes the
+  `kernel32` import library with `llvm-dlltool` and reserves an 8 MB
+  stack. Tested by `scripts/check-driver.sh` and
+  `scripts/check-freestanding.sh`; the Windows runs themselves were
+  by hand on Windows 11 x86-64, because no CI job runs Windows yet.
+
 - Codegen ownership and flow facts now converge as a worklist:
   after one full pass, rounds re-walk only the callers of functions
   whose summaries moved, over a caller index whose counts ride on

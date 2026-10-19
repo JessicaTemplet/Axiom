@@ -2446,10 +2446,14 @@ A target is supported when a CI job executes what the compiler emits there.
 assembles their code, without the whole execution battery. They have
 no prebuilt release archive. See [targets](../README.md#targets).
 
-Select a target with `--target=linux-aarch64`. Windows is an output
-target; the compiler does not run there. Linking Windows executables
-requires `lld-link` and a matching `kernel32.lib`, supplied through
-`--link-search`. Windows static-library emission is refused.
+Select a target with `--target=linux-aarch64`. A compiler built for
+`windows-x86_64` runs on Windows and builds itself there; no CI job
+runs it yet. Linking a Windows executable needs `lld-link` and
+`llvm-dlltool`, which makes the `kernel32` import library from the
+program's own imports. A `kernel32.lib` on `--link-search` is used
+instead when there is one. A Windows executable reserves an 8 MB
+stack, as a POSIX main thread has. Windows static-library emission is
+refused.
 
 For `baremetal-aarch64`, use the [embedded guide](embedded-guide.md) for
 the board, linker layout, static heap and fault policy. Emulator

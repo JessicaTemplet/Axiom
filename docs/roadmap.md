@@ -215,7 +215,7 @@ work; they do not claim full feature parity.
 |---|---|
 | CI green on linux-aarch64 and darwin-aarch64 | Done |
 | Reproducible toolchain records for every supported target | In progress |
-| The compiler hosts itself on Windows, and crypto runs there | Not started |
+| The compiler hosts itself on Windows, and crypto runs there | In progress |
 | The embedded checks run on a named board | Not started |
 | Compatibility rules enforced at 1.0 (`COMPAT-6`) | Planned |
 
