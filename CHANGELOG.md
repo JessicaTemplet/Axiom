@@ -16,6 +16,13 @@ its changelog too.
 
 ## Unreleased
 
+- The formatter preserves an uppercase match binder followed by a
+  parenthesised body. Region checks use a leaf program
+  as their negative witness; the compiler imports Task, which uses a
+  region. Region cells carry an explicit IR marker.
+  Tested by `tests/stdlib/976-uppercase-pattern-binder.ax` and
+  `scripts/check-region-scope.sh`.
+
 - Darwin backtrace tables use relative addresses in read-only text.
   Minimal executables avoid an extra 16 KiB data segment while retaining
   named stack traces. Tested by `scripts/check-backtrace.sh` and
