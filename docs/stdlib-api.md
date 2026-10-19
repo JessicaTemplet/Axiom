@@ -1506,11 +1506,11 @@ malformed record, and the handlers that answer it without unwinding.
 | `fallibleSkipped` | value | `Int` |  |  | The value a handler answers to mean "skip this record": the most negative `Int`. A loop compares the value it got against this, or asks `fallibleIsSkipped`. |
 | `fallibleIsSkipped` | value | `(-> Int Bool)` |  |  | Whether a value is the skip sentinel. The comparison a batch loop makes once per record; it allocates nothing. |
 | `fallibleSkip` | value | `(-> String Int)` |  |  | Skip every malformed record: answer `fallibleSkipped`, whatever the message. A one-parameter top-level function is a value, so it is passed bare. |
-| `fallibleDefault` | value | `(-> Int String Int)` |  |  | Use `d` in place of every malformed record: `(fallibleDefault 0)` is the handler. |
+| `fallibleDefault` | value | `(-> Int String Int)` | `Alloc` |  | Use `d` in place of every malformed record: `(fallibleDefault 0)` is the handler. |
 | `FallibleTally` | struct |  |  |  | How many records were malformed, as `fallibleCounting` counts them. |
 | `fallibleTally` | value | `FallibleTally` | `Alloc` |  | A fresh tally at zero. |
 | `fallibleCount` | value | `(-> FallibleTally Int)` |  |  | What a tally holds. |
-| `fallibleCounting` | value | `(-> FallibleTally (-> String Int) String Int)` | `Mut` |  | Count every malformed record in `tally`, then answer as `next` would: `(fallibleCounting t fallibleSkip)` skips and counts, `(fallibleCounting t (fallibleDefault 0))` substitutes and counts. The `handle` installing it lists `Mut` beside `Fallible`, because a handler's own effects count at the site that installs it. |
+| `fallibleCounting` | value | `(-> FallibleTally (-> String Int) String Int)` | `Alloc,Mut` |  | Count every malformed record in `tally`, then answer as `next` would: `(fallibleCounting t fallibleSkip)` skips and counts, `(fallibleCounting t (fallibleDefault 0))` substitutes and counts. The `handle` installing it lists `Mut` beside `Fallible`, because a handler's own effects count at the site that installs it. |
 
 ## `Ffi`
 
@@ -2537,5 +2537,5 @@ Vec - a growable array of machine words, in Axiom.
 | `vecSum` | value | `(-> (Vec Int) Int)` |  |  | The sum of every element. |
 | `vecHash` | value | `(-> (Vec Int) Int)` |  |  | A position-sensitive digest of the whole vector. |
 | `vecSort` | value | `(-> (Vec Int) (Vec Int))` | `Mut` |  | Sort a vector of `Int` ascending, in place. Answers the vector. |
-| `vecSortBy` | value | `(-> (Vec a) (-> a a Int) (Vec a))` | `Mut (incomplete)` |  | Sort `v` in place by `cmp`, which takes two elements and answers negative, zero or positive the way `strCmp` does. Answers the vector. `(vecSortBy names (lambda (a b) (strCmp a b)))` orders strings by their bytes. |
+| `vecSortBy` | value | `(-> (Vec a) (-> a a Int) (Vec a))` | `Alloc,Mut (incomplete)` |  | Sort `v` in place by `cmp`, which takes two elements and answers negative, zero or positive the way `strCmp` does. Answers the vector. `(vecSortBy names (lambda (a b) (strCmp a b)))` orders strings by their bytes. |
 
