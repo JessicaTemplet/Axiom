@@ -48,8 +48,10 @@ on:
 
 # Every job gets `contents: read`. Without this block a job holds the
 # repository default, which can be read/write. No job pushes, comments,
-# releases, reads a secret or uploads an artifact. Gate results use the
-# branch-scoped Actions cache; the one GitHub API token use is
+# releases or reads a secret. One artifact is uploaded: `cross` hands
+# the Windows modules to `windows`, which needs no extra scope. Gate
+# results and the Windows LLVM tools use the branch-scoped Actions
+# cache; the one GitHub API token use is
 # `scope`'s read-only `gh api` calls with `github.token`. Outside this
 # comment, `grep -nE 'GITHUB_TOKEN|secrets\.|id-token|packages:'` over
 # this file and .github/actions/provision/action.yml matches nothing.
@@ -1426,18 +1428,132 @@ jobs:
         run: ./scripts/ci-gate.py ./scripts/check-cross-targets.sh
 
       # The Windows hello, emitted for windows-x86_64 and windows-aarch64
-      # where the tree's compiler runs. Both are source-only (README,
-      # Targets): no job links or runs them, and
-      # `check-windows-hello.sh --run` is the half a Windows machine
-      # would take.
+      # where the tree's compiler runs. `check-windows-hello.sh --run` is
+      # the other half, and the `windows` job below takes it.
       - name: Emit the Windows hello
         run: ./scripts/check-windows-hello.sh --emit windows-hello
+
+      # The compiler itself, cross-emitted for windows-x86_64. The
+      # `windows` job assembles, links and runs it there.
+      - name: Cross-emit the compiler for windows-x86_64
+        run: |
+          mkdir -p windows-compiler
+          .axiom-bin/axiom --target=windows-x86_64 emit-llvm self_host/main.ax -o windows-compiler/axiom.ll
+          head -1 windows-compiler/axiom.ll
+          test "$(head -1 windows-compiler/axiom.ll)" = 'target triple = "x86_64-pc-windows-msvc"'
+
+      - name: Hand the Windows modules to the Windows runner
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-emitted
+          path: |
+            windows-hello
+            windows-compiler
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Preserve successful gates even when another gate fails
         if: ${{ !cancelled() }}
         uses: ./.github/actions/gate-cache
         with:
           mode: save
+
+  # windows-x86_64 on a Windows runner. `cross` emits the hello and the
+  # compiler on Linux; this job assembles and links them with LLVM's own
+  # tools and runs them. No C compiler or Windows SDK is involved. The
+  # target stays source-only (README, Targets), because the test
+  # battery doesn't run here.
+  #
+  # LLVM comes from the release archive, since the Windows installer
+  # carries no `llc`. The version and the archive's sha256 are pinned
+  # here, and only the six tools the link and `axiom test` call are
+  # kept and cached.
+  #
+  # Every step names `shell: bash`, which is Git Bash on this image.
+  # The runner's default shell is PowerShell, and the coverage reader
+  # counts a gate only under bash.
+  windows:
+    name: Windows (windows-x86_64)
+    needs: cross
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      LLVM_VERSION: 23.1.1
+      LLVM_SHA256: c54ac8146b420fe72e11e6fdd56498d6818011ad23267196b6ab37b5ac9264c3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Restore LLVM
+        id: llvm
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:\llvm
+          key: llvm-${{ env.LLVM_VERSION }}-windows-x86_64-${{ env.LLVM_SHA256 }}
+
+      - name: Install LLVM
+        if: steps.llvm.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          archive="clang+llvm-$LLVM_VERSION-x86_64-pc-windows-msvc"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/llvm.tar.xz" \
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/$archive.tar.xz"
+          echo "$LLVM_SHA256  $RUNNER_TEMP/llvm.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP" \
+            "$archive/bin/llc.exe" "$archive/bin/lld-link.exe" "$archive/bin/llvm-dlltool.exe" \
+            "$archive/bin/llvm-readobj.exe" "$archive/bin/llvm-split.exe" "$archive/bin/opt.exe"
+          mkdir -p /c/llvm/bin
+          mv "$RUNNER_TEMP/$archive/bin/"*.exe /c/llvm/bin/
+          rm -f "$RUNNER_TEMP/llvm.tar.xz"
+
+      - name: Record the toolchain
+        shell: bash
+        run: |
+          echo 'C:\llvm\bin' >> "$GITHUB_PATH"
+          export PATH="/c/llvm/bin:$PATH"
+          uname -a
+          llc --version | sed -n 2p
+          lld-link --version
+          llc --version | grep -q "LLVM version $LLVM_VERSION"
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: windows-emitted
+
+      - name: The Windows hello links, imports only permitted names and runs
+        shell: bash
+        run: ./scripts/check-windows-hello.sh --run windows-hello windows-x86_64
+
+      # The link a Windows compiler makes for itself: `kernel32.lib` from
+      # the allowlist, so an unpermitted import fails the link, and an
+      # 8 MB stack.
+      - name: Assemble and link the cross-emitted compiler
+        shell: bash
+        run: |
+          w="$RUNNER_TEMP/axiom"
+          mkdir -p "$w"
+          source scripts/lib/imports.sh
+          { printf 'LIBRARY kernel32.dll\nEXPORTS\n'; permitted_windows scripts/platform-allow.windows.txt; } > "$w/kernel32.def"
+          llvm-dlltool -m i386:x86-64 -d "$w/kernel32.def" -l "$w/kernel32.lib"
+          time llc -filetype=obj -O1 -relocation-model=pic windows-compiler/axiom.ll -o "$w/axiom.obj"
+          lld-link -subsystem:console -entry:mainCRTStartup -stack:8388608 -machine:x64 \
+            "-out:$w/axiom.exe" "$w/axiom.obj" "$w/kernel32.lib"
+          "$w/axiom.exe" version
+
+      # A recovery point must recover here at every optimisation level,
+      # so the run reports every test after a failing one. This is the
+      # case that ended in STATUS_BREAKPOINT when llc put an `int3`
+      # after the abort's last call.
+      - name: axiom test reports every test after a failing one
+        shell: bash
+        env:
+          AXIOM_STDLIB: ${{ github.workspace }}\stdlib
+        run: |
+          rc=0
+          "$RUNNER_TEMP/axiom/axiom.exe" test tests/testrunner/mixed-tests.ax > "$RUNNER_TEMP/mixed.out" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/mixed.out"
+          echo "exit status $rc"
+          test "$rc" -eq 1
+          diff -u tests/testrunner/mixed-tests.out "$RUNNER_TEMP/mixed.out"
 
   bootstrap:
     name: Self-hosting fixpoint
