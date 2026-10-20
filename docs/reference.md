@@ -2460,8 +2460,8 @@ assembles their code, without the whole execution battery. They have
 no prebuilt release archive. See [targets](../README.md#targets).
 
 Select a target with `--target=linux-aarch64`. A compiler built for
-`windows-x86_64` runs on Windows and builds itself there; no CI job
-runs it yet. Linking a Windows executable needs `lld-link` and
+`windows-x86_64` runs on Windows and builds itself there. A CI job
+links it on Windows and runs `axiom test` with it. Linking a Windows executable needs `lld-link` and
 `llvm-dlltool`, which makes the `kernel32` import library from the
 program's own imports. A `kernel32.lib` on `--link-search` is used
 instead when there is one. A Windows executable reserves an 8 MB

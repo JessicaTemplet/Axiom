@@ -16,6 +16,14 @@ its changelog too.
 
 ## Unreleased
 
+- CI: a `windows` job runs on a Windows Server 2025 runner with LLVM
+  23.1.1's own tools. It links and runs the Windows hello that `cross`
+  emits (`scripts/check-windows-hello.sh --run`). It also assembles and
+  links the compiler cross-emitted for `windows-x86_64`, then runs
+  `axiom test tests/testrunner/mixed-tests.ax` with it and compares
+  the report to its golden. `windows-x86_64` stays source-only, since
+  the test battery doesn't run there.
+
 - Windows: the standard library reaches files, directories and child
   processes through kernel32 (`stdlib/Sys/Platform.windows.ax`), and a
   compiler built for `windows-x86_64` runs on Windows and builds
@@ -23,16 +31,17 @@ its changelog too.
   to a Linux compiler's cross-emission. A Windows link makes the
   `kernel32` import library with `llvm-dlltool` and reserves an 8 MB
   stack. Tested by `scripts/check-driver.sh` and
-  `scripts/check-freestanding.sh`; the Windows runs themselves were
-  by hand on Windows 11 x86-64, because no CI job runs Windows yet.
+  `scripts/check-freestanding.sh`. The `windows` CI job links and runs
+  the cross-emitted compiler; its build of itself on Windows was run by
+  hand on Windows 11 x86-64.
 
 - Windows: a recovery point recovers on `windows-x86_64` at every
   optimisation level, so `axiom test` reports every test after a
   failing one. Above `--opt 0`, llc put an `int3` between the abort's
   last call and its jump, and the process ended in `STATUS_BREAKPOINT`.
   The abort now ends in `llvm.trap` after the jump. Tested by
-  `scripts/check-recover.sh`; `tests/testrunner/mixed-tests.ax` was
-  run by hand on Windows 11 x86-64.
+  `scripts/check-recover.sh` and by the `windows` CI job, which runs
+  `tests/testrunner/mixed-tests.ax` on Windows.
 
 - Guarded task stacks reinstall signal state after `fork`, reusing
   their mapped alternate stack. A task overflow reports status 86

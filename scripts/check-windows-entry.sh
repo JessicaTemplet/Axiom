@@ -12,8 +12,8 @@
 # windows-x86_64 and windows-aarch64 modules, assembles them for the
 # host and runs them from a C harness against known answers. The
 # harness may use libc, since it isn't Axiom's output. The kernel32
-# calls themselves need a Windows machine
-# (`check-windows-hello.sh --run`), which no CI job provides.
+# calls themselves need a Windows machine: the `windows` CI job runs
+# `check-windows-hello.sh --run` there.
 #
 # Negative probes ablate two rules in the extracted IR. The harness must
 # then disagree with the golden on the cases that use them, or the gate
